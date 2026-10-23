@@ -155,6 +155,33 @@ RPC（TCP，行分隔 JSON）：
 > 后台线程用 `PostMessage` 打断 `PeekMessage` 循环，组件通过 `UiEvent::Tick` 主动轮询。
 > 等真正需要"后台任务完成即重绘"时再引入 runtime 层（见白皮书 M7.8）。
 
+### 7.1 推送策略：非阻塞广播 + 满队列丢弃
+
+RPC 推送**绝不允许**在 UI 线程碰 socket。策略分三层：
+
+| 层 | 做什么 | 失败时 |
+|---|---|---|
+| **UI 线程** | `Broadcaster::send(line)` → `SyncSender::try_send` | 队列满 → **直接丢弃**并计数，立即返回 |
+| **有界队列** | `std::sync::mpsc::sync_channel(1024)` | 容量固定，不增长 |
+| **写线程**（`y901-rpc-push`） | 从队列取 → 遍历连接池 `writeln!` + `flush` | 写失败 → 从连接池剔除该连接 |
+
+设计取舍：
+
+- **为什么丢弃而不是阻塞**：UI 线程是唯一能推进布局/渲染/事件的地方。为一个读得慢的
+  Agent 卡住整个界面，是拿最贵的资源等最便宜的环节。丢一条 `state_changed` 的代价是
+  Agent 少看到一帧中间态，下次推送会带上最新差分——**最终一致，不丢终态**。
+- **为什么不用 crossbeam**：`std::sync::mpsc::sync_channel` 的 `try_send` 语义与
+  crossbeam 的 `try_send` 完全一致（有界、非阻塞、返回 `Full`）。`y901-ui` 的零依赖是
+  架构承诺，为一个等价 API 破坏它不划算。
+- **诊断**：`Broadcaster::dropped()` 返回累计丢弃条数，可用于确认"是不是客户端太慢"。
+  这是唯一的可观测面，不额外暴露队列长度（避免调用方依赖内部状态）。
+
+实测基线（`broadcast_never_blocks_ui`）：容量 2、无消费线程时连发 1000 条，
+总耗时 < 50ms，`dropped() == 998`。
+
+> 未来若要"不丢"，正确做法是**每连接一个队列 + 写端合并**（同一 id 只保留最新 patch），
+> 而不是加大缓冲或改成阻塞写。
+
 ## 8. 目录
 
 ```
@@ -171,7 +198,7 @@ docs/
 ## 9. 测试
 
 ```
-cargo test --workspace      # 84 项，绝大多数不需要窗口/GPU
+cargo test --workspace      # 89 项，绝大多数不需要窗口/GPU
 cargo clippy --workspace    # 仅剩风格类提示
 ```
 
