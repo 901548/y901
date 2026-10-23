@@ -100,8 +100,8 @@ impl ApiError {
             .set("code", self.code())
             .set("status", self.status());
         match self {
-            ApiError::Forbidden { id } => obj = obj.set("id", id.as_str()),
-            ApiError::NotFound { id } => obj = obj.set("id", id.as_str()),
+            // Forbidden / NotFound 都不回显 id：避免用错误码探测节点是否存在
+            ApiError::Forbidden { .. } | ApiError::NotFound { .. } => {}
             ApiError::BadRequest(msg) => obj = obj.set("message", msg.as_str()),
             ApiError::Conflict { expected, actual } => {
                 obj = obj
