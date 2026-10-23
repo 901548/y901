@@ -1,0 +1,23 @@
+[package]
+name = "y901-app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "y901"
+path = "src/main.rs"
+
+# 应用壳：建树 + 平台后端 + RPC。
+# 不实现组件逻辑（y901-widgets），也不定义布局规则（y901-ui）。
+[dependencies]
+y901-ui = { path = "../y901-ui" }
+y901-widgets = { path = "../y901-widgets" }
+crossbeam-channel = "0.5"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

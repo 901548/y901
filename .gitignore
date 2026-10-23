@@ -1,0 +1,20 @@
+﻿# Rust
+target/
+**/*.rs.bk
+
+# 运行产物
+*.log
+*.out
+*.err
+logs/
+
+# 截图（归档保留，不入库）
+*.png
+shots/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini

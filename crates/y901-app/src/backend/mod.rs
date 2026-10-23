@@ -1,0 +1,279 @@
+//! D3D11 后端：`y901_ui::RenderCtx` + `TextMetrics` 的唯一实现。
+//!
+//! 这一层是框架与 GPU 之间唯一的桥：
+//! - `fill_rect` / `draw_text` → 追加到实例数组（同一帧只有一次 DrawInstanced）
+//! - DirectWrite 字形 → 图集纹理，增量上传
+//!
+//! 框架和组件都看不到 D3D11 类型，只看到 `RenderCtx`。
+
+#[allow(dead_code)] // Atlas/Placement 是给多页图集预留的 API，暂由 SkylinePacker 先行使用
+pub mod atlas;
+pub mod d3d11;
+pub mod font;
+
+
+use windows_sys::Win32::Foundation::HWND;
+
+use y901_ui::{Color, Pos, Rect, RenderCtx, Size, TextStyle, TextMetrics};
+
+use d3d11::{Gfx, Instance};
+use font::TextEngine;
+
+/// 逻辑像素下的单元格尺寸。终端组件会通过 `measure_text("M")` 拿到同样的值。
+const CELL_W: f32 = 8.0;
+const CELL_H: f32 = 16.0;
+const FONT_SIZE: f32 = 16.0;
+const FONT_FAMILY: &str = "NSimSun";
+
+pub struct D3dBackend {
+    pub gfx: Gfx,
+    text: TextEngine,
+    instances: Vec<Instance>,
+    viewport: Size,
+    clips: Vec<Rect>,
+}
+
+impl D3dBackend {
+    pub unsafe fn new(hwnd: HWND, width: u32, height: u32) -> Result<Self, String> {
+        // 逐字节核对 CPU 实例布局与 GPU InputLayout：错一个字节整屏都是乱码。
+        d3d11::verify_instance_layout()?;
+
+        let gfx = Gfx::new(hwnd, width, height)?;
+        let text = TextEngine::new(FONT_FAMILY, FONT_SIZE, CELL_W, CELL_H)?;
+        println!(
+            "[y901] backend ready: ascent={:.2} descent={:.2} atlas={}",
+            text.ascent, text.descent, text.atlas_size
+        );
+
+        let mut backend = Self {
+            gfx,
+            text,
+            instances: Vec::with_capacity(4096),
+            viewport: Size::new(width as f32, height as f32),
+            clips: Vec::new(),
+        };
+        backend.sync_atlas()?;
+        Ok(backend)
+    }
+
+    /// 每帧开始：清空实例数组，并推进图集帧号（LRU 用）。
+    pub fn begin(&mut self) {
+        self.instances.clear();
+        self.clips.clear();
+        self.text.begin_frame();
+    }
+
+    /// 把 CPU 图集的脏区同步到 GPU。首次调用会创建纹理。
+    unsafe fn sync_atlas(&mut self) -> Result<(), String> {
+        let (reset, dirty) = self.text.take_dirty();
+        if !reset && dirty.is_empty() {
+            return Ok(());
+        }
+        let rects: Vec<(u32, u32, u32, u32)> = dirty
+            .iter()
+            .map(|d| (d.x, d.y, d.width, d.height))
+            .collect();
+        self.gfx
+            .update_atlas(&self.text.atlas, self.text.atlas_size, reset, &rects)
+    }
+
+    /// 提交一帧。返回是否需要继续重绘。
+    pub unsafe fn present(&mut self, hwnd: HWND, width: u32, height: u32) -> bool {
+        if self.gfx.is_empty() {
+            if let Err(err) = self.gfx.rebuild(hwnd, width, height) {
+                eprintln!("[y901] rebuild failed: {err}");
+                return false;
+            }
+        }
+
+        if let Err(err) = self.sync_atlas() {
+            eprintln!("[y901] atlas sync failed: {err}");
+        }
+
+        // sync_interval = 0：不阻塞在 vsync 上。
+        // 我们是按需重绘（invalidate 驱动），不需要垂直同步；
+        // 用 1 时窗口被遮挡会让 Present 永久阻塞，把消息循环卡死。
+        let mut hr = self.gfx.render(&self.instances, 0);
+
+        if Gfx::device_lost(hr) {
+            eprintln!("[y901] device lost: 0x{:08X}, rebuilding", hr as u32);
+            if let Err(err) = self.gfx.rebuild(hwnd, width, height) {
+                eprintln!("[y901] rebuild failed: {err}");
+                return false;
+            }
+            // 设备重建后纹理是空的：全量重传
+            if let Err(err) = self
+                .gfx
+                .update_atlas(&self.text.atlas, self.text.atlas_size, true, &[])
+            {
+                eprintln!("[y901] atlas re-upload failed: {err}");
+            }
+            hr = self.gfx.render(&self.instances, 0);
+        }
+
+        if hr < 0 {
+            eprintln!("[y901] Present failed: 0x{:08X}", hr as u32);
+            return false;
+        }
+        !Gfx::is_occluded(hr)
+    }
+
+    pub unsafe fn resize(&mut self, width: u32, height: u32) {
+        self.viewport = Size::new(width as f32, height as f32);
+        // 交换链尺寸更新交给 present 前的 rebuild 路径；这里只记尺寸。
+        if let Err(err) = self.gfx.resize(width, height) {
+            eprintln!("[y901] swapchain resize failed: {err}");
+        }
+    }
+
+    /// 当前帧的实例数（诊断用）。
+    #[allow(dead_code)] // 诊断接口，主循环不调用
+    pub fn instance_count(&self) -> usize {
+        self.instances.len()
+    }
+
+    #[allow(dead_code)] // 诊断接口，主循环不调用
+    pub fn live_objects() -> isize {
+        Gfx::live_objects()
+    }
+
+    fn clip_of(&self, rect: Rect) -> Option<Rect> {
+        match self.clips.last() {
+            Some(clip) => {
+                let r = rect.intersect(*clip);
+                if r.is_empty() {
+                    None
+                } else {
+                    Some(r)
+                }
+            }
+            None => Some(rect),
+        }
+    }
+
+    fn push_glyph(&mut self, x: f32, y: f32, ch: char, color: Color, bold: bool) {
+        let atlas_size = self.text.atlas_size as f32;
+        let ascent = self.text.ascent;
+
+        let Some(glyph) = self.text.glyph(ch).cloned() else {
+            return;
+        };
+        if glyph.is_empty() {
+            return;
+        }
+
+        let pos = Pos::new(
+            x + glyph.bearing_x as f32,
+            y + ascent + glyph.bearing_y as f32,
+        );
+        let size = [glyph.width as f32, glyph.height as f32];
+        let uv = [
+            glyph.atlas_x as f32 / atlas_size,
+            glyph.atlas_y as f32 / atlas_size,
+            (glyph.atlas_x + glyph.width) as f32 / atlas_size,
+            (glyph.atlas_y + glyph.height) as f32 / atlas_size,
+        ];
+        let rgba = [color.r, color.g, color.b, color.a];
+
+        self.instances.push(Instance {
+            pos: [pos.x, pos.y],
+            size,
+            uv_rect: uv,
+            color: rgba,
+        });
+
+        // 假粗体：右移 1px 再画一遍（比加载粗体字形便宜，且等宽不变）
+        if bold {
+            self.instances.push(Instance {
+                pos: [pos.x + 1.0, pos.y],
+                size,
+                uv_rect: uv,
+                color: rgba,
+            });
+        }
+    }
+}
+
+impl TextMetrics for D3dBackend {
+    fn measure_text(&self, text: &str, _style: &TextStyle) -> Size {
+        let cols: u32 = text.chars().map(|c| self.text.cell_span(c)).sum();
+        Size::new(cols as f32 * CELL_W, CELL_H)
+    }
+
+    fn line_height(&self, _style: &TextStyle) -> f32 {
+        CELL_H
+    }
+
+    fn scale(&self) -> f32 {
+        1.0
+    }
+}
+
+impl RenderCtx for D3dBackend {
+    fn size(&self) -> Size {
+        self.viewport
+    }
+
+    fn fill_rect(&mut self, rect: Rect, color: Color) {
+        let Some(r) = self.clip_of(rect) else {
+            return;
+        };
+        self.instances.push(Instance {
+            pos: [r.x, r.y],
+            size: [r.w, r.h],
+            // 纯色哨兵：uv 两端相等，PS 直接输出 color
+            uv_rect: [0.0, 0.0, 0.0, 0.0],
+            color: [color.r, color.g, color.b, color.a],
+        });
+    }
+
+    fn stroke_rect(&mut self, rect: Rect, color: Color, width: f32) {
+        self.fill_rect(Rect::new(rect.x, rect.y, rect.w, width), color);
+        self.fill_rect(
+            Rect::new(rect.x, rect.bottom() - width, rect.w, width),
+            color,
+        );
+        self.fill_rect(Rect::new(rect.x, rect.y, width, rect.h), color);
+        self.fill_rect(
+            Rect::new(rect.right() - width, rect.y, width, rect.h),
+            color,
+        );
+    }
+
+    fn draw_text(&mut self, origin: Pos, text: &str, style: &TextStyle) -> f32 {
+        let mut pen_x = origin.x;
+        for ch in text.chars() {
+            let span = self.text.cell_span(ch).max(1) as f32;
+            // 背景（如果有）
+            if style.bg.a > 0.0 {
+                self.fill_rect(
+                    Rect::new(pen_x, origin.y, span * CELL_W, CELL_H),
+                    style.bg,
+                );
+            }
+            if ch != ' ' {
+                self.push_glyph(pen_x, origin.y, ch, style.fg, style.bold);
+            }
+            if style.underline {
+                self.fill_rect(
+                    Rect::new(pen_x, origin.y + CELL_H - 2.0, span * CELL_W, 1.0),
+                    style.fg,
+                );
+            }
+            pen_x += span * CELL_W;
+        }
+        pen_x - origin.x
+    }
+
+    fn push_clip(&mut self, rect: Rect) {
+        let clipped = match self.clips.last() {
+            Some(outer) => rect.intersect(*outer),
+            None => rect,
+        };
+        self.clips.push(clipped);
+    }
+
+    fn pop_clip(&mut self) {
+        self.clips.pop();
+    }
+}

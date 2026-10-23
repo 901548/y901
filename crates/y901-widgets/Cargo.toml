@@ -1,0 +1,10 @@
+[package]
+name = "y901-widgets"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+y901-core = { path = "../y901-core" }
+y901-ui = { path = "../y901-ui" }
+crossbeam-channel = "0.5"
+portable-pty = "0.8"

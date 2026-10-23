@@ -1,0 +1,89 @@
+//! 颜色与文本样式。框架只描述"要什么颜色"，不关心怎么上屏。
+
+/// 线性空间的 RGBA，0.0..=1.0。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Color {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl Color {
+    pub const TRANSPARENT: Color = Color::rgba(0.0, 0.0, 0.0, 0.0);
+    pub const BLACK: Color = Color::rgb(0.0, 0.0, 0.0);
+    pub const WHITE: Color = Color::rgb(1.0, 1.0, 1.0);
+
+    pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
+        Self { r, g, b, a: 1.0 }
+    }
+
+    pub const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self { r, g, b, a }
+    }
+
+    pub const fn from_rgb8(r: u8, g: u8, b: u8) -> Self {
+        Self::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+    }
+
+    pub fn with_alpha(self, a: f32) -> Self {
+        Self { a, ..self }
+    }
+
+    /// 反显：前景当背景、背景当前景。
+    pub fn over(self, backdrop: Color) -> Color {
+        let a = self.a + backdrop.a * (1.0 - self.a);
+        if a <= 0.0 {
+            return Color::TRANSPARENT;
+        }
+        Color {
+            r: (self.r * self.a + backdrop.r * backdrop.a * (1.0 - self.a)) / a,
+            g: (self.g * self.a + backdrop.g * backdrop.a * (1.0 - self.a)) / a,
+            b: (self.b * self.a + backdrop.b * backdrop.a * (1.0 - self.a)) / a,
+            a,
+        }
+    }
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Color::TRANSPARENT
+    }
+}
+
+/// 文本样式。框架层只表达语义，字形如何光栅化由后端决定。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextStyle {
+    pub fg: Color,
+    pub bg: Color,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+}
+
+impl TextStyle {
+    pub const fn fg(color: Color) -> Self {
+        Self {
+            fg: color,
+            bg: Color::TRANSPARENT,
+            bold: false,
+            italic: false,
+            underline: false,
+        }
+    }
+
+    pub fn with_bg(mut self, color: Color) -> Self {
+        self.bg = color;
+        self
+    }
+
+    pub fn bold(mut self) -> Self {
+        self.bold = true;
+        self
+    }
+
+    pub fn underline(mut self) -> Self {
+        self.underline = true;
+        self
+    }
+}
