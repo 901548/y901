@@ -44,6 +44,23 @@ pub enum Cursor {
     /// 抓取/拖动中
     Grab,
 }
+
+/// 挂载上下文：组件在 `on_mount` 里订阅响应式数据时用。
+pub struct MountCtx {
+    /// 本节点 id（订阅时用作 owner）。
+    pub id: String,
+    /// 共享失效队列：Signal 变化时往里推 id。
+    pub invalidation: crate::signal::Invalidation,
+}
+
+impl MountCtx {
+    pub fn new(id: impl Into<String>, invalidation: crate::signal::Invalidation) -> Self {
+        Self {
+            id: id.into(),
+            invalidation,
+        }
+    }
+}
 /// 组件的语义角色。给 Agent 看的那一层。
 ///
 /// **不是枚举**：框架只提供一组约定常量（panel / button / text …），
@@ -557,6 +574,12 @@ pub trait Widget {
     fn revision(&self) -> u64 {
         0
     }
+
+    /// 挂载：申请资源（订阅 Signal、启动后台任务）。
+    fn on_mount(&mut self, _ctx: &mut MountCtx) {}
+
+    /// 卸载：释放资源（取消订阅、关闭 PTY）。
+    fn on_unmount(&mut self) {}
 
     /// 是否被禁用。禁用节点会被排除在 Tab 遍历之外。
     fn is_disabled(&self) -> bool {

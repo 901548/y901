@@ -38,6 +38,7 @@ pub mod geometry;
 pub mod json;
 pub mod layout;
 pub mod text;
+pub mod signal;
 pub mod theme;
 pub mod tree;
 pub mod widget;
@@ -51,6 +52,8 @@ pub use geometry::{Edges, Pos, Rect, Size};
 pub use json::Json;
 pub use layout::{flex_arrange, flex_measure, layout_tree, Flex, Stack};
 pub use text::TextBuffer;
+pub use signal::{Invalidation, Signal};
+pub use widget::MountCtx;
 pub use theme::{Style, Theme, State};
 pub use tree::{NodeInfo, UiTree};
 pub use widget::{

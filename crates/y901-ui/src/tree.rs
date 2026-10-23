@@ -137,6 +137,8 @@ pub struct UiTree {
     focus_order: Vec<Vec<usize>>,
     /// 语义订阅（RPC push）。
     subscriptions: Vec<Subscription>,
+    /// 响应式失效队列（Signal 变化 → 节点标脏）。
+    invalidation_queue: crate::signal::Invalidation,
 }
 
 impl UiTree {
@@ -162,6 +164,7 @@ impl UiTree {
             in_focus_change: false,
             focus_order: Vec::new(),
             subscriptions: Vec::new(),
+            invalidation_queue: crate::signal::Invalidation::new(),
         }
     }
 
@@ -282,6 +285,110 @@ impl UiTree {
         !vetoed
     }
 
+
+    // ---------- 动态挂载 / 卸载 ----------
+
+    /// 响应式失效队列（组件在 on_mount 里会拿到它）。
+    pub fn invalidation(&self) -> crate::signal::Invalidation {
+        self.invalidation_queue.clone()
+    }
+
+    /// 把 parent 挂到一个新子节点下。返回是否成功。
+    ///
+    /// 会：调用 `on_mount` → 标记父节点布局失效 → 整窗重绘。
+    pub fn add_node(&mut self, parent: &str, child: Box<dyn Widget>) -> bool {
+        let Some(node) = self.find_mut(parent) else {
+            return false;
+        };
+        let Some(children) = node.children_mut() else {
+            return false;
+        };
+        children.push(child);
+
+        // 新节点要拿到挂载上下文（订阅 Signal 等）
+        let invalidation = self.invalidation_queue.clone();
+        if let Some(children) = self.find_mut(parent).and_then(|n| n.children_mut()) {
+            if let Some(mounted) = children.last_mut() {
+                let mut ctx = crate::widget::MountCtx::new(mounted.id().to_string(), invalidation);
+                mounted.on_mount(&mut ctx);
+            }
+        }
+
+        self.cache.mark_dirty(parent);
+        self.dirty = DirtyRegion::full();
+        true
+    }
+
+    /// 从树上摘掉一个节点（连同子树），返回是否成功。
+    ///
+    /// 会：调用 `on_unmount`（递归）→ 清理焦点/捕获 → 标记父节点失效。
+    pub fn remove_node(&mut self, id: &str) -> bool {
+        if id == self.root.id() {
+            return false; // 根节点不可摘
+        }
+        let Some(path) = self.find_path(id) else {
+            return false;
+        };
+        if path.is_empty() {
+            return false;
+        }
+
+        let parent_path = path[..path.len() - 1].to_vec();
+        let index = path[path.len() - 1];
+
+        let removed = {
+            let Some(parent) = self.node_at_mut(&parent_path) else {
+                return false;
+            };
+            let Some(children) = parent.children_mut() else {
+                return false;
+            };
+            if index >= children.len() {
+                return false;
+            }
+            children.remove(index)
+        };
+
+        // 卸载钩子（整棵被摘掉的子树）
+        unmount_recursive(removed);
+
+        let parent_id = self
+            .node_at_ref(&parent_path)
+            .map(|n| n.id().to_string())
+            .unwrap_or_default();
+
+        // 焦点/捕获若落在被删子树里，就地清空（否则悬空）
+        let inside = |p: &Vec<usize>| p.starts_with(&path);
+        if self.focus_path.as_ref().map(|p| inside(p)).unwrap_or(false) {
+            self.focus = None;
+            self.focus_path = None;
+        }
+        if self.captured_path.as_ref().map(|p| inside(p)).unwrap_or(false) {
+            self.captured_pointer = None;
+            self.captured_path = None;
+        }
+        if self.hovered.as_deref() == Some(id) {
+            self.hovered = None;
+        }
+
+        self.cache.mark_dirty(&parent_id);
+        self.dirty = DirtyRegion::full();
+        true
+    }
+
+    /// 排空响应式失效队列：把这些节点标脏并重算布局。
+    pub fn drain_invalidation(&mut self) -> usize {
+        let ids = self.invalidation_queue.drain();
+        if ids.is_empty() {
+            return 0;
+        }
+        for id in &ids {
+            self.cache.mark_dirty(id);
+            self.invalidate(id);
+        }
+        self.dirty = DirtyRegion::full();
+        ids.len()
+    }
     /// 取走组件请求的 IME 候选窗位置（应用层每帧调用一次）。
     pub fn take_pending_ime(&mut self) -> Option<Pos> {
         self.pending_ime.take()
@@ -497,6 +604,8 @@ impl UiTree {
     /// 约束与所有节点的 `layout_version` 都没变时，这次调用是 O(1)：
     /// 直接返回，不进入任何 `measure`。
     pub fn layout(&mut self, viewport: Size, metrics: &dyn TextMetrics) {
+        // 响应式：Signal 变过的节点先标脏，再进布局
+        self.drain_invalidation();
         let viewport_changed = self.viewport != viewport;
         if viewport_changed {
             self.cache.mark_dirty(self.root.id());
@@ -1239,4 +1348,14 @@ fn diff_state(old: &crate::json::Json, new: &crate::json::Json) -> crate::json::
         }
     }
     Json::Obj(out)
+}
+/// 递归调用卸载钩子：先释放子树资源，再释放自己。
+fn unmount_recursive(mut node: Box<dyn Widget>) {
+    if let Some(children) = node.children_mut() {
+        let taken: Vec<Box<dyn Widget>> = children.drain(..).collect();
+        for child in taken {
+            unmount_recursive(child);
+        }
+    }
+    node.on_unmount();
 }

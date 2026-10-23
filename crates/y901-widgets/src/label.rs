@@ -10,6 +10,8 @@ use y901_ui::{
 pub struct TextLabel {
     id: String,
     text: String,
+    /// 可选的响应式来源：挂载后由 Signal 驱动文本。
+    signal: Option<y901_ui::Signal<String>>,
     color: Color,
     item: FlexItem,
     rect: Rect,
@@ -20,9 +22,25 @@ impl TextLabel {
         Self {
             id: id.into(),
             text: text.into(),
+            signal: None,
             color: Color::WHITE,
             item: FlexItem::default(),
             rect: Rect::ZERO,
+        }
+    }
+
+    /// 绑定一个 Signal<String>：值变化 → 框架自动标脏重绘。
+    pub fn bind(mut self, signal: y901_ui::Signal<String>) -> Self {
+        self.text = signal.get();
+        self.signal = Some(signal);
+        self
+    }
+
+    /// 当前应显示的文本（优先取 Signal）。
+    fn current_text(&self) -> String {
+        match &self.signal {
+            Some(sig) => sig.get(),
+            None => self.text.clone(),
         }
     }
 
@@ -36,8 +54,8 @@ impl TextLabel {
         self
     }
 
-    pub fn text(&self) -> &str {
-        &self.text
+    pub fn text(&self) -> String {
+        self.current_text()
     }
 
     pub fn set_text(&mut self, text: impl Into<String>) {
@@ -65,7 +83,7 @@ impl Widget for TextLabel {
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         let style = TextStyle::fg(self.color);
-        c.constrain(Size::new(metrics.measure_text(&self.text, &style).w, metrics.line_height(&style)))
+        c.constrain(Size::new(metrics.measure_text(&self.current_text(), &style).w, metrics.line_height(&style)))
     }
 
     fn arrange(
@@ -97,15 +115,23 @@ impl Widget for TextLabel {
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
         ctx.draw_text(
             Pos::new(self.rect.x, self.rect.y),
-            &self.text,
+            &self.current_text(),
             &TextStyle::fg(self.color),
         );
     }
 
     fn semantics(&self) -> Semantics {
         Semantics::default()
-            .label(self.text.clone())
-            .value(self.text.clone())
+            .label(self.current_text())
+            .value(self.current_text())
             .action("set_text")
+    }
+}
+impl TextLabel {
+    /// 用 Signal 的当前值刷新快照文本。
+    pub fn refresh(&mut self) {
+        if let Some(sig) = &self.signal {
+            self.text = sig.get();
+        }
     }
 }
