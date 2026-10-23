@@ -253,6 +253,12 @@ pub struct Scrollbar {
     start_ratio: f32,
     pub(crate) dragging: bool,
     hovered: bool,
+    /// 独立使用时的三个量：内容总高 / 视口高 / 当前偏移。
+    total: f32,
+    viewport: f32,
+    offset: f32,
+    /// 拖拽回调：参数是换算后的新 offset。
+    on_change: Option<Box<dyn FnMut(f32)>>,
 }
 
 impl Scrollbar {
@@ -266,6 +272,10 @@ impl Scrollbar {
             start_ratio: 0.0,
             dragging: false,
             hovered: false,
+            total: 0.0,
+            viewport: 0.0,
+            offset: 0.0,
+            on_change: None,
         }
     }
 
@@ -324,3 +334,118 @@ pub const NO_PADDING: Edges = Edges::ZERO;
 /// 兼容 `Pos` 的显式导入（某些平台构建需要）。
 #[allow(dead_code)]
 fn _pos(_: Pos) {}
+
+impl Scrollbar {
+    /// 独立使用：设置内容总高、视口高、当前偏移。
+    pub fn tracker(mut self, total: f32, viewport: f32, offset: f32) -> Self {
+        self.total = total.max(0.0);
+        self.viewport = viewport.max(0.0);
+        self.offset = offset.max(0.0);
+        self.refresh_ratios();
+        self
+    }
+
+    /// 拖拽回调：拖动时把新 offset 交给业务代码。
+    pub fn on_change(mut self, f: impl FnMut(f32) + 'static) -> Self {
+        self.on_change = Some(Box::new(f));
+        self
+    }
+
+    pub fn offset(&self) -> f32 {
+        self.offset
+    }
+
+    fn refresh_ratios(&mut self) {
+        let max = (self.total - self.viewport).max(0.0);
+        self.thumb_ratio = if self.total > 0.0 {
+            (self.viewport / self.total).clamp(0.05, 1.0)
+        } else {
+            1.0
+        };
+        self.start_ratio = if max > 0.0 {
+            (self.offset / max).clamp(0.0, 1.0 - self.thumb_ratio)
+        } else {
+            0.0
+        };
+    }
+
+    /// 根据拖拽位置更新 offset 并触发回调。
+    fn drag_to(&mut self, y: f32) -> bool {
+        let max = (self.total - self.viewport).max(0.0);
+        if max <= 0.0 {
+            return false;
+        }
+        let ratio = self.ratio_at(y) - self.thumb_ratio * 0.5;
+        let next = (ratio * max).clamp(0.0, max);
+        if (next - self.offset).abs() < 0.01 {
+            return false;
+        }
+        self.offset = next;
+        self.refresh_ratios();
+        if let Some(cb) = self.on_change.as_mut() {
+            cb(self.offset);
+        }
+        true
+    }
+}
+
+impl Widget for Scrollbar {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn role(&self) -> Role {
+        Role("scrollbar")
+    }
+
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+        c.constrain(Size::new(BAR_WIDTH, c.max.h))
+    }
+
+    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+        self.rect = rect;
+        self.visible = self.total > self.viewport;
+        self.refresh_ratios();
+    }
+
+    fn rect(&self) -> Rect {
+        self.rect
+    }
+
+    fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+        match event {
+            UiEvent::MouseDown { pos, .. } if self.visible && self.rect.contains(*pos) => {
+                ctx.set_pointer_capture(self.id.clone());
+                self.dragging = true;
+                self.drag_to(pos.y);
+                EventResult::Redraw
+            }
+            UiEvent::MouseMove { pos } if self.dragging => {
+                if self.drag_to(pos.y) {
+                    EventResult::Relayout
+                } else {
+                    EventResult::Handled
+                }
+            }
+            UiEvent::MouseUp { .. } if self.dragging => {
+                self.dragging = false;
+                ctx.release_pointer_capture();
+                EventResult::Redraw
+            }
+            _ => EventResult::Ignored,
+        }
+    }
+
+    fn render(&mut self, ctx: &mut dyn RenderCtx) {
+        self.render_bar(ctx);
+    }
+
+    fn semantics(&self) -> Semantics {
+        Semantics::default()
+            .label("scrollbar")
+            .action("scroll_to_ratio")
+            .state("offset", self.offset)
+            .state("total", self.total)
+            .state("viewport", self.viewport)
+    }
+}

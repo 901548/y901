@@ -18,10 +18,11 @@ struct Row {
     id: String,
     text: String,
     rect: Rect,
+    visual: State,
 }
 
 impl Row {
-    fn set(&mut self, parent: &str, index: usize, text: &str, rect: Rect) {
+    fn set(&mut self, parent: &str, index: usize, text: &str, rect: Rect, visual: State) {
         self.id.clear();
         self.id.push_str(parent);
         self.id.push_str(".row");
@@ -29,6 +30,7 @@ impl Row {
         self.text.clear();
         self.text.push_str(text);
         self.rect = rect;
+        self.visual = visual;
     }
 }
 
@@ -53,7 +55,7 @@ impl Widget for Row {
         self.rect
     }
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
-        let style = ctx.theme().style(Role::LIST_ITEM, State::Normal);
+        let style = ctx.theme().style(Role::LIST_ITEM, self.visual);
         ctx.fill_rect(self.rect, style.bg);
         ctx.draw_text(
             Pos::new(self.rect.x + 8.0, self.rect.y + 2.0),
@@ -79,6 +81,12 @@ pub struct ListView {
     show_bar: bool,
     bar: Scrollbar,
     arranged_rows: usize,
+    /// 当前选中行（数据索引，不是池索引）。
+    selected: Option<usize>,
+    /// 悬停行。
+    hovered: Option<usize>,
+    /// 选中回调。
+    on_select: Option<Box<dyn FnMut(usize)>>,
 }
 
 impl ListView {
@@ -96,6 +104,9 @@ impl ListView {
             item: FlexItem::default(),
             show_bar: false,
             arranged_rows: 0,
+            selected: None,
+            hovered: None,
+            on_select: None,
         }
     }
 
@@ -112,6 +123,36 @@ impl ListView {
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
+    }
+
+    /// 初始选中行。
+    pub fn selected(mut self, index: Option<usize>) -> Self {
+        self.selected = index;
+        self
+    }
+
+    /// 行被点击时回调（参数是数据索引）。
+    pub fn on_row_selected(mut self, f: impl FnMut(usize) + 'static) -> Self {
+        self.on_select = Some(Box::new(f));
+        self
+    }
+
+    pub fn selected_index(&self) -> Option<usize> {
+        self.selected
+    }
+
+    /// 屏幕坐标 → 数据索引。
+    fn row_at(&self, pos: Pos) -> Option<usize> {
+        if !self.inner.contains(pos) {
+            return None;
+        }
+        let rel = pos.y - self.inner.y + self.offset;
+        let index = (rel / self.row_height).floor();
+        if index < 0.0 {
+            return None;
+        }
+        let index = index as usize;
+        (index < self.items.len()).then_some(index)
     }
 
     pub fn offset(&self) -> f32 {
@@ -195,6 +236,7 @@ impl Widget for ListView {
                 id: String::new(),
                 text: String::new(),
                 rect: Rect::ZERO,
+                visual: State::Normal,
             }));
         }
 
@@ -205,7 +247,14 @@ impl Widget for ListView {
             let r = Rect::new(self.inner.x, y, self.inner.w, self.row_height);
             if let Some(row) = cell.as_any_mut().and_then(|a| a.downcast_mut::<Row>()) {
                 let text = self.items.get(index).cloned().unwrap_or_default();
-                row.set(&self.id, index, &text, r);
+                let visual = if Some(index) == self.selected {
+                    State::Focused
+                } else if Some(index) == self.hovered {
+                    State::Hovered
+                } else {
+                    State::Normal
+                };
+                row.set(&self.id, index, &text, r, visual);
             }
             cell.arrange(r, m, cache);
             self.arranged_rows += 1;
@@ -240,6 +289,25 @@ impl Widget for ListView {
             return EventResult::Ignored;
         }
         match event {
+            UiEvent::MouseDown { pos, .. } => {
+                if let Some(index) = self.row_at(*pos) {
+                    self.selected = Some(index);
+                    if let Some(cb) = self.on_select.as_mut() {
+                        cb(index);
+                    }
+                    return EventResult::Relayout;
+                }
+                EventResult::Ignored
+            }
+            UiEvent::MouseMove { pos } => {
+                let was = self.hovered;
+                self.hovered = self.row_at(*pos);
+                if was != self.hovered {
+                    EventResult::Relayout
+                } else {
+                    EventResult::Ignored
+                }
+            }
             UiEvent::Wheel { pos, delta } => {
                 if !self.inner.contains(*pos) {
                     return EventResult::Ignored;
@@ -299,6 +367,7 @@ impl Widget for ListView {
             .state("rows", self.items.len() as u32)
             .state("offset", self.offset)
             .state("arranged", self.arranged_rows as u32)
+            .state("selected", self.selected.map(|i| i as u32).unwrap_or(u32::MAX))
     }
 }
 

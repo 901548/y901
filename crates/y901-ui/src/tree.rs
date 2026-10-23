@@ -319,6 +319,32 @@ impl UiTree {
         true
     }
 
+
+    /// 在指定位置插入子节点（越界自动 clamp 到末尾）。
+    ///
+    /// 与 `add_node` 的差别只有位置；生命周期与重建逻辑完全一致。
+    pub fn insert_node(&mut self, parent: &str, index: usize, child: Box<dyn Widget>) -> bool {
+        let Some(node) = self.find_mut(parent) else {
+            return false;
+        };
+        let Some(children) = node.children_mut() else {
+            return false;
+        };
+        let at = index.min(children.len());
+        children.insert(at, child);
+
+        let invalidation = self.invalidation_queue.clone();
+        if let Some(children) = self.find_mut(parent).and_then(|n| n.children_mut()) {
+            if let Some(mounted) = children.get_mut(at) {
+                let mut ctx = crate::widget::MountCtx::new(mounted.id().to_string(), invalidation);
+                mounted.on_mount(&mut ctx);
+            }
+        }
+
+        self.cache.mark_dirty(parent);
+        self.dirty = DirtyRegion::full();
+        true
+    }
     /// 从树上摘掉一个节点（连同子树），返回是否成功。
     ///
     /// 会：调用 `on_unmount`（递归）→ 清理焦点/捕获 → 标记父节点失效。

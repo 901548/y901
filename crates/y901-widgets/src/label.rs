@@ -3,8 +3,8 @@
 //! 只做一件事：把一段文字画出来。它是"如何写一个 Widget"的最小样本。
 
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, FlexItem, Pos, Rect, RenderCtx, Role, Semantics,
-    Size, TextStyle, TextMetrics, UiEvent, Widget,
+    Color, Constraints, EventCtx, EventResult, FlexItem, MountCtx, Pos, Rect, RenderCtx, Role,
+    Semantics, Size, TextStyle, TextMetrics, UiEvent, Widget,
 };
 
 pub struct TextLabel {
@@ -126,7 +126,21 @@ impl Widget for TextLabel {
             .value(self.current_text())
             .action("set_text")
     }
+
+    fn on_mount(&mut self, ctx: &mut MountCtx) {
+        // bind() 之后无需手动订阅：挂载时自动接上失效队列
+        if let Some(sig) = &self.signal {
+            sig.subscribe(ctx.id.clone(), ctx.invalidation.clone());
+        }
+    }
+
+    fn on_unmount(&mut self) {
+        if let Some(sig) = &self.signal {
+            sig.unsubscribe(&self.id);
+        }
+    }
 }
+
 impl TextLabel {
     /// 用 Signal 的当前值刷新快照文本。
     pub fn refresh(&mut self) {
