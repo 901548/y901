@@ -47,10 +47,9 @@ impl TextMetrics for MonoMetrics {
     }
 }
 
+/// 记录绘制指令的后端（本文件只关心计数，不保留内容）
 #[derive(Default)]
-struct Recorder {
-    renders: Vec<String>,
-}
+struct Recorder {}
 
 impl TextMetrics for Recorder {
     fn measure_text(&self, t: &str, s: &TextStyle) -> Size {
