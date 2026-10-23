@@ -6,13 +6,9 @@
 
 use y901_ui::{
     Color, Command, Constraints, EventCtx, EventResult, FlexItem, Json, Pos, Rect, RenderCtx, Role,
-    Semantics, Size, TextStyle, TextMetrics, UiEvent, Widget,
+    Semantics, Size, State, TextStyle, TextMetrics, UiEvent, Widget,
 };
 
-const BG: Color = Color::rgba(0.16, 0.18, 0.24, 1.0);
-const BG_HOVER: Color = Color::rgba(0.22, 0.26, 0.34, 1.0);
-const BG_PRESSED: Color = Color::rgba(0.30, 0.42, 0.60, 1.0);
-const FG: Color = Color::rgba(0.90, 0.92, 0.96, 1.0);
 
 pub struct Button {
     id: String,
@@ -91,7 +87,7 @@ impl Widget for Button {
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
-        let style = TextStyle::fg(FG);
+        let style = TextStyle::fg(Color::WHITE);
         let text = metrics.measure_text(&self.label, &style);
         // 左右各 12px 内边距
         c.constrain(Size::new(text.w + 24.0, metrics.line_height(&style) + 8.0))
@@ -151,16 +147,20 @@ impl Widget for Button {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
-        let bg = if self.pressed {
-            BG_PRESSED
+        // 颜色全部来自主题：组件不持有任何业务色
+        let state = if self.disabled {
+            State::Disabled
+        } else if self.pressed {
+            State::Pressed
         } else if self.hovered {
-            BG_HOVER
+            State::Hovered
         } else {
-            BG
+            State::Normal
         };
-        ctx.fill_rect(self.rect, bg);
+        let s = ctx.theme().style(Role::BUTTON, state);
+        ctx.fill_rect(self.rect, s.bg);
 
-        let style = TextStyle::fg(FG);
+        let style = TextStyle::fg(s.fg);
         let text_w = ctx.measure_text(&self.label, &style).w;
         let x = self.rect.x + (self.rect.w - text_w) * 0.5;
         let y = self.rect.y + (self.rect.h - ctx.line_height(&style)) * 0.5;

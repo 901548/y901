@@ -28,6 +28,22 @@ impl Layer {
         self as u8
     }
 }
+/// 鼠标光标形状。框架只声明"想要什么"，具体映射到平台由应用层负责。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Cursor {
+    #[default]
+    Default,
+    /// 可点击（按钮、链接）
+    Pointer,
+    /// 文本输入
+    Text,
+    /// 左右拖拽（竖向分割条）
+    ResizeHorizontal,
+    /// 上下拖拽（横向分割条）
+    ResizeVertical,
+    /// 抓取/拖动中
+    Grab,
+}
 /// 组件的语义角色。给 Agent 看的那一层。
 ///
 /// **不是枚举**：框架只提供一组约定常量（panel / button / text …），
@@ -277,9 +293,14 @@ pub trait RenderCtx: TextMetrics {
     /// 在 `origin`（左上角）画一行文本，返回前进宽度。
     fn draw_text(&mut self, origin: Pos, text: &str, style: &TextStyle) -> f32;
 
-    /// 裁剪栈：终端/列表滚动需要。
+    /// 裁剪栈：滚动容器由框架自动压栈，组件不需要手动调用。
     fn push_clip(&mut self, rect: Rect);
     fn pop_clip(&mut self);
+
+    /// 当前主题。默认返回内置暗色主题，应用可注入自己的。
+    fn theme(&self) -> &crate::theme::Theme {
+        &crate::theme::DARK_THEME
+    }
 }
 
 /// 事件上下文：组件通过它向框架提请"焦点/重绘/重排"。
@@ -507,6 +528,23 @@ pub trait Widget {
     /// 是否被禁用。禁用节点会被排除在 Tab 遍历之外。
     fn is_disabled(&self) -> bool {
         false
+    }
+
+    /// 裁剪矩形（屏幕坐标系）。子节点只能落在这一区域内。
+    ///
+    /// 滚动容器通过它声明视口；None 表示不裁剪。
+    fn clip(&self) -> Option<Rect> {
+        None
+    }
+
+    /// 鼠标悬停时的光标形状（静态声明）。
+    fn cursor(&self) -> Cursor {
+        Cursor::Default
+    }
+
+    /// 按指针位置计算光标形状（需要几何判断的组件覆写它）。
+    fn cursor_at(&self, _pos: Pos) -> Cursor {
+        self.cursor()
     }
 
     /// 子节点（容器才有）。

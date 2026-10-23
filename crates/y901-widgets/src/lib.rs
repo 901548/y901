@@ -18,6 +18,8 @@ pub mod button;
 pub mod label;
 pub mod list;
 pub mod palette;
+pub mod scroll;
+pub mod split;
 pub mod terminal;
 pub mod text_input;
 pub mod vt;
@@ -25,6 +27,8 @@ pub mod vt;
 pub use button::Button;
 pub use label::TextLabel;
 pub use list::VerticalList;
+pub use scroll::{Scrollbar, ScrollView};
+pub use split::SplitView;
 pub use terminal::TerminalWidget;
 pub use text_input::{Clipboard, MemoryClipboard, NullClipboard, TextInput};
 

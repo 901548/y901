@@ -1,0 +1,258 @@
+//! 通用分栏：可拖拽的两栏容器（左右 / 上下）。
+//!
+//! 与现有机制的关系：
+//! - 拖拽用**指针捕获**，鼠标移出分栏也能继续拖；
+//! - 比例变化只影响 `arrange`，不触发 `measure` 失效（尺寸约束没变）；
+//! - `cursor()` 让应用层在悬浮分隔条时把鼠标变成左右/上下箭头。
+
+use y901_ui::{
+    Axis, Constraints, Cursor, Edges, EventCtx, EventResult, FlexItem, Pos, Rect, RenderCtx, Role,
+    Semantics, Size, State, TextMetrics, UiEvent, Widget,
+};
+
+/// 分隔条命中宽度（视觉 1px，热区 ±HIT_SLOP）。
+const DIVIDER: f32 = 1.0;
+const HIT_SLOP: f32 = 4.0;
+
+pub struct SplitView {
+    id: String,
+    /// 两栏，顺序固定：first 在左/上。
+    kids: Vec<Box<dyn Widget>>,
+    axis: Axis,
+    /// 第一栏占比（0..1）。
+    ratio: f32,
+    /// 第一栏最小像素宽/高。
+    min_first: f32,
+    /// 第二栏最小像素宽/高。
+    min_second: f32,
+    rect: Rect,
+    item: FlexItem,
+    dragging: bool,
+    hover_divider: bool,
+}
+
+impl SplitView {
+    pub fn new(id: impl Into<String>, axis: Axis, first: Box<dyn Widget>, second: Box<dyn Widget>) -> Self {
+        Self {
+            id: id.into(),
+            kids: vec![first, second],
+            axis,
+            ratio: 0.28,
+            min_first: 120.0,
+            min_second: 200.0,
+            rect: Rect::ZERO,
+            item: FlexItem::default(),
+            dragging: false,
+            hover_divider: false,
+        }
+    }
+
+    pub fn horizontal(id: impl Into<String>, first: Box<dyn Widget>, second: Box<dyn Widget>) -> Self {
+        Self::new(id, Axis::Horizontal, first, second)
+    }
+
+    pub fn vertical(id: impl Into<String>, first: Box<dyn Widget>, second: Box<dyn Widget>) -> Self {
+        Self::new(id, Axis::Vertical, first, second)
+    }
+
+    pub fn ratio(mut self, ratio: f32) -> Self {
+        self.ratio = ratio.clamp(0.05, 0.95);
+        self
+    }
+
+    pub fn min_sizes(mut self, first: f32, second: f32) -> Self {
+        self.min_first = first.max(0.0);
+        self.min_second = second.max(0.0);
+        self
+    }
+
+    pub fn flex_item(mut self, item: FlexItem) -> Self {
+        self.item = item;
+        self
+    }
+
+    pub fn current_ratio(&self) -> f32 {
+        self.ratio
+    }
+
+    fn along(&self) -> f32 {
+        match self.axis {
+            Axis::Horizontal => self.rect.w,
+            Axis::Vertical => self.rect.h,
+        }
+    }
+
+    /// 分隔条中心（主轴方向的绝对坐标）。
+    fn divider_pos(&self) -> f32 {
+        match self.axis {
+            Axis::Horizontal => self.rect.x + self.along() * self.ratio,
+            Axis::Vertical => self.rect.y + self.along() * self.ratio,
+        }
+    }
+
+    fn on_divider(&self, pos: Pos) -> bool {
+        let center = self.divider_pos();
+        let along = match self.axis {
+            Axis::Horizontal => pos.x,
+            Axis::Vertical => pos.y,
+        };
+        let cross_ok = match self.axis {
+            Axis::Horizontal => pos.y >= self.rect.y && pos.y <= self.rect.bottom(),
+            Axis::Vertical => pos.x >= self.rect.x && pos.x <= self.rect.right(),
+        };
+        cross_ok && (along - center).abs() <= HIT_SLOP
+    }
+
+    /// 依据拖拽位置更新比例（受最小尺寸约束）。
+    fn update_ratio(&mut self, pos: Pos) {
+        let total = self.along();
+        if total <= 0.0 {
+            return;
+        }
+        let along = match self.axis {
+            Axis::Horizontal => pos.x - self.rect.x,
+            Axis::Vertical => pos.y - self.rect.y,
+        };
+        let min = (self.min_first / total).clamp(0.0, 0.95);
+        let max = (1.0 - self.min_second / total).clamp(0.05, 1.0);
+        let next = (along / total).clamp(min.min(max), max.max(min));
+        self.ratio = next;
+    }
+}
+
+impl Widget for SplitView {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn role(&self) -> Role {
+        Role("split_view")
+    }
+
+    fn flex(&self) -> FlexItem {
+        self.item
+    }
+
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.kids
+    }
+
+    fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        Some(&mut self.kids)
+    }
+
+    fn measure(&mut self, m: &dyn TextMetrics, c: Constraints, cache: &mut y901_ui::layout::LayoutCache) -> Size {
+        // 两栏都按"能占满"来测，实际尺寸在 arrange 里按比例分
+        for k in self.kids.iter_mut() {
+            let _ = cache.measure(k.as_mut(), m, c);
+        }
+        c.constrain(c.max)
+    }
+
+    fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
+        self.rect = rect;
+        let total = self.along();
+        let first_len = (total * self.ratio).max(self.min_first.min(total)).min(total);
+        let second_len = (total - first_len - DIVIDER).max(0.0);
+
+        let (a, b) = match self.axis {
+            Axis::Horizontal => (
+                Rect::new(rect.x, rect.y, first_len, rect.h),
+                Rect::new(rect.x + first_len + DIVIDER, rect.y, second_len, rect.h),
+            ),
+            Axis::Vertical => (
+                Rect::new(rect.x, rect.y, rect.w, first_len),
+                Rect::new(rect.x, rect.y + first_len + DIVIDER, rect.w, second_len),
+            ),
+        };
+
+        self.kids[0].arrange(a, m, cache);
+        self.kids[1].arrange(b, m, cache);
+    }
+
+    fn rect(&self) -> Rect {
+        self.rect
+    }
+
+    fn cursor(&self) -> Cursor {
+        if self.hover_divider || self.dragging {
+            match self.axis {
+                Axis::Horizontal => Cursor::ResizeHorizontal,
+                Axis::Vertical => Cursor::ResizeVertical,
+            }
+        } else {
+            Cursor::Default
+        }
+    }
+
+    fn cursor_at(&self, pos: y901_ui::Pos) -> Cursor {
+        if self.dragging || self.on_divider(pos) {
+            match self.axis {
+                Axis::Horizontal => Cursor::ResizeHorizontal,
+                Axis::Vertical => Cursor::ResizeVertical,
+            }
+        } else {
+            Cursor::Default
+        }
+    }
+
+    fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+        match event {
+            UiEvent::MouseDown { pos, .. } if self.on_divider(*pos) || self.dragging => {
+                ctx.set_pointer_capture(self.id.clone());
+                self.dragging = true;
+                self.update_ratio(*pos);
+                ctx.request_relayout();
+                EventResult::Relayout
+            }
+            UiEvent::MouseMove { pos } => {
+                if self.dragging {
+                    self.update_ratio(*pos);
+                    EventResult::Relayout
+                } else {
+                    let was = self.hover_divider;
+                    self.hover_divider = self.on_divider(*pos);
+                    if was != self.hover_divider {
+                        EventResult::Redraw
+                    } else {
+                        EventResult::Ignored
+                    }
+                }
+            }
+            UiEvent::MouseUp { .. } if self.dragging => {
+                self.dragging = false;
+                ctx.release_pointer_capture();
+                EventResult::Handled
+            }
+            _ => EventResult::Ignored,
+        }
+    }
+
+    fn render(&mut self, ctx: &mut dyn RenderCtx) {
+        let theme = ctx.theme();
+        let state = if self.dragging {
+            State::Pressed
+        } else if self.hover_divider {
+            State::Hovered
+        } else {
+            State::Normal
+        };
+        let color = theme.style(Role("split_view"), state).bg;
+        let bar = match self.axis {
+            Axis::Horizontal => Rect::new(self.divider_pos(), self.rect.y, DIVIDER, self.rect.h),
+            Axis::Vertical => Rect::new(self.rect.x, self.divider_pos(), self.rect.w, DIVIDER),
+        };
+        ctx.fill_rect(bar, color);
+    }
+
+    fn semantics(&self) -> Semantics {
+        Semantics::default()
+            .label("split")
+            .state("ratio", self.ratio)
+            .state("dragging", self.dragging)
+    }
+
+    fn padding(&self) -> Edges {
+        Edges::ZERO
+    }
+}

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use y901_ui::text::TextBuffer;
 use y901_ui::{
     Color, Constraints, Dimension, Edges, EventCtx, EventResult, FlexItem, Json, Key, Modifiers, Pos,
-    Rect, RenderCtx, Role, Semantics, Size, TextStyle, TextMetrics, UiEvent, Widget,
+    Rect, RenderCtx, Role, Semantics, Size, State, TextStyle, TextMetrics, UiEvent, Widget,
 };
 
 /// 光标闪烁周期。
@@ -573,10 +573,16 @@ impl Widget for TextInput {
         }
         self.ensure_caret_visible();
 
-        // 2) 背景
-        if self.style.bg.a > 0.0 {
-            ctx.fill_rect(rect, self.style.bg);
-        }
+        // 2) 背景（来自主题）
+        let state = if self.disabled {
+            State::Disabled
+        } else if self.focused {
+            State::Focused
+        } else {
+            State::Normal
+        };
+        let themed = ctx.theme().style(Role::TEXT_INPUT, state);
+        ctx.fill_rect(rect, themed.bg);
 
         ctx.push_clip(inner);
 

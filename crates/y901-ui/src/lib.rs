@@ -39,6 +39,7 @@ pub mod json;
 pub mod layout;
 pub mod rpc;
 pub mod text;
+pub mod theme;
 pub mod tree;
 pub mod widget;
 
@@ -52,9 +53,10 @@ pub use json::Json;
 pub use layout::{flex_arrange, flex_measure, layout_tree, Flex};
 pub use rpc::{Pending, RpcEvent, RpcRequest};
 pub use text::TextBuffer;
+pub use theme::{Style, Theme, State};
 pub use tree::{NodeInfo, UiTree};
 pub use widget::{
-    Axis2, Layer,
+    Axis2, Cursor, Layer,
     Axis, Constraints, Dimension, EventCtx, FlexItem, RenderCtx, Role, Semantics, TextMetrics,
     Widget,
 };

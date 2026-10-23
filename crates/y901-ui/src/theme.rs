@@ -1,0 +1,287 @@
+//! 主题契约：把颜色/尺寸从组件里抽出来，按 `(角色, 状态)` 查表。
+//!
+//! 刻意做成**固定数组**而不是 HashMap：`Theme::DARK` 必须是 `const`，
+//! 这样 `RenderCtx::theme()` 能返回 `&'static`，组件零成本查表。
+
+use crate::color::Color;
+use crate::geometry::Edges;
+use crate::widget::Role;
+
+/// 组件的交互状态。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum State {
+    #[default]
+    Normal,
+    Hovered,
+    Pressed,
+    Focused,
+    Disabled,
+}
+
+impl State {
+    pub const COUNT: usize = 5;
+
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// 一套视觉属性。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Style {
+    pub fg: Color,
+    pub bg: Color,
+    pub border: Color,
+    pub radius: f32,
+    pub padding: Edges,
+    pub selection: Color,
+    pub caret: Color,
+}
+
+impl Style {
+    pub const fn new(fg: Color, bg: Color) -> Self {
+        Self {
+            fg,
+            bg,
+            border: Color::TRANSPARENT,
+            radius: 0.0,
+            padding: Edges::ZERO,
+            selection: Color::rgba(0.24, 0.45, 0.75, 0.55),
+            caret: Color::rgba(0.85, 0.90, 1.0, 1.0),
+        }
+    }
+
+    pub const fn with_padding(mut self, padding: Edges) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    pub const fn with_radius(mut self, radius: f32) -> Self {
+        self.radius = radius;
+        self
+    }
+}
+
+/// 主题：`Role` → 槽位，`State` → 列。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Theme {
+    slots: [&'static str; Theme::SLOTS],
+    table: [[Style; State::COUNT]; Theme::SLOTS],
+}
+
+impl Theme {
+    pub const SLOTS: usize = 6;
+
+    /// 把任意角色映射到槽位；未知角色落到 "panel"。
+    pub const fn slot(role: Role) -> usize {
+        // Role 是开放字符串，只能线性比对（6 次 str 比较，可忽略）
+        let name = role.0;
+        let mut i = 0;
+        while i < Theme::SLOTS {
+            if str_eq(name, Theme::slot_name(i)) {
+                return i;
+            }
+            i += 1;
+        }
+        0
+    }
+
+    pub const fn slot_name(i: usize) -> &'static str {
+        match i {
+            0 => "panel",
+            1 => "button",
+            2 => "text_input",
+            3 => "text",
+            4 => "list",
+            _ => "scrollbar",
+        }
+    }
+
+    /// 查表。未知角色回退到 panel。
+    pub const fn style(&self, role: Role, state: State) -> Style {
+        self.table[Theme::slot(role)][state.index()]
+    }
+
+    /// 默认暗色主题。组件不得再硬编码颜色。
+    pub const DARK: Theme = Theme {
+        slots: ["panel", "button", "text_input", "text", "list", "scrollbar"],
+        table: [
+            // panel
+            [
+                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.05, 0.05, 0.07, 1.0)),
+                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.08, 0.08, 0.10, 1.0)),
+                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.10, 0.10, 0.13, 1.0)),
+                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.07, 0.07, 0.09, 1.0)),
+                Style::new(Color::rgba(0.50, 0.52, 0.58, 1.0), Color::rgba(0.05, 0.05, 0.07, 1.0)),
+            ],
+            // button
+            [
+                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.16, 0.18, 0.24, 1.0))
+                    .with_padding(Edges::symmetric(12.0, 6.0))
+                    .with_radius(4.0),
+                Style::new(Color::rgba(0.95, 0.97, 1.0, 1.0), Color::rgba(0.22, 0.26, 0.34, 1.0))
+                    .with_padding(Edges::symmetric(12.0, 6.0))
+                    .with_radius(4.0),
+                Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.30, 0.42, 0.60, 1.0))
+                    .with_padding(Edges::symmetric(12.0, 6.0))
+                    .with_radius(4.0),
+                Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.20, 0.30, 0.45, 1.0))
+                    .with_padding(Edges::symmetric(12.0, 6.0))
+                    .with_radius(4.0),
+                Style::new(Color::rgba(0.55, 0.56, 0.60, 1.0), Color::rgba(0.12, 0.13, 0.16, 1.0))
+                    .with_padding(Edges::symmetric(12.0, 6.0))
+                    .with_radius(4.0),
+            ],
+            // text_input
+            [
+                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.10, 0.11, 0.14, 1.0))
+                    .with_padding(Edges::symmetric(8.0, 4.0)),
+                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.12, 0.13, 0.17, 1.0))
+                    .with_padding(Edges::symmetric(8.0, 4.0)),
+                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.13, 0.14, 0.18, 1.0))
+                    .with_padding(Edges::symmetric(8.0, 4.0)),
+                Style::new(Color::rgba(0.96, 0.98, 1.0, 1.0), Color::rgba(0.10, 0.11, 0.14, 1.0))
+                    .with_padding(Edges::symmetric(8.0, 4.0)),
+                Style::new(Color::rgba(0.55, 0.56, 0.60, 1.0), Color::rgba(0.08, 0.08, 0.10, 1.0))
+                    .with_padding(Edges::symmetric(8.0, 4.0)),
+            ],
+            // text
+            [
+                Style::new(Color::rgba(0.88, 0.90, 0.94, 1.0), Color::TRANSPARENT),
+                Style::new(Color::rgba(0.88, 0.90, 0.94, 1.0), Color::TRANSPARENT),
+                Style::new(Color::rgba(0.88, 0.90, 0.94, 1.0), Color::TRANSPARENT),
+                Style::new(Color::rgba(0.96, 0.98, 1.0, 1.0), Color::TRANSPARENT),
+                Style::new(Color::rgba(0.50, 0.52, 0.58, 1.0), Color::TRANSPARENT),
+            ],
+            // list
+            [
+                Style::new(Color::rgba(0.86, 0.88, 0.92, 1.0), Color::rgba(0.06, 0.06, 0.08, 1.0)),
+                Style::new(Color::rgba(0.90, 0.93, 0.98, 1.0), Color::rgba(0.12, 0.14, 0.18, 1.0)),
+                Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.16, 0.20, 0.28, 1.0)),
+                Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.10, 0.12, 0.16, 1.0)),
+                Style::new(Color::rgba(0.50, 0.52, 0.58, 1.0), Color::rgba(0.06, 0.06, 0.08, 1.0)),
+            ],
+            // scrollbar
+            [
+                Style::new(Color::TRANSPARENT, Color::rgba(0.22, 0.24, 0.30, 1.0)),
+                Style::new(Color::TRANSPARENT, Color::rgba(0.28, 0.31, 0.38, 1.0)),
+                Style::new(Color::TRANSPARENT, Color::rgba(0.38, 0.43, 0.55, 1.0)),
+                Style::new(Color::TRANSPARENT, Color::rgba(0.22, 0.24, 0.30, 1.0)),
+                Style::new(Color::TRANSPARENT, Color::rgba(0.15, 0.16, 0.20, 1.0)),
+            ],
+        ],
+    };
+}
+
+/// 高对比主题：证明"换肤"是真的（组件不持有任何颜色）。
+pub const LIGHT: Theme = Theme {
+    slots: ["panel", "button", "text_input", "text", "list", "scrollbar"],
+    table: [
+        [
+            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.96, 0.96, 0.97, 1.0)),
+            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.94, 0.94, 0.96, 1.0)),
+            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.92, 0.92, 0.94, 1.0)),
+            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.95, 0.95, 0.96, 1.0)),
+            Style::new(Color::rgba(0.45, 0.45, 0.48, 1.0), Color::rgba(0.96, 0.96, 0.97, 1.0)),
+        ],
+        [
+            Style::new(Color::rgba(0.12, 0.12, 0.14, 1.0), Color::rgba(0.88, 0.89, 0.92, 1.0))
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
+            Style::new(Color::rgba(0.12, 0.12, 0.14, 1.0), Color::rgba(0.82, 0.85, 0.92, 1.0))
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
+            Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.30, 0.45, 0.75, 1.0))
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
+            Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.35, 0.50, 0.80, 1.0))
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
+            Style::new(Color::rgba(0.55, 0.55, 0.58, 1.0), Color::rgba(0.90, 0.90, 0.92, 1.0))
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
+        ],
+        [
+            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.99, 0.99, 1.0, 1.0))
+                .with_padding(Edges::symmetric(8.0, 4.0)),
+            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.97, 0.97, 0.99, 1.0))
+                .with_padding(Edges::symmetric(8.0, 4.0)),
+            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.95, 0.96, 0.99, 1.0))
+                .with_padding(Edges::symmetric(8.0, 4.0)),
+            Style::new(Color::rgba(0.05, 0.05, 0.08, 1.0), Color::rgba(0.99, 0.99, 1.0, 1.0))
+                .with_padding(Edges::symmetric(8.0, 4.0)),
+            Style::new(Color::rgba(0.60, 0.60, 0.62, 1.0), Color::rgba(0.94, 0.94, 0.95, 1.0))
+                .with_padding(Edges::symmetric(8.0, 4.0)),
+        ],
+        [
+            Style::new(Color::rgba(0.14, 0.14, 0.16, 1.0), Color::TRANSPARENT),
+            Style::new(Color::rgba(0.14, 0.14, 0.16, 1.0), Color::TRANSPARENT),
+            Style::new(Color::rgba(0.14, 0.14, 0.16, 1.0), Color::TRANSPARENT),
+            Style::new(Color::rgba(0.05, 0.05, 0.08, 1.0), Color::TRANSPARENT),
+            Style::new(Color::rgba(0.60, 0.60, 0.62, 1.0), Color::TRANSPARENT),
+        ],
+        [
+            Style::new(Color::rgba(0.16, 0.16, 0.18, 1.0), Color::rgba(0.95, 0.95, 0.96, 1.0)),
+            Style::new(Color::rgba(0.16, 0.16, 0.18, 1.0), Color::rgba(0.88, 0.90, 0.95, 1.0)),
+            Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.72, 0.80, 0.95, 1.0)),
+            Style::new(Color::rgba(0.05, 0.05, 0.08, 1.0), Color::rgba(0.97, 0.97, 0.99, 1.0)),
+            Style::new(Color::rgba(0.60, 0.60, 0.62, 1.0), Color::rgba(0.95, 0.95, 0.96, 1.0)),
+        ],
+        [
+            Style::new(Color::TRANSPARENT, Color::rgba(0.80, 0.81, 0.85, 1.0)),
+            Style::new(Color::TRANSPARENT, Color::rgba(0.72, 0.74, 0.80, 1.0)),
+            Style::new(Color::TRANSPARENT, Color::rgba(0.60, 0.64, 0.75, 1.0)),
+            Style::new(Color::TRANSPARENT, Color::rgba(0.80, 0.81, 0.85, 1.0)),
+            Style::new(Color::TRANSPARENT, Color::rgba(0.88, 0.88, 0.90, 1.0)),
+        ],
+    ],
+};
+
+/// `const` 环境下的字符串比较。
+const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// 供 RenderCtx::theme() 默认返回的静态主题。
+pub static DARK_THEME: Theme = Theme::DARK;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dark_and_light_differ() {
+        let dark = Theme::DARK.style(Role::BUTTON, State::Normal);
+        let light = LIGHT.style(Role::BUTTON, State::Normal);
+        assert_ne!(dark.bg, light.bg, "换主题必须真的换颜色");
+    }
+
+    #[test]
+    fn unknown_role_falls_back_to_panel() {
+        let custom = Role("terminal");
+        let a = Theme::DARK.style(custom, State::Normal);
+        let b = Theme::DARK.style(Role::PANEL, State::Normal);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn states_have_distinct_backgrounds() {
+        let normal = Theme::DARK.style(Role::BUTTON, State::Normal).bg;
+        let hovered = Theme::DARK.style(Role::BUTTON, State::Hovered).bg;
+        let pressed = Theme::DARK.style(Role::BUTTON, State::Pressed).bg;
+        assert_ne!(normal, hovered);
+        assert_ne!(hovered, pressed);
+    }
+}
+

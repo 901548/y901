@@ -651,6 +651,27 @@ impl UiTree {
         self.rects.get(id).copied()
     }
 
+    /// 命中位置处最内层的非默认光标形状（应用层据此设置系统光标）。
+    pub fn cursor_at(&self, pos: Pos) -> crate::widget::Cursor {
+        fn walk(node: &dyn Widget, pos: Pos, inherited: crate::widget::Cursor) -> crate::widget::Cursor {
+            let visible = match node.clip() {
+                Some(c) => node.rect().intersect(c),
+                None => node.rect(),
+            };
+            if !visible.contains(pos) {
+                return inherited;
+            }
+            let mut found = match node.cursor_at(pos) {
+                crate::widget::Cursor::Default => inherited,
+                c => c,
+            };
+            for child in node.children() {
+                found = walk(child.as_ref(), pos, found);
+            }
+            found
+        }
+        walk(self.root.as_ref(), pos, crate::widget::Cursor::Default)
+    }
     /// 命中测试：返回最深的、包含该点的节点 id。
     pub fn hit_test(&self, pos: Pos) -> Option<String> {
         self.hit_index(pos)
