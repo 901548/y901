@@ -227,7 +227,10 @@ pub struct Dialog {
     rect: Rect,
     panel: Rect,
     open: bool,
-    highlighted: usize,
+    /// 底部按钮条：(文案, 动作名)。
+    buttons: Vec<(String, String)>,
+    /// arrange 时算出的按钮矩形，与 buttons 一一对应。
+    button_rects: Vec<Rect>,
     item: FlexItem,
 }
 
@@ -240,7 +243,8 @@ impl Dialog {
             rect: Rect::ZERO,
             panel: Rect::ZERO,
             open: false,
-            highlighted: 0,
+            buttons: Vec::new(),
+            button_rects: Vec::new(),
             item: FlexItem::default(),
         }
     }
@@ -252,11 +256,15 @@ impl Dialog {
 
     pub fn open(&mut self) {
         self.open = true;
-        self.highlighted = 0;
     }
 
-    pub fn highlighted(&self) -> usize {
-        self.highlighted
+    /// 配置底部按钮条：`[("Cancel", "cancel"), ("OK", "ok")]`。
+    pub fn buttons(mut self, buttons: Vec<(impl Into<String>, impl Into<String>)>) -> Self {
+        self.buttons = buttons
+            .into_iter()
+            .map(|(label, action)| (label.into(), action.into()))
+            .collect();
+        self
     }
 
     pub fn close(&mut self) {
@@ -309,9 +317,31 @@ impl Widget for Dialog {
         );
 
         let inner = self.panel.inset(Edges::all(16.0));
-        let body = Rect::new(inner.x, inner.y + 28.0, inner.w, (inner.h - 28.0).max(0.0));
+        // 底部预留按钮条（36px），body 相应缩短
+        let bar_h = if self.buttons.is_empty() { 0.0 } else { 36.0 };
+        let body = Rect::new(
+            inner.x,
+            inner.y + 28.0,
+            inner.w,
+            (inner.h - 28.0 - bar_h).max(0.0),
+        );
         if let Some(first) = self.children.first_mut() {
             first.arrange(body, m, cache);
+        }
+
+        // 按钮条：右对齐排布，等宽 88px，间距 8px
+        self.button_rects.clear();
+        if !self.buttons.is_empty() {
+            const BTN_W: f32 = 88.0;
+            const GAP: f32 = 8.0;
+            let n = self.buttons.len() as f32;
+            let total = n * BTN_W + (n - 1.0) * GAP;
+            let mut x = inner.x + (inner.w - total).max(0.0);
+            let y = self.panel.bottom() - 16.0 - 28.0;
+            for _ in 0..self.buttons.len() {
+                self.button_rects.push(Rect::new(x, y, BTN_W, 28.0));
+                x += BTN_W + GAP;
+            }
         }
     }
 
@@ -324,8 +354,23 @@ impl Widget for Dialog {
             return EventResult::Ignored;
         }
         match event {
-            UiEvent::MouseDown { .. } | UiEvent::MouseMove { .. } | UiEvent::Wheel { .. } => {
-                // 面板内的点击交给子节点（框架已经先派发过），面板外一律吞掉
+            // 按钮命中优先于"吞掉外部点击"
+            UiEvent::MouseDown { pos, .. } => {
+                let hit = self
+                    .button_rects
+                    .iter()
+                    .position(|r| r.contains(*pos))
+                    .map(|i| (i, self.buttons[i].1.clone()));
+                if let Some((_, action)) = hit {
+                    ctx.emit_app(action, Json::obj());
+                    self.close();
+                    return EventResult::Redraw;
+                }
+                // 面板外的点击一律吞掉
+                ctx.stop_propagation();
+                EventResult::Handled
+            }
+            UiEvent::MouseMove { .. } | UiEvent::Wheel { .. } => {
                 ctx.stop_propagation();
                 EventResult::Handled
             }
@@ -353,6 +398,21 @@ impl Widget for Dialog {
             &self.title,
             &TextStyle::fg(panel_style.fg),
         );
+
+        // 底部按钮条：颜色全部来自主题
+        for (i, (label, _)) in self.buttons.iter().enumerate() {
+            let Some(r) = self.button_rects.get(i) else {
+                break;
+            };
+            let style = ctx.theme().style(Role::BUTTON, State::Normal);
+            ctx.fill_rect(*r, style.bg);
+            let w = ctx.measure_text(label, &TextStyle::fg(style.fg)).w;
+            ctx.draw_text(
+                Pos::new(r.x + (r.w - w) * 0.5, r.y + 4.0),
+                label,
+                &TextStyle::fg(style.fg),
+            );
+        }
     }
 
     fn semantics(&self) -> Semantics {
