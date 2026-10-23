@@ -1027,6 +1027,8 @@ impl UiTree {
                 .set("actions", Json::Arr(sem.actions.iter().map(|a| Json::Str(a.clone())).collect()))
                 .set("props", props)
                 .set("state", sem.state.clone())
+                .set("revision", node.revision())
+                .set("disabled", sem.disabled)
                 .set("children", Json::Arr(
                     node.children().iter().map(|c| node_json(c.as_ref(), focus)).collect()
                 ))

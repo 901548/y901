@@ -12,7 +12,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::json::Json;
+use y901_ui::Json;
 
 pub const DEFAULT_ADDR: &str = "127.0.0.1:9410";
 
@@ -44,18 +44,18 @@ pub enum RpcRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub enum RpcEvent {
     Text(String),
-    Key(crate::event::Key),
+    Key(y901_ui::Key),
     Compose(String),
-    MouseDown { pos: crate::geometry::Pos, button: crate::event::MouseButton },
-    MouseUp { pos: crate::geometry::Pos, button: crate::event::MouseButton },
-    MouseMove { pos: crate::geometry::Pos },
-    Wheel { pos: crate::geometry::Pos, delta: f32 },
+    MouseDown { pos: y901_ui::Pos, button: y901_ui::MouseButton },
+    MouseUp { pos: y901_ui::Pos, button: y901_ui::MouseButton },
+    MouseMove { pos: y901_ui::Pos },
+    Wheel { pos: y901_ui::Pos, delta: f32 },
 }
 
 impl RpcEvent {
     /// 转成框架内部的 `UiEvent`。
-    pub fn to_ui_event(&self) -> crate::event::UiEvent {
-        use crate::event::UiEvent;
+    pub fn to_ui_event(&self) -> y901_ui::UiEvent {
+        use y901_ui::UiEvent;
         match self {
             RpcEvent::Text(t) => UiEvent::Text(t.clone()),
             RpcEvent::Key(k) => UiEvent::Key {
@@ -102,14 +102,14 @@ impl RpcEvent {
                     .to_string(),
             )),
             "mouse_down" | "mouse_up" | "mouse_move" => {
-                let pos = crate::geometry::Pos::new(
+                let pos = y901_ui::Pos::new(
                     value.get("x").and_then(|v| v.as_f64()).ok_or("mouse event requires x")? as f32,
                     value.get("y").and_then(|v| v.as_f64()).ok_or("mouse event requires y")? as f32,
                 );
                 let button = match value.get("button").and_then(|v| v.as_str()) {
-                    Some("right") => crate::event::MouseButton::Right,
-                    Some("middle") => crate::event::MouseButton::Middle,
-                    _ => crate::event::MouseButton::Left,
+                    Some("right") => y901_ui::MouseButton::Right,
+                    Some("middle") => y901_ui::MouseButton::Middle,
+                    _ => y901_ui::MouseButton::Left,
                 };
                 match kind {
                     "mouse_down" => Ok(RpcEvent::MouseDown { pos, button }),
@@ -118,7 +118,7 @@ impl RpcEvent {
                 }
             }
             "wheel" => {
-                let pos = crate::geometry::Pos::new(
+                let pos = y901_ui::Pos::new(
                     value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
                     value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
                 );
@@ -131,14 +131,14 @@ impl RpcEvent {
                     .and_then(|v| v.as_str())
                     .ok_or("key event requires key")?;
                 let key = match name {
-                    "enter" => crate::event::Key::Enter,
-                    "tab" => crate::event::Key::Tab,
-                    "backspace" => crate::event::Key::Backspace,
-                    "escape" => crate::event::Key::Escape,
-                    "up" => crate::event::Key::Up,
-                    "down" => crate::event::Key::Down,
-                    "left" => crate::event::Key::Left,
-                    "right" => crate::event::Key::Right,
+                    "enter" => y901_ui::Key::Enter,
+                    "tab" => y901_ui::Key::Tab,
+                    "backspace" => y901_ui::Key::Backspace,
+                    "escape" => y901_ui::Key::Escape,
+                    "up" => y901_ui::Key::Up,
+                    "down" => y901_ui::Key::Down,
+                    "left" => y901_ui::Key::Left,
+                    "right" => y901_ui::Key::Right,
                     other => return Err(format!("unknown key: {other}")),
                 };
                 Ok(RpcEvent::Key(key))

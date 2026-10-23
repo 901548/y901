@@ -368,11 +368,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "y901-agent"
+version = "0.1.0"
+dependencies = [
+ "y901-core",
+ "y901-ui",
+]
+
+[[package]]
 name = "y901-app"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "windows-sys",
+ "y901-agent",
  "y901-ui",
  "y901-widgets",
 ]
@@ -387,6 +396,9 @@ dependencies = [
 [[package]]
 name = "y901-ui"
 version = "0.1.0"
+dependencies = [
+ "y901-agent",
+]
 
 [[package]]
 name = "y901-widgets"
@@ -394,6 +406,7 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "portable-pty",
+ "y901-agent",
  "y901-core",
  "y901-ui",
 ]

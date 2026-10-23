@@ -10,6 +10,7 @@ path = "src/main.rs"
 # 应用壳：建树 + 平台后端 + RPC。
 # 不实现组件逻辑（y901-widgets），也不定义布局规则（y901-ui）。
 [dependencies]
+y901-agent = { path = "../y901-agent" }
 y901-ui = { path = "../y901-ui" }
 y901-widgets = { path = "../y901-widgets" }
 crossbeam-channel = "0.5"

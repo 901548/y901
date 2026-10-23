@@ -446,45 +446,45 @@ fn rpc_get_tree_and_dispatch() {
     tree.set_focus(Some("node".to_string()));
 
     let (tx, rx) = channel();
-    let (addr, _hub) = y901_ui::rpc::spawn("127.0.0.1:0", tx).expect("bind rpc");
+    let (addr, _hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind rpc");
 
     let mut handle_one = || {
         let pending = rx.recv_timeout(Duration::from_secs(2)).expect("request");
         let result = match &pending.request {
-            y901_ui::RpcRequest::GetTree => Ok(tree.snapshot_json()),
-            y901_ui::RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
-            y901_ui::RpcRequest::Focus { node } => {
+            y901_agent::RpcRequest::GetTree => Ok(tree.snapshot_json()),
+            y901_agent::RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
+            y901_agent::RpcRequest::Focus { node } => {
                 if tree.set_focus(Some(node.clone())) {
                     Ok(Json::obj())
                 } else {
                     Err(format!("no such node: {node}"))
                 }
             }
-            y901_ui::RpcRequest::Dispatch { node, .. } => {
+            y901_agent::RpcRequest::Dispatch { node, .. } => {
                 if tree.find(node).is_some() {
                     Ok(Json::obj())
                 } else {
                     Err(format!("no such node: {node}"))
                 }
             }
-            y901_ui::RpcRequest::Invoke { node, .. } => {
+            y901_agent::RpcRequest::Invoke { node, .. } => {
                 if tree.find(node).is_some() {
                     Ok(Json::obj())
                 } else {
                     Err(format!("no such node: {node}"))
                 }
             }
-            y901_ui::RpcRequest::Subscribe { node, interval_ms } => {
+            y901_agent::RpcRequest::Subscribe { node, interval_ms } => {
                 let ok = tree.subscribe(node, Duration::from_millis(*interval_ms));
                 if ok { Ok(Json::obj()) } else { Err(format!("unknown node: {node}")) }
             }
-            y901_ui::RpcRequest::Unsubscribe { node } => {
+            y901_agent::RpcRequest::Unsubscribe { node } => {
                 tree.unsubscribe(node);
                 Ok(Json::obj())
             }
-            y901_ui::RpcRequest::Unknown { method } => Err(format!("unknown method {method}")),
+            y901_agent::RpcRequest::Unknown { method } => Err(format!("unknown method {method}")),
         };
-        y901_ui::rpc::reply_to(pending, result);
+        y901_agent::rpc::reply_to(pending, result);
     };
 
     let client = std::thread::spawn(move || {
@@ -1118,7 +1118,7 @@ fn broadcast_never_blocks_ui() {
     use std::time::{Duration, Instant};
 
     // 容量 2，且**不启动写线程**：队列必然被填满
-    let (hub, rx) = y901_ui::rpc::Broadcaster::new(2);
+    let (hub, rx) = y901_agent::rpc::Broadcaster::new(2);
 
     let start = Instant::now();
     for i in 0..1000 {
@@ -1138,7 +1138,7 @@ fn broadcast_never_blocks_ui() {
 fn broadcast_writer_removes_dead_connections() {
     // 建一个真实监听：客户端连上后立刻关闭，写线程应把它剔除
     let (tx, _rx) = std::sync::mpsc::channel();
-    let (addr, hub) = y901_ui::rpc::spawn("127.0.0.1:0", tx).expect("bind");
+    let (addr, hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind");
     {
         let stream = std::net::TcpStream::connect(addr).expect("connect");
         drop(stream); // 立即断开

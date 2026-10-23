@@ -57,6 +57,7 @@ pub enum Cursor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Role(pub &'static str);
 
+
 impl Role {
     pub const PANEL: Role = Role("panel");
     pub const WINDOW: Role = Role("window");
@@ -440,7 +441,7 @@ impl EventCtx {
 }
 
 /// 语义描述：给 Agent 读的节点信息。
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Semantics {
     pub label: String,
     pub value: String,
@@ -451,8 +452,28 @@ pub struct Semantics {
     /// 结构化状态：Agent 直接消费（文本、光标、禁用…）。
     /// 是否被禁用（不参与 Tab 遍历，也不接收事件）。
     pub disabled: bool,
+    /// 是否对 AI 开放（网关据此过滤，false 的节点 AI 不可见也不可操作）。
+    pub exposed_to_ai: bool,
+    /// 是否敏感（网关返回 JSON 时把 value 打码）。
+    pub sensitive: bool,
     /// 结构化状态：Agent 直接消费。
     pub state: crate::json::Json,
+}
+
+impl Default for Semantics {
+    fn default() -> Self {
+        Self {
+            label: String::new(),
+            value: String::new(),
+            actions: Vec::new(),
+            props: Vec::new(),
+            disabled: false,
+            // 默认对 AI 开放：安全策略由应用显式收紧，而不是默认全关
+            exposed_to_ai: true,
+            sensitive: false,
+            state: crate::json::Json::Null,
+        }
+    }
 }
 
 impl Semantics {
@@ -468,6 +489,18 @@ impl Semantics {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// 是否向 AI 暴露这个节点（网关据此过滤）。
+    pub fn exposed(mut self, exposed: bool) -> Self {
+        self.exposed_to_ai = exposed;
+        self
+    }
+
+    /// 标记敏感：网关返回 JSON 时会把 value 打码。
+    pub fn sensitive(mut self, sensitive: bool) -> Self {
+        self.sensitive = sensitive;
         self
     }
 

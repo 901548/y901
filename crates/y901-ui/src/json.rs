@@ -124,6 +124,12 @@ impl From<i32> for Json {
     }
 }
 
+impl From<u16> for Json {
+    fn from(v: u16) -> Self {
+        Json::Num(v as f64)
+    }
+}
+
 impl From<u64> for Json {
     fn from(v: u64) -> Self {
         Json::Num(v as f64)

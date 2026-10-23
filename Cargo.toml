@@ -5,12 +5,9 @@ members = [
     "crates/y901-core",
     "crates/y901-ui",
     "crates/y901-widgets",
+    "crates/y901-agent",
     "crates/y901-app",
 ]
-
-# y901-win32 已退役：它的 D3D11/DirectWrite/IME 代码已迁入
-# crates/y901-app/src/backend/ 与 src/ime.rs，目录保留作历史参考。
-# 需要时用 `cargo build --manifest-path crates/y901-win32/Cargo.toml` 单独构建。
 
 [workspace.package]
 version = "0.1.0"

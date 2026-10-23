@@ -7,3 +7,6 @@ edition.workspace = true
 # 不认识 D3D11，不认识 PTY，不认识 Win32，也不认识任何具体业务。
 # 所有平台能力经 trait 由应用层注入；所有业务语义由应用层解释。
 [dependencies]
+
+[dev-dependencies]
+y901-agent = { path = "../y901-agent" }

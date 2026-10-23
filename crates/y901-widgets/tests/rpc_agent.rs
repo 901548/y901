@@ -9,9 +9,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
-use y901_ui::{
-    Flex, FlexItem, Json, Pos, RpcEvent, RpcRequest, UiEvent, UiTree,
-};
+use y901_agent::{Pending, RpcEvent, RpcRequest};
+use y901_ui::{Flex, FlexItem, Json, Pos, UiEvent, UiTree};
 use y901_widgets::TextInput;
 
 // ---------- 极简等宽度量 ----------
@@ -63,7 +62,7 @@ fn text_of(node: &Json, key: &str) -> String {
 }
 
 /// UI 线程侧：处理一条 RPC 请求。
-fn handle(tree: &mut UiTree, pending: y901_ui::Pending) {
+fn handle(tree: &mut UiTree, pending: Pending) {
     let result = match &pending.request {
         RpcRequest::GetTree => Ok(tree.snapshot_json()),
         RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
@@ -110,7 +109,7 @@ fn handle(tree: &mut UiTree, pending: y901_ui::Pending) {
         }
         RpcRequest::Unknown { method } => Err(format!("unknown method: {method}")),
     };
-    y901_ui::rpc::reply_to(pending, result);
+    y901_agent::rpc::reply_to(pending, result);
 }
 
 // ---------- 测试 ----------
@@ -127,7 +126,7 @@ fn agent_drives_text_input_over_rpc() {
     tree.layout(y901_ui::Size::new(400.0, 200.0), &Mono);
 
     let (tx, rx) = channel();
-    let (addr, _hub) = y901_ui::rpc::spawn("127.0.0.1:0", tx).expect("bind rpc");
+    let (addr, _hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind rpc");
 
     // ---- Agent 侧 ----
     let client = std::thread::spawn(move || {
@@ -209,7 +208,7 @@ fn dispatch_reports_unhandled_nodes() {
 
     // 未聚焦时文本事件被忽略 → RPC 返回错误而不是假装成功
     let (tx, rx) = channel();
-    let (addr, _hub) = y901_ui::rpc::spawn("127.0.0.1:0", tx).expect("bind rpc");
+    let (addr, _hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind rpc");
 
     let client = std::thread::spawn(move || {
         let stream = std::net::TcpStream::connect(addr).expect("connect");
@@ -266,7 +265,7 @@ fn agent_subscribes_and_gets_incremental_patch() {
     tree.layout(y901_ui::Size::new(300.0, 100.0), &Mono);
 
     let (tx, rx) = channel();
-    let (addr, hub) = y901_ui::rpc::spawn("127.0.0.1:0", tx).expect("bind rpc");
+    let (addr, hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind rpc");
 
     // Agent：订阅后等两条推送
     let client = std::thread::spawn(move || {

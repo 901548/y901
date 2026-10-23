@@ -38,9 +38,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WNDCLASSEXW, WS_OVERLAPPEDWINDOW, PM_REMOVE, WM_QUIT, IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IDC_SIZEALL,
 };
 
+use y901_agent::{Pending, RpcRequest};
 use y901_ui::{
-    Color, Command, Edges, Flex, FlexItem, Json, Key, Modifiers, MouseButton, Pending, Pos,
-    RpcRequest,
+    Color, Command, Edges, Flex, FlexItem, Json, Key, Modifiers, MouseButton, Pos,
     Size, UiEvent, UiTree,
 };
 use y901_widgets::{Button, TerminalWidget, TextLabel, VerticalList};
@@ -69,7 +69,7 @@ struct App {
     /// 窗口创建后才有 HWND，后端只能那时初始化。
     backend: Option<D3dBackend>,
     rpc_rx: Receiver<Pending>,
-    broadcaster: y901_ui::rpc::Broadcaster,
+    broadcaster: y901_agent::rpc::Broadcaster,
     ime: ImeState,
     viewport: (u32, u32),
 }
@@ -412,7 +412,7 @@ fn handle_rpc(app: &mut App, pending: Pending) {
         }
         RpcRequest::Unknown { method } => Err(format!("unknown method: {method}")),
     };
-    y901_ui::rpc::reply_to(pending, result);
+    y901_agent::rpc::reply_to(pending, result);
 }
 
 /// 空闲工作：RPC 请求、PTY 心跳、按需重绘。
@@ -680,7 +680,7 @@ unsafe fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let (tx, rpc_rx) = std::sync::mpsc::channel();
-    let (rpc_addr, broadcaster) = y901_ui::rpc::spawn(y901_ui::rpc::DEFAULT_ADDR, tx)?;
+    let (rpc_addr, broadcaster) = y901_agent::rpc::spawn(y901_agent::rpc::DEFAULT_ADDR, tx)?;
     println!("[y901] RPC listening on {rpc_addr}");
 
     let tree = build_demo1();
