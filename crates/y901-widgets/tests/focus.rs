@@ -140,7 +140,7 @@ fn disabled_node_ignores_events() {
 
     let r = tree.dispatch_to("a", &UiEvent::Text("x".to_string()));
     assert_eq!(r, y901_ui::EventResult::Ignored, "禁用节点不处理事件");
-    assert_eq!(tree.snapshot_json().to_string().contains("\"disabled\":true"), true);
+    assert!(tree.snapshot_json().to_string().contains("\"disabled\":true"));
 }
 
 #[test]
