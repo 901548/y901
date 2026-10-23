@@ -102,3 +102,68 @@ fn tab_is_linear_in_number_of_nodes() {
     tree.dispatch(&tab(false));
     assert_eq!(tree.focus(), Some("i1"));
 }
+
+#[test]
+fn tab_skips_disabled_nodes() {
+    let root = Flex::column("root")
+        .push(Box::new(TextInput::new("a").flex_item(FlexItem::height(30.0))))
+        .push(Box::new(
+            TextInput::new("b")
+                .disabled(true)
+                .flex_item(FlexItem::height(30.0)),
+        ))
+        .push(Box::new(TextInput::new("c").flex_item(FlexItem::height(30.0))));
+
+    let mut tree = UiTree::new(Box::new(root));
+    tree.layout(Size::new(200.0, 200.0), &Mono);
+
+    assert_eq!(tree.focus_order_len(), 2, "禁用的 b 不应进入 Tab 顺序");
+
+    tree.dispatch(&tab(false));
+    assert_eq!(tree.focus(), Some("a"));
+    tree.dispatch(&tab(false));
+    assert_eq!(tree.focus(), Some("c"), "Tab 必须跳过 disabled 的 b");
+    tree.dispatch(&tab(false));
+    assert_eq!(tree.focus(), Some("a"), "循环回到第一个");
+}
+
+#[test]
+fn disabled_node_ignores_events() {
+    let mut tree = UiTree::new(Box::new(
+        Flex::column("root").push(Box::new(
+            TextInput::new("a")
+                .disabled(true)
+                .flex_item(FlexItem::height(30.0)),
+        )),
+    ));
+    tree.layout(Size::new(200.0, 100.0), &Mono);
+
+    let r = tree.dispatch_to("a", &UiEvent::Text("x".to_string()));
+    assert_eq!(r, y901_ui::EventResult::Ignored, "禁用节点不处理事件");
+    assert_eq!(tree.snapshot_json().to_string().contains("\"disabled\":true"), true);
+}
+
+#[test]
+fn compose_reports_ime_candidate_position() {
+    let mut tree = UiTree::new(Box::new(
+        Flex::column("root").push(Box::new(
+            TextInput::new("a")
+                .with_text("ab")
+                .flex_item(FlexItem::height(30.0)),
+        )),
+    ));
+    tree.layout(Size::new(200.0, 100.0), &Mono);
+    tree.set_focus(Some("a".to_string()));
+
+    assert!(tree.take_pending_ime().is_none(), "初始没有请求");
+
+    tree.dispatch_to("a", &UiEvent::Compose("nihao".to_string()));
+
+    let pos = tree.take_pending_ime().expect("组合态应请求定位候选窗");
+    // padding.left = 8，光标在 "ab" 之后 = 2 * 8 = 16
+    assert!((pos.x - 24.0).abs() < 0.01, "x 应等于 padding + caret_x，实际 {}", pos.x);
+    assert!(pos.y >= 0.0);
+
+    // 取走后清空，避免每帧重复设置
+    assert!(tree.take_pending_ime().is_none());
+}

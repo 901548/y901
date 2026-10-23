@@ -129,6 +129,8 @@ pub struct UiTree {
     captured_path: Option<Vec<usize>>,
     /// 复用的事件路径缓冲，避免每次鼠标移动都分配。
     path_buf: Vec<usize>,
+    /// 组件请求的 IME 候选窗位置（应用层取走后清空）。
+    pending_ime: Option<Pos>,
     /// 焦点变更重入保护。
     in_focus_change: bool,
     /// Tab 遍历顺序（前序、只含 focusable，受 Modal 作用域限制）。
@@ -156,6 +158,7 @@ impl UiTree {
             focus_path: None,
             captured_path: None,
             path_buf: Vec::new(),
+            pending_ime: None,
             in_focus_change: false,
             focus_order: Vec::new(),
             subscriptions: Vec::new(),
@@ -277,6 +280,11 @@ impl UiTree {
         let vetoed = ctx.focus_vetoed;
         let _ = self.finish_dispatch(ctx, EventResult::Ignored);
         !vetoed
+    }
+
+    /// 取走组件请求的 IME 候选窗位置（应用层每帧调用一次）。
+    pub fn take_pending_ime(&mut self) -> Option<Pos> {
+        self.pending_ime.take()
     }
 
     /// Tab 遍历：把焦点移到下一个（delta = ±1）可聚焦节点，边界处循环。
@@ -571,7 +579,7 @@ impl UiTree {
     /// 前序遍历一遍，收集所有 focusable 节点；Modal 存在时只看它子树。
     fn rebuild_focus_order(&mut self) {
         fn walk(node: &dyn Widget, path: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
-            if node.focusable() {
+            if node.focusable() && !node.is_disabled() {
                 out.push(path.clone());
             }
             for (i, child) in node.children().iter().enumerate() {
@@ -892,6 +900,11 @@ impl UiTree {
     fn finish_dispatch(&mut self, mut ctx: EventCtx, result: EventResult) -> EventResult {
         let merged = ctx.finish(result);
         self.pending.append(&mut ctx.commands);
+
+        // 组件请求的 IME 候选窗位置：留给应用层下一帧落实
+        if ctx.ime_candidate.is_some() {
+            self.pending_ime = ctx.ime_candidate;
+        }
 
         if let Some(want) = ctx.focus_request.clone() {
             self.set_focus(Some(want));

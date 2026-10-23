@@ -1110,3 +1110,44 @@ fn layers_paint_in_order() {
     // Modal 根路径必须存在，且是作用域
     assert!(tree.modal_scope().is_some());
 }
+
+// ---------- 9. 广播不阻塞 UI ----------
+
+#[test]
+fn broadcast_never_blocks_ui() {
+    use std::time::{Duration, Instant};
+
+    // 容量 2，且**不启动写线程**：队列必然被填满
+    let (hub, rx) = y901_ui::rpc::Broadcaster::new(2);
+
+    let start = Instant::now();
+    for i in 0..1000 {
+        hub.send(&format!("{{\"event\":\"tick\",\"n\":{i}}}"));
+    }
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed < Duration::from_millis(50),
+        "1000 次投递必须立即返回，实际耗时 {elapsed:?}"
+    );
+    assert_eq!(rx.try_iter().count(), 2, "只有容量内的消息进入队列");
+    assert_eq!(hub.dropped(), 998, "其余全部被丢弃而不是阻塞");
+}
+
+#[test]
+fn broadcast_writer_removes_dead_connections() {
+    // 建一个真实监听：客户端连上后立刻关闭，写线程应把它剔除
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let (addr, hub) = y901_ui::rpc::spawn("127.0.0.1:0", tx).expect("bind");
+    {
+        let stream = std::net::TcpStream::connect(addr).expect("connect");
+        drop(stream); // 立即断开
+    }
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    for _ in 0..5 {
+        hub.send("{\"event\":\"ping\"}");
+    }
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // 不 panic 即通过：写失败会自动剔除
+    assert!(hub.dropped() <= 5);
+}

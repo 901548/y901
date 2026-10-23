@@ -308,6 +308,8 @@ pub struct EventCtx {
     pub pointer_capture: Option<crate::event::PointerCapture>,
     /// 焦点守卫：在处理 `Focus` 事件时置 true 可以拒绝这次焦点变更。
     pub focus_vetoed: bool,
+    /// 请求把 IME 候选窗钉在某个屏幕坐标（组件算好光标位置后填）。
+    pub ime_candidate: Option<Pos>,
 }
 
 impl EventCtx {
@@ -325,7 +327,13 @@ impl EventCtx {
             propagate: false,
             pointer_capture: None,
             focus_vetoed: false,
+            ime_candidate: None,
         }
+    }
+
+    /// 请求把 IME 候选窗钉到这个屏幕坐标（由应用层落实）。
+    pub fn set_ime_candidate(&mut self, pos: Pos) {
+        self.ime_candidate = Some(pos);
     }
 
     /// 拒绝本次焦点变更（只能在 `UiEvent::Focus` 的处理中调用）。
@@ -420,6 +428,9 @@ pub struct Semantics {
     /// 额外键值（终端会填 cols/rows/scroll_offset）。
     pub props: Vec<(String, String)>,
     /// 结构化状态：Agent 直接消费（文本、光标、禁用…）。
+    /// 是否被禁用（不参与 Tab 遍历，也不接收事件）。
+    pub disabled: bool,
+    /// 结构化状态：Agent 直接消费。
     pub state: crate::json::Json,
 }
 
@@ -431,6 +442,11 @@ impl Semantics {
 
     pub fn value(mut self, value: impl Into<String>) -> Self {
         self.value = value.into();
+        self
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 
@@ -486,6 +502,11 @@ pub trait Widget {
     /// 返回 0 表示不维护，框架退回对 state JSON 做指纹哈希。
     fn revision(&self) -> u64 {
         0
+    }
+
+    /// 是否被禁用。禁用节点会被排除在 Tab 遍历之外。
+    fn is_disabled(&self) -> bool {
+        false
     }
 
     /// 子节点（容器才有）。

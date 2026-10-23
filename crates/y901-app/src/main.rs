@@ -415,6 +415,13 @@ unsafe fn idle(app: &mut App) {
         }
     }
 
+    // IME：组件请求把候选窗钉到光标处（TextInput 在组合态发出）
+    if let Some(pos) = app.tree.take_pending_ime() {
+        if let Some(hwnd) = app.hwnd {
+            ime::set_composition_position(hwnd.as_raw(), pos.x, pos.y);
+        }
+    }
+
     // 语义订阅：到期且有变化就推给所有连接的 Agent（差分 + 节流在框架里做）
     let events = app.tree.poll_subscriptions(std::time::Instant::now());
     for event in events {

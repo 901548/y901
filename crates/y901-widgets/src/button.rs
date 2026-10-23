@@ -22,6 +22,7 @@ pub struct Button {
     args: Json,
     item: FlexItem,
     rect: Rect,
+    disabled: bool,
     hovered: bool,
     pressed: bool,
 }
@@ -35,6 +36,7 @@ impl Button {
             args: Json::obj(),
             item: FlexItem::default(),
             rect: Rect::ZERO,
+            disabled: false,
             hovered: false,
             pressed: false,
         }
@@ -44,6 +46,11 @@ impl Button {
     pub fn on_click(mut self, command: impl Into<String>, args: Json) -> Self {
         self.command = command.into();
         self.args = args;
+        self
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 
@@ -68,6 +75,10 @@ impl Widget for Button {
 
     fn focusable(&self) -> bool {
         true
+    }
+
+    fn is_disabled(&self) -> bool {
+        self.disabled
     }
 
     fn flex(&self) -> FlexItem {
@@ -100,6 +111,9 @@ impl Widget for Button {
     }
 
     fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+        if self.disabled {
+            return EventResult::Ignored;
+        }
         match event {
             UiEvent::MouseMove { pos } => {
                 let was = self.hovered;

@@ -158,26 +158,48 @@ pub struct Pending {
 /// 启动 RPC 服务。
 ///
 /// 返回实际监听地址（端口传 0 时可拿到系统分配端口，测试用）。
-/// 推送总线：所有活动连接共享，UI 线程直接往这里写。
-#[derive(Clone, Default)]
+/// 推送总线：**UI 线程只投递字符串，绝不碰 socket**。
+///
+/// - 有界队列（`std::sync::mpsc::sync_channel`），`send` 用 `try_send`：
+///   队列满时直接丢弃并计数，UI 线程永远不会被慢客户端拖住。
+/// - 后台线程独占连接池，负责 `writeln!` + `flush`，写失败的连接自动剔��。
+#[derive(Clone)]
 pub struct Broadcaster {
+    tx: std::sync::mpsc::SyncSender<String>,
     conns: Arc<Mutex<Vec<Arc<Mutex<TcpStream>>>>>,
+    dropped: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Broadcaster {
-    /// 向所有连接广播一行 JSON。写失败的连接会被摘掉。
-    pub fn send(&self, line: &str) {
-        let mut conns = match self.conns.lock() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        conns.retain(|conn| {
-            let mut stream = match conn.lock() {
-                Ok(s) => s,
-                Err(_) => return false,
-            };
-            writeln!(stream, "{line}").is_ok() && stream.flush().is_ok()
-        });
+    /// 建一个总线（不启动线程）。返回接收端，方便测试验证"投递不阻塞"。
+    pub fn new(capacity: usize) -> (Self, std::sync::mpsc::Receiver<String>) {
+        let (tx, rx) = std::sync::mpsc::sync_channel(capacity);
+        (
+            Self {
+                tx,
+                conns: Arc::new(Mutex::new(Vec::new())),
+                dropped: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            },
+            rx,
+        )
+    }
+
+    /// 投递一行 JSON。**永不阻塞**：满了就丢，返回是否入队。
+    pub fn send(&self, line: &str) -> bool {
+        use std::sync::mpsc::TrySendError;
+        match self.tx.try_send(line.to_string()) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
+                self.dropped
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                false
+            }
+        }
+    }
+
+    /// 因队列满而丢弃的消息数（诊断）。
+    pub fn dropped(&self) -> u64 {
+        self.dropped.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn connection_count(&self) -> usize {
@@ -189,6 +211,28 @@ impl Broadcaster {
             conns.push(stream);
         }
     }
+
+    /// 后台写线程：从队列取数据，串行写给所有连接。
+    fn spawn_writer(self, rx: std::sync::mpsc::Receiver<String>) {
+        thread::Builder::new()
+            .name("y901-rpc-push".to_string())
+            .spawn(move || {
+                while let Ok(line) = rx.recv() {
+                    let mut conns = match self.conns.lock() {
+                        Ok(c) => c,
+                        Err(_) => break,
+                    };
+                    conns.retain(|conn| {
+                        let mut stream = match conn.lock() {
+                            Ok(s) => s,
+                            Err(_) => return false,
+                        };
+                        writeln!(stream, "{line}").is_ok() && stream.flush().is_ok()
+                    });
+                }
+            })
+            .ok();
+    }
 }
 
 /// 启动 RPC 服务。
@@ -197,7 +241,9 @@ impl Broadcaster {
 pub fn spawn(addr: &str, tx: Sender<Pending>) -> std::io::Result<(SocketAddr, Broadcaster)> {
     let listener = TcpListener::bind(addr)?;
     let local = listener.local_addr()?;
-    let broadcaster = Broadcaster::default();
+
+    let (broadcaster, push_rx) = Broadcaster::new(1024);
+    broadcaster.clone().spawn_writer(push_rx);
 
     let hub = broadcaster.clone();
     thread::Builder::new()
@@ -230,7 +276,7 @@ fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster) {
         Ok(s) => BufReader::new(s),
         Err(_) => return,
     };
-    // 写端共享：既能回包，也能被推送总线使用
+    // 写端共享：既能回包，也能被推送线程使用
     let writer = Arc::new(Mutex::new(stream));
     hub.register(writer.clone());
 
@@ -252,7 +298,7 @@ fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster) {
             Ok(w) => w,
             Err(_) => break,
         };
-        if writeln!(w, "{}", response.to_string()).is_err() {
+        if writeln!(w, "{}", response).is_err() {
             break;
         }
         let _ = w.flush();

@@ -95,6 +95,8 @@ pub struct TextInput {
     clipboard: Box<dyn Clipboard>,
     /// 内容版本：文本变化时 +1，供布局缓存判断。
     version: u64,
+    /// 禁用：不参与 Tab，也不接收事件。
+    disabled: bool,
 }
 
 impl TextInput {
@@ -120,6 +122,7 @@ impl TextInput {
             preedit: String::new(),
             clipboard: Box::new(NullClipboard),
             version: 0,
+            disabled: false,
         }
     }
 
@@ -143,6 +146,12 @@ impl TextInput {
 
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
+        self
+    }
+
+    /// 禁用后不参与 Tab 遍历，也不接收任何事件。
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 
@@ -355,6 +364,10 @@ impl Widget for TextInput {
         true
     }
 
+    fn is_disabled(&self) -> bool {
+        self.disabled
+    }
+
     fn revision(&self) -> u64 {
         self.version
     }
@@ -403,6 +416,9 @@ impl Widget for TextInput {
     }
 
     fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+        if self.disabled {
+            return EventResult::Ignored;
+        }
         match event {
             UiEvent::Focus(on) => {
                 self.focused = *on;
@@ -477,6 +493,11 @@ impl Widget for TextInput {
                     return EventResult::Ignored;
                 }
                 self.preedit = text.clone();
+                // 让应用层把 IME 候选窗钉在光标处
+                let caret_x = self.rect.x + self.padding.left + self.x_of_byte(self.buffer.cursor())
+                    - self.scroll_x;
+                let caret_y = self.rect.y + self.padding.top;
+                ctx.set_ime_candidate(Pos::new(caret_x, caret_y + 16.0));
                 EventResult::Redraw
             }
 
@@ -647,6 +668,8 @@ impl Widget for TextInput {
             .state("caret", self.buffer.cursor())
             .state("anchor", self.buffer.anchor())
             .state("focused", self.focused)
+            .state("disabled", self.disabled)
+            .disabled(self.disabled)
     }
 
     fn padding(&self) -> Edges {
