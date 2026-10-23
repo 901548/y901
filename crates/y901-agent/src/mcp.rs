@@ -15,16 +15,23 @@ use crate::api::{handle_call, ApiCall, ApiError, Policy};
 /// 协议版本：与 MCP 2024-11-05 规范对齐。
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
 
+/// 握手状态机：未 initialize 之前，除 ping 外一律拒绝。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum State {
+    Uninitialized,
+    Initialized,
+}
+
 pub struct McpServer {
     policy: Policy,
-    initialized: bool,
+    pub state: State,
 }
 
 impl McpServer {
     pub fn new(policy: Policy) -> Self {
         Self {
             policy,
-            initialized: false,
+            state: State::Uninitialized,
         }
     }
 
@@ -52,14 +59,23 @@ impl McpServer {
         // 通知：有 method 无 id
         if id.is_none() {
             if method == "notifications/initialized" {
-                self.initialized = true;
+                self.state = State::Initialized;
             }
             return None;
         }
         let id = id.unwrap();
 
+        // 握手门：未初始化时只放行 initialize / ping
+        if self.state == State::Uninitialized && method != "initialize" && method != "ping" {
+            return Some(error_response(id, -32002, "Server not initialized"));
+        }
+
         let result = match method {
-            "initialize" => Ok(initialize_result()),
+            "initialize" => {
+                // 回应 initialize 即视为已握手（initialized 通知只是补充确认）
+                self.state = State::Initialized;
+                Ok(initialize_result())
+            }
             "ping" => Ok(Json::obj()),
             "tools/list" => Ok(Json::obj().set("tools", Json::Arr(tool_defs()))),
             "tools/call" => self.call_tool(tree, &params),
@@ -287,6 +303,7 @@ fn node_resource(tree: &UiTree, policy: &Policy, id: &str) -> Option<Json> {
     }
     let sem = node.semantics();
     let rect = tree.rect_of(id).unwrap_or_else(|| node.rect());
+    let merged = crate::api::redact_node(&sem, policy);
     Some(
         Json::obj()
             .set("id", id)
@@ -300,23 +317,12 @@ fn node_resource(tree: &UiTree, policy: &Policy, id: &str) -> Option<Json> {
                     .set("w", rect.w)
                     .set("h", rect.h),
             )
-            .set(
-                "value",
-                if policy.redact && sem.sensitive {
-                    "***".to_string()
-                } else {
-                    sem.value.clone()
-                },
-            )
-            .set("label", sem.label.clone())
-            .set(
-                "actions",
-                Json::Arr(sem.actions.iter().map(|a| Json::Str(a.clone())).collect()),
-            ),
+            .set("label", merged.get("label").cloned().unwrap_or(Json::Null))
+            .set("value", merged.get("value").cloned().unwrap_or(Json::Null))
+            .set("state", merged.get("state").cloned().unwrap_or(Json::Null))
+            .set("actions", merged.get("actions").cloned().unwrap_or(Json::Null)),
     )
 }
-
-
 // ---------- 编解码 ----------
 
 fn ok_response(id: Json, result: Json) -> String {
@@ -492,13 +498,20 @@ mod tests {
         t
     }
 
+    /// 已握手的 server（除握手相关用例外，其余测试直接用它）。
+    fn ready() -> McpServer {
+        let mut s = McpServer::new(Policy::default());
+        s.state = State::Initialized;
+        s
+    }
+
     fn call(server: &mut McpServer, tree: &mut UiTree, msg: &str) -> Json {
         Json::parse(&server.handle_line(tree, msg).expect("response")).expect("json")
     }
 
     #[test]
     fn initialize_returns_capabilities() {
-        let mut s = McpServer::new(Policy::default());
+        let mut s = ready();
         let mut t = tree();
         let r = call(&mut s, &mut t, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
         assert_eq!(r.get("jsonrpc").and_then(|v| v.as_str()), Some("2.0"));
@@ -520,16 +533,16 @@ mod tests {
 
     #[test]
     fn initialized_notification_has_no_response() {
-        let mut s = McpServer::new(Policy::default());
+        let mut s = ready();
         let mut t = tree();
         let out = s.handle_line(&mut t, r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
         assert!(out.is_none(), "通知不应有响应");
-        assert!(s.initialized);
+        assert_eq!(s.state, State::Initialized);
     }
 
     #[test]
     fn tools_list_exposes_four_tools_with_schema() {
-        let mut s = McpServer::new(Policy::default());
+        let mut s = ready();
         let mut t = tree();
         let r = call(&mut s, &mut t, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
         let tools = match r.get("result").unwrap().get("tools") {
@@ -550,7 +563,7 @@ mod tests {
 
     #[test]
     fn tools_call_click_succeeds() {
-        let mut s = McpServer::new(Policy::default());
+        let mut s = ready();
         let mut t = tree();
         let r = call(
             &mut s,
@@ -568,7 +581,7 @@ mod tests {
 
     #[test]
     fn tools_call_on_hidden_node_is_error_without_leaking() {
-        let mut s = McpServer::new(Policy::default());
+        let mut s = ready();
         let mut t = tree();
         let r = call(
             &mut s,
@@ -584,7 +597,7 @@ mod tests {
 
     #[test]
     fn resources_read_returns_redacted_tree() {
-        let mut s = McpServer::new(Policy::default());
+        let mut s = ready();
         let mut t = tree();
         let r = call(
             &mut s,
@@ -608,7 +621,7 @@ mod tests {
 
     #[test]
     fn unknown_method_returns_jsonrpc_error() {
-        let mut s = McpServer::new(Policy::default());
+        let mut s = ready();
         let mut t = tree();
         let r = call(&mut s, &mut t, r#"{"jsonrpc":"2.0","id":9,"method":"nope"}"#);
         let err = r.get("error").expect("error");
@@ -618,7 +631,7 @@ mod tests {
 
     #[test]
     fn parse_error_is_reported() {
-        let mut s = McpServer::new(Policy::default());
+        let mut s = ready();
         let mut t = tree();
         let r = call(&mut s, &mut t, "{not json");
         assert_eq!(

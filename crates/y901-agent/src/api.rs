@@ -292,16 +292,7 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
             return None;
         }
         let rect = node.rect();
-        let value = if policy.redact && sem.sensitive {
-            "***".to_string()
-        } else {
-            sem.value.clone()
-        };
-        let state = if policy.redact && sem.sensitive {
-            Json::obj().set("redacted", true)
-        } else {
-            sem.state.clone()
-        };
+        let merged = redact_node(&sem, policy);
         let children: Vec<Json> = node
             .children()
             .iter()
@@ -320,13 +311,13 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
                         .set("h", rect.h),
                 )
                 .set("revision", node.revision())
-                .set("sensitive", sem.sensitive)
+                .set("sensitive", merged.get("sensitive").cloned().unwrap_or(Json::Bool(false)))
                 .set("label", sem.label.clone())
-                .set("value", value)
+                .set("value", merged.get("value").cloned().unwrap_or(Json::Null))
                 .set("actions", Json::Arr(
                     sem.actions.iter().map(|a| Json::Str(a.clone())).collect()
                 ))
-                .set("state", state)
+                .set("state", merged.get("state").cloned().unwrap_or(Json::Null))
                 .set("children", Json::Arr(children)),
         )
     }
@@ -524,4 +515,38 @@ mod tests {
         // 未配置 token 时不校验
         assert!(Policy::default().authorize(None).is_ok());
     }
+}
+/// 统一的节点脱敏：把 `Semantics` 转成给 AI 看的 JSON。
+///
+/// `public_tree` 和 `resources/read ui://node/{id}` 都走这里，
+/// 避免两套逻辑漂移（曾经单节点路径漏掉了 state 脱敏）。
+pub fn redact_node(sem: &y901_ui::Semantics, policy: &Policy) -> Json {
+    let sensitive = policy.redact && sem.sensitive;
+    let value = if sensitive {
+        "***".to_string()
+    } else {
+        sem.value.clone()
+    };
+    // 敏感节点：state 的每个键都打码，避免从结构化字段反推内容
+    let state = if sensitive {
+        let mut masked = Json::obj();
+        if let Json::Obj(map) = &sem.state {
+            for (k, _) in map {
+                masked = masked.set(k.as_str(), "***");
+            }
+        }
+        masked
+    } else {
+        sem.state.clone()
+    };
+    Json::obj()
+        .set("label", sem.label.clone())
+        .set("value", value)
+        .set(
+            "actions",
+            Json::Arr(sem.actions.iter().map(|a| Json::Str(a.clone())).collect()),
+        )
+        .set("state", state)
+        .set("sensitive", sem.sensitive)
+        .set("disabled", sem.disabled)
 }

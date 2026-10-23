@@ -1,0 +1,17 @@
+[package]
+name = "y901-mcp"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "y901_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "y901-mcp"
+path = "src/main.rs"
+
+[dependencies]
+y901-ui = { path = "../y901-ui" }
+y901-widgets = { path = "../y901-widgets" }
+y901-agent = { path = "../y901-agent" }

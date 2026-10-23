@@ -6,6 +6,7 @@ members = [
     "crates/y901-ui",
     "crates/y901-widgets",
     "crates/y901-agent",
+    "crates/y901-mcp",
     "crates/y901-app",
 ]
 
