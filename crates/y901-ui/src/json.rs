@@ -60,7 +60,8 @@ impl Json {
         }
     }
 
-    pub fn to_string(&self) -> String {
+    /// 序列化成一行 JSON。
+    pub fn dump(&self) -> String {
         let mut out = String::new();
         write_json(self, &mut out);
         out
@@ -78,6 +79,12 @@ impl Json {
             return Err(format!("trailing bytes at {}", p.pos));
         }
         Ok(value)
+    }
+}
+
+impl std::fmt::Display for Json {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.dump())
     }
 }
 
