@@ -62,6 +62,8 @@ impl Hwnd {
 }
 
 struct App {
+    /// --mcp 时的协议服务端与请求队列（None 表示未启用）。
+    mcp: Option<(y901_agent::McpServer, std::sync::mpsc::Receiver<y901_mcp::bridge::Job>)>,
     hwnd: Option<Hwnd>,
     tree: UiTree,
     /// 当前 Demo 编号：1 = 终端，2 = 组件联动。
@@ -91,7 +93,7 @@ fn wide(text: &str) -> Vec<u16> {
 fn build_demo1() -> UiTree {
     let mut terminal = TerminalWidget::new("main_terminal", 120, 32).flex_item(FlexItem::fill());
     match terminal.attach_shell() {
-        Ok(()) => println!("[y901] shell attached"),
+        Ok(()) => eprintln!("[y901] shell attached"),
         Err(err) => eprintln!("[y901] shell attach failed: {err}"),
     }
 
@@ -299,7 +301,7 @@ fn process_commands(app: &mut App) {
                         args: Json::obj(),
                     },
                 );
-                println!("[app] terminal.clear -> {target}");
+                eprintln!("[app] terminal.clear -> {target}");
             }
             // 业务语义：改标签文字（示例：跨组件联动）
             "label.set" => {
@@ -320,7 +322,7 @@ fn process_commands(app: &mut App) {
                         args: Json::obj().set("text", text),
                     },
                 );
-                println!("[app] label.set -> {target}");
+                eprintln!("[app] label.set -> {target}");
             }
             // 业务语义：切换 Demo
             "demo.switch" => {
@@ -328,7 +330,7 @@ fn process_commands(app: &mut App) {
                 switch_demo(app, to);
             }
             other => {
-                println!("[app] unhandled command: {other}");
+                eprintln!("[app] unhandled command: {other}");
             }
         }
     }
@@ -345,7 +347,7 @@ fn switch_demo(app: &mut App, to: u8) {
     };
     let (w, h) = app.viewport;
     relayout(app, w, h);
-    println!("[app] switched to demo {to}");
+    eprintln!("[app] switched to demo {to}");
     if let Some(hwnd) = app.hwnd {
         unsafe {
             InvalidateRect(hwnd.as_raw(), null(), 0);
@@ -422,6 +424,11 @@ fn handle_rpc(app: &mut App, pending: Pending) {
 unsafe fn idle(app: &mut App) {
     while let Ok(pending) = app.rpc_rx.try_recv() {
         handle_rpc(app, pending);
+    }
+
+    // MCP：每帧最多 8 条，绝不阻塞渲染
+    if let Some((server, jobs)) = app.mcp.as_mut() {
+        y901_mcp::bridge::pump(server, &mut app.tree, jobs, 8);
     }
 
     let mut dirty = false;
@@ -622,7 +629,7 @@ unsafe fn handle(app: &mut App, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRE
         }
 
         WM_DESTROY => {
-            println!("[y901] 退出");
+            eprintln!("[y901] 退出");
             PostQuitMessage(0);
             0
         }
@@ -645,13 +652,59 @@ fn client_size(hwnd: HWND) -> (u32, u32) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let want_mcp = args.iter().any(|a| a == "--mcp");
+    let headless = args.iter().any(|a| a == "--headless");
+
+    // 无窗口 MCP：不建窗口、不进消息循环，直接跑协议（供 Claude Desktop / 测试）
+    if want_mcp && headless {
+        return run_mcp_headless();
+    }
+
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        run()
+        run(want_mcp)
     }
 }
 
-unsafe fn run() -> Result<(), Box<dyn std::error::Error>> {
+/// 无窗口环境的等宽度量（headless 也要能算出真实 rect）。
+struct HeadlessMetrics;
+
+impl y901_ui::TextMetrics for HeadlessMetrics {
+    fn measure_text(&self, text: &str, _s: &y901_ui::TextStyle) -> y901_ui::Size {
+        let mut w = 0.0;
+        for ch in text.chars() {
+            w += if (ch as u32) >= 0x2E80 { 16.0 } else { 8.0 };
+        }
+        y901_ui::Size::new(w, 16.0)
+    }
+    fn line_height(&self, _s: &y901_ui::TextStyle) -> f32 {
+        16.0
+    }
+    fn scale(&self) -> f32 {
+        1.0
+    }
+}
+
+/// `y901-app --mcp --headless`：纯协议模式，stdout 只留给 MCP。
+fn run_mcp_headless() -> Result<(), Box<dyn std::error::Error>> {
+    let token = std::env::var("Y901_TOKEN").unwrap_or_default();
+    let policy = y901_agent::Policy { token, redact: true };
+
+    let mut tree = build_demo1();
+    // 无窗口也要先布局，否则所有 rect 为 0，语义 API 无法定位
+    tree.layout(y901_ui::Size::new(1200.0, 800.0), &HeadlessMetrics);
+
+    let mut server = y901_agent::McpServer::new(policy);
+    let jobs = y901_mcp::bridge::spawn_io(
+        std::io::BufReader::new(std::io::stdin()),
+        std::io::stdout(),
+    );
+    y901_mcp::bridge::run_blocking(&mut server, &mut tree, &jobs);
+    Ok(())
+}
+
+unsafe fn run(want_mcp: bool) -> Result<(), Box<dyn std::error::Error>> {
     let instance = GetModuleHandleW(null());
     if instance.is_null() {
         return Err(std::io::Error::last_os_error().into());
@@ -681,9 +734,23 @@ unsafe fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let (tx, rpc_rx) = std::sync::mpsc::channel();
     let (rpc_addr, broadcaster) = y901_agent::rpc::spawn(y901_agent::rpc::DEFAULT_ADDR, tx)?;
-    println!("[y901] RPC listening on {rpc_addr}");
+    eprintln!("[y901] RPC listening on {rpc_addr}");
 
     let tree = build_demo1();
+
+    // --mcp：把正在运行的这棵树挂到 stdio 上
+    let mcp = if want_mcp {
+        let token = std::env::var("Y901_TOKEN").unwrap_or_default();
+        let policy = y901_agent::Policy { token, redact: true };
+        let jobs = y901_mcp::bridge::spawn_io(
+            std::io::BufReader::new(std::io::stdin()),
+            std::io::stdout(),
+        );
+        eprintln!("[y901] MCP bridge attached (stdio)");
+        Some((y901_agent::McpServer::new(policy), jobs))
+    } else {
+        None
+    };
 
     STATE_TAKEN.store(false, std::sync::atomic::Ordering::SeqCst);
     let app = Box::into_raw(Box::new(App {
@@ -693,6 +760,7 @@ unsafe fn run() -> Result<(), Box<dyn std::error::Error>> {
         backend: None,
         rpc_rx,
         broadcaster,
+        mcp,
         ime: ImeState::default(),
         viewport: (1, 1),
     }));
@@ -737,7 +805,7 @@ unsafe fn run() -> Result<(), Box<dyn std::error::Error>> {
     InvalidateRect(hwnd, null(), 0);
     UpdateWindow(hwnd);
 
-    println!("[y901] tree:\n{}", (*app).tree.snapshot_json().to_string());
+    eprintln!("[y901] tree:\n{}", (*app).tree.snapshot_json().to_string());
 
     let mut msg: MSG = std::mem::zeroed();
     'outer: loop {

@@ -204,3 +204,22 @@ cargo clippy --workspace    # 仅剩风格类提示
 
 布局、事件路由、语义树、RPC 往返、图集打包/压缩都能在 CI 里跑；
 真实渲染与窗口行为靠 `cargo run -p y901-app` 验证。
+
+### 7.2 通过 MCP 接入 AI 生态
+
+```json
+{
+  "mcpServers": {
+    "y901": {
+      "command": "F:\\Y901\\target\\release\\y901-app.exe",
+      "args": ["--mcp"],
+      "env": { "Y901_TOKEN": "local-dev-token" }
+    }
+  }
+}
+```
+
+- `--mcp`：把**正在运行的那棵 UiTree** 挂到 stdio（stdout 只走协议，日志全部 stderr）。
+- `--mcp --headless`：不开窗口，纯协议模式（CI / 测试用）。
+- 暴露的四种工具：`ui_click` / `ui_type_text` / `ui_scroll` / `ui_invoke`；
+  两个资源：`ui://tree`、`ui://node/{id}`。

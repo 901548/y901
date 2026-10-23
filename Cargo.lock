@@ -382,6 +382,7 @@ dependencies = [
  "crossbeam-channel",
  "windows-sys",
  "y901-agent",
+ "y901-mcp",
  "y901-ui",
  "y901-widgets",
 ]
