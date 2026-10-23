@@ -288,7 +288,32 @@ impl Widget for ListView {
         if ctx.phase == y901_ui::EventPhase::Capture {
             return EventResult::Ignored;
         }
+        // 顺序即优先级：滚动条必须抢在行点击之前，否则点滑块会被当成选中行
         match event {
+            UiEvent::MouseDown { pos, .. } if self.show_bar && self.bar.rect.contains(*pos) => {
+                ctx.set_pointer_capture(self.id.clone());
+                self.bar.dragging = true;
+                let ratio = self.bar.ratio_at(pos.y) - self.bar.thumb_ratio * 0.5;
+                if self.set_offset(ratio * self.max_offset()) {
+                    EventResult::Relayout
+                } else {
+                    EventResult::Handled
+                }
+            }
+            UiEvent::MouseMove { pos } if self.bar.dragging => {
+                // 拖拽滑块期间绝不触发行选中
+                let ratio = self.bar.ratio_at(pos.y) - self.bar.thumb_ratio * 0.5;
+                if self.set_offset(ratio * self.max_offset()) {
+                    EventResult::Relayout
+                } else {
+                    EventResult::Handled
+                }
+            }
+            UiEvent::MouseUp { .. } if self.bar.dragging => {
+                self.bar.dragging = false;
+                ctx.release_pointer_capture();
+                EventResult::Redraw
+            }
             UiEvent::MouseDown { pos, .. } => {
                 if let Some(index) = self.row_at(*pos) {
                     self.selected = Some(index);
@@ -327,33 +352,9 @@ impl Widget for ListView {
                     EventResult::Handled
                 }
             }
-            UiEvent::MouseDown { pos, .. } if self.show_bar && self.bar.rect.contains(*pos) => {
-                ctx.set_pointer_capture(self.id.clone());
-                self.bar.dragging = true;
-                let ratio = self.bar.ratio_at(pos.y) - self.bar.thumb_ratio * 0.5;
-                if self.set_offset(ratio * self.max_offset()) {
-                    EventResult::Relayout
-                } else {
-                    EventResult::Handled
-                }
-            }
-            UiEvent::MouseMove { pos } if self.bar.dragging => {
-                let ratio = self.bar.ratio_at(pos.y) - self.bar.thumb_ratio * 0.5;
-                if self.set_offset(ratio * self.max_offset()) {
-                    EventResult::Relayout
-                } else {
-                    EventResult::Handled
-                }
-            }
-            UiEvent::MouseUp { .. } if self.bar.dragging => {
-                self.bar.dragging = false;
-                ctx.release_pointer_capture();
-                EventResult::Redraw
-            }
             _ => EventResult::Ignored,
         }
     }
-
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
         let style = ctx.theme().style(Role::LIST, State::Normal);
         ctx.fill_rect(self.viewport, style.bg);

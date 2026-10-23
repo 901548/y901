@@ -24,6 +24,7 @@ pub struct Menu {
     /// 面板 rect（内容区）。
     panel: Rect,
     hover: Option<usize>,
+    highlighted: usize,
     item: FlexItem,
 }
 
@@ -37,6 +38,7 @@ impl Menu {
             rect: Rect::ZERO,
             panel: Rect::ZERO,
             hover: None,
+            highlighted: 0,
             item: FlexItem::default(),
         }
     }
@@ -53,6 +55,11 @@ impl Menu {
 
     pub fn open(&mut self) {
         self.open = true;
+        self.highlighted = 0;
+    }
+
+    pub fn highlighted(&self) -> usize {
+        self.highlighted
     }
 
     pub fn close(&mut self) {
@@ -147,6 +154,32 @@ impl Widget for Menu {
                 self.close();
                 EventResult::Redraw
             }
+            UiEvent::Key { key, .. } if !self.items.is_empty() => match key {
+                y901_ui::Key::Down => {
+                    self.highlighted = (self.highlighted + 1) % self.items.len();
+                    EventResult::Redraw
+                }
+                y901_ui::Key::Up => {
+                    self.highlighted = (self.highlighted + self.items.len() - 1) % self.items.len();
+                    EventResult::Redraw
+                }
+                y901_ui::Key::Enter => {
+                    let i = self.highlighted.min(self.items.len() - 1);
+                    ctx.emit_app(
+                        self.action.clone(),
+                        Json::obj()
+                            .set("index", i as u32)
+                            .set("label", self.items[i].clone()),
+                    );
+                    self.close();
+                    EventResult::Redraw
+                }
+                y901_ui::Key::Escape => {
+                    self.close();
+                    EventResult::Redraw
+                }
+                _ => EventResult::Ignored,
+            },
             _ => EventResult::Ignored,
         }
     }
@@ -164,7 +197,7 @@ impl Widget for Menu {
 
         for (i, label) in self.items.iter().enumerate() {
             let r = self.item_rect(i);
-            if self.hover == Some(i) {
+            if self.hover == Some(i) || self.highlighted == i {
                 let hover = ctx.theme().style(Role::LIST_ITEM, State::Hovered);
                 ctx.fill_rect(r, hover.bg);
             }
@@ -194,6 +227,7 @@ pub struct Dialog {
     rect: Rect,
     panel: Rect,
     open: bool,
+    highlighted: usize,
     item: FlexItem,
 }
 
@@ -206,6 +240,7 @@ impl Dialog {
             rect: Rect::ZERO,
             panel: Rect::ZERO,
             open: false,
+            highlighted: 0,
             item: FlexItem::default(),
         }
     }
@@ -217,6 +252,11 @@ impl Dialog {
 
     pub fn open(&mut self) {
         self.open = true;
+        self.highlighted = 0;
+    }
+
+    pub fn highlighted(&self) -> usize {
+        self.highlighted
     }
 
     pub fn close(&mut self) {

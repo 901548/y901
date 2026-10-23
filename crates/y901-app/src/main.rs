@@ -18,7 +18,9 @@ use std::ptr::{null, null_mut};
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, InvalidateRect, UpdateWindow, PAINTSTRUCT,
 };
@@ -35,7 +37,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, IDC_ARROW, MSG, SW_SHOW, WM_CHAR, WM_DESTROY,
     WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
     WM_NCDESTROY, WM_PAINT, WM_SIZE,
-    WNDCLASSEXW, WS_OVERLAPPEDWINDOW, PM_REMOVE, WM_QUIT, IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IDC_SIZEALL,
+    WNDCLASSEXW, WS_OVERLAPPEDWINDOW, WM_SETCURSOR, HTCLIENT, PM_REMOVE, WM_QUIT, IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IDC_SIZEALL,
 };
 
 use y901_agent::{Pending, RpcRequest};
@@ -223,6 +225,14 @@ fn vk_to_ctrl_char(vk: u32) -> Option<Key> {
     }
 }
 
+
+/// 取当前鼠标位置的客户区坐标（WM_SETCURSOR 不带坐标）。
+unsafe fn client_pos(hwnd: HWND) -> Pos {
+    let mut pt = POINT { x: 0, y: 0 };
+    let _ = GetCursorPos(&mut pt);
+    let _ = ScreenToClient(hwnd, &mut pt);
+    Pos::new(pt.x as f32, pt.y as f32)
+}
 
 /// 把框架声明的光标形状映射到系统光标。
 unsafe fn apply_cursor(app: &App, pos: Pos) {
@@ -514,6 +524,18 @@ unsafe fn handle(app: &mut App, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRE
                 InvalidateRect(hwnd, null(), 0);
             }
             0
+        }
+
+        WM_SETCURSOR => {
+            // lParam 低字是命中区域；只有客户区才由我们接管光标
+            let hit = (lparam as u32) & 0xFFFF;
+            if hit == HTCLIENT {
+                let pos = client_pos(hwnd);
+                apply_cursor(app, pos);
+                1 // TRUE：阻止系统把光标重置成箭头
+            } else {
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
         }
 
         WM_PAINT => {
