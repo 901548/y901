@@ -140,6 +140,17 @@ impl Policy {
         }
     }
 
+    /// 校验裸 Token（MCP 的 `params.token`）。空配置表示不校验。
+    pub fn authorize_token(&self, presented: Option<&str>) -> Result<(), ApiError> {
+        if self.token.is_empty() {
+            return Ok(());
+        }
+        match presented {
+            Some(t) if t == self.token => Ok(()),
+            _ => Err(ApiError::Unauthorized),
+        }
+    }
+
     /// 校验 `Authorization` 头的值（形如 `Bearer xxx`）。
     pub fn authorize(&self, header: Option<&str>) -> Result<(), ApiError> {
         if self.token.is_empty() {
@@ -312,7 +323,7 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
                 )
                 .set("revision", node.revision())
                 .set("sensitive", merged.get("sensitive").cloned().unwrap_or(Json::Bool(false)))
-                .set("label", sem.label.clone())
+                .set("label", merged.get("label").cloned().unwrap_or(Json::Null))
                 .set("value", merged.get("value").cloned().unwrap_or(Json::Null))
                 .set("actions", Json::Arr(
                     sem.actions.iter().map(|a| Json::Str(a.clone())).collect()
@@ -539,8 +550,13 @@ pub fn redact_node(sem: &y901_ui::Semantics, policy: &Policy) -> Json {
     } else {
         sem.state.clone()
     };
+    let label = if sensitive {
+        "***".to_string()
+    } else {
+        sem.label.clone()
+    };
     Json::obj()
-        .set("label", sem.label.clone())
+        .set("label", label)
         .set("value", value)
         .set(
             "actions",

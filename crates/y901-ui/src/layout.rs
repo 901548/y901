@@ -530,7 +530,7 @@ impl Widget for Flex {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
     }
 }
 
@@ -628,6 +628,6 @@ impl Widget for Stack {
     }
     fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
     }
 }

@@ -94,6 +94,10 @@ impl Widget for Menu {
         Layer::Overlay
     }
 
+    fn is_open(&self) -> bool {
+        self.open
+    }
+
     fn flex(&self) -> FlexItem {
         self.item
     }
@@ -211,7 +215,7 @@ impl Widget for Menu {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
             .label("menu")
             .action("select")
             .state("open", self.open)
@@ -289,6 +293,10 @@ impl Widget for Dialog {
         Layer::Modal
     }
 
+    fn is_open(&self) -> bool {
+        self.open
+    }
+
     fn flex(&self) -> FlexItem {
         self.item
     }
@@ -356,6 +364,10 @@ impl Widget for Dialog {
         match event {
             // 按钮命中优先于"吞掉外部点击"
             UiEvent::MouseDown { pos, .. } => {
+                // Capture 阶段不拦截，让子节点先看到事件
+                if ctx.phase == y901_ui::EventPhase::Capture {
+                    return EventResult::Ignored;
+                }
                 let hit = self
                     .button_rects
                     .iter()
@@ -366,11 +378,20 @@ impl Widget for Dialog {
                     self.close();
                     return EventResult::Redraw;
                 }
-                // 面板外的点击一律吞掉
+                // 面板内的点击放行给子节点；只吞面板外的
+                if self.panel.contains(*pos) {
+                    return EventResult::Ignored;
+                }
                 ctx.stop_propagation();
                 EventResult::Handled
             }
             UiEvent::MouseMove { .. } | UiEvent::Wheel { .. } => {
+                // 面板内的事件交给子节点；只有面板外才吞掉
+                if let UiEvent::MouseMove { pos } = event {
+                    if self.panel.contains(*pos) {
+                        return EventResult::Ignored;
+                    }
+                }
                 ctx.stop_propagation();
                 EventResult::Handled
             }
@@ -416,7 +437,7 @@ impl Widget for Dialog {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
             .label(self.title.clone())
             .action("close")
             .state("open", self.open)

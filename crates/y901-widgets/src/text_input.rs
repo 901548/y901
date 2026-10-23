@@ -660,7 +660,7 @@ impl Widget for TextInput {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
             .label(self.buffer.text().to_string())
             .value(self.buffer.text().to_string())
             .action("set_text")

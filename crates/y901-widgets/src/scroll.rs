@@ -17,7 +17,7 @@ pub const BAR_WIDTH: f32 = 10.0;
 /// 竖向滚动容器：**主轴无界测量**子节点，超出部分靠视口裁剪。
 pub struct ScrollView {
     id: String,
-    child: Box<dyn Widget>,
+    kids: Vec<Box<dyn Widget>>,
     bar: Scrollbar,
     /// 当前滚动偏移（像素，0 = 顶部）。
     offset: f32,
@@ -37,7 +37,7 @@ impl ScrollView {
         Self {
             bar: Scrollbar::new(format!("{id}.bar"), id.clone()),
             id,
-            child,
+            kids: vec![child],
             offset: 0.0,
             content_h: 0.0,
             viewport: Rect::ZERO,
@@ -88,11 +88,11 @@ impl Widget for ScrollView {
     }
 
     fn children(&self) -> &[Box<dyn Widget>] {
-        std::slice::from_ref(&self.child)
+        &self.kids
     }
 
     fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
-        None
+        Some(&mut self.kids)
     }
 
     fn measure(
@@ -103,7 +103,7 @@ impl Widget for ScrollView {
     ) -> Size {
         // 主轴无界：问内容到底多高
         let content = cache.measure(
-            self.child.as_mut(),
+            self.kids[0].as_mut(),
             metrics,
             Constraints::unbounded_main(y901_ui::Axis::Vertical, c.max),
         );
@@ -120,7 +120,7 @@ impl Widget for ScrollView {
 
         // 内容坐标系：子节点按未滚动的绝对高度排，屏幕位置靠平移得到
         let content_rect = Rect::new(self.inner.x, self.inner.y - self.offset, self.inner.w, self.content_h);
-        self.child.arrange(content_rect, metrics, cache);
+        self.kids[0].arrange(content_rect, metrics, cache);
 
         self.offset = self.offset.clamp(0.0, self.max_offset());
 
@@ -230,7 +230,7 @@ impl Widget for ScrollView {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
             .label("scroll")
             .action("scroll_to")
             .action("scroll_to_ratio")
@@ -441,7 +441,7 @@ impl Widget for Scrollbar {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
             .label("scrollbar")
             .action("scroll_to_ratio")
             .state("offset", self.offset)

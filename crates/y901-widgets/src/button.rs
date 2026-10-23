@@ -168,7 +168,7 @@ impl Widget for Button {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
             .label(self.label.clone())
             .value(self.command.clone())
             .action("click")

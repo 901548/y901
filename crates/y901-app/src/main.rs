@@ -676,6 +676,7 @@ fn client_size(hwnd: HWND) -> (u32, u32) {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let want_mcp = args.iter().any(|a| a == "--mcp");
+    let want_rpc = args.iter().any(|a| a == "--rpc");
     let headless = args.iter().any(|a| a == "--headless");
 
     // 无窗口 MCP：不建窗口、不进消息循环，直接跑协议（供 Claude Desktop / 测试）
@@ -685,7 +686,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        run(want_mcp)
+        run(want_mcp, want_rpc)
     }
 }
 
@@ -726,7 +727,7 @@ fn run_mcp_headless() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-unsafe fn run(want_mcp: bool) -> Result<(), Box<dyn std::error::Error>> {
+unsafe fn run(want_mcp: bool, want_rpc: bool) -> Result<(), Box<dyn std::error::Error>> {
     let instance = GetModuleHandleW(null());
     if instance.is_null() {
         return Err(std::io::Error::last_os_error().into());
@@ -754,9 +755,21 @@ unsafe fn run(want_mcp: bool) -> Result<(), Box<dyn std::error::Error>> {
         return Err(std::io::Error::last_os_error().into());
     }
 
+    // 裸奔 TCP 是漏洞：默认关闭，只有显式 --rpc 且配置了 Token 才开
     let (tx, rpc_rx) = std::sync::mpsc::channel();
-    let (rpc_addr, broadcaster) = y901_agent::rpc::spawn(y901_agent::rpc::DEFAULT_ADDR, tx)?;
-    eprintln!("[y901] RPC listening on {rpc_addr}");
+    let (broadcaster, _rpc_addr) = if want_rpc {
+        let token = std::env::var("Y901_TOKEN").unwrap_or_default();
+        if token.is_empty() {
+            eprintln!("[y901] --rpc 需要 Y901_TOKEN，已拒绝启动 TCP 通道");
+            (y901_agent::Broadcaster::new(16).0, None)
+        } else {
+            let (addr, hub) = y901_agent::rpc::spawn(y901_agent::rpc::DEFAULT_ADDR, tx)?;
+            eprintln!("[y901] RPC listening on {addr} (token required)");
+            (hub, Some(addr))
+        }
+    } else {
+        (y901_agent::Broadcaster::new(16).0, None)
+    };
 
     let tree = build_demo1();
 

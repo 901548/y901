@@ -246,7 +246,7 @@ impl Widget for SplitView {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
             .label("split")
             .state("ratio", self.ratio)
             .state("dragging", self.dragging)

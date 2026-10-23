@@ -485,8 +485,8 @@ impl Default for Semantics {
             actions: Vec::new(),
             props: Vec::new(),
             disabled: false,
-            // 默认对 AI 开放：安全策略由应用显式收紧，而不是默认全关
-            exposed_to_ai: true,
+            // 默认封禁：组件必须显式 .exposed(true) 才对 AI 可见
+            exposed_to_ai: false,
             sensitive: false,
             state: crate::json::Json::Null,
         }
@@ -580,6 +580,11 @@ pub trait Widget {
 
     /// 卸载：释放资源（取消订阅、关闭 PTY）。
     fn on_unmount(&mut self) {}
+
+    /// 是否处于已打开状态。关闭的浮层不参与绘制、命中与布局。
+    fn is_open(&self) -> bool {
+        true
+    }
 
     /// 是否被禁用。禁用节点会被排除在 Tab 遍历之外。
     fn is_disabled(&self) -> bool {

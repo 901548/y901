@@ -50,6 +50,12 @@ impl McpServer {
             return Some(error_response(Json::Null, -32700, "parse error"));
         };
 
+        // JSON-RPC 2.0 版本字段必须存在且正确
+        if msg.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") {
+            let id = msg.get("id").cloned().unwrap_or(Json::Null);
+            return Some(error_response(id, -32600, "invalid request: jsonrpc must be \"2.0\""));
+        }
+
         let id = msg.get("id").cloned();
         let Some(method) = msg.get("method").and_then(|m| m.as_str()) else {
             return id.map(|i| error_response(i, -32600, "missing method"));
@@ -58,12 +64,19 @@ impl McpServer {
 
         // 通知：有 method 无 id
         if id.is_none() {
-            if method == "notifications/initialized" {
-                self.state = State::Initialized;
+            // 未握手前不接受 initialized 通知
+            if method == "notifications/initialized" && self.state == State::Initialized {
+                // 已经是握手态（initialize 已推进），通知只作确认，无需额外状态
             }
             return None;
         }
         let id = id.unwrap();
+
+        // Token：MCP 没有 HTTP 头，用 params.token 承载
+        let presented = params.get("token").and_then(|v| v.as_str());
+        if self.policy.authorize_token(presented).is_err() {
+            return Some(error_response(id, -32001, "unauthorized: invalid or missing token"));
+        }
 
         // 握手门：未初始化时只放行 initialize / ping
         if self.state == State::Uninitialized && method != "initialize" && method != "ping" {
@@ -80,6 +93,9 @@ impl McpServer {
             "tools/list" => Ok(Json::obj().set("tools", Json::Arr(tool_defs()))),
             "tools/call" => self.call_tool(tree, &params),
             "resources/list" => Ok(Json::obj().set("resources", Json::Arr(resource_defs()))),
+            "resources/templates/list" => {
+                Ok(Json::obj().set("resourceTemplates", Json::Arr(template_defs())))
+            }
             "resources/read" => self.read_resource(tree, &params),
             _ => Err((-32601, format!("method not found: {method}"))),
         };
@@ -277,6 +293,14 @@ fn schema(
     obj
 }
 
+fn template_defs() -> Vec<Json> {
+    vec![Json::obj()
+        .set("uriTemplate", "ui://node/{id}")
+        .set("name", "ui_node")
+        .set("description", "Single node details; use ui://node/<id>.")
+        .set("mimeType", "application/json")]
+}
+
 fn resource_defs() -> Vec<Json> {
     vec![
         Json::obj()
@@ -287,11 +311,7 @@ fn resource_defs() -> Vec<Json> {
                 "Full semantic tree (already filtered by exposed_to_ai and redacted).",
             )
             .set("mimeType", "application/json"),
-        Json::obj()
-            .set("uri", "ui://node/{id}")
-            .set("name", "ui_node")
-            .set("description", "Single node details; use ui://node/<id>.")
-            .set("mimeType", "application/json"),
+
     ]
 }
 

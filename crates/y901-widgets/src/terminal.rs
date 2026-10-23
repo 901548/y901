@@ -436,7 +436,7 @@ impl Widget for TerminalWidget {
     }
 
     fn semantics(&self) -> Semantics {
-        let mut sem = Semantics::default()
+        let mut sem = Semantics::default().exposed(true)
             .label(format!("terminal {}", self.grid.cols as u32 * self.grid.rows as u32))
             .value(self.grid.line_text(self.grid.cursor_row.min(self.grid.rows as usize - 1)))
             .action("inject_text")

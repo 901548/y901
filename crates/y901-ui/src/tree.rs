@@ -143,7 +143,7 @@ pub struct UiTree {
 
 impl UiTree {
     pub fn new(root: Box<dyn Widget>) -> Self {
-        Self {
+        let mut this = Self {
             root,
             focus: None,
             viewport: Size::ZERO,
@@ -165,7 +165,12 @@ impl UiTree {
             focus_order: Vec::new(),
             subscriptions: Vec::new(),
             invalidation_queue: crate::signal::Invalidation::new(),
-        }
+        };
+
+        // 初始树也要触发 on_mount：bind() 的 Signal 才能自动订阅
+        let invalidation = this.invalidation_queue.clone();
+        mount_recursive(this.root.as_mut(), &invalidation);
+        this
     }
 
     pub fn hovered(&self) -> Option<&str> {
@@ -661,6 +666,10 @@ impl UiTree {
             layer_present: &mut [bool; 3],
             modal_root: &mut Option<Vec<usize>>,
         ) {
+            // 关闭的浮层整棵子树都不进索引（不画、不命中、不可聚焦）
+            if !node.is_open() {
+                return;
+            }
             let own = node.layer();
             let effective = inherited.max(own);
             let rect = node.rect();
@@ -1384,4 +1393,15 @@ fn unmount_recursive(mut node: Box<dyn Widget>) {
         }
     }
     node.on_unmount();
+}
+
+/// 递归触发挂载钩子（初始树用）。
+fn mount_recursive(node: &mut dyn Widget, invalidation: &crate::signal::Invalidation) {
+    let mut ctx = crate::widget::MountCtx::new(node.id().to_string(), invalidation.clone());
+    node.on_mount(&mut ctx);
+    if let Some(children) = node.children_mut() {
+        for child in children.iter_mut() {
+            mount_recursive(child.as_mut(), invalidation);
+        }
+    }
 }

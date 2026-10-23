@@ -121,7 +121,7 @@ impl Widget for TextLabel {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
             .label(self.current_text())
             .value(self.current_text())
             .action("set_text")

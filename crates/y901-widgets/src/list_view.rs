@@ -64,7 +64,7 @@ impl Widget for Row {
         );
     }
     fn semantics(&self) -> Semantics {
-        Semantics::default().label(self.text.clone())
+        Semantics::default().exposed(true).label(self.text.clone())
     }
 }
 
@@ -362,7 +362,7 @@ impl Widget for ListView {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
+        Semantics::default().exposed(true)
             .label(format!("list({} rows)", self.items.len()))
             .action("scroll_to_ratio")
             .state("rows", self.items.len() as u32)
