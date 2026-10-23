@@ -50,7 +50,7 @@ pub use event::{
 };
 pub use geometry::{Edges, Pos, Rect, Size};
 pub use json::Json;
-pub use layout::{flex_arrange, flex_measure, layout_tree, Flex};
+pub use layout::{flex_arrange, flex_measure, layout_tree, Flex, Stack};
 pub use rpc::{Pending, RpcEvent, RpcRequest};
 pub use text::TextBuffer;
 pub use theme::{Style, Theme, State};

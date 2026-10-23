@@ -560,3 +560,74 @@ pub fn layout_tree(
     cache.finish_layout();
     cache.stats
 }
+/// 叠放容器：所有子节点拿到**同一个矩形**。
+///
+/// 浮层（Menu/Dialog）需要一个"全屏宿主"，否则它们的 rect 会被父容器的
+/// flex 槽位限制住，既盖不住全屏，也无法用几何判断"点在外面"。
+pub struct Stack {
+    id: String,
+    children: Vec<Box<dyn Widget>>,
+    rect: Rect,
+    item: FlexItem,
+}
+
+impl Stack {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            children: Vec::new(),
+            rect: Rect::ZERO,
+            item: FlexItem::default(),
+        }
+    }
+
+    pub fn push(mut self, child: Box<dyn Widget>) -> Self {
+        self.children.push(child);
+        self
+    }
+
+    pub fn flex_item(mut self, item: FlexItem) -> Self {
+        self.item = item;
+        self
+    }
+}
+
+impl Widget for Stack {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn role(&self) -> Role {
+        Role::PANEL
+    }
+    fn flex(&self) -> FlexItem {
+        self.item
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        Some(&mut self.children)
+    }
+    fn measure(&mut self, m: &dyn TextMetrics, c: Constraints, cache: &mut LayoutCache) -> Size {
+        for child in self.children.iter_mut() {
+            let _ = cache.measure(child.as_mut(), m, c);
+        }
+        c.constrain(c.max)
+    }
+    fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut LayoutCache) {
+        self.rect = rect;
+        for child in self.children.iter_mut() {
+            child.arrange(rect, m, cache);
+        }
+    }
+    fn rect(&self) -> Rect {
+        self.rect
+    }
+    fn event(&mut self, _ctx: &mut EventCtx, _event: &UiEvent) -> EventResult {
+        EventResult::Ignored
+    }
+    fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
+    fn semantics(&self) -> Semantics {
+        Semantics::default()
+    }
+}

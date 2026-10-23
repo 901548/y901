@@ -29,12 +29,13 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, PeekMessageW,
+    SetCursor,
     GetWindowLongPtrW, LoadCursorW, PostQuitMessage, RegisterClassExW,
     SetWindowLongPtrW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW,
     CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, IDC_ARROW, MSG, SW_SHOW, WM_CHAR, WM_DESTROY,
     WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
     WM_NCDESTROY, WM_PAINT, WM_SIZE,
-    WNDCLASSEXW, WS_OVERLAPPEDWINDOW, PM_REMOVE, WM_QUIT,
+    WNDCLASSEXW, WS_OVERLAPPEDWINDOW, PM_REMOVE, WM_QUIT, IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IDC_SIZEALL,
 };
 
 use y901_ui::{
@@ -220,6 +221,23 @@ fn vk_to_ctrl_char(vk: u32) -> Option<Key> {
     }
 }
 
+
+/// 把框架声明的光标形状映射到系统光标。
+unsafe fn apply_cursor(app: &App, pos: Pos) {
+    use y901_ui::Cursor;
+    let id = match app.tree.cursor_at(pos) {
+        Cursor::Text => IDC_IBEAM,
+        Cursor::Pointer => IDC_HAND,
+        Cursor::ResizeHorizontal => IDC_SIZEWE,
+        Cursor::ResizeVertical => IDC_SIZENS,
+        Cursor::Grab => IDC_SIZEALL,
+        Cursor::Default => IDC_ARROW,
+    };
+    let handle = LoadCursorW(null_mut(), id);
+    if !handle.is_null() {
+        SetCursor(handle);
+    }
+}
 // ============================ 渲染 / 布局 ============================
 
 unsafe fn paint(app: &mut App) {
@@ -557,6 +575,8 @@ unsafe fn handle(app: &mut App, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRE
                 },
                 _ => UiEvent::MouseMove { pos },
             };
+            // 光标形状：分栏分割线 → 左右箭头，输入框 → I 形
+            apply_cursor(app, pos);
             let result = app.tree.dispatch(&ev);
             process_commands(app);
             if result.needs_redraw() {

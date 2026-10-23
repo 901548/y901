@@ -242,16 +242,16 @@ impl Widget for ScrollView {
 
 /// 竖向滚动条。拖拽时把自己换算成比例交给目标滚动视图。
 pub struct Scrollbar {
-    id: String,
+    pub(crate) id: String,
     #[allow(dead_code)] // 留作把滚动条拆成独立组件时用
     target: String,
-    rect: Rect,
-    visible: bool,
+    pub(crate) rect: Rect,
+    pub(crate) visible: bool,
     /// 滑块占轨道的比例（viewport / content）
-    thumb_ratio: f32,
+    pub(crate) thumb_ratio: f32,
     /// 滑块起点在轨道中的比例
     start_ratio: f32,
-    dragging: bool,
+    pub(crate) dragging: bool,
     hovered: bool,
 }
 
@@ -269,20 +269,20 @@ impl Scrollbar {
         }
     }
 
-    fn arrange_at(&mut self, rect: Rect, thumb_ratio: f32, start_ratio: f32, visible: bool) {
+    pub(crate) fn arrange_at(&mut self, rect: Rect, thumb_ratio: f32, start_ratio: f32, visible: bool) {
         self.rect = rect;
         self.visible = visible;
         self.thumb_ratio = thumb_ratio.clamp(0.05, 1.0);
         self.start_ratio = start_ratio.clamp(0.0, 1.0 - self.thumb_ratio);
     }
 
-    fn thumb(&self) -> Rect {
+    pub(crate) fn thumb(&self) -> Rect {
         let h = (self.rect.h * self.thumb_ratio).max(24.0);
         let y = self.rect.y + (self.rect.h - h) * self.start_ratio;
         Rect::new(self.rect.x + 2.0, y, (self.rect.w - 4.0).max(2.0), h)
     }
 
-    fn ratio_at(&self, y: f32) -> f32 {
+    pub(crate) fn ratio_at(&self, y: f32) -> f32 {
         if self.rect.h <= 0.0 {
             return 0.0;
         }
@@ -291,7 +291,7 @@ impl Scrollbar {
 }
 
 impl Scrollbar {
-    fn render_bar(&self, ctx: &mut dyn RenderCtx) {
+    pub(crate) fn render_bar(&self, ctx: &mut dyn RenderCtx) {
         if !self.visible {
             return;
         }

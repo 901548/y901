@@ -537,6 +537,11 @@ pub trait Widget {
         None
     }
 
+    /// 向下转型：容器需要就地修改子节点（虚拟化行复用）时用。
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        None
+    }
+
     /// 鼠标悬停时的光标形状（静态声明）。
     fn cursor(&self) -> Cursor {
         Cursor::Default
