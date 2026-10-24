@@ -1611,10 +1611,12 @@ fn semantic_hash(node: &dyn Widget) -> u64 {
 
 /// 纯函数版本：给定 `(role, Semantics)` 计算语义面哈希。
 ///
-/// 公开是为了让碰撞统计与实现共用同一份代码——测试若另写一份哈希就没有意义。
+/// 公开只是工程妥协：`tests/` 是独立 crate，需要和实现共用同一份哈希，
+/// 否则碰撞统计测的就不是产品代码。**不属于稳定 API，不要依赖。**
 ///
 /// 分隔符说明：每个字段结尾都会喂一次 `0xff`，避免 `"ab"+"c"` 与 `"a"+"bc"`
 /// 落在同一状态机上。
+#[doc(hidden)]
 pub fn hash_semantics(role: Role, sem: &crate::widget::Semantics) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut feed = |bytes: &[u8]| {
