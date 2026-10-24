@@ -332,6 +332,10 @@ pub fn spawn_with_token(
 }
 
 fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster, expected: String) {
+    // 写超时：`reply_to` 在 UI 线程内同步写 socket，若客户端不读会把缓冲写满。
+    // 100ms 是经验值（正常回包只有几百字节，远小于此），保证 UI 线程最多被占用 100ms。
+    // 彻底方案（每连接一个写线程 + 统一 FIFO 队列）记在 FRAMEWORK_GUIDE §16。
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(100)));
     let reader = match stream.try_clone() {
         Ok(s) => BufReader::new(s),
         Err(_) => return,
@@ -503,7 +507,14 @@ pub fn reply_to(pending: Pending, result: Result<Json, String>) {
             .set("result", result),
         Err(err) => error_response(pending.id.clone(), &err),
     };
-    let _ = write_line(&pending.writer, &body);
+    if !write_line(&pending.writer, &body) {
+        // 写失败 = 客户端已断开，或写超时（对端不读）。
+        // 立刻 shutdown，让后续推送也尽早失败，避免每条消息都等满 100ms。
+        if let Ok(stream) = pending.writer.lock() {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+        eprintln!("[y901] RPC 回复写入失败（对端断开或不读），关闭连接");
+    }
 }
 
 /// 便捷类型：UI 线程持有的接收端。

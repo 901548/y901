@@ -283,3 +283,21 @@ Agent 看到的 `revision` 不变，但 `get_tree` 的内容变了，
 顺带一条顺序保证：**回包永远先于该回包触发的推送**。
 实现上 `reply_to` 在 UI 线程内同步写 socket，推送随后才入广播队列；
 早期实现里两者由不同线程写，出现过"先收到 state_changed 再收到 ack"的乱序。
+## §16 TODO：把 RPC 回包移出 UI 线程（跨平台 v3 之后做）
+
+**现状**：`reply_to` 在 UI 线程内同步写 socket，靠 `set_write_timeout(100ms)`
+把最坏阻塞压到 100ms；写失败/超时立即 `shutdown` 断开连接。
+
+**为什么还不够**：UI 线程阻塞 100ms 就是一帧掉 6 帧（60fps）。
+正常路径不会触发，但对"性能至上"的框架来说，这是一笔不该存在的风险。
+
+**彻底方案**：每连接一个写线程 + 统一 FIFO 队列。
+回包与推送都进同一个队列，由写线程按入队顺序写出。
+收益：UI 线程**永不**碰 socket（零阻塞），且顺序由队列天然保证（§15 的顺序契约）。
+
+**迁移步骤**
+1. `Pending` 携带该连接的 `Sender<String>`，`reply_to` 改为 `send`（非阻塞）。
+2. `Broadcaster` 从"持 socket"改为"持每条连接的 Sender"。
+3. 每连接一个写线程：`for line in rx { write_all }`，写失败即断开并注销。
+4. 删除 `set_write_timeout`（写线程阻塞无害，UI 不受影响）。
+5. 测试：`rpc_write_timeout.rs` 改为断言"UI 线程零阻塞"，而不是"100ms 内返回"。
