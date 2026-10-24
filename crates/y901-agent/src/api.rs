@@ -651,6 +651,15 @@ pub fn dispatch_request(
             delta: params.get("delta").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
             if_rev: arg_u64(params, "if_rev"),
         },
+        // 原生事件直投（RPC 的 dispatch 与 MCP 的底层入口共用）
+        "dispatch" => {
+            let id = arg_str(params, "id")?;
+            let raw = params.get("event").cloned().unwrap_or(Json::Null);
+            let ev = crate::rpc::RpcEvent::from_json(&raw)
+                .map_err(|e| ApiError::BadRequest(format!("bad event: {e}")))?;
+            let handled = tree.dispatch_to(&id, &ev.to_ui_event()).is_handled();
+            return Ok(Json::obj().set("ok", handled).set("id", id));
+        }
         "invoke" | "ui_invoke" => ApiCall::Invoke {
             id: arg_str(params, "id")?,
             action: arg_str(params, "action")?,

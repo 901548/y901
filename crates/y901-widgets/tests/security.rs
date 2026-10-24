@@ -94,26 +94,30 @@ fn sensitive_label_is_redacted_too() {
 // ---------- 2. Token ----------
 
 #[test]
-fn mcp_requires_token_when_configured() {
+fn standard_mcp_initialize_without_token_succeeds() {
+    // 标准 MCP 客户端的 initialize 只带 protocolVersion / capabilities / clientInfo，
+    // 不带任何 token。stdio 是进程边界，鉴权在启动时由 Y901_TOKEN 决定。
     let policy = Policy::with_token("s3cret");
     let mut server = McpServer::new(policy);
-    let mut tree = UiTree::new(Box::new(Flex::column("root")));
+    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(Button::new("ok", "OK")))));
     tree.layout(Size::new(400.0, 300.0), &Mono);
 
-    // 无 token 的 initialize
     let out = server
-        .handle_line(&mut tree, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#)
-        .expect("response");
-    assert!(out.contains("-32001"), "无 Token 应 401：{out}");
-
-    // 带 token
-    let ok = server
         .handle_line(
             &mut tree,
-            r#"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"token":"s3cret"}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"claude","version":"1.0"}}}"#,
         )
         .expect("response");
-    assert!(ok.contains("protocolVersion"), "正确 Token 应放行：{ok}");
+    assert!(
+        out.contains("protocolVersion") && out.contains("serverInfo"),
+        "标准 initialize 应成功：{out}"
+    );
+
+    // 握手后 tools/list 正常
+    let tools = server
+        .handle_line(&mut tree, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#)
+        .expect("response");
+    assert!(tools.contains("ui_click"), "tools/list 应可用：{tools}");
 }
 
 #[test]

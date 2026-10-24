@@ -7,7 +7,7 @@ mod host;
 
 use y901_agent::{McpServer, Policy};
 use y901_backend_win32::runtime::Win32Runtime;
-use y901_runtime::{Options, PlatformRuntime};
+use y901_runtime::{Host, Options, PlatformRuntime};
 use y901_ui::{Color, Edges, Flex, FlexItem, Size, UiTree};
 use y901_widgets::TextLabel;
 
@@ -32,12 +32,28 @@ fn build_shell() -> UiTree {
 fn run_headless(policy: Policy) -> Result<(), String> {
     let mut tree = build_shell();
     tree.layout(Size::new(1200.0, 800.0), &HeadlessMetrics);
-    let mut server = McpServer::new(policy);
+
+    let mut server = McpServer::new(policy.clone());
+    let mut host = Shell::new(policy);
     let jobs = y901_mcp::bridge::spawn_io(
         std::io::BufReader::new(std::io::stdin()),
         std::io::stdout(),
     );
-    y901_mcp::bridge::run_blocking(&mut server, &mut tree, &jobs);
+
+    // 与 GUI 路径共用同一个 Host：命令必须经 host.command，不允许第二条执行路径
+    loop {
+        match jobs.recv_timeout(std::time::Duration::from_millis(16)) {
+            Ok(job) => {
+                let response = server.handle_line(&mut tree, &job.line);
+                let _ = job.reply.send(response);
+                for cmd in tree.drain_commands() {
+                    let _ = host.command(&mut tree, cmd);
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => host.idle(&mut tree),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
     Ok(())
 }
 

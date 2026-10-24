@@ -68,7 +68,9 @@ impl Host for Shell {
 /// RPC 请求 → 统一 dispatcher。
 fn handle_rpc(tree: &mut UiTree, policy: &Policy, pending: Pending) {
     let result = match &pending.request {
-        RpcRequest::GetTree => Ok(tree.snapshot_json()),
+        // 与 MCP 共用同一个网关入口（同样的过滤、脱敏、类型校验）
+        RpcRequest::GetTree => y901_agent::dispatch_request(tree, policy, "get_tree", &Json::obj())
+            .map_err(|e| e.code().to_string()),
         RpcRequest::Query { q } => {
             let params = Json::obj().set("q", q.clone());
             y901_agent::dispatch_request(tree, policy, "query", &params)
@@ -76,23 +78,19 @@ fn handle_rpc(tree: &mut UiTree, policy: &Policy, pending: Pending) {
         }
         RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
         RpcRequest::Dispatch { node, event } => {
-            let ev = event.to_ui_event();
-            if tree.dispatch_to(node, &ev).is_handled() {
-                Ok(Json::obj().set("ok", true))
-            } else {
-                Err(format!("node ignored event: {node}"))
-            }
+            let params = Json::obj()
+                .set("id", node.clone())
+                .set("event", event.to_json());
+            y901_agent::dispatch_request(tree, policy, "dispatch", &params)
+                .map_err(|e| e.code().to_string())
         }
         RpcRequest::Invoke { node, action, args } => {
-            let ev = UiEvent::Action {
-                name: action.clone(),
-                args: args.clone(),
-            };
-            if tree.dispatch_to(node, &ev).is_handled() {
-                Ok(Json::obj().set("ok", true))
-            } else {
-                Err(format!("node ignored action: {action} on {node}"))
-            }
+            let params = Json::obj()
+                .set("id", node.clone())
+                .set("action", action.clone())
+                .set("args", args.clone());
+            y901_agent::dispatch_request(tree, policy, "invoke", &params)
+                .map_err(|e| e.code().to_string())
         }
         RpcRequest::Focus { node } => {
             if tree.set_focus(Some(node.clone())) {

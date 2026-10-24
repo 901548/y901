@@ -44,9 +44,11 @@ impl PlatformRuntime for Win32Runtime {
                 }
 
                 if let Some(ev) = translate(&raw, viewport) {
-                    let _ = host.event(&mut tree, &ev);
-                    let result = tree.dispatch(&ev);
-                    if result.needs_relayout() {
+                    // Host 先处理：返回 Handled 表示它接管了这条事件
+                    if host.event(&mut tree, &ev).is_handled() {
+                        continue;
+                    }
+                    if tree.dispatch(&ev).needs_relayout() {
                         need_layout = true;
                     }
                 }

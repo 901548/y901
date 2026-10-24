@@ -108,7 +108,14 @@ pub fn translate(raw: &RawEvent, viewport: Size) -> Option<UiEvent> {
             modifiers: *mods,
         }),
         RawEvent::Char { c } => Some(UiEvent::Text(c.to_string())),
-        RawEvent::Ime { text, .. } => Some(UiEvent::Compose(text.clone())),
+        // 组合中 → Compose（不插入正文）；提交 → Text（插入正文）
+        RawEvent::Ime { text, composition } => {
+            if *composition {
+                Some(UiEvent::Compose(text.clone()))
+            } else {
+                Some(UiEvent::Text(text.clone()))
+            }
+        }
         RawEvent::Resize { w: _, h: _ } => {
             let _ = viewport;
             Some(UiEvent::Resize)

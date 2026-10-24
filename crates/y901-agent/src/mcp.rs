@@ -72,11 +72,9 @@ impl McpServer {
         }
         let id = id.unwrap();
 
-        // Token：MCP 没有 HTTP 头，用 params.token 承载
-        let presented = params.get("token").and_then(|v| v.as_str());
-        if self.policy.authorize_token(presented).is_err() {
-            return Some(error_response(id, -32001, "unauthorized: invalid or missing token"));
-        }
+        // Token 不在协议层校验：标准 MCP 客户端（Claude Desktop / Cursor）的
+        // initialize 参数只有 protocolVersion / capabilities / clientInfo。
+        // stdio 是进程边界，鉴权在启动时由 Y901_TOKEN 决定（见 McpServer::new）。
 
         // 握手门：未初始化时只放行 initialize / ping
         if self.state == State::Uninitialized && method != "initialize" && method != "ping" {

@@ -14,6 +14,14 @@ use std::thread;
 
 use y901_ui::Json;
 
+fn button_name(b: y901_ui::MouseButton) -> &'static str {
+    match b {
+        y901_ui::MouseButton::Left => "left",
+        y901_ui::MouseButton::Right => "right",
+        y901_ui::MouseButton::Middle => "middle",
+    }
+}
+
 pub const DEFAULT_ADDR: &str = "127.0.0.1:9410";
 
 /// 解析后的请求（已去掉传输层细节）。
@@ -55,6 +63,38 @@ pub enum RpcEvent {
 }
 
 impl RpcEvent {
+    /// 还原成协议 JSON（RPC 转 gateway 时用，保证与 MCP 走同一套解析）。
+    pub fn to_json(&self) -> Json {
+        use y901_ui::UiEvent;
+        let _: Option<UiEvent> = None;
+        match self {
+            RpcEvent::Text(t) => Json::obj().set("type", "text").set("text", t.clone()),
+            RpcEvent::Key(k) => Json::obj()
+                .set("type", "key")
+                .set("key", format!("{k:?}")),
+            RpcEvent::Compose(t) => Json::obj().set("type", "compose").set("text", t.clone()),
+            RpcEvent::MouseDown { pos, button } => Json::obj()
+                .set("type", "mouse_down")
+                .set("x", pos.x)
+                .set("y", pos.y)
+                .set("button", button_name(*button)),
+            RpcEvent::MouseUp { pos, button } => Json::obj()
+                .set("type", "mouse_up")
+                .set("x", pos.x)
+                .set("y", pos.y)
+                .set("button", button_name(*button)),
+            RpcEvent::MouseMove { pos } => Json::obj()
+                .set("type", "mouse_move")
+                .set("x", pos.x)
+                .set("y", pos.y),
+            RpcEvent::Wheel { pos, delta } => Json::obj()
+                .set("type", "wheel")
+                .set("x", pos.x)
+                .set("y", pos.y)
+                .set("delta", *delta),
+        }
+    }
+
     /// 转成框架内部的 `UiEvent`。
     pub fn to_ui_event(&self) -> y901_ui::UiEvent {
         use y901_ui::UiEvent;
