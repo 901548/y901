@@ -176,10 +176,15 @@ impl Widget for Button {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default().exposed(true)
+        Semantics::default()
+            .exposed(true)
             .label(self.label.clone())
             .value(self.command.clone())
             .action("click")
+            // disabled 必须进语义：Agent 据此判断"现在能不能点"，
+            // 也是 revision 哈希覆盖的可见字段之一。
+            .disabled(self.disabled)
+            .state("disabled", self.disabled)
             .prop("hovered", self.hovered.to_string())
             .prop("pressed", self.pressed.to_string())
     }

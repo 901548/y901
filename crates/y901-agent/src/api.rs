@@ -351,6 +351,9 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
                 )
                 .set("revision", node.revision())
                 .set("sensitive", merged.get("sensitive").cloned().unwrap_or(Json::Bool(false)))
+                // disabled 是 Agent 的可见语义（"现在点不了"），必须输出；
+                // 后续 revision 的哈希范围与这里保持一一对应。
+                .set("disabled", merged.get("disabled").cloned().unwrap_or(Json::Bool(false)))
                 .set("label", merged.get("label").cloned().unwrap_or(Json::Null))
                 .set("value", merged.get("value").cloned().unwrap_or(Json::Null))
                 .set("actions", Json::Arr(
@@ -422,6 +425,8 @@ fn query_result(tree: &UiTree, policy: &Policy, q: &y901_ui::Query) -> Json {
                 .set("role", node.role().as_str())
                 .set("label", redacted.get("label").cloned().unwrap_or(Json::Null))
                 .set("revision", node.revision())
+                // 与 public_tree 对齐：disabled 属于 Agent 可操作性的输入
+                .set("disabled", redacted.get("disabled").cloned().unwrap_or(Json::Bool(false)))
                 .set(
                     "rect",
                     Json::obj()
