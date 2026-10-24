@@ -232,8 +232,8 @@ impl Widget for ScrollView {
     fn semantics(&self) -> Semantics {
         Semantics::default().exposed(true)
             .label("scroll")
-            .action("scroll_to")
-            .action("scroll_to_ratio")
+            .action_spec("scroll_to", y901_ui::InputKind::Number)
+            .action_spec("scroll_to_ratio", y901_ui::InputKind::Number)
             .state("offset", self.offset)
             .state("content_height", self.content_h)
             .state("viewport_height", self.inner.h)
@@ -443,7 +443,7 @@ impl Widget for Scrollbar {
     fn semantics(&self) -> Semantics {
         Semantics::default().exposed(true)
             .label("scrollbar")
-            .action("scroll_to_ratio")
+            .action_spec("scroll_to_ratio", y901_ui::InputKind::Number)
             .state("offset", self.offset)
             .state("total", self.total)
             .state("viewport", self.viewport)

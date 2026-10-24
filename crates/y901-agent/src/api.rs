@@ -13,6 +13,8 @@ use y901_ui::{Json, MouseButton, Pos, Rect, UiEvent, UiTree};
 pub enum ApiCall {
     /// 列出（过滤 + 脱敏后的）语义树。
     Tree,
+    /// 按查询语言筛选，返回精简节点列表（id/role/label/rect/revision）。
+    Query { q: String },
     /// 点击节点：网关自动换算中心点并伪造 MouseDown + MouseUp。
     Click { id: String, if_rev: Option<u64> },
     /// 向节点输入文本（等价于聚焦后键入）。
@@ -39,7 +41,7 @@ pub enum ApiCall {
 impl ApiCall {
     pub fn id(&self) -> Option<&str> {
         match self {
-            ApiCall::Tree => None,
+            ApiCall::Tree | ApiCall::Query { .. } => None,
             ApiCall::Click { id, .. }
             | ApiCall::Type { id, .. }
             | ApiCall::Scroll { id, .. }
@@ -49,7 +51,7 @@ impl ApiCall {
 
     pub fn if_rev(&self) -> Option<u64> {
         match self {
-            ApiCall::Tree => None,
+            ApiCall::Tree | ApiCall::Query { .. } => None,
             ApiCall::Click { if_rev, .. }
             | ApiCall::Type { if_rev, .. }
             | ApiCall::Scroll { if_rev, .. }
@@ -176,6 +178,10 @@ impl Policy {
 pub fn handle_call(tree: &mut UiTree, policy: &Policy, call: ApiCall) -> Result<Json, ApiError> {
     match call {
         ApiCall::Tree => Ok(public_tree(tree, policy)),
+        ApiCall::Query { q } => {
+            let parsed = y901_ui::Query::parse(&q).map_err(ApiError::BadRequest)?;
+            Ok(query_result(tree, policy, &parsed))
+        }
         ApiCall::Click { id, if_rev } => {
             let (rect, node_rev) = locate(tree, &id)?;
             check_rev(if_rev, node_rev)?;
@@ -240,12 +246,28 @@ pub fn handle_call(tree: &mut UiTree, policy: &Policy, call: ApiCall) -> Result<
             // 动作必须在组件声明的列表里，避免"猜 API"
             let allowed = tree
                 .find(&id)
-                .map(|n| n.semantics().actions.iter().any(|a| a == &action))
+                .map(|n| n.semantics().actions.iter().any(|a| a.name == action))
                 .unwrap_or(false);
             if !allowed {
                 return Err(ApiError::BadRequest(format!(
                     "action `{action}` is not declared by `{id}`"
                 )));
+            }
+            // 参数类型必须与 ActionSpec.input 匹配
+            if let Some(node) = tree.find(&id) {
+                if let Some(spec) = node.semantics().actions.iter().find(|a| a.name == action) {
+                    let value = args.get(spec.input.arg_name()).cloned().unwrap_or(Json::Null);
+                    // 无参动作不接受任何多余参数
+                    let extra = matches!(spec.input, y901_ui::InputKind::None)
+                        && matches!(&args, Json::Obj(map) if !map.is_empty());
+                    if extra || !spec.input.accepts(&value) {
+                        return Err(ApiError::BadRequest(format!(
+                            "action `{action}` expects {:?} argument `{}`",
+                            spec.input,
+                            spec.input.arg_name()
+                        )));
+                    }
+                }
             }
             let handled = tree
                 .dispatch_to(&id, &UiEvent::Action { name: action.clone(), args })
@@ -326,7 +348,7 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
                 .set("label", merged.get("label").cloned().unwrap_or(Json::Null))
                 .set("value", merged.get("value").cloned().unwrap_or(Json::Null))
                 .set("actions", Json::Arr(
-                    sem.actions.iter().map(|a| Json::Str(a.clone())).collect()
+                    sem.actions.iter().map(|a| a.to_json()).collect()
                 ))
                 .set("state", merged.get("state").cloned().unwrap_or(Json::Null))
                 .set("children", Json::Arr(children)),
@@ -560,9 +582,42 @@ pub fn redact_node(sem: &y901_ui::Semantics, policy: &Policy) -> Json {
         .set("value", value)
         .set(
             "actions",
-            Json::Arr(sem.actions.iter().map(|a| Json::Str(a.clone())).collect()),
+            Json::Arr(sem.actions.iter().map(|a| a.to_json()).collect()),
         )
         .set("state", state)
         .set("sensitive", sem.sensitive)
         .set("disabled", sem.disabled)
+}
+
+/// 查询结果：只返回定位所需字段，避免整树 JSON。
+fn query_result(tree: &UiTree, policy: &Policy, q: &y901_ui::Query) -> Json {
+    let ids = y901_ui::query_nodes(tree.root(), q);
+    let mut items = Vec::new();
+    for id in ids {
+        let Some(node) = tree.find(&id) else { continue };
+        let sem = node.semantics();
+        if !sem.exposed_to_ai {
+            continue;
+        }
+        let rect = tree.rect_of(&id).unwrap_or_else(|| node.rect());
+        let redacted = redact_node(&sem, policy);
+        items.push(
+            Json::obj()
+                .set("id", id)
+                .set("role", node.role().as_str())
+                .set("label", redacted.get("label").cloned().unwrap_or(Json::Null))
+                .set("revision", node.revision())
+                .set(
+                    "rect",
+                    Json::obj()
+                        .set("x", rect.x)
+                        .set("y", rect.y)
+                        .set("w", rect.w)
+                        .set("h", rect.h),
+                ),
+        );
+    }
+    Json::obj()
+        .set("count", items.len() as u32)
+        .set("items", Json::Arr(items))
 }

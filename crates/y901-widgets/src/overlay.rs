@@ -217,7 +217,7 @@ impl Widget for Menu {
     fn semantics(&self) -> Semantics {
         Semantics::default().exposed(true)
             .label("menu")
-            .action("select")
+            .action_spec("select", y901_ui::InputKind::Number)
             .state("open", self.open)
             .state("items", self.items.len() as u32)
     }

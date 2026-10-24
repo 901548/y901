@@ -364,7 +364,7 @@ impl Widget for ListView {
     fn semantics(&self) -> Semantics {
         Semantics::default().exposed(true)
             .label(format!("list({} rows)", self.items.len()))
-            .action("scroll_to_ratio")
+            .action_spec("scroll_to_ratio", y901_ui::InputKind::Number)
             .state("rows", self.items.len() as u32)
             .state("offset", self.offset)
             .state("arranged", self.arranged_rows as u32)

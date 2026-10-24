@@ -38,6 +38,7 @@ pub mod geometry;
 pub mod json;
 pub mod layout;
 pub mod text;
+pub mod query;
 pub mod signal;
 pub mod theme;
 pub mod tree;
@@ -52,12 +53,13 @@ pub use geometry::{Edges, Pos, Rect, Size};
 pub use json::Json;
 pub use layout::{flex_arrange, flex_measure, layout_tree, Flex, Stack};
 pub use text::TextBuffer;
+pub use query::{run as query_nodes, Query};
 pub use signal::{Invalidation, Signal};
 pub use widget::MountCtx;
 pub use theme::{Style, Theme, State};
 pub use tree::{NodeInfo, UiTree};
 pub use widget::{
-    Axis2, Cursor, Layer,
+    ActionSpec, Axis2, Cursor, InputKind, Layer,
     Axis, Constraints, Dimension, EventCtx, FlexItem, RenderCtx, Role, Semantics, TextMetrics,
     Widget,
 };

@@ -439,7 +439,7 @@ impl Widget for TerminalWidget {
         let mut sem = Semantics::default().exposed(true)
             .label(format!("terminal {}", self.grid.cols as u32 * self.grid.rows as u32))
             .value(self.grid.line_text(self.grid.cursor_row.min(self.grid.rows as usize - 1)))
-            .action("inject_text")
+            .action_spec("inject_text", y901_ui::InputKind::Text)
             .action("clear")
             .action("focus")
             .prop("cols", self.grid.cols.to_string())

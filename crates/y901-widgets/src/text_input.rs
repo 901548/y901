@@ -667,7 +667,7 @@ impl Widget for TextInput {
         Semantics::default().exposed(true)
             .label(self.buffer.text().to_string())
             .value(self.buffer.text().to_string())
-            .action("set_text")
+            .action_spec("set_text", y901_ui::InputKind::Text)
             .action("focus")
             .prop("cursor", self.buffer.cursor().to_string())
             .prop("anchor", self.buffer.anchor().to_string())
@@ -1213,7 +1213,7 @@ mod tests {
         );
         let sem = w.semantics();
         assert_eq!(sem.value, "hi");
-        assert!(sem.actions.iter().any(|a| a == "set_text"));
+        assert!(sem.actions.iter().any(|a| a.name == "set_text"));
         assert!(sem.props.iter().any(|(k, v)| k == "cursor" && v == "0"));
         assert!(sem.props.iter().any(|(k, _)| k == "focused"));
         assert_eq!(w.role(), Role::TEXT_INPUT);

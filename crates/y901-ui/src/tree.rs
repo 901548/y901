@@ -1185,7 +1185,7 @@ impl UiTree {
                 .set("focused", focus == Some(node.id()))
                 .set("label", sem.label.clone())
                 .set("value", sem.value.clone())
-                .set("actions", Json::Arr(sem.actions.iter().map(|a| Json::Str(a.clone())).collect()))
+                .set("actions", Json::Arr(sem.actions.iter().map(|a| a.to_json()).collect()))
                 .set("props", props)
                 .set("state", sem.state.clone())
                 .set("revision", node.revision())

@@ -130,6 +130,9 @@ impl McpServer {
                 delta: args.get("delta").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
                 if_rev: opt_u64(&args, "if_rev"),
             },
+            "ui_query" => ApiCall::Query {
+                q: need_str(&args, "q")?,
+            },
             "ui_invoke" => ApiCall::Invoke {
                 id: need_str(&args, "id")?,
                 action: need_str(&args, "action")?,
@@ -242,6 +245,20 @@ fn tool_defs() -> Vec<Json> {
                     ],
                     &["id", "delta"],
                     &[("if_rev", "number", "乐观锁")],
+                ),
+            ),
+        Json::obj()
+            .set("name", "ui_query")
+            .set(
+                "description",
+                "Query nodes by selector, e.g. `role=button & label~=\"Save\" & limit=5`. Returns id/role/label/rect/revision.",
+            )
+            .set(
+                "inputSchema",
+                schema(
+                    &[("q", "string", "查询表达式")],
+                    &["q"],
+                    &[],
                 ),
             ),
         Json::obj()
@@ -569,12 +586,12 @@ mod tests {
             Some(Json::Arr(a)) => a.clone(),
             _ => panic!("tools 应为数组"),
         };
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 5);
         let names: Vec<&str> = tools
             .iter()
             .filter_map(|t| t.get("name").and_then(|v| v.as_str()))
             .collect();
-        assert_eq!(names, vec!["ui_click", "ui_type_text", "ui_scroll", "ui_invoke"]);
+        assert_eq!(names, vec!["ui_click", "ui_type_text", "ui_scroll", "ui_query", "ui_invoke"]);
 
         let click = &tools[0].get("inputSchema").unwrap();
         assert_eq!(click.get("type").and_then(|v| v.as_str()), Some("object"));

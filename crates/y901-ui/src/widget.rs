@@ -457,13 +457,78 @@ impl EventCtx {
     }
 }
 
+
+/// 动作参数的形态。网关据此做类型校验，Agent 据此知道该传什么。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputKind {
+    None,
+    Text,
+    Number,
+    Bool,
+}
+
+impl InputKind {
+    /// 参数名（约定：每个动作最多一个入参）。
+    pub fn arg_name(self) -> &'static str {
+        match self {
+            InputKind::None => "",
+            InputKind::Text => "text",
+            InputKind::Number => "value",
+            InputKind::Bool => "flag",
+        }
+    }
+
+    /// 校验一个 JSON 值是否匹配。
+    pub fn accepts(self, value: &crate::json::Json) -> bool {
+        use crate::json::Json;
+        match self {
+            InputKind::None => matches!(value, Json::Null),
+            InputKind::Text => matches!(value, Json::Str(_)),
+            InputKind::Number => matches!(value, Json::Num(_)),
+            InputKind::Bool => matches!(value, Json::Bool(_)),
+        }
+    }
+}
+
+/// 一个可被 Agent 调用的动作。
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActionSpec {
+    pub name: String,
+    pub input: InputKind,
+}
+
+impl ActionSpec {
+    pub fn new(name: impl Into<String>, input: InputKind) -> Self {
+        Self {
+            name: name.into(),
+            input,
+        }
+    }
+
+    /// 语义树里的紧凑表示：`{"name":"click","input":"none"}`。
+    pub fn to_json(&self) -> crate::json::Json {
+        crate::json::Json::obj()
+            .set("name", self.name.clone())
+            .set(
+                "input",
+                match self.input {
+                    InputKind::None => "none",
+                    InputKind::Text => "text",
+                    InputKind::Number => "number",
+                    InputKind::Bool => "bool",
+                },
+            )
+    }
+}
 /// 语义描述：给 Agent 读的节点信息。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Semantics {
     pub label: String,
     pub value: String,
+    /// 角色名（query 用；由 tree/query 从 Widget::role() 填入）。
+    pub role_name: String,
     /// 该节点支持的动作名，例如 ["click", "set_text"]。
-    pub actions: Vec<String>,
+    pub actions: Vec<ActionSpec>,
     /// 额外键值（终端会填 cols/rows/scroll_offset）。
     pub props: Vec<(String, String)>,
     /// 结构化状态：Agent 直接消费（文本、光标、禁用…）。
@@ -482,6 +547,7 @@ impl Default for Semantics {
         Self {
             label: String::new(),
             value: String::new(),
+            role_name: String::new(),
             actions: Vec::new(),
             props: Vec::new(),
             disabled: false,
@@ -528,8 +594,15 @@ impl Semantics {
         self
     }
 
+    /// 声明一个动作（无参数）。
     pub fn action(mut self, name: impl Into<String>) -> Self {
-        self.actions.push(name.into());
+        self.actions.push(ActionSpec::new(name, InputKind::None));
+        self
+    }
+
+    /// 声明一个带参数类型的动作。
+    pub fn action_spec(mut self, name: impl Into<String>, input: InputKind) -> Self {
+        self.actions.push(ActionSpec::new(name, input));
         self
     }
 
