@@ -8,8 +8,8 @@
 //! 渲染完全由框架驱动：`tree.render(&mut backend)` 走一遍树，
 //! 后端把 `fill_rect` / `draw_text` 累积成实例数组，**一次 DrawInstanced** 提交。
 
-mod backend;
-mod ime;
+
+
 
 use std::any::Any;
 use std::ffi::c_void;
@@ -47,8 +47,8 @@ use y901_ui::{
 };
 use y901_widgets::{Button, TerminalWidget, TextLabel, VerticalList};
 
-use backend::D3dBackend;
-use ime::{ImeAction, ImeState};
+use y901_backend_win32::backend::D3dBackend;
+use y901_backend_win32::ime::{ImeAction, ImeState};
 
 /// 打包 HWND：`NonNull` 天然 `!Send + !Sync`。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -463,7 +463,7 @@ unsafe fn idle(app: &mut App) {
     // IME：组件请求把候选窗钉到光标处（TextInput 在组合态发出）
     if let Some(pos) = app.tree.take_pending_ime() {
         if let Some(hwnd) = app.hwnd {
-            ime::set_composition_position(hwnd.as_raw(), pos.x, pos.y);
+            y901_backend_win32::ime::set_composition_position(hwnd.as_raw(), pos.x, pos.y);
         }
     }
 
@@ -642,8 +642,8 @@ unsafe fn handle(app: &mut App, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRE
         }
 
         // ---- IME ----
-        ime::WM_IME_STARTCOMPOSITION | ime::WM_IME_COMPOSITION | ime::WM_IME_ENDCOMPOSITION => {
-            match ime::handle_ime_message(hwnd, msg, lparam, &mut app.ime) {
+        y901_backend_win32::ime::WM_IME_STARTCOMPOSITION | y901_backend_win32::ime::WM_IME_COMPOSITION | y901_backend_win32::ime::WM_IME_ENDCOMPOSITION => {
+            match y901_backend_win32::ime::handle_ime_message(hwnd, msg, lparam, &mut app.ime) {
                 ImeAction::Unhandled => DefWindowProcW(hwnd, msg, wparam, lparam),
                 ImeAction::Redraw => {
                     let text = app.ime.composing_text();
