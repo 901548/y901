@@ -330,8 +330,9 @@ fn node_resource(tree: &UiTree, policy: &Policy, id: &str) -> Option<Json> {
             .set("label", merged.get("label").cloned().unwrap_or(Json::Null))
             .set("value", merged.get("value").cloned().unwrap_or(Json::Null))
             .set("state", merged.get("state").cloned().unwrap_or(Json::Null))
-            // 与 public_tree / query_result 对齐：disabled 是可见语义
+            // 与 public_tree / query_result 对齐：disabled / focused 都是可见语义
             .set("disabled", merged.get("disabled").cloned().unwrap_or(Json::Bool(false)))
+            .set("focused", tree.focus() == Some(id))
             .set("actions", merged.get("actions").cloned().unwrap_or(Json::Null)),
     )
 }

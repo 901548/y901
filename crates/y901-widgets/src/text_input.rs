@@ -439,13 +439,11 @@ impl Widget for TextInput {
                 if !self.rect.contains(*pos) {
                     return EventResult::Ignored;
                 }
-                // 点击即取焦，不等 Focus 事件回来
+                // 只**请求**焦点，不在这里假定成功：请求可能被 Modal 作用域拒绝。
+                // 真正的 focused 只由框架的 Focus(true) 事件设置（单一真相）。
                 ctx.request_focus(self.id.clone());
                 // 捕获指针：拖出控件后仍能收到 MouseMove（拖拽选中靠它）
                 ctx.set_pointer_capture(self.id.clone());
-                self.focused = true;
-                self.caret_visible = true;
-                self.last_blink = Instant::now();
                 self.dragging = true;
 
                 let byte = self.byte_at_screen_x(pos.x);
@@ -532,8 +530,8 @@ impl Widget for TextInput {
                     EventResult::Relayout
                 }
                 "focus" => {
+                    // 同上：只请求，等框架的 Focus(true) 回来再置位
                     ctx.request_focus(self.id.clone());
-                    self.focused = true;
                     EventResult::Redraw
                 }
                 "select_all" => {
@@ -677,7 +675,7 @@ impl Widget for TextInput {
             .state("text", self.buffer.text())
             .state("caret", self.buffer.cursor())
             .state("anchor", self.buffer.anchor())
-            .state("focused", self.focused)
+            // focused 是框架拥有的语义字段，由 UiTree 注入顶层；不进 state
             // disabled 是顶层语义字段，不进 state（与 Button 保持一致）
             .disabled(self.disabled)
     }
@@ -768,12 +766,22 @@ mod tests {
         EventCtx::new(None, Size::new(240.0, 24.0))
     }
 
+    /// 挂载并让"框架"授予焦点。
+    ///
+    /// 生产路径里 `focused` **只**由框架的 `Focus(true)` 事件设置；
+    /// 单元测试里没有 UiTree，所以显式模拟一次。
+    fn mount_focused(widget: &mut TextInput) {
+        mount(widget);
+        let mut c = ctx();
+        let _ = widget.event(&mut c, &UiEvent::Focus(true));
+    }
+
     // ---------- 综合流程 ----------
 
     #[test]
     fn full_flow_click_shift_select_replace_backspace() {
         let mut w = TextInput::new("input").with_text("abc中");
-        mount(&mut w);
+        mount_focused(&mut w);
 
         // 1) 点击：padding.left=8，文字起点 x=8；点 x=28 → 行内 20
         //    边界 0/8/16/24/40，20 落在 'c' 与 '中' 之间 → byte 3
@@ -786,7 +794,7 @@ mod tests {
             },
         );
         assert!(r.needs_redraw());
-        assert!(w.is_focused(), "点击应获得焦点");
+        // 新契约：点击只"请求"焦点，focused 由框架的 Focus(true) 设置\n        assert!(!w.is_focused(), "点击本身不应直接置位 focused");
         assert_eq!(c.focus_request.as_deref(), Some("input"));
         assert_eq!(w.cursor(), 3);
         assert_eq!(w.anchor(), 3);
@@ -842,7 +850,7 @@ mod tests {
     #[test]
     fn shift_selection_then_ctrl_a_then_replace() {
         let mut w = TextInput::new("i").with_text("hello");
-        mount(&mut w);
+        mount_focused(&mut w);
         let mut c = ctx();
         w.event(
             &mut c,
@@ -893,7 +901,7 @@ mod tests {
     #[test]
     fn drag_creates_selection() {
         let mut w = TextInput::new("i").with_text("abcdef");
-        mount(&mut w);
+        mount_focused(&mut w);
         let mut c = ctx();
 
         // 按下在 x=8（byte 0）
@@ -948,7 +956,7 @@ mod tests {
     #[test]
     fn home_end_and_delete() {
         let mut w = TextInput::new("i").with_text("abc中");
-        mount(&mut w);
+        mount_focused(&mut w);
         let mut c = ctx();
         w.event(
             &mut c,
@@ -991,7 +999,7 @@ mod tests {
     #[test]
     fn backspace_across_cjk() {
         let mut w = TextInput::new("i").with_text("a中");
-        mount(&mut w);
+        mount_focused(&mut w);
         let mut c = ctx();
         w.event(
             &mut c,
@@ -1040,7 +1048,7 @@ mod tests {
     fn copy_paste_through_clipboard() {
         let mut w =
             TextInput::new("i").with_text("hello world").with_clipboard(Box::new(MemoryClipboard::default()));
-        mount(&mut w);
+        mount_focused(&mut w);
         let mut c = ctx();
         w.event(
             &mut c,
@@ -1099,7 +1107,7 @@ mod tests {
     #[test]
     fn render_draws_background_selection_caret() {
         let mut w = TextInput::new("i").with_text("ab");
-        mount(&mut w);
+        mount_focused(&mut w);
         let mut c = ctx();
         w.event(
             &mut c,
@@ -1133,7 +1141,7 @@ mod tests {
     #[test]
     fn long_text_scrolls_to_follow_caret() {
         let mut w = TextInput::new("i");
-        mount(&mut w);
+        mount_focused(&mut w);
         let mut c = ctx();
         w.event(
             &mut c,
@@ -1157,7 +1165,7 @@ mod tests {
     #[test]
     fn drag_outside_widget_still_selects_via_pointer_capture() {
         let mut w = TextInput::new("i").with_text("abcdef");
-        mount(&mut w);
+        mount_focused(&mut w);
         let mut c = ctx();
 
         // 在 x=16（byte 1）按下 → 请求指针捕获
@@ -1202,7 +1210,7 @@ mod tests {
 
     #[test]fn semantics_expose_editor_state() {
         let mut w = TextInput::new("i").with_text("hi");
-        mount(&mut w);
+        mount_focused(&mut w);
         let mut c = ctx();
         w.event(
             &mut c,

@@ -249,3 +249,19 @@ Agent 看到的 `revision` 不变，但 `get_tree` 的内容变了，
 
 **自检方法**：把 `render()` 的 `&mut self` 临时改成 `&self` 编译一次
 （或在其中只调用 `&self` 方法），若编译不过，说明它偷偷改了状态。
+## §14 `focused` 的语义
+
+`focused` 是**框架拥有的语义字段**，由 `UiTree::focus_path` 注入，组件不得设置。
+
+| 位置 | 含义 | 维护者 |
+|---|---|---|
+| 顶层 `Semantics.focused` | 该节点当前是否接收键盘事件 | 框架（`set_focus` / Tab / Modal / RPC focus） |
+| 组件内部 `focused` 字段 | 渲染状态（光标闪烁、按键门控） | 组件自己，靠 `UiEvent::Focus` 同步 |
+
+**规则**
+1. Agent 判断"输入会到哪"应看**顶层** `focused`，不要看 `state`。
+2. 组件**不得**在 `request_focus` 之前就把自己的 `focused` 置 true：
+   请求可能被 Modal 作用域拒绝，抢跑会导致"组件自以为聚焦、框架却把按键发给别人"。
+   正确做法：只 `request_focus`，等框架的 `Focus(true)` 事件回来再置位。
+3. 顶层 `focused` 参与 revision 哈希：焦点变化 = Agent 可操作对象变化。
+4. 订阅 patch 覆盖 `value / state（拍平）/ disabled / focused / label`。

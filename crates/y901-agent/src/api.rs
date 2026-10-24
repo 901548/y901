@@ -355,6 +355,8 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
                         .set("h", rect.h),
                 )
                 .set("revision", tree.effective_revision(node.id()))
+                // 顶层 focused：框架拥有（来自 focus_path），组件不得设置
+                .set("focused", tree.focus() == Some(node.id()))
                 .set("sensitive", merged.get("sensitive").cloned().unwrap_or(Json::Bool(false)))
                 // disabled 是 Agent 的可见语义（"现在点不了"），必须输出；
                 // 后续 revision 的哈希范围与这里保持一一对应。
@@ -430,8 +432,9 @@ fn query_result(tree: &UiTree, policy: &Policy, q: &y901_ui::Query) -> Json {
                 .set("role", node.role().as_str())
                 .set("label", redacted.get("label").cloned().unwrap_or(Json::Null))
                 .set("revision", tree.effective_revision(node.id()))
-                // 与 public_tree 对齐：disabled 属于 Agent 可操作性的输入
+                // 与 public_tree 对齐：disabled / focused 都属于 Agent 可操作性的输入
                 .set("disabled", redacted.get("disabled").cloned().unwrap_or(Json::Bool(false)))
+                .set("focused", tree.focus() == Some(node.id()))
                 .set(
                     "rect",
                     Json::obj()

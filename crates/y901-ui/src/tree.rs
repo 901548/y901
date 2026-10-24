@@ -535,7 +535,10 @@ impl UiTree {
             // 先结束不可变借用，再写 map
             let Some((hash, gen)) = self
                 .find(&id)
-                .map(|node| (semantic_hash(node), self.generations.get(&id).copied().unwrap_or(0)))
+                .map(|node| {
+                    let focused = self.focus.as_deref() == Some(id.as_str());
+                    (semantic_hash(node, focused), self.generations.get(&id).copied().unwrap_or(0))
+                })
             else {
                 continue;
             };
@@ -598,18 +601,14 @@ impl UiTree {
 
     /// 订阅某个节点的状态变化。
     pub fn subscribe(&mut self, id: &str, interval: std::time::Duration) -> bool {
-        let Some(node) = self.find(id) else {
+        let Some(sem) = self.semantics_with_focus(id) else {
             return false;
         };
-        let sem = node.semantics();
-        let state = sem.state.clone();
-        let value = sem.value.clone();
-        let rev = fingerprint(node);
+        let rev = self.fingerprint_of(id).unwrap_or(0);
 
         if let Some(sub) = self.subscriptions.iter_mut().find(|s| s.id == id) {
             sub.rev = rev;
-            sub.last_state = state;
-            sub.last_value = value;
+            sub.last_sem = sem;
             sub.interval = interval;
             sub.next_due = std::time::Instant::now() + interval;
             return true;
@@ -618,12 +617,26 @@ impl UiTree {
         self.subscriptions.push(Subscription {
             id: id.to_string(),
             rev,
-            last_state: state,
-            last_value: value,
+            last_sem: sem,
             interval,
             next_due: std::time::Instant::now() + interval,
         });
         true
+    }
+
+    /// 取节点语义并把 `focused` 注入为框架真值。
+    fn semantics_with_focus(&self, id: &str) -> Option<crate::widget::Semantics> {
+        let node = self.find(id)?;
+        let mut sem = node.semantics();
+        sem.focused = self.focus.as_deref() == Some(id);
+        Some(sem)
+    }
+
+    /// 节点的语义指纹（含焦点与组件 revision）。
+    fn fingerprint_of(&self, id: &str) -> Option<u64> {
+        let node = self.find(id)?;
+        let focused = self.focus.as_deref() == Some(id);
+        Some(fingerprint(node, focused))
     }
 
     pub fn unsubscribe(&mut self, id: &str) -> bool {
@@ -656,56 +669,29 @@ impl UiTree {
                 continue;
             }
 
-            let Some(node) = self.find(&id) else {
+            let Some(sem) = self.semantics_with_focus(&id) else {
                 continue;
             };
-            let rev = fingerprint(node);
-            let state = node.semantics().state;
-            let last_state = self
-                .subscriptions
-                .iter()
-                .find(|s| s.id == id)
-                .map(|s| s.last_state.clone())
-                .unwrap_or(crate::json::Json::Null);
-            let interval = self
-                .subscriptions
-                .iter()
-                .find(|s| s.id == id)
-                .map(|s| s.interval)
-                .unwrap_or(std::time::Duration::from_millis(100));
-
-            // 状态没变：只顺延下次检查时间
-            if rev == self
-                .subscriptions
-                .iter()
-                .find(|s| s.id == id)
-                .map(|s| s.rev)
-                .unwrap_or(rev)
+            let rev = self.fingerprint_of(&id).unwrap_or(0);
+            let (last_rev, last_sem, interval) = match self.subscriptions.iter().find(|s| s.id == id)
             {
+                Some(sub) => (sub.rev, sub.last_sem.clone(), sub.interval),
+                None => continue,
+            };
+
+            // 语义面没变：只顺延下次检查时间
+            if rev == last_rev {
                 if let Some(sub) = self.subscriptions.iter_mut().find(|s| s.id == id) {
                     sub.next_due = now + interval;
                 }
                 continue;
             }
 
-            let mut patch = diff_state(&last_state, &state);
-
-            // 没有结构化 state 的组件（如终端）：value 变化也必须推出去
-            let value = node.semantics().value;
-            let last_value = self
-                .subscriptions
-                .iter()
-                .find(|s| s.id == id)
-                .map(|s| s.last_value.clone())
-                .unwrap_or_default();
-            if value != last_value {
-                patch = patch.set("value", value.as_str());
-            }
+            let patch = semantic_patch(&last_sem, &sem);
 
             if let Some(sub) = self.subscriptions.iter_mut().find(|s| s.id == id) {
                 sub.rev = rev;
-                sub.last_state = state;
-                sub.last_value = value;
+                sub.last_sem = sem;
                 sub.next_due = now + interval;
             }
 
@@ -1517,38 +1503,48 @@ fn render_subtree(node: &mut dyn Widget, ctx: &mut dyn RenderCtx, dirty: &DirtyR
 /// 一条语义订阅。
 struct Subscription {
     id: String,
-    /// 上次看到的指纹。
+    /// 上次看到的指纹（语义面哈希 + 组件 revision）。
     rev: u64,
-    /// 上次推送时的状态快照（用于差分）。
-    last_state: crate::json::Json,
-    /// 上次推送时的 value（没有结构化 state 的组件靠它感知变化）。
-    last_value: String,
+    /// 上次推送时的完整语义快照：差分需要 label/value/state/disabled/focused。
+    last_sem: crate::widget::Semantics,
     /// 最小推送间隔。
     interval: std::time::Duration,
     /// 下次允许检查的时间点。
     next_due: std::time::Instant,
 }
 
-/// 节点状态指纹：revision + value + state。用于低成本判断"变没变"。
-fn fingerprint(node: &dyn Widget) -> u64 {
-    fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
-        for b in bytes {
-            hash ^= *b as u64;
-            hash = hash.wrapping_mul(0x1000_0000_01b3);
-        }
-        hash
-    }
-
-    let sem = node.semantics();
-    let mut h = 0xcbf2_9ce4_8422_2325u64;
-    h = fnv1a(&node.revision().to_le_bytes(), h);
-    h = fnv1a(sem.value.as_bytes(), h);
-    h = fnv1a(sem.state.to_string().as_bytes(), h);
-    h
+/// 节点状态指纹：语义面哈希 + 组件 revision。
+///
+/// 语义面已含 label/value/state/disabled/sensitive/exposed/focused，
+/// 因此任何 Agent 可见变化都会改变指纹 —— 这正是"要不要推送"的判据。
+fn fingerprint(node: &dyn Widget, focused: bool) -> u64 {
+    let mut sem = node.semantics();
+    sem.focused = focused;
+    crate::tree::hash_semantics(node.role(), &sem) ^ node.revision().wrapping_mul(0x9e37_79b9_7f4a_7c15)
 }
 
-fn patch_is_empty(patch: &crate::json::Json) -> bool {
-    matches!(patch, crate::json::Json::Obj(map) if map.is_empty())
+/// 语义差分：只保留 Agent 关心的、且真的变了的字段。
+///
+/// 覆盖 value / state（**拍平**成顶层键）/ disabled / focused / label。
+/// `role` / `actions` / `sensitive` / `exposed` 很少变，靠 get_tree 兜底。
+///
+/// 拍平是为了让订阅者拿到的形状与 `get_tree` 的 state 一致（`patch.text` 而不是
+/// `patch.state.text`），也保持既有消费者的兼容性。
+fn semantic_patch(old: &crate::widget::Semantics, new: &crate::widget::Semantics) -> crate::json::Json {
+    let mut out = diff_state(&old.state, &new.state);
+    if old.label != new.label {
+        out = out.set("label", new.label.as_str());
+    }
+    if old.value != new.value {
+        out = out.set("value", new.value.as_str());
+    }
+    if old.disabled != new.disabled {
+        out = out.set("disabled", new.disabled);
+    }
+    if old.focused != new.focused {
+        out = out.set("focused", new.focused);
+    }
+    out
 }
 
 /// 计算两个扁平状态对象的差分（只保留变化的键）。
@@ -1573,6 +1569,11 @@ fn diff_state(old: &crate::json::Json, new: &crate::json::Json) -> crate::json::
     }
     Json::Obj(out)
 }
+
+fn patch_is_empty(patch: &crate::json::Json) -> bool {
+    matches!(patch, crate::json::Json::Obj(map) if map.is_empty())
+}
+
 /// 递归调用卸载钩子：先释放子树资源，再释放自己。
 fn unmount_recursive(mut node: Box<dyn Widget>) {
     if let Some(children) = node.children_mut() {
@@ -1601,12 +1602,15 @@ fn mount_recursive(node: &mut dyn Widget, invalidation: &crate::signal::Invalida
 
 /// 语义面哈希：**Agent 可见的字段**才参与。
 ///
-/// 进：role / label / value / actions / state / disabled / sensitive / exposed
+/// 进：role / label / value / actions / state / disabled / sensitive / exposed / focused
 /// 不进：id（身份）、rect（几何）、props（调试信息）
 ///
+/// `focused` 由调用方传入（框架拥有），组件自报的 `semantics().focused` 会被覆盖。
 /// 用 FNV-1a 增量写入，不构造中间 String（比 to_string 快数倍）。
-fn semantic_hash(node: &dyn Widget) -> u64 {
-    crate::tree::hash_semantics(node.role(), &node.semantics())
+fn semantic_hash(node: &dyn Widget, focused: bool) -> u64 {
+    let mut sem = node.semantics();
+    sem.focused = focused;
+    crate::tree::hash_semantics(node.role(), &sem)
 }
 
 /// 纯函数版本：给定 `(role, Semantics)` 计算语义面哈希。
@@ -1633,6 +1637,7 @@ pub fn hash_semantics(role: Role, sem: &crate::widget::Semantics) -> u64 {
     feed(sem.value.as_bytes());
     feed(&u64::from(sem.disabled).to_le_bytes());
     feed(&u64::from(sem.sensitive).to_le_bytes());
+    feed(&u64::from(sem.focused).to_le_bytes());
     feed(&u64::from(sem.exposed_to_ai).to_le_bytes());
     feed(sem.state.to_string().as_bytes());
     for action in &sem.actions {

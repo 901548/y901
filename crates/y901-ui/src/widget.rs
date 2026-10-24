@@ -538,6 +538,9 @@ pub struct Semantics {
     pub exposed_to_ai: bool,
     /// 是否敏感（网关返回 JSON 时把 value 打码）。
     pub sensitive: bool,
+    /// 是否持有键盘焦点。**框架拥有**：由 `UiTree::focus_path` 注入，
+    /// 组件不得自行设置（组件自己的 focused 字段只用于渲染/按键门控）。
+    pub focused: bool,
     /// 结构化状态：Agent 直接消费。
     pub state: crate::json::Json,
 }
@@ -554,6 +557,7 @@ impl Default for Semantics {
             // 默认封禁：组件必须显式 .exposed(true) 才对 AI 可见
             exposed_to_ai: false,
             sensitive: false,
+            focused: false,
             state: crate::json::Json::Null,
         }
     }
