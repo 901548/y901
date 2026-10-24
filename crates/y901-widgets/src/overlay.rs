@@ -126,6 +126,22 @@ impl Widget for Menu {
             return EventResult::Ignored;
         }
         match event {
+            // 语义动作：Agent 不需要坐标，直接选第 index 项
+            UiEvent::Action { name, args } if name == "select" => {
+                let index = args.get("index").and_then(|v| v.as_f64()).unwrap_or(-1.0);
+                if index < 0.0 || index as usize >= self.items.len() {
+                    return EventResult::Ignored;
+                }
+                let i = index as usize;
+                ctx.emit_app(
+                    self.action.clone(),
+                    Json::obj()
+                        .set("index", i as u32)
+                        .set("label", self.items[i].clone()),
+                );
+                self.close();
+                EventResult::Redraw
+            }
             UiEvent::MouseMove { pos } => {
                 let hover = (0..self.items.len()).find(|i| self.item_rect(*i).contains(*pos));
                 if hover != self.hover {
@@ -362,6 +378,11 @@ impl Widget for Dialog {
             return EventResult::Ignored;
         }
         match event {
+            // 语义动作：Agent 直接关闭对话框
+            UiEvent::Action { name, .. } if name == "close" => {
+                self.close();
+                EventResult::Redraw
+            }
             // 按钮命中优先于"吞掉外部点击"
             UiEvent::MouseDown { pos, .. } => {
                 // Capture 阶段不拦截，让子节点先看到事件

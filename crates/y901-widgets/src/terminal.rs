@@ -441,7 +441,6 @@ impl Widget for TerminalWidget {
             .value(self.grid.line_text(self.grid.cursor_row.min(self.grid.rows as usize - 1)))
             .action_spec("inject_text", y901_ui::InputKind::Text)
             .action("clear")
-            .action("focus")
             .prop("cols", self.grid.cols.to_string())
             .prop("rows", self.grid.rows.to_string())
             .prop("cursor_row", self.grid.cursor_row.to_string())

@@ -125,7 +125,7 @@ fn render_pushes_clip_for_scrolling_container() {
     let inner = rec.clips[0];
     assert!((inner.w - 290.0).abs() < 1.0, "裁剪宽度应扣除滚动条：{inner:?}");
     assert!((inner.h - 120.0).abs() < 1.0, "裁剪高度应等于视口：{inner:?}");
-    assert_eq!(rec.depth, rec.depth, "栈必须配平（这里只做存在性断言）");
+    assert_eq!(rec.max_depth, 1, "ScrollView 只应压一层裁剪，实际 {}", rec.max_depth);
     assert_eq!(rec.depth, 0, "push/pop 必须配平，实际残留 {}", rec.depth);
 }
 

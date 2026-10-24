@@ -95,14 +95,6 @@ fn fixed(id: &str) -> Box<dyn Widget> {
     })
 }
 
-fn order(tree: &UiTree) -> Vec<String> {
-    ["a", "b", "c"]
-        .iter()
-        .filter_map(|id| tree.rect_of(id).map(|r| (*id, r.y)))
-        .map(|(id, _)| id.to_string())
-        .collect()
-}
-
 #[test]
 fn insert_node_places_child_at_index() {
     let mut tree = UiTree::new(Box::new(

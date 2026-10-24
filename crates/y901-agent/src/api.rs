@@ -272,6 +272,12 @@ pub fn handle_call(tree: &mut UiTree, policy: &Policy, call: ApiCall) -> Result<
             let handled = tree
                 .dispatch_to(&id, &UiEvent::Action { name: action.clone(), args })
                 .is_handled();
+            // 声明了却没处理 = 契约违约，不能返回成功让 Agent 以为生效了
+            if !handled {
+                return Err(ApiError::BadRequest(format!(
+                    "action `{action}` not handled by `{id}`"
+                )));
+            }
             Ok(Json::obj()
                 .set("ok", true)
                 .set("action", action)

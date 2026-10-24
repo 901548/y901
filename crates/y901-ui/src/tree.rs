@@ -302,6 +302,11 @@ impl UiTree {
     ///
     /// 会：调用 `on_mount` → 标记父节点布局失效 → 整窗重绘。
     pub fn add_node(&mut self, parent: &str, child: Box<dyn Widget>) -> bool {
+        // 重复 id 会让 find/dispatch_to 命中第一个，必须拒绝而不是静默接受
+        if self.subtree_has_duplicate(child.as_ref()) {
+            eprintln!("[y901] add_node: duplicate id `{}` rejected", child.id());
+            return false;
+        }
         let Some(node) = self.find_mut(parent) else {
             return false;
         };
@@ -310,12 +315,11 @@ impl UiTree {
         };
         children.push(child);
 
-        // 新节点要拿到挂载上下文（订阅 Signal 等）
+        // 新子树整体挂载（订阅 Signal 等），不只是顶层节点
         let invalidation = self.invalidation_queue.clone();
         if let Some(children) = self.find_mut(parent).and_then(|n| n.children_mut()) {
             if let Some(mounted) = children.last_mut() {
-                let mut ctx = crate::widget::MountCtx::new(mounted.id().to_string(), invalidation);
-                mounted.on_mount(&mut ctx);
+                mount_recursive(mounted.as_mut(), &invalidation);
             }
         }
 
@@ -329,6 +333,13 @@ impl UiTree {
     ///
     /// 与 `add_node` 的差别只有位置；生命周期与重建逻辑完全一致。
     pub fn insert_node(&mut self, parent: &str, index: usize, child: Box<dyn Widget>) -> bool {
+        if self.subtree_has_duplicate(child.as_ref()) {
+            eprintln!(
+                "[y901] insert_node: duplicate id `{}` rejected",
+                child.id()
+            );
+            return false;
+        }
         let Some(node) = self.find_mut(parent) else {
             return false;
         };
@@ -341,14 +352,22 @@ impl UiTree {
         let invalidation = self.invalidation_queue.clone();
         if let Some(children) = self.find_mut(parent).and_then(|n| n.children_mut()) {
             if let Some(mounted) = children.get_mut(at) {
-                let mut ctx = crate::widget::MountCtx::new(mounted.id().to_string(), invalidation);
-                mounted.on_mount(&mut ctx);
+                mount_recursive(mounted.as_mut(), &invalidation);
             }
         }
 
         self.cache.mark_dirty(parent);
         self.dirty = DirtyRegion::full();
         true
+    }
+    /// 子树里是否有 id 已存在于当前树中。
+    fn subtree_has_duplicate(&self, node: &dyn Widget) -> bool {
+        if self.find(node.id()).is_some() {
+            return true;
+        }
+        node.children()
+            .iter()
+            .any(|c| self.subtree_has_duplicate(c.as_ref()))
     }
     /// 从树上摘掉一个节点（连同子树），返回是否成功。
     ///

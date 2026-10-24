@@ -443,7 +443,6 @@ impl Widget for Scrollbar {
     fn semantics(&self) -> Semantics {
         Semantics::default().exposed(true)
             .label("scrollbar")
-            .action_spec("scroll_to_ratio", y901_ui::InputKind::Number)
             .state("offset", self.offset)
             .state("total", self.total)
             .state("viewport", self.viewport)

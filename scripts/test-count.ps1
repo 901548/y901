@@ -4,7 +4,8 @@
 # PowerShell 下会因为 stdout/stderr 合流而丢行，曾把 183 误报成 126。
 # 必须先把完整输出落盘，再解析。
 
-# cargo 的 warning 走 stderr，Stop 会把它当致命错误中断解析`n$ErrorActionPreference = "Continue"
+# cargo 的 warning 走 stderr，Stop 会把它当致命错误中断解析
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 $log = Join-Path $root "target\test-workspace.log"
 

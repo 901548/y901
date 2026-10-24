@@ -1,0 +1,18 @@
+﻿fix: 动作契约 + 测试质量 + add_node 递归挂载
+
+第一优先（安全）:
+- Menu 补齐 select 动作（emit_app + close），Dialog 补齐 close
+- 删除未实现的声明：Terminal.focus、Scrollbar.scroll_to_ratio
+- 网关 invoke：组件返回 Ignored 时返回 BadRequest，不再包装成成功
+
+第二优先（测试质量）:
+- rpc_agent 删除重复（unreachable）Query 分支
+- p0 删除未使用的 order 函数
+- audit 恒真断言改为 max_depth == 1
+- test-count.ps1 修复注释吞掉 ErrorActionPreference 的问题
+
+第三优先:
+- add_node/insert_node 递归挂载整棵子树
+- 插入前检查重复 id，重复则返回 false 并告警
+
+测试 188 -> 196
