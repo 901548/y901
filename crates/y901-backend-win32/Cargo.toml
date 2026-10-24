@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 y901-ui = { path = "../y901-ui" }
+y901-runtime = { path = "../y901-runtime" }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

@@ -1,0 +1,7 @@
+﻿refactor(step1): remove demo business + add window.rs
+
+- delete build_demo1/2, process_commands, switch_demo, demo state
+- startup tree is minimal: root(Flex) + TextLabel(Y901)
+- new backend-win32/src/window.rs: wndproc only pushes RawEvent to a Mutex queue
+- IME state owned by Window (OnceLock<Mutex<ImeState>>)
+- update mcp_mode test for minimal tree

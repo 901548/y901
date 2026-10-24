@@ -5,5 +5,7 @@
 
 pub mod backend;
 pub mod ime;
+pub mod window;
 
 pub use backend::D3dBackend;
+pub use window::Window;

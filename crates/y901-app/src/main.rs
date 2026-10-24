@@ -45,7 +45,7 @@ use y901_ui::{
     Color, Command, Edges, Flex, FlexItem, Json, Key, Modifiers, MouseButton, Pos,
     Size, UiEvent, UiTree,
 };
-use y901_widgets::{Button, TerminalWidget, TextLabel, VerticalList};
+use y901_widgets::TextLabel;
 
 use y901_backend_win32::backend::D3dBackend;
 use y901_backend_win32::ime::{ImeAction, ImeState};
@@ -69,7 +69,7 @@ struct App {
     hwnd: Option<Hwnd>,
     tree: UiTree,
     /// 当前 Demo 编号：1 = 终端，2 = 组件联动。
-    demo: u8,
+
     /// 窗口创建后才有 HWND，后端只能那时初始化。
     backend: Option<D3dBackend>,
     rpc_rx: Receiver<Pending>,
@@ -91,98 +91,23 @@ fn wide(text: &str) -> Vec<u16> {
 // 注意：这里**只有应用层**知道"终端""清屏""切换 Demo"这些业务概念。
 // 框架（y901-ui）一个都不认识，组件（y901-widgets）也互不认识。
 
-/// Demo 1：标题栏（两个按钮）+ 终端。
-fn build_demo1() -> UiTree {
-    let mut terminal = TerminalWidget::new("main_terminal", 120, 32).flex_item(FlexItem::fill());
-    match terminal.attach_shell() {
-        Ok(()) => eprintln!("[y901] shell attached"),
-        Err(err) => eprintln!("[y901] shell attach failed: {err}"),
-    }
-
-    let titlebar = Flex::row("titlebar")
-        .background(Color::from_rgb8(24, 26, 32))
-        .padding(Edges::symmetric(10.0, 6.0))
-        .gap(8.0)
-        .flex_item(FlexItem::height(34.0))
-        // 按钮只发命令，不认识终端
-        .push(Box::new(
-            Button::new("btn_clear", "Clear")
-                .on_click("terminal.clear", Json::obj().set("target", "main_terminal"))
-                .flex_item(FlexItem::width(84.0)),
-        ))
-        .push(Box::new(
-            Button::new("btn_demo2", "Demo 2 →")
-                .on_click("demo.switch", Json::obj().set("to", 2))
-                .flex_item(FlexItem::width(110.0)),
-        ));
-
+/// 最小启动树：一张标签，没有任何业务组件。
+///
+/// Demo 已移除——框架优先，示例留给用户自己写。
+fn build_shell() -> UiTree {
     let root = Flex::column("root")
         .background(Color::from_rgb8(12, 12, 16))
-        .push(Box::new(titlebar))
-        .push(Box::new(terminal));
-
-    let mut tree = UiTree::new(Box::new(root));
-    tree.set_focus(Some("main_terminal".to_string()));
-    tree
-}
-
-/// Demo 2：纯组件演示，展示「按钮 → 命令 → 应用层 → 标签」的联动。
-fn build_demo2() -> UiTree {
-    let root = Flex::column("root")
-        .background(Color::from_rgb8(14, 14, 20))
-        .padding(Edges::all(20.0))
-        .gap(14.0)
+        .padding(Edges::all(24.0))
         .push(Box::new(
-            TextLabel::new("title", "Demo 2 · Framework Composition")
+            TextLabel::new("title", "Y901")
                 .color(Color::rgba(0.85, 0.9, 1.0, 1.0))
-                .flex_item(FlexItem::height(24.0)),
-        ))
-        .push(Box::new(
-            TextLabel::new("hint", "按钮不知道谁会响应，它只发一条命令。")
-                .color(Color::rgba(0.6, 0.66, 0.8, 1.0))
-                .flex_item(FlexItem::height(22.0)),
-        ))
-        .push(Box::new(
-            Button::new("btn_hello", "Say Hi")
-                .on_click("label.set", Json::obj().set("target", "status").set("text", "Hi from Button"))
-                .flex_item(FlexItem::width(110.0)),
-        ))
-        .push(Box::new(
-            Button::new("btn_back", "← Demo 1")
-                .on_click("demo.switch", Json::obj().set("to", 1))
-                .flex_item(FlexItem::width(110.0)),
-        ))
-        .push(Box::new(
-            TextLabel::new("status", "(等待命令)")
-                .color(Color::rgba(0.5, 0.9, 0.7, 1.0))
-                .flex_item(FlexItem::height(24.0)),
-        ))
-        .push(Box::new(
-            VerticalList::new("list")
-                .gap(6.0)
-                .flex_item(FlexItem::fill())
-                .push(Box::new(
-                    TextLabel::new("row1", "· VerticalList 第一行")
-                        .color(Color::rgba(0.7, 0.75, 0.85, 1.0))
-                        .flex_item(FlexItem::height(20.0)),
-                ))
-                .push(Box::new(
-                    TextLabel::new("row2", "· 第二行")
-                        .color(Color::rgba(0.7, 0.75, 0.85, 1.0))
-                        .flex_item(FlexItem::height(20.0)),
-                ))
-                .push(Box::new(
-                    TextLabel::new("row3", "· 容器自己决定子节点怎么摆")
-                        .color(Color::rgba(0.7, 0.75, 0.85, 1.0))
-                        .flex_item(FlexItem::height(20.0)),
-                )),
+                .flex_item(FlexItem::height(28.0)),
         ));
 
     let mut tree = UiTree::new(Box::new(root));
-    tree.set_focus(Some("btn_hello".to_string()));
+    tree.set_focus(Some("title".to_string()));
     tree
 }
-
 // ============================ 事件翻译 ============================
 
 fn modifiers() -> Modifiers {
@@ -285,86 +210,6 @@ fn relayout(app: &mut App, w: u32, h: u32) {
 
 // ============================ RPC ============================
 
-/// 应用层：解释 `Command::App` 的语义。
-///
-/// **这里是唯一知道"terminal.clear"是什么意思的地方。**
-/// 框架只是把命令搬过来，组件只是把命令发出去。
-fn process_commands(app: &mut App) {
-    let commands = app.tree.drain_commands();
-    for cmd in commands {
-        let Command::App { name, args } = cmd else {
-            continue; // Node 级命令框架已经自己路由完了
-        };
-
-        match name.as_str() {
-            // 业务语义：清空终端
-            "terminal.clear" => {
-                let target = args
-                    .get("target")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("main_terminal")
-                    .to_string();
-                app.tree.dispatch_to(
-                    &target,
-                    &UiEvent::Action {
-                        name: "clear".to_string(),
-                        args: Json::obj(),
-                    },
-                );
-                eprintln!("[app] terminal.clear -> {target}");
-            }
-            // 业务语义：改标签文字（示例：跨组件联动）
-            "label.set" => {
-                let target = args
-                    .get("target")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let text = args
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                app.tree.dispatch_to(
-                    &target,
-                    &UiEvent::Action {
-                        name: "set_text".to_string(),
-                        args: Json::obj().set("text", text),
-                    },
-                );
-                eprintln!("[app] label.set -> {target}");
-            }
-            // 业务语义：切换 Demo
-            "demo.switch" => {
-                let to = args.get("to").and_then(|v| v.as_f64()).unwrap_or(1.0) as u8;
-                switch_demo(app, to);
-            }
-            other => {
-                eprintln!("[app] unhandled command: {other}");
-            }
-        }
-    }
-}
-
-fn switch_demo(app: &mut App, to: u8) {
-    if to == app.demo {
-        return;
-    }
-    app.demo = to;
-    app.tree = match to {
-        2 => build_demo2(),
-        _ => build_demo1(),
-    };
-    let (w, h) = app.viewport;
-    relayout(app, w, h);
-    eprintln!("[app] switched to demo {to}");
-    if let Some(hwnd) = app.hwnd {
-        unsafe {
-            InvalidateRect(hwnd.as_raw(), null(), 0);
-        }
-    }
-}
-
 fn handle_rpc(app: &mut App, pending: Pending) {
     let result = match &pending.request {
         RpcRequest::GetTree => Ok(app.tree.snapshot_json()),
@@ -382,7 +227,7 @@ fn handle_rpc(app: &mut App, pending: Pending) {
         RpcRequest::Dispatch { node, event } => {
             let ev = event.to_ui_event();
             let handled = app.tree.dispatch_to(node, &ev).is_handled();
-            process_commands(app);
+
             if handled {
                 Ok(Json::obj().set("ok", true))
             } else {
@@ -404,7 +249,7 @@ fn handle_rpc(app: &mut App, pending: Pending) {
                     },
                 )
                 .is_handled();
-            process_commands(app);
+
             if handled {
                 Ok(Json::obj().set("ok", true))
             } else {
@@ -568,7 +413,7 @@ unsafe fn handle(app: &mut App, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRE
             if let Some(c) = char::from_u32(ch) {
                 if !c.is_control() {
                     app.tree.dispatch(&UiEvent::Text(c.to_string()));
-                    process_commands(app);
+        
                     InvalidateRect(hwnd, null(), 0);
                 }
             }
@@ -591,7 +436,7 @@ unsafe fn handle(app: &mut App, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRE
                 key,
                 modifiers: mods,
             });
-            process_commands(app);
+
             if result.needs_redraw() {
                 InvalidateRect(hwnd, null(), 0);
             }
@@ -617,7 +462,7 @@ unsafe fn handle(app: &mut App, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRE
             // 光标形状：分栏分割线 → 左右箭头，输入框 → I 形
             apply_cursor(app, pos);
             let result = app.tree.dispatch(&ev);
-            process_commands(app);
+
             if result.needs_redraw() {
                 InvalidateRect(hwnd, null(), 0);
             }
@@ -634,7 +479,7 @@ unsafe fn handle(app: &mut App, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRE
                 delta: delta as f32,
                 pos,
             });
-            process_commands(app);
+
             if result.needs_redraw() {
                 InvalidateRect(hwnd, null(), 0);
             }
@@ -724,7 +569,7 @@ fn run_mcp_headless() -> Result<(), Box<dyn std::error::Error>> {
     let token = std::env::var("Y901_TOKEN").unwrap_or_default();
     let policy = y901_agent::Policy { token, redact: true };
 
-    let mut tree = build_demo1();
+    let mut tree = build_shell();
     // 无窗口也要先布局，否则所有 rect 为 0，语义 API 无法定位
     tree.layout(y901_ui::Size::new(1200.0, 800.0), &HeadlessMetrics);
 
@@ -781,7 +626,7 @@ unsafe fn run(want_mcp: bool, want_rpc: bool) -> Result<(), Box<dyn std::error::
         (y901_agent::Broadcaster::new(16).0, None)
     };
 
-    let tree = build_demo1();
+    let tree = build_shell();
 
     // --mcp：把正在运行的这棵树挂到 stdio 上
     let mcp = if want_mcp {
@@ -801,7 +646,7 @@ unsafe fn run(want_mcp: bool, want_rpc: bool) -> Result<(), Box<dyn std::error::
     let app = Box::into_raw(Box::new(App {
         hwnd: None,
         tree,
-        demo: 1,
+
         backend: None,
         rpc_rx,
         broadcaster,

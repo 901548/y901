@@ -56,18 +56,18 @@ fn app_mcp_mode_serves_handshake_and_tool_calls() {
 
 #[test]
 fn app_mcp_mode_dispatches_click_into_real_tree() {
-    // 点终端节点：它是 Demo1 里一定存在、且暴露给 AI 的可交互节点
+    // 点最小启动树里的标签节点：验证 dispatch 链路可达
     let out = run_session(&[
         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
         r#"{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"ui://tree"}}"#,
-        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ui_click","arguments":{"id":"main_terminal"}}}"#,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ui_click","arguments":{"id":"title"}}}"#,
     ]);
 
     assert_eq!(out.len(), 3, "应有 3 条响应：{out:?}");
 
     // 1) 真实树里能看到终端节点
     let tree = &out[1];
-    assert!(tree.contains("main_terminal"), "语义树应包含终端节点");
+    assert!(tree.contains("title"), "最小启动树应包含 title 标签：{tree}");
 
     // 2) 点击被真实 UiTree 处理
     let click = &out[2];
