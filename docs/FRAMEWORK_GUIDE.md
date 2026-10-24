@@ -265,3 +265,21 @@ Agent 看到的 `revision` 不变，但 `get_tree` 的内容变了，
    正确做法：只 `request_focus`，等框架的 `Focus(true)` 事件回来再置位。
 3. 顶层 `focused` 参与 revision 哈希：焦点变化 = Agent 可操作对象变化。
 4. 订阅 patch 覆盖 `value / state（拍平）/ disabled / focused / label`。
+## §15 订阅 patch 的形状
+
+`state_changed` 推送里的 `patch` 是**拍平**的：`state` 内的字段被提到顶层。
+
+```json
+{"event":"state_changed","id":"input","rev":3,
+ "patch":{"text":"abcXY","caret":5,"focused":true}}
+```
+
+- 访问方式：`patch.text`，**不是** `patch.state.text`（与 `get_tree` 的嵌套结构不同）。
+- 覆盖字段：`value` / `state` 内各键 / `disabled` / `focused` / `label`。
+- 只包含**真正变化**的字段；未变化的字段不出现。
+- 设计理由：订阅推送只服务于"增量更新"，拍平能让消费者直接按键取值，
+  无需先判空 `patch.state`。
+
+顺带一条顺序保证：**回包永远先于该回包触发的推送**。
+实现上 `reply_to` 在 UI 线程内同步写 socket，推送随后才入广播队列；
+早期实现里两者由不同线程写，出现过"先收到 state_changed 再收到 ack"的乱序。

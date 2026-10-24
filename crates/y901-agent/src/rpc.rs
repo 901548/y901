@@ -191,10 +191,16 @@ impl RpcEvent {
 }
 
 /// 一条待处理请求：UI 线程处理完把 JSON 塞进 `reply`。
+///
+/// 额外携带 `writer`：回包必须由 UI 线程**同步写回**，否则会与推送乱序
+/// （连接线程写回包、广播线程写推送，两者共用 socket 锁但先后不受控，
+/// 客户端可能先收到 `state_changed` 再收到 `subscribe` 的 ack）。
 pub struct Pending {
     pub request: RpcRequest,
     pub id: Json,
     pub reply: Sender<Result<Json, String>>,
+    /// 该连接的写端。
+    pub writer: Arc<Mutex<TcpStream>>,
 }
 
 /// 启动 RPC 服务。
@@ -367,7 +373,11 @@ fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster, expected: Str
             }
         }
 
-        let response = handle(value, &tx);
+        let response = handle(value, &tx, &writer);
+        // `Null` 表示请求已转交 UI 线程，回包由 `reply_to` 同步写出
+        if matches!(response, Json::Null) {
+            continue;
+        }
         if !write_line(&writer, &response) {
             break;
         }
@@ -382,7 +392,7 @@ fn write_line(writer: &Arc<Mutex<TcpStream>>, response: &Json) -> bool {
     writeln!(w, "{response}").is_ok() && w.flush().is_ok()
 }
 
-fn handle(value: Json, tx: &Sender<Pending>) -> Json {
+fn handle(value: Json, tx: &Sender<Pending>, writer: &Arc<Mutex<TcpStream>>) -> Json {
     let id = value.get("id").cloned().unwrap_or(Json::Null);
     let method = match value.get("method").and_then(|m| m.as_str()) {
         Some(m) => m.to_string(),
@@ -459,24 +469,18 @@ fn handle(value: Json, tx: &Sender<Pending>) -> Json {
         },
     };
 
-    let (reply_tx, reply_rx) = channel();
+    let (reply_tx, _reply_rx) = channel();
     let pending = Pending {
         request,
         id: id.clone(),
         reply: reply_tx,
+        writer: writer.clone(),
     };
     if tx.send(pending).is_err() {
         return error_response(id, "ui thread is gone");
     }
-
-    match reply_rx.recv_timeout(std::time::Duration::from_secs(5)) {
-        Ok(Ok(result)) => Json::obj()
-            .set("id", id)
-            .set("ok", true)
-            .set("result", result),
-        Ok(Err(err)) => error_response(id, &err),
-        Err(_) => error_response(id, "timeout waiting for ui thread"),
-    }
+    // 已转交 UI 线程：回包由 reply_to 在 UI 线程内同步写出（保证早于推送）
+    Json::Null
 }
 
 fn error_response(id: Json, message: &str) -> Json {
@@ -486,9 +490,20 @@ fn error_response(id: Json, message: &str) -> Json {
         .set("error", message)
 }
 
-/// UI 线程侧：把请求处理结果写回。
+/// UI 线程侧：把请求处理结果**同步**写回该连接。
+///
+/// 同步写出的关键作用：调用方（host）处理完请求后会紧接着 `hub.send` 推送，
+/// 推送走广播队列（另一个线程）。回包先落 socket、推送后落，
+/// 客户端因此不会先收到 `state_changed`、再收到本请求的 ack。
 pub fn reply_to(pending: Pending, result: Result<Json, String>) {
-    let _ = pending.reply.send(result);
+    let body = match result {
+        Ok(result) => Json::obj()
+            .set("id", pending.id.clone())
+            .set("ok", true)
+            .set("result", result),
+        Err(err) => error_response(pending.id.clone(), &err),
+    };
+    let _ = write_line(&pending.writer, &body);
 }
 
 /// 便捷类型：UI 线程持有的接收端。
