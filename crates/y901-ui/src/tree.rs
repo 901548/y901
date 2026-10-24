@@ -661,6 +661,7 @@ impl UiTree {
             node: &dyn Widget,
             path: &mut Vec<usize>,
             inherited: Layer,
+            inherited_clip: Option<Rect>,
             rects: &mut HashMap<String, Rect>,
             out: &mut Vec<PaintEntry>,
             layer_present: &mut [bool; 3],
@@ -673,6 +674,13 @@ impl UiTree {
             let own = node.layer();
             let effective = inherited.max(own);
             let rect = node.rect();
+            // 可见区 = 自身 rect ∩ 所有祖先 clip（滚动容器靠它约束命中与绘制）
+            let clip = match (inherited_clip, node.clip()) {
+                (Some(a), Some(b)) => Some(a.intersect(b)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            };
 
             rects.insert(node.id().to_string(), rect);
             layer_present[effective.rank() as usize] = true;
@@ -685,6 +693,7 @@ impl UiTree {
             out.push(PaintEntry {
                 path: path.clone(),
                 rect,
+                clip,
                 layer: effective,
             });
 
@@ -694,6 +703,7 @@ impl UiTree {
                     child.as_ref(),
                     path,
                     effective,
+                    clip,
                     rects,
                     out,
                     layer_present,
@@ -708,6 +718,7 @@ impl UiTree {
             self.root.as_ref(),
             &mut path,
             Layer::Base,
+            None,
             &mut self.rects,
             &mut self.paint_order,
             &mut self.layer_present,
@@ -846,7 +857,13 @@ impl UiTree {
 
         self.paint_order
             .iter()
-            .rposition(|entry| entry.rect.contains(pos))
+            .rposition(|entry| {
+                let visible = match entry.clip {
+                    Some(c) => entry.rect.intersect(c),
+                    None => entry.rect,
+                };
+                visible.contains(pos)
+            })
     }
     /// 按路径取不可变节点引用（O(depth)，无字符串比较）。
     fn node_at_ref<'a>(&'a self, path: &[usize]) -> Option<&'a dyn Widget> {
@@ -1235,6 +1252,8 @@ fn broadcast(
 struct PaintEntry {
     path: Vec<usize>,
     rect: Rect,
+    /// 屏幕可见区 = rect ∩ 祖先 clip；命中与裁剪共用。
+    clip: Option<Rect>,
     layer: Layer,
 }
 

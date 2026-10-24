@@ -239,6 +239,16 @@ impl Broadcaster {
 ///
 /// 返回 `(监听地址, 推送总线)`：端口传 0 可拿系统分配端口（测试用）。
 pub fn spawn(addr: &str, tx: Sender<Pending>) -> std::io::Result<(SocketAddr, Broadcaster)> {
+    let token = std::env::var("Y901_TOKEN").unwrap_or_default();
+    spawn_with_token(addr, tx, token)
+}
+
+/// 显式指定 Token（测试用，避免依赖全局 env）。
+pub fn spawn_with_token(
+    addr: &str,
+    tx: Sender<Pending>,
+    token: String,
+) -> std::io::Result<(SocketAddr, Broadcaster)> {
     let listener = TcpListener::bind(addr)?;
     let local = listener.local_addr()?;
 
@@ -246,6 +256,7 @@ pub fn spawn(addr: &str, tx: Sender<Pending>) -> std::io::Result<(SocketAddr, Br
     broadcaster.clone().spawn_writer(push_rx);
 
     let hub = broadcaster.clone();
+    let token_for_conn = token;
     thread::Builder::new()
         .name("y901-rpc".to_string())
         .spawn(move || {
@@ -254,9 +265,10 @@ pub fn spawn(addr: &str, tx: Sender<Pending>) -> std::io::Result<(SocketAddr, Br
                     Ok(stream) => {
                         let tx = tx.clone();
                         let hub = hub.clone();
+                        let token = token_for_conn.clone();
                         thread::Builder::new()
                             .name("y901-rpc-conn".to_string())
-                            .spawn(move || serve(stream, tx, hub))
+                            .spawn(move || serve(stream, tx, hub, token))
                             .ok();
                     }
                     Err(err) => {
@@ -271,7 +283,7 @@ pub fn spawn(addr: &str, tx: Sender<Pending>) -> std::io::Result<(SocketAddr, Br
     Ok((local, broadcaster))
 }
 
-fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster) {
+fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster, expected: String) {
     let reader = match stream.try_clone() {
         Ok(s) => BufReader::new(s),
         Err(_) => return,
@@ -279,6 +291,8 @@ fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster) {
     // 写端共享：既能回包，也能被推送线程使用
     let writer = Arc::new(Mutex::new(stream));
     hub.register(writer.clone());
+
+    // 每请求鉴权：Token 非空时，所有请求必须携带 params.token
 
     for line in reader.lines() {
         let line = match line {
@@ -289,21 +303,43 @@ fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster) {
             continue;
         }
 
-        let response = match Json::parse(&line) {
-            Ok(value) => handle(value, &tx),
-            Err(err) => error_response(Json::Null, &format!("parse error: {err}")),
+        let value = match Json::parse(&line) {
+            Ok(v) => v,
+            Err(err) => {
+                write_line(&writer, &error_response(Json::Null, &format!("parse error: {err}")));
+                continue;
+            }
         };
 
-        let mut w = match writer.lock() {
-            Ok(w) => w,
-            Err(_) => break,
-        };
-        if writeln!(w, "{}", response).is_err() {
+        if !expected.is_empty() {
+            let presented = value
+                .get("params")
+                .and_then(|p| p.get("token"))
+                .and_then(|t| t.as_str());
+            if presented != Some(expected.as_str()) {
+                let id = value.get("id").cloned().unwrap_or(Json::Null);
+                let mut body = error_response(id, "unauthorized: invalid or missing token");
+                body = body.set("status", 401u16).set("code", "unauthorized");
+                write_line(&writer, &body);
+                break; // 鉴权失败直接断开，不给穷举机会
+            }
+        }
+
+        let response = handle(value, &tx);
+        if !write_line(&writer, &response) {
             break;
         }
-        let _ = w.flush();
     }
 }
+
+/// 写一行并 flush；返回是否成功。
+fn write_line(writer: &Arc<Mutex<TcpStream>>, response: &Json) -> bool {
+    let Ok(mut w) = writer.lock() else {
+        return false;
+    };
+    writeln!(w, "{response}").is_ok() && w.flush().is_ok()
+}
+
 fn handle(value: Json, tx: &Sender<Pending>) -> Json {
     let id = value.get("id").cloned().unwrap_or(Json::Null);
     let method = match value.get("method").and_then(|m| m.as_str()) {

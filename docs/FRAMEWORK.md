@@ -1,211 +1,159 @@
 # Y901 框架总览
 
-> 一句话：**Y901 是一个零依赖的 Agent-Native 桌面 UI 框架**。
-> 平台能力（Win32 / D3D11 / DirectWrite / PTY）全部在应用层，框架只认抽象。
+Y901 是一个**零依赖、Agent 原生**的桌面 UI 框架。UI 框架本身不认识任何平台 API，
+平台能力（Win32 / D3D11 / DirectWrite / PTY）全部收敛在应用层。
+
+## 1. 六个 crate
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  Agent (LLM / 脚本)                                       │
-│      │  TCP 127.0.0.1:9410  · JSON-RPC                    │
-│      ▼                                                    │
-│  y901-ui        框架：Widget / UiTree / Flex / 事件 / 语义 │  ← 零依赖
-│      ▲                                                    │
-│  y901-widgets   组件：Terminal / TextInput / Button …      │  ← 只依赖 y901-ui
-│      ▲                                                    │
-│  y901-app       应用：Win32 窗口 + D3D11 后端 + RPC 总线    │  ← 唯一碰平台的地方
-└──────────────────────────────────────────────────────────┘
+y901-core     纯逻辑：终端 Grid / reflow / scrollback（依赖 unicode-width）
+y901-ui       框架：Widget / UiTree / 布局 / 事件 / Signal / 语义树（零依赖）
+y901-widgets  官方组件：Terminal / TextInput / Button / Label / List / ScrollView / SplitView / Menu / Dialog
+y901-agent    安全网关：语义 API、Token、作用域、版本锁、脱敏
+y901-mcp      MCP 桥：stdio + JSON-RPC 2.0，把网关暴露给 Claude Desktop / Cursor
+y901-app      应用壳：Win32 窗口 + D3D11 后端 + 事件循环
 ```
 
-## 1. 四个 crate 的边界
-
-| crate | 职责 | 允许依赖 | 绝对不做 |
-|---|---|---|---|
-| `y901-core` | 纯逻辑终端内核：`Grid` / reflow / scrollback / 样式表 | `unicode-width` | 不画图、不开窗 |
-| `y901-ui` | 框架：`Widget` / `UiTree` / 布局 / 事件 / 语义树 / RPC 协议 | **无** | 不认识 Win32、D3D11、PTY、任何业务 |
-| `y901-widgets` | 官方组件库 | `y901-core`、`y901-ui`、`portable-pty` | 组件之间互不认识 |
-| `y901-app` | 应用壳：窗口、渲染后端、RPC 总线、IME | 上面三个 + `windows-sys`、`crossbeam-channel` | 不含组件逻辑 |
-
-依赖树（`cargo tree --depth 1`）：
+依赖方向严格单向：
 
 ```
-y901-app
-├── crossbeam-channel
-├── windows-sys
-├── y901-ui          (无依赖)
-└── y901-widgets
-
-y901-core
-└── unicode-width
+y901-app -> y901-mcp -> y901-agent -> y901-ui <- y901-widgets -> y901-core
 ```
 
-## 2. 框架提供给组件的两座桥
+`y901-ui` 的 `[dependencies]` 是空的。这不是洁癖，而是测试策略的地基：
+156 项测试里绝大多数不需要窗口、GPU、PTY。
 
-框架不直接调用任何平台 API，全部通过 trait 注入：
+## 2. 两个桥
+
+框架不直接调用平台 API，全部通过 trait 注入：
 
 ```rust
-/// 布局期：把文本量成像素
-pub trait TextMetrics {
-    fn measure_text(&self, text: &str, style: &TextStyle) -> Size;
-    fn line_height(&self, style: &TextStyle) -> f32;
-    fn scale(&self) -> f32;
-}
+pub trait TextMetrics { fn measure_text(...); fn line_height(...); fn scale() -> f32; }
 
-/// 渲染期：把绘制指令交给后端
 pub trait RenderCtx: TextMetrics {
-    fn size(&self) -> Size;
-    fn fill_rect(&mut self, rect: Rect, color: Color);
-    fn stroke_rect(&mut self, rect: Rect, color: Color, width: f32);
-    fn draw_text(&mut self, origin: Pos, text: &str, style: &TextStyle) -> f32;
-    fn push_clip(&mut self, rect: Rect);
-    fn pop_clip(&mut self);
+    fn fill_rect(...); fn stroke_rect(...); fn draw_text(...);
+    fn push_clip(...); fn pop_clip(...);
+    fn theme(&self) -> &Theme;
 }
 ```
 
-`y901-app` 里的 `backend::D3dBackend` 是**唯一**实现者：`fill_rect` / `draw_text` 累积成实例数组，
-每帧一次 `DrawInstanced` 提交换链；字形由 DirectWrite 光栅化进 RTL 图集（skyline 打包 + 压缩搬移 + LRU）。
-
-换成软件后端、测试记录器、甚至 Web Canvas，组件一行都不用改 —— `crates/y901-ui/tests/framework.rs`
-里的 `Recorder` 就是这么跑的（无窗口、无 GPU）。
+`y901-app::backend::D3dBackend` 是唯一实现者；测试里用 `Recorder` 实现，
+所以布局与绘制可以在无窗口环境断言。
 
 ## 3. 组件模型
 
 ```rust
 pub trait Widget {
     fn id(&self) -> &str;
-    fn role(&self) -> Role;                        // 语义角色，开放字符串
-    fn flex(&self) -> FlexItem;                    // 伸缩参数
-    fn layer(&self) -> Layer;                      // Base / Overlay / Modal
-    fn focusable(&self) -> bool;                   // Tab 遍历与 Modal 自动聚焦
-    fn layout_version(&self) -> u64;               // 内在尺寸版本（布局缓存键）
-    fn revision(&self) -> u64;                     // 语义版本（增量推送用）
-
-    fn children(&self) -> &[Box<dyn Widget>];
-    fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>>;
+    fn role(&self) -> Role;
+    fn layer(&self) -> Layer;          // Base / Overlay / Modal
+    fn is_open(&self) -> bool;         // 关闭的浮层不进索引
+    fn focusable(&self) -> bool;
+    fn is_disabled(&self) -> bool;
+    fn clip(&self) -> Option<Rect>;    // 滚动容器声明视口
+    fn cursor_at(&self, pos: Pos) -> Cursor;
 
     fn measure(&mut self, m: &dyn TextMetrics, c: Constraints, cache: &mut LayoutCache) -> Size;
     fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut LayoutCache);
     fn event(&mut self, ctx: &mut EventCtx, e: &UiEvent) -> EventResult;
     fn render(&mut self, ctx: &mut dyn RenderCtx);
     fn semantics(&self) -> Semantics;
+    fn on_mount(&mut self, ctx: &mut MountCtx);
+    fn on_unmount(&mut self);
 }
 ```
 
-生命周期：`measure → arrange → render`；事件随时来。容器在 `arrange` 里继续给子节点排布
-（框架提供 `layout::flex_arrange`），递归由容器驱动。
+## 4. 坐标系与裁剪
 
-## 4. 布局：手写 Flex + 记忆化
+- `rect()` 是**父坐标系**（arrange 传入的绝对矩形）；
+- 滚动容器把子节点排在**内容坐标系**（`y - offset`），用 `clip()` 声明视口；
+- `hit_index` 用 `rect ∩ clip` 判定可见性 —— 看不见就点不到；
+- 渲染时框架自动 `push_clip` / `pop_clip`，组件无需手写。
 
-- 只有 **Row / Column** 两种方向，没有 wrap / absolute / aspect-ratio。
-- 容器必须通过 `LayoutCache::measure(child, …)` 访问子节点，框架在那里按
-  `(id, constraints, layout_version)` 记忆。**相同约束下第二次布局是 O(1)**，
-  2000 节点树的测试断言 `measure` 调用次数为 0。
-- `Constraints::unbounded_main(axis, …)` 显式表达"主轴无界"（ScrollView 场景），
-  返回值永远是有限内容尺寸，不会把 `inf` 泄漏给 GPU。
-
-## 5. 事件：三阶段 + 指针捕获 + 分层
+## 5. 事件：三阶段
 
 ```
-命中(hit_index，零分配) → Capture(根→父) → Target → Bubble(父→根)
+命中 -> Capture(根→父) -> Target -> Bubble(父→根)
 ```
 
-- `EventCtx::stop_propagation()` 立刻停止后续阶段；
-- `EventCtx::set_pointer_capture(id)` 让之后的 `MouseMove` / `MouseUp` 无视坐标强制投递
-  （TextInput 拖拽选中就靠它）；
-- 层级 `Base → Overlay → Modal`：绘制正序、命中逆序；Modal 外部点击被吞掉，焦点被限制在子树内；
-- `Focus` 事件也走三阶段，组件可 `ctx.veto_focus()` 拒绝焦点离开（表单守卫）。
+- **Capture 用于拦截，Bubble/Target 用于响应**；在 Capture 里做响应会导致执行两次。
+- `ctx.set_pointer_capture(id)`：拖拽期间 Events 强制投递（SplitView、滚动条依赖它）；
+- `ctx.veto_focus()`：焦点守卫；
+- Modal 层吞噬外部点击，Focus 被限制在子树内。
 
-路径表示：`Vec<usize>`（子索引）。派发沿路径**递归一趟**，访问节点数 = 深度，
-与树规模无关（测试：1000 个兄弟节点不改变访问次数）。
+## 6. 响应式：Signal
 
-## 6. 语义树与 Agent 协议
-
-`UiTree::snapshot_json()` 输出：
-
-```json
-{"id":"input","role":"text_input","rect":{"x":0,"y":0,"w":300,"h":32},
- "focused":true,"label":"Agent","value":"Agent",
- "actions":["set_text","focus","select_all"],
- "state":{"text":"Agent","caret":5,"anchor":5,"focused":true},
- "children":[]}
+```rust
+let title = Signal::new("hello".to_string());
+let label = TextLabel::new("t", "hello").bind(title.clone());
+// 之后只需：
+title.set("world".to_string());
 ```
 
-RPC（TCP，行分隔 JSON）：
+- `Signal` 不认识 `UiTree`：值变化只把订阅者 id 推进 `Invalidation` 队列；
+- 组件在 `on_mount` 订阅、`on_unmount` 退订（`bind()` 后自动）；
+- 框架在 `layout()` / `render()` 开头排空队列并标脏；
+- 同帧内多次 set 去重为一次失效。
 
-| 方法 | 作用 |
+## 7. 动态挂载
+
+```rust
+tree.add_node("panel", Box::new(Button::new("ok", "OK")));
+tree.insert_node("panel", 1, Box::new(TextLabel::new("x", "hi")));
+tree.remove_node("ok");
+```
+
+- `add_node` / `insert_node` 会触发 `on_mount`、标记父节点布局失效；
+- `remove_node` 递归 `on_unmount`，并清理落在被删子树里的焦点与指针捕获。
+
+## 8. 组件用法速览
+
+```rust
+// 滚动容器
+let list = ScrollView::new("sv", Box::new(content)).flex_item(FlexItem::fill());
+
+// 虚拟化列表（10k 行只排布可见的几行）
+let list = ListView::new("files", 20.0)
+    .items(names)
+    .selected(Some(0))
+    .on_row_selected(|i| println!("{i}"));
+
+// 分栏
+let panes = SplitView::horizontal("split", Box::new(left), Box::new(right)).ratio(0.3);
+
+// 下拉菜单（Overlay 层）
+let mut menu = Menu::new("menu").items(vec!["Open".into(), "Quit".into()]);
+menu.open(); // 键盘 Down/Up 移动高亮，Enter 触发
+
+// 对话框（Modal 层）
+let mut dlg = Dialog::new("dlg", "Confirm")
+    .push(Box::new(TextLabel::new("body", "Sure?")))
+    .buttons(vec![("Cancel", "cancel"), ("OK", "ok")]);
+dlg.open();
+```
+
+**宿主约定**：Menu / Dialog 需要全屏宿主才有"点外部关闭/吞噬"的几何依据，
+用 `Stack`（所有子节点同尺寸）把它们放在最外层。
+
+## 9. Agent 网关与 MCP
+
+`s_y901-agent` 提供语义 API（不传坐标）：
+
+| 工具 | 参数 |
 |---|---|
-| `get_tree` | 整棵语义树（含 rect / role / state） |
-| `invoke {id, action, args}` | 触发组件动作 |
-| `dispatch {id, event}` | 投递原生事件（text / key / mouse_down / mouse_up / mouse_move / wheel / compose） |
-| `subscribe {id, interval_ms}` | 订阅状态变化，服务端主动推 `state_changed` |
-| `unsubscribe {id}` | 取消订阅 |
-| `focus {id}` | 切换焦点 |
-| `ping` | 健康检查 |
+| `ui_click` | `id`, `if_rev?` |
+| `ui_type_text` | `id`, `text`, `if_rev?` |
+| `ui_scroll` | `id`, `delta`, `if_rev?` |
+| `ui_invoke` | `id`, `action`, `args`, `if_rev?` |
 
-推送是**差分 + 节流**的：`patch` 只含变化的字段，窗口内的多次变化合并成一条。
-指纹由 `Widget::revision()` + `value` + `state` 三部分哈希而成。
+安全检查（顺序即优先级）：
 
-## 7. 线程模型
+1. **Token**：`--mcp` 时读 `Y901_TOKEN`，请求需带 `params.token`（-32001）；
+2. **能力作用域**：`exposed_to_ai` 默认 **false**，组件必须显式 `.exposed(true)`；
+3. **版本锁**：`if_rev` 与节点 `revision()` 不符 → 409；
+4. **脱敏**：`sensitive` 节点的 `label` 与 `value` 一律 `***`，`state` 逐键打码。
 
-- **UI 线程**独占 `UiTree` / `Grid` / `Gfx`，无锁；
-- **PTY 读线程**：`read` → `crossbeam_channel` → `PostMessage(WM_APP_PTY_DATA)`；
-- **RPC 线程**：只做解析与转发，业务在 UI 线程执行；
-- 主循环 `PeekMessage` 排空后跑 `idle()`：抽取 RPC、`Tick` 驱动组件 pump、推送订阅、按需重绘。
-
-> **关于唤醒**：框架**没有** `Waker` 抽象。暂停/唤醒由应用层实现 ——
-> 后台线程用 `PostMessage` 打断 `PeekMessage` 循环，组件通过 `UiEvent::Tick` 主动轮询。
-> 等真正需要"后台任务完成即重绘"时再引入 runtime 层（见白皮书 M7.8）。
-
-### 7.1 推送策略：非阻塞广播 + 满队列丢弃
-
-RPC 推送**绝不允许**在 UI 线程碰 socket。策略分三层：
-
-| 层 | 做什么 | 失败时 |
-|---|---|---|
-| **UI 线程** | `Broadcaster::send(line)` → `SyncSender::try_send` | 队列满 → **直接丢弃**并计数，立即返回 |
-| **有界队列** | `std::sync::mpsc::sync_channel(1024)` | 容量固定，不增长 |
-| **写线程**（`y901-rpc-push`） | 从队列取 → 遍历连接池 `writeln!` + `flush` | 写失败 → 从连接池剔除该连接 |
-
-设计取舍：
-
-- **为什么丢弃而不是阻塞**：UI 线程是唯一能推进布局/渲染/事件的地方。为一个读得慢的
-  Agent 卡住整个界面，是拿最贵的资源等最便宜的环节。丢一条 `state_changed` 的代价是
-  Agent 少看到一帧中间态，下次推送会带上最新差分——**最终一致，不丢终态**。
-- **为什么不用 crossbeam**：`std::sync::mpsc::sync_channel` 的 `try_send` 语义与
-  crossbeam 的 `try_send` 完全一致（有界、非阻塞、返回 `Full`）。`y901-ui` 的零依赖是
-  架构承诺，为一个等价 API 破坏它不划算。
-- **诊断**：`Broadcaster::dropped()` 返回累计丢弃条数，可用于确认"是不是客户端太慢"。
-  这是唯一的可观测面，不额外暴露队列长度（避免调用方依赖内部状态）。
-
-实测基线（`broadcast_never_blocks_ui`）：容量 2、无消费线程时连发 1000 条，
-总耗时 < 50ms，`dropped() == 998`。
-
-> 未来若要"不丢"，正确做法是**每连接一个队列 + 写端合并**（同一 id 只保留最新 patch），
-> 而不是加大缓冲或改成阻塞写。
-
-## 8. 目录
-
-```
-crates/
-  y901-core/     Grid · reflow · scrollback · StyleTable
-  y901-ui/       widget · layout · tree · event · command · json · rpc · text
-  y901-widgets/  terminal · text_input · button · label · list · vt · palette
-  y901-app/      main（窗口/事件/RPC） · backend（d3d11 · font · atlas） · ime
-docs/
-  FRAMEWORK.md        本文件：架构总览
-  FRAMEWORK_GUIDE.md  上手手册：写第一个组件、发命令、跑 RPC
-```
-
-## 9. 测试
-
-```
-cargo test --workspace      # 89 项，绝大多数不需要窗口/GPU
-cargo clippy --workspace    # 仅剩风格类提示
-```
-
-布局、事件路由、语义树、RPC 往返、图集打包/压缩都能在 CI 里跑；
-真实渲染与窗口行为靠 `cargo run -p y901-app` 验证。
-
-### 7.2 通过 MCP 接入 AI 生态
+### Claude Desktop 配置
 
 ```json
 {
@@ -219,7 +167,16 @@ cargo clippy --workspace    # 仅剩风格类提示
 }
 ```
 
-- `--mcp`：把**正在运行的那棵 UiTree** 挂到 stdio（stdout 只走协议，日志全部 stderr）。
-- `--mcp --headless`：不开窗口，纯协议模式（CI / 测试用）。
-- 暴露的四种工具：`ui_click` / `ui_type_text` / `ui_scroll` / `ui_invoke`；
-  两个资源：`ui://tree`、`ui://node/{id}`。
+- `--mcp`：把正在运行的窗口挂到 stdio；
+- `--mcp --headless`：不开窗口，纯协议（CI 用）；
+- `--rpc`：启用 TCP 通道（9410），**必须**配置 `Y901_TOKEN`，且每请求校验。
+
+## 10. 测试
+
+```
+cargo test --workspace     # 156 项
+cargo build --workspace    # 零警告
+```
+
+绝大多数测试无需窗口/GPU：布局、事件路由、裁剪命中、语义树、网关鉴权、
+MCP 协议往返、图集打包都能在 CI 里跑。
