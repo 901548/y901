@@ -316,7 +316,9 @@ fn node_resource(tree: &UiTree, policy: &Policy, id: &str) -> Option<Json> {
         Json::obj()
             .set("id", id)
             .set("role", node.role().as_str())
-            .set("revision", node.revision())
+            // 与 public_tree / query_result 一致：输出**有效** revision
+            // （组件自报 + 框架计数器），否则同一节点在不同接口会看到不同值。
+            .set("revision", tree.effective_revision(id))
             .set(
                 "rect",
                 Json::obj()

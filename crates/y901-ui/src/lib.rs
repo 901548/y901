@@ -57,7 +57,7 @@ pub use query::{run as query_nodes, Query};
 pub use signal::{Invalidation, Signal};
 pub use widget::MountCtx;
 pub use theme::{Style, Theme, State};
-pub use tree::{NodeInfo, UiTree};
+pub use tree::{hash_semantics, NodeInfo, UiTree};
 pub use widget::{
     ActionSpec, Axis2, Cursor, InputKind, Layer,
     Axis, Constraints, Dimension, EventCtx, FlexItem, RenderCtx, Role, Semantics, TextMetrics,

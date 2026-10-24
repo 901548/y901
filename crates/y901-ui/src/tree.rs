@@ -1606,18 +1606,27 @@ fn mount_recursive(node: &mut dyn Widget, invalidation: &crate::signal::Invalida
 ///
 /// 用 FNV-1a 增量写入，不构造中间 String（比 to_string 快数倍）。
 fn semantic_hash(node: &dyn Widget) -> u64 {
-    let sem = node.semantics();
+    crate::tree::hash_semantics(node.role(), &node.semantics())
+}
+
+/// 纯函数版本：给定 `(role, Semantics)` 计算语义面哈希。
+///
+/// 公开是为了让碰撞统计与实现共用同一份代码——测试若另写一份哈希就没有意义。
+///
+/// 分隔符说明：每个字段结尾都会喂一次 `0xff`，避免 `"ab"+"c"` 与 `"a"+"bc"`
+/// 落在同一状态机上。
+pub fn hash_semantics(role: Role, sem: &crate::widget::Semantics) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut feed = |bytes: &[u8]| {
         for b in bytes {
             h ^= *b as u64;
             h = h.wrapping_mul(0x1000_0000_01b3);
         }
-        h ^= 0xff; // 字段分隔，避免 "ab"+"c" 与 "a"+"bc" 撞车
+        h ^= 0xff;
         h = h.wrapping_mul(0x1000_0000_01b3);
     };
 
-    feed(node.role().as_str().as_bytes());
+    feed(role.as_str().as_bytes());
     feed(sem.label.as_bytes());
     feed(sem.value.as_bytes());
     feed(&u64::from(sem.disabled).to_le_bytes());
@@ -1626,6 +1635,7 @@ fn semantic_hash(node: &dyn Widget) -> u64 {
     feed(sem.state.to_string().as_bytes());
     for action in &sem.actions {
         feed(action.name.as_bytes());
+        // InputKind 是 4 值枚举，u8 足够；不是截断
         feed(&[action.input as u8]);
     }
     h
