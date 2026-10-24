@@ -11,16 +11,10 @@ path = "src/main.rs"
 # 不实现组件逻辑（y901-widgets），也不定义布局规则（y901-ui）。
 [dependencies]
 y901-backend-win32 = { path = "../y901-backend-win32" }
+y901-runtime = { path = "../y901-runtime" }
 y901-mcp = { path = "../y901-mcp" }
 y901-agent = { path = "../y901-agent" }
 y901-ui = { path = "../y901-ui" }
 y901-widgets = { path = "../y901-widgets" }
 crossbeam-channel = "0.5"
-windows-sys = { version = "0.59", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_System_LibraryLoader",
-    "Win32_UI_HiDpi",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
-] }
+

@@ -40,7 +40,7 @@ impl D3dBackend {
 
         let gfx = Gfx::new(hwnd, width, height)?;
         let text = TextEngine::new(FONT_FAMILY, FONT_SIZE, CELL_W, CELL_H)?;
-        println!(
+        eprintln!(
             "[y901] backend ready: ascent={:.2} descent={:.2} atlas={}",
             text.ascent, text.descent, text.atlas_size
         );

@@ -27,11 +27,10 @@ impl TextMetrics for Mono {
 
 #[test]
 fn rpc_rejects_requests_without_token() {
-    // 用独立进程级 env 有并发风险，这里直接设定，测试内只此一处使用 RPC
-    std::env::set_var("Y901_TOKEN", "t0ken");
-
+    // 显式传 token，不依赖进程级 env（否则与另一个测试并行时互相干扰）
     let (tx, _rx) = channel();
-    let (addr, _hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind");
+    let (addr, _hub) = y901_agent::rpc::spawn_with_token("127.0.0.1:0", tx, "t0ken".into())
+        .expect("bind");
 
     let stream = std::net::TcpStream::connect(addr).expect("connect");
     stream
@@ -52,16 +51,13 @@ fn rpc_rejects_requests_without_token() {
     let mut rest = String::new();
     let n = reader.read_line(&mut rest).unwrap_or(0);
     assert_eq!(n, 0, "鉴权失败后应断开连接");
-
-    std::env::remove_var("Y901_TOKEN");
 }
 
 #[test]
 fn rpc_accepts_requests_with_token() {
-    std::env::set_var("Y901_TOKEN", "t0ken2");
-
     let (tx, rx) = channel();
-    let (addr, _hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind");
+    let (addr, _hub) = y901_agent::rpc::spawn_with_token("127.0.0.1:0", tx, "t0ken2".into())
+        .expect("bind");
 
     let stream = std::net::TcpStream::connect(addr).expect("connect");
     let mut writer = stream.try_clone().unwrap();

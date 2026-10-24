@@ -380,10 +380,10 @@ name = "y901-app"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
- "windows-sys",
  "y901-agent",
  "y901-backend-win32",
  "y901-mcp",
+ "y901-runtime",
  "y901-ui",
  "y901-widgets",
 ]

@@ -5,7 +5,9 @@
 
 pub mod backend;
 pub mod ime;
+pub mod runtime;
 pub mod window;
 
 pub use backend::D3dBackend;
+pub use runtime::Win32Runtime;
 pub use window::Window;
