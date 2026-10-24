@@ -77,6 +77,14 @@ impl Widget for Button {
         self.disabled
     }
 
+    fn cursor(&self) -> y901_ui::Cursor {
+        if self.disabled {
+            y901_ui::Cursor::Default
+        } else {
+            y901_ui::Cursor::Pointer
+        }
+    }
+
     fn flex(&self) -> FlexItem {
         self.item
     }

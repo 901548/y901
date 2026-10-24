@@ -368,6 +368,10 @@ impl Widget for TextInput {
         self.disabled
     }
 
+    fn cursor(&self) -> y901_ui::Cursor {
+        y901_ui::Cursor::Text
+    }
+
     fn revision(&self) -> u64 {
         self.version
     }
