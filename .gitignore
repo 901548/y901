@@ -21,3 +21,4 @@ desktop.ini
 # 测试日志（临时产物）
 test.log
 target/test-workspace.log
+commitmsg.txt
