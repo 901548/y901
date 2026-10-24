@@ -1098,8 +1098,18 @@ impl UiTree {
     }
 
     /// 统一收尾：合并标志、搬运命令、落实焦点与指针捕获。
+    ///
+    /// 输入：本次派发的 `ctx` 与组件返回的 `result`。
+    /// 失败：无（不 panic）。若 `result` 要求 Relayout，会在此处标记布局失效——
+    /// 这是**所有入口**（dispatch / dispatch_to / RPC）共用的语义，
+    /// 否则 RPC 触发的 Relayout 会变成空操作，索引与布局永远停在旧状态。
     fn finish_dispatch(&mut self, mut ctx: EventCtx, result: EventResult) -> EventResult {
+        let target = ctx.target.clone();
         let merged = ctx.finish(result);
+        if merged.needs_relayout() && !target.is_empty() {
+            self.cache.mark_dirty(&target);
+            self.dirty = DirtyRegion::full();
+        }
         self.pending.append(&mut ctx.commands);
 
         // 组件请求的 IME 候选窗位置：留给应用层下一帧落实
@@ -1332,6 +1342,11 @@ fn render_pass(
     path: &mut Vec<usize>,
     deferred: &mut Vec<(Layer, Vec<usize>)>,
 ) {
+    // 关闭的浮层：整棵子树都不绘制。
+    // 与 rebuild_indices 的跳过共享同一不变量，否则会出现"看不见但仍占 GPU"的怪状。
+    if !node.is_open() {
+        return;
+    }
     let effective = inherited.max(node.layer());
 
     if effective == Layer::Base {
@@ -1361,6 +1376,10 @@ fn render_pass(
 
 /// 回放一个延后的子树（层内顺序 = 树序）。
 fn render_subtree(node: &mut dyn Widget, ctx: &mut dyn RenderCtx, dirty: &DirtyRegion) {
+    // 延后回放同样要遵守 is_open 不变量（否则关闭的 Modal 会被补画出来）
+    if !node.is_open() {
+        return;
+    }
     if node.needs_paint(dirty) {
         node.render(ctx);
     }

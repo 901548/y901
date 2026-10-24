@@ -17,7 +17,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
     LoadCursorW, PeekMessageW, PostQuitMessage, RegisterClassExW,
-    SetCursor, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
+    SetCursor, SetWindowLongPtrW, ShowWindow, TranslateMessage,
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW,
     IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IDC_SIZEALL, MSG, PM_REMOVE, SW_SHOW,
     WM_CHAR, WM_DESTROY, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION,
@@ -395,21 +395,5 @@ impl Window {
 impl Drop for Window {
     fn drop(&mut self) {
         self.backend = None;
-    }
-}
-
-/// 让窗口可见（`SetWindowPos` 的常见用法）。
-pub fn show(hwnd: HWND) {
-    unsafe {
-        ShowWindow(hwnd, SW_SHOW);
-        SetWindowPos(
-            hwnd,
-            std::ptr::null_mut(),
-            0,
-            0,
-            0,
-            0,
-            0x0001 | 0x0002,
-        );
     }
 }

@@ -140,7 +140,8 @@ impl Widget for Menu {
                         .set("label", self.items[i].clone()),
                 );
                 self.close();
-                EventResult::Redraw
+                // 关闭会改变 is_open：必须重建索引，否则该项仍留在 paint_order 里
+                EventResult::Relayout
             }
             UiEvent::MouseMove { pos } => {
                 let hover = (0..self.items.len()).find(|i| self.item_rect(*i).contains(*pos));
@@ -165,14 +166,14 @@ impl Widget for Menu {
                 // 无论点哪里，菜单都关闭；并吞掉这次点击，避免穿透到底层
                 self.close();
                 ctx.stop_propagation();
-                EventResult::Redraw
+                EventResult::Relayout
             }
             UiEvent::Key {
                 key: y901_ui::Key::Escape,
                 ..
             } => {
                 self.close();
-                EventResult::Redraw
+                EventResult::Relayout
             }
             UiEvent::Key { key, .. } if !self.items.is_empty() => match key {
                 y901_ui::Key::Down => {
@@ -192,11 +193,11 @@ impl Widget for Menu {
                             .set("label", self.items[i].clone()),
                     );
                     self.close();
-                    EventResult::Redraw
+                    EventResult::Relayout
                 }
                 y901_ui::Key::Escape => {
                     self.close();
-                    EventResult::Redraw
+                    EventResult::Relayout
                 }
                 _ => EventResult::Ignored,
             },
@@ -381,7 +382,9 @@ impl Widget for Dialog {
             // 语义动作：Agent 直接关闭对话框
             UiEvent::Action { name, .. } if name == "close" => {
                 self.close();
-                EventResult::Redraw
+                // is_open 变化必须触发重建：索引/脏区都基于"打开时"的快照，
+                // 只 Redraw 会让关闭的节点继续留在 paint_order 里。
+                EventResult::Relayout
             }
             // 按钮命中优先于"吞掉外部点击"
             UiEvent::MouseDown { pos, .. } => {
@@ -397,7 +400,7 @@ impl Widget for Dialog {
                 if let Some((_, action)) = hit {
                     ctx.emit_app(action, Json::obj());
                     self.close();
-                    return EventResult::Redraw;
+                    return EventResult::Relayout;
                 }
                 // 面板内的点击放行给子节点；只吞面板外的
                 if self.panel.contains(*pos) {
@@ -421,7 +424,7 @@ impl Widget for Dialog {
                 ..
             } => {
                 self.close();
-                EventResult::Redraw
+                EventResult::Relayout
             }
             _ => EventResult::Ignored,
         }
