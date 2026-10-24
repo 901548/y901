@@ -354,7 +354,8 @@ impl Window {
         let (w, h) = self.viewport;
         if let Some(backend) = self.backend.as_mut() {
             unsafe {
-                let _ = backend.resize(w, h);
+                // SAFETY: backend 由本窗口创建，hwnd 仍有效；w/h 来自当前客户区。
+                backend.resize(w, h);
             }
             tree.layout(Size::new(w as f32, h as f32), backend);
         }

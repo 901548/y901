@@ -1034,6 +1034,11 @@ struct Atlas {
     sampler: SamplerState,
 }
 
+// Win32 的 InputElementDesc.semantic_name 需要 nul 结尾的字节串。
+// 这里保留手写 b"…\0" 而不是 c"…"：
+//   1. 项目 MSRV 未强制到引入 c-string 字面量的版本（1.77）；
+//   2. 语义名将来要按顶点属性表运行时拼接时，b"" 形式更容易与 fmt 组合。
+#[allow(clippy::manual_c_str_literals)]
 unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
     let vs_blob = compile_shader("vs_main", "vs_5_0")?;
     let ps_blob = compile_shader("ps_main", "ps_5_0")?;
@@ -1363,6 +1368,15 @@ impl Gfx {
     /// `instances` 长度任意：内部按 `INSTANCE_CAPACITY` 截断，不会越界。
     /// 违反前述任一条不会造成内存不安全，但会得到未定义的画面或设备错误码。
     pub unsafe fn render(&mut self, instances: &[Instance], sync_interval: u32) -> Hresult {
+        // 把 # Safety 里"图集已同步"的承诺在 debug 构建下变成可执行断言。
+        debug_assert!(
+            render_preconditions_ok(
+                self.atlas.is_some() || self.atlas_data.is_empty(),
+                self.width,
+                self.height,
+            ),
+            "render 前置条件不满足：图集未同步（有数据但无纹理）或尺寸为 0"
+        );
         let (Some(pipeline), Some(rtv), Some(context), Some(swap_chain)) = (
             self.pipeline.as_ref(),
             self.rtv.as_ref(),
@@ -1508,4 +1522,44 @@ unsafe fn create_device_and_swap_chain(
     }
 
     unreachable!("loop always returns")
+}
+
+// ---------------------------------------------------------------------------
+// render 前置条件（纯函数，便于单测）
+// ---------------------------------------------------------------------------
+
+/// `render` 依赖的两条不变量：图集可用、尺寸非零。
+///
+/// * `atlas_ready`：纹理已创建，**或** 根本没有待上传的数据。
+/// * `width` / `height`：交换链尺寸，必须 > 0。
+///
+/// 返回 `false` 表示 [`Gfx::render`] 的 `# Safety` 承诺被违反。
+fn render_preconditions_ok(atlas_ready: bool, width: u32, height: u32) -> bool {
+    atlas_ready && width > 0 && height > 0
+}
+
+#[cfg(test)]
+mod render_guard_tests {
+    use super::render_preconditions_ok;
+
+    #[test]
+    fn accepts_ready_atlas_with_nonzero_size() {
+        assert!(render_preconditions_ok(true, 800, 600));
+    }
+
+    #[test]
+    fn rejects_unsynced_atlas() {
+        assert!(!render_preconditions_ok(false, 800, 600));
+    }
+
+    #[test]
+    fn rejects_zero_size() {
+        assert!(!render_preconditions_ok(true, 0, 600));
+        assert!(!render_preconditions_ok(true, 800, 0));
+    }
+
+    #[test]
+    fn rejects_everything_at_once() {
+        assert!(!render_preconditions_ok(false, 0, 0));
+    }
 }

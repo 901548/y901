@@ -259,7 +259,7 @@ fn schema(
     let mut props = Json::obj();
     for (name, ty, desc) in required.iter().chain(optional.iter()) {
         props = props.set(
-            *name,
+            name,
             Json::obj()
                 .set("type", *ty)
                 .set("description", *desc),

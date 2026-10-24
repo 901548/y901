@@ -44,7 +44,7 @@ fn big_tree() -> UiTree {
 
 #[test]
 fn button_click_is_inputkind_none_and_textinput_set_text_is_text() {
-    let mut tree = big_tree();
+    let tree = big_tree();
 
     let btn = tree.find("b0").expect("button");
     let click = btn

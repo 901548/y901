@@ -132,7 +132,7 @@ fn render_pushes_clip_for_scrolling_container() {
 /// 2. 关闭的浮层既不能画、也不能被命中。
 #[test]
 fn closed_overlay_is_neither_rendered_nor_hittable() {
-    let mut menu = y901_widgets::Menu::new("menu").items(vec!["A".to_string()]);
+    let menu = y901_widgets::Menu::new("menu").items(vec!["A".to_string()]);
     let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(menu))));
     tree.layout(Size::new(400.0, 300.0), &Mono);
 

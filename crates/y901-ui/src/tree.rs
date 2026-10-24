@@ -409,11 +409,11 @@ impl UiTree {
 
         // 焦点/捕获若落在被删子树里，就地清空（否则悬空）
         let inside = |p: &Vec<usize>| p.starts_with(&path);
-        if self.focus_path.as_ref().map(|p| inside(p)).unwrap_or(false) {
+        if self.focus_path.as_ref().map(inside).unwrap_or(false) {
             self.focus = None;
             self.focus_path = None;
         }
-        if self.captured_path.as_ref().map(|p| inside(p)).unwrap_or(false) {
+        if self.captured_path.as_ref().map(inside).unwrap_or(false) {
             self.captured_pointer = None;
             self.captured_path = None;
         }
@@ -676,15 +676,21 @@ impl UiTree {
         self.layer_present = [false; 3];
         self.modal_root = None;
 
+        // 把四个可变的输出目标打包：既避免 8 参数，也明确"它们是一起写的"
+        struct Outputs<'a> {
+            rects: &'a mut HashMap<String, Rect>,
+            order: &'a mut Vec<PaintEntry>,
+            layer_present: &'a mut [bool; 3],
+            modal_root: &'a mut Option<Vec<usize>>,
+        }
+
+        /// 前序遍历建索引：关闭的子树整棵跳过；clip 沿祖先累积。
         fn walk(
             node: &dyn Widget,
             path: &mut Vec<usize>,
             inherited: Layer,
             inherited_clip: Option<Rect>,
-            rects: &mut HashMap<String, Rect>,
-            out: &mut Vec<PaintEntry>,
-            layer_present: &mut [bool; 3],
-            modal_root: &mut Option<Vec<usize>>,
+            out: &mut Outputs<'_>,
         ) {
             // 关闭的浮层整棵子树都不进索引（不画、不命中、不可聚焦）
             if !node.is_open() {
@@ -701,15 +707,15 @@ impl UiTree {
                 (None, None) => None,
             };
 
-            rects.insert(node.id().to_string(), rect);
-            layer_present[effective.rank() as usize] = true;
+            out.rects.insert(node.id().to_string(), rect);
+            out.layer_present[effective.rank() as usize] = true;
 
             if own == Layer::Modal {
                 // 后出现的 Modal 在更上层
-                *modal_root = Some(path.clone());
+                *out.modal_root = Some(path.clone());
             }
 
-            out.push(PaintEntry {
+            out.order.push(PaintEntry {
                 path: path.clone(),
                 rect,
                 clip,
@@ -718,31 +724,19 @@ impl UiTree {
 
             for (i, child) in node.children().iter().enumerate() {
                 path.push(i);
-                walk(
-                    child.as_ref(),
-                    path,
-                    effective,
-                    clip,
-                    rects,
-                    out,
-                    layer_present,
-                    modal_root,
-                );
+                walk(child.as_ref(), path, effective, clip, out);
                 path.pop();
             }
         }
 
         let mut path = Vec::new();
-        walk(
-            self.root.as_ref(),
-            &mut path,
-            Layer::Base,
-            None,
-            &mut self.rects,
-            &mut self.paint_order,
-            &mut self.layer_present,
-            &mut self.modal_root,
-        );
+        let mut outputs = Outputs {
+            rects: &mut self.rects,
+            order: &mut self.paint_order,
+            layer_present: &mut self.layer_present,
+            modal_root: &mut self.modal_root,
+        };
+        walk(self.root.as_ref(), &mut path, Layer::Base, None, &mut outputs);
 
         // 稳定排序：同层内保持树序（即绘制先后）
         self.paint_order.sort_by_key(|e| e.layer.rank());
@@ -1459,7 +1453,7 @@ fn diff_state(old: &crate::json::Json, new: &crate::json::Json) -> crate::json::
 /// 递归调用卸载钩子：先释放子树资源，再释放自己。
 fn unmount_recursive(mut node: Box<dyn Widget>) {
     if let Some(children) = node.children_mut() {
-        let taken: Vec<Box<dyn Widget>> = children.drain(..).collect();
+        let taken: Vec<Box<dyn Widget>> = std::mem::take(children);
         for child in taken {
             unmount_recursive(child);
         }

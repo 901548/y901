@@ -1,0 +1,420 @@
+﻿cargo :     Checking y901-ui v0.1.0 (F:\Y901\crates\y901-ui)
+所在位置 行:2 字符: 1
++ cargo clippy --workspace --all-targets 2>&1 | Out-File F:\Y901\clippy ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checking y9...crates\y901-ui):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+warning: this function has too many arguments (8/7)
+   --> crates\y901-ui\src\tree.rs:679:9
+    |
+679 | /         fn walk(
+680 | |             node: &dyn Widget,
+681 | |             path: &mut Vec<usize>,
+682 | |             inherited: Layer,
+...   |
+687 | |             modal_root: &mut Option<Vec<usize>>,
+688 | |         ) {
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#too_many_argum
+ents
+    = note: `#[warn(clippy::too_many_arguments)]` on by default
+
+warning: `y901-ui` (lib) generated 1 warning
+    Checking y901-agent v0.1.0 (F:\Y901\crates\y901-agent)
+    Checking y901-widgets v0.1.0 (F:\Y901\crates\y901-widgets)
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-agent\src\api.rs:409:53
+    |
+409 |         fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Siz
+e {
+    |                                                     ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+    = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-agent\src\mcp.rs:448:53
+    |
+448 |         fn measure(&mut self, _m: &dyn TextMetrics, c: y901_ui::Constraints, _c: &mut y901_ui::layout::LayoutCach
+e) -> Size {
+    |                                                     ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+  --> crates\y901-widgets\src\list_view.rs:47:48
+   |
+47 |     fn measure(&mut self, m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+   |                                                ^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_under
+score_argument
+   = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-widgets\src\overlay.rs:105:49
+    |
+105 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    |                                                 ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-widgets\src\overlay.rs:329:49
+    |
+329 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    |                                                 ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-widgets\src\scroll.rs:401:49
+    |
+401 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    |                                                 ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+
+warning: items after a test module
+   --> crates\y901-agent\src\api.rs:368:1
+    |
+368 |   mod tests {
+    |   ^^^^^^^^^
+...
+562 |   pub fn redact_node(sem: &y901_ui::Semantics, policy: &Policy) -> Json {
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+599 |   fn query_result(tree: &UiTree, policy: &Policy, q: &y901_ui::Query) -> Json {
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+635 | / pub fn dispatch_request(
+636 | |     tree: &mut UiTree,
+637 | |     policy: &Policy,
+638 | |     method: &str,
+639 | |     params: &Json,
+640 | | ) -> Result<Json, ApiError> {
+    | |___________________________^
+...
+682 |   fn arg_str(params: &Json, key: &str) -> Result<String, ApiError> {
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+690 |   fn arg_u64(params: &Json, key: &str) -> Option<u64> {
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#items_after_te
+st_module
+    = note: `#[warn(clippy::items_after_test_module)]` on by default
+    = help: move the items to before the test module was defined
+
+    Checking y901-runtime v0.1.0 (F:\Y901\crates\y901-runtime)
+warning: `y901-agent` (lib test) generated 3 warnings (run `cargo clippy --fix --lib -p y901-agent --tests` to apply 1 
+suggestion)
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-ui\tests\framework.rs:401:53
+    |
+401 |         fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    |                                                     ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+    = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-ui\tests\framework.rs:603:49
+    |
+603 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    |                                                 ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-ui\tests\framework.rs:700:49
+    |
+700 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    |                                                 ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+
+warning: `y901-widgets` (lib) generated 4 warnings
+    Checking y901-mcp v0.1.0 (F:\Y901\crates\y901-mcp)
+    Checking y901-backend-win32 v0.1.0 (F:\Y901\crates\y901-backend-win32)
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+  --> crates\y901-widgets\tests\audit.rs:80:49
+   |
+80 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+   |                                                 ^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_under
+score_argument
+   = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-widgets\tests\audit.rs:173:53
+    |
+173 |         fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Siz
+e {
+    |                                                     ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+
+warning: variable does not need to be mutable
+   --> crates\y901-widgets\tests\audit.rs:135:9
+    |
+135 |     let mut menu = y901_widgets::Menu::new("menu").items(vec!["A".to_string()]);
+    |         ----^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `y901-ui` (test "framework") generated 3 warnings
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+  --> crates\y901-widgets\tests\reactive.rs:91:49
+   |
+91 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+   |                                                 ^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_under
+score_argument
+   = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-widgets\tests\query_actions.rs:214:49
+    |
+214 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    |                                                 ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+    = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: variable does not need to be mutable
+  --> crates\y901-widgets\tests\query_actions.rs:47:9
+   |
+47 |     let mut tree = big_tree();
+   |         ----^^^^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `y901-widgets` (test "audit") generated 3 warnings (run `cargo clippy --fix --test "audit" -p y901-widgets` to
+ apply 1 suggestion)
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+  --> crates\y901-widgets\tests\overlay_render.rs:50:9
+   |
+50 |         c: Constraints,
+   |         ^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_under
+score_argument
+   = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+  --> crates\y901-widgets\tests\scroll_split.rs:38:49
+   |
+38 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+   |                                                 ^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_under
+score_argument
+   = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: `y901-widgets` (lib test) generated 4 warnings (4 duplicates)
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+  --> crates\y901-mcp\tests\stdio.rs:37:49
+   |
+37 |     fn measure(&mut self, _m: &dyn TextMetrics, c: y901_ui::Constraints, _c: &mut y901_ui::layout::LayoutCache) ->
+ Size {
+   |                                                 ^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_under
+score_argument
+   = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+  --> crates\y901-widgets\tests\security.rs:41:49
+   |
+41 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+   |                                                 ^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_under
+score_argument
+   = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-widgets\tests\security.rs:167:49
+    |
+167 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    |                                                 ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+   --> crates\y901-widgets\tests\security.rs:237:53
+    |
+237 |         fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Siz
+e {
+    |                                                     ^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_unde
+rscore_argument
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+  --> crates\y901-widgets\tests\finale.rs:92:49
+   |
+92 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+   |                                                 ^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_under
+score_argument
+   = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: variable does not need to be mutable
+   --> crates\y901-widgets\tests\security.rs:139:9
+    |
+139 |     let mut menu = Menu::new("menu").items(vec!["A".to_string()]);
+    |         ----^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: manually constructing a nul-terminated string
+    --> crates\y901-backend-win32\src\backend\d3d11.rs:1046:28
+     |
+1046 |             semantic_name: b"TEXCOORD\0".as_ptr(),
+     |                            ^^^^^^^^^^^^^ help: use a `c""` literal: `c"TEXCOORD"`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#manual_c_str_
+literals
+     = note: `#[warn(clippy::manual_c_str_literals)]` on by default
+
+warning: manually constructing a nul-terminated string
+    --> crates\y901-backend-win32\src\backend\d3d11.rs:1055:28
+     |
+1055 |             semantic_name: b"TEXCOORD\0".as_ptr(),
+     |                            ^^^^^^^^^^^^^ help: use a `c""` literal: `c"TEXCOORD"`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#manual_c_str_
+literals
+
+warning: manually constructing a nul-terminated string
+    --> crates\y901-backend-win32\src\backend\d3d11.rs:1064:28
+     |
+1064 |             semantic_name: b"TEXCOORD\0".as_ptr(),
+     |                            ^^^^^^^^^^^^^ help: use a `c""` literal: `c"TEXCOORD"`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#manual_c_str_
+literals
+
+warning: manually constructing a nul-terminated string
+    --> crates\y901-backend-win32\src\backend\d3d11.rs:1073:28
+     |
+1073 |             semantic_name: b"TEXCOORD\0".as_ptr(),
+     |                            ^^^^^^^^^^^^^ help: use a `c""` literal: `c"TEXCOORD"`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#manual_c_str_
+literals
+
+warning: `y901-widgets` (test "overlay_render") generated 1 warning
+warning: `y901-widgets` (test "query_actions") generated 2 warnings (run `cargo clippy --fix --test "query_actions" -p 
+y901-widgets` to apply 1 suggestion)
+warning: `y901-widgets` (test "reactive") generated 1 warning
+warning: `y901-widgets` (test "scroll_split") generated 1 warning
+warning: `y901-ui` (lib test) generated 1 warning (1 duplicate)
+warning: `to_string` applied to a type that implements `Display` in `assert_eq!` args
+   --> crates\y901-widgets\tests\rpc_agent.rs:171:95
+    |
+171 |         assert_eq!(r2.get("ok").and_then(|v| v.as_bool()), Some(true), "mouse_down 失败: {}", r2.to_string());
+    |                                                                                                 ^^^^^^^^^^^^ help
+: remove this
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#to_string_in_f
+ormat_args
+    = note: `#[warn(clippy::to_string_in_format_args)]` on by default
+
+warning: `c` already exists, having another argument having almost the same name makes code comprehension and documenta
+tion more difficult
+  --> crates\y901-widgets\tests\p0.rs:76:49
+   |
+76 |     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+   |                                                 ^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#duplicate_under
+score_argument
+   = note: `#[warn(clippy::duplicate_underscore_argument)]` on by default
+
+warning: `to_string` applied to a type that implements `Display` in `assert!` args
+   --> crates\y901-widgets\tests\rpc_agent.rs:344:15
+    |
+344 |         patch2.to_string()
+    |               ^^^^^^^^^^^^ help: remove this
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#to_string_in_f
+ormat_args
+
+warning: `to_string` applied to a type that implements `Display` in `assert!` args
+  --> crates\y901-widgets\tests\dispatcher.rs:96:12
+   |
+96 |         out.to_string()
+   |            ^^^^^^^^^^^^ help: remove this
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.92.0/index.html#to_string_in_fo
+rmat_args
+   = note: `#[warn(clippy::to_string_in_format_args)]` on by default
+
+warning: `y901-widgets` (test "finale") generated 1 warning
+warning: `y901-widgets` (test "rpc_agent") generated 2 warnings (run `cargo clippy --fix --test "rpc_agent" -p y901-wid
+gets` to apply 2 suggestions)
+warning: `y901-widgets` (test "dispatcher") generated 1 warning (run `cargo clippy --fix --test "dispatcher" -p y901-wi
+dgets` to apply 1 suggestion)
+warning: `y901-widgets` (test "security") generated 4 warnings (run `cargo clippy --fix --test "security" -p y901-widge
+ts` to apply 1 suggestion)
+warning: `y901-widgets` (test "p0") generated 1 warning
+warning: `y901-mcp` (test "stdio") generated 1 warning
+warning: `y901-backend-win32` (lib) generated 4 warnings
+    Checking y901-app v0.1.0 (F:\Y901\crates\y901-app)
+warning: `y901-backend-win32` (lib test) generated 4 warnings (4 duplicates)
+warning: unused import: `Constraints`
+ --> crates\y901-app\tests\audit_fixes.rs:6:14
+  |
+6 |     Command, Constraints, EventResult, Flex, FlexItem, Json, Key, Modifiers, Size, TextStyle,
+  |              ^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `y901-app` (test "audit_fixes") generated 1 warning (run `cargo clippy --fix --test "audit_fixes" -p y901-app`
+ to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.59s

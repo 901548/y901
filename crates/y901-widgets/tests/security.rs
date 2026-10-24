@@ -136,7 +136,7 @@ fn mcp_rejects_bad_jsonrpc_version() {
 
 #[test]
 fn closed_menu_is_not_hittable() {
-    let mut menu = Menu::new("menu").items(vec!["A".to_string()]);
+    let menu = Menu::new("menu").items(vec!["A".to_string()]);
     // 不 open
     let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(menu))));
     tree.layout(Size::new(400.0, 300.0), &Mono);
