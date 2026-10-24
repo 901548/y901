@@ -115,39 +115,12 @@ impl McpServer {
             .ok_or((-32602, "tools/call requires name".to_string()))?;
         let args = params.get("arguments").cloned().unwrap_or_else(Json::obj);
 
-        let call = match name {
-            "ui_click" => ApiCall::Click {
-                id: need_str(&args, "id")?,
-                if_rev: opt_u64(&args, "if_rev"),
-            },
-            "ui_type_text" => ApiCall::Type {
-                id: need_str(&args, "id")?,
-                text: need_str(&args, "text")?,
-                if_rev: opt_u64(&args, "if_rev"),
-            },
-            "ui_scroll" => ApiCall::Scroll {
-                id: need_str(&args, "id")?,
-                delta: args.get("delta").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
-                if_rev: opt_u64(&args, "if_rev"),
-            },
-            "ui_query" => ApiCall::Query {
-                q: need_str(&args, "q")?,
-            },
-            "ui_invoke" => ApiCall::Invoke {
-                id: need_str(&args, "id")?,
-                action: need_str(&args, "action")?,
-                args: args.get("args").cloned().unwrap_or_else(Json::obj),
-                if_rev: opt_u64(&args, "if_rev"),
-            },
-            other => return Err((-32602, format!("unknown tool: {other}"))),
-        };
-
-        match handle_call(tree, &self.policy, call) {
+        // 统一入口：RPC 与 MCP 共用同一份执行逻辑
+        match crate::api::dispatch_request(tree, &self.policy, name, &args) {
             Ok(value) => Ok(tool_ok(&value)),
             Err(err) => Ok(tool_err(&err)),
         }
     }
-
     // ---------- resources ----------
 
     fn read_resource(&mut self, tree: &mut UiTree, params: &Json) -> Result<Json, (i32, String)> {
@@ -420,17 +393,6 @@ fn human_message(err: &ApiError) -> String {
         ),
         ApiError::BadRequest(msg) => format!("bad request: {msg}"),
     }
-}
-
-fn need_str(args: &Json, key: &str) -> Result<String, (i32, String)> {
-    args.get(key)
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or((-32602, format!("missing required argument: {key}")))
-}
-
-fn opt_u64(args: &Json, key: &str) -> Option<u64> {
-    args.get(key).and_then(|v| v.as_f64()).map(|f| f as u64)
 }
 
 // ---------- stdio 循环 ----------

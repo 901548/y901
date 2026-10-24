@@ -29,6 +29,8 @@ pub enum RpcRequest {
         action: String,
         args: Json,
     },
+    /// 按查询语言筛选节点（与 MCP 的 ui_query 完全一致）。
+    Query { q: String },
     /// 切换焦点。
     Focus { node: String },
     /// 订阅某个节点的状态变化（服务端主动推送 `state_changed`）。
@@ -379,6 +381,13 @@ fn handle(value: Json, tx: &Sender<Pending>) -> Json {
                 action,
                 args,
             }
+        }
+        "query" => {
+            let q = match params.get("q").and_then(|v| v.as_str()) {
+                Some(v) => v.to_string(),
+                None => return error_response(id, "query requires q"),
+            };
+            RpcRequest::Query { q }
         }
         "subscribe" => {
             let node = match params.get("id").and_then(|v| v.as_str()) {

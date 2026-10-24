@@ -11,6 +11,6 @@ pub mod api;
 pub mod mcp;
 pub mod rpc;
 
-pub use api::{handle_call, ApiCall, ApiError, Policy};
+pub use api::{dispatch_request, handle_call, ApiCall, ApiError, Policy};
 pub use mcp::{run_stdio, McpServer};
 pub use rpc::{spawn, Broadcaster, Pending, RpcEvent, RpcRequest};

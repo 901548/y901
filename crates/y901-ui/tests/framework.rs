@@ -452,7 +452,14 @@ fn rpc_get_tree_and_dispatch() {
         let pending = rx.recv_timeout(Duration::from_secs(2)).expect("request");
         let result = match &pending.request {
             y901_agent::RpcRequest::GetTree => Ok(tree.snapshot_json()),
-            y901_agent::RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
+            y901_agent::RpcRequest::Query { q } => y901_agent::dispatch_request(
+            &mut tree,
+            &y901_agent::Policy::default(),
+            "query",
+            &Json::obj().set("q", q.clone()),
+        )
+        .map_err(|e| e.code().to_string()),
+        y901_agent::RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
             y901_agent::RpcRequest::Focus { node } => {
                 if tree.set_focus(Some(node.clone())) {
                     Ok(Json::obj())

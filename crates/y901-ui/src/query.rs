@@ -66,7 +66,7 @@ impl Query {
         self.clauses.iter().all(|c| match c {
             Clause::Eq(k, v) => match *k {
                 "id" => id == v,
-                "role" => sem.role_name == *v,
+                "role" => sem.role.0 == v.as_str(),
                 "label" => sem.label == *v,
                 "value" => sem.value == *v,
                 "disabled" => sem.disabled.to_string() == *v,
@@ -77,7 +77,7 @@ impl Query {
                 let needle = v.to_lowercase();
                 let hay = match *k {
                     "id" => id.to_string(),
-                    "role" => sem.role_name.clone(),
+                    "role" => sem.role.0.to_string(),
                     "label" => sem.label.clone(),
                     "value" => sem.value.clone(),
                     _ => return false,
@@ -124,7 +124,8 @@ fn walk(node: &dyn Widget, q: &Query, out: &mut Vec<String>) {
         }
     }
     let mut sem = node.semantics();
-    sem.role_name = node.role().as_str().to_string();
+    // 角色由框架注入，组件不必手填
+    sem.role = node.role();
     if q.matches(node.id(), &sem) {
         out.push(node.id().to_string());
     }
@@ -139,7 +140,7 @@ mod tests {
 
     fn sem(role: &str, label: &str, disabled: bool) -> Semantics {
         let mut s = Semantics::default().label(label).exposed(true).disabled(disabled);
-        s.role_name = role.to_string();
+        s.role = crate::widget::Role(Box::leak(role.to_string().into_boxed_str()));
         s
     }
 

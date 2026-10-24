@@ -163,3 +163,34 @@ fn main() {
 - 事件：用 `tree.dispatch_to(id, &event)` 走真实三阶段；
 - 渲染：实现一个记录型 `RenderCtx`，断言 `draw_text` 收到的内容；
 - 网关：直接调 `y901_agent::handle_call`，不需要起 TCP。
+
+## 10. id 命名规范
+
+id 是 Agent 定位节点的**唯一稳定锚点**，也是 `query` 的筛选依据。建议按路径式命名：
+
+| 类型 | 规范 | 示例 |
+|---|---|---|
+| 面板/容器 | `panel.{name}` | `panel.sidebar`、`panel.editor` |
+| 列表项 | `list.{list}.item.{n}` | `list.files.item.12` |
+| 操作按钮 | `action.{verb}` | `action.save`、`action.cancel` |
+| 输入框 | `input.{field}` | `input.username`、`input.search` |
+| 弹层 | `menu.{name}` / `dialog.{name}` | `menu.file`、`dialog.confirm` |
+| 状态区 | `status.{area}` | `status.bar` |
+
+约定：
+
+1. **扁平、可读、不以数字开头**；
+2. 列表项用**数据索引**而不是屏幕序号（滚动后不变）；
+3. 同一个 id 在树里**唯一**——重复会让 `find`/`dispatch_to` 命中第一个；
+4. 动态内容（行、页签）把变化的部分放到最后一段。
+
+配套的查询示例：
+
+```
+role=button & id~="action."
+label~="Save" & limit=5
+panel.editor 里的一切：id~="panel.editor"
+```
+
+框架不强制校验命名，但 `query` 的表达式能力建立在命名可预测之上——
+命名混乱时 AI 只能拉全树，方向 C 的收益就没了。

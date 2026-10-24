@@ -525,8 +525,8 @@ impl ActionSpec {
 pub struct Semantics {
     pub label: String,
     pub value: String,
-    /// 角色名（query 用；由 tree/query 从 Widget::role() 填入）。
-    pub role_name: String,
+    /// 角色（query 用；由框架在遍历时从 Widget::role() 自动注入）。
+    pub role: Role,
     /// 该节点支持的动作名，例如 ["click", "set_text"]。
     pub actions: Vec<ActionSpec>,
     /// 额外键值（终端会填 cols/rows/scroll_offset）。
@@ -547,7 +547,7 @@ impl Default for Semantics {
         Self {
             label: String::new(),
             value: String::new(),
-            role_name: String::new(),
+            role: Role(""),
             actions: Vec::new(),
             props: Vec::new(),
             disabled: false,

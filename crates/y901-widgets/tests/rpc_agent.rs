@@ -65,6 +65,20 @@ fn text_of(node: &Json, key: &str) -> String {
 fn handle(tree: &mut UiTree, pending: Pending) {
     let result = match &pending.request {
         RpcRequest::GetTree => Ok(tree.snapshot_json()),
+        RpcRequest::Query { q } => y901_agent::dispatch_request(
+            tree,
+            &y901_agent::Policy::default(),
+            "query",
+            &Json::obj().set("q", q.clone()),
+        )
+        .map_err(|e| e.code().to_string()),
+        RpcRequest::Query { q } => y901_agent::dispatch_request(
+            tree,
+            &y901_agent::Policy::default(),
+            "query",
+            &Json::obj().set("q", q.clone()),
+        )
+        .map_err(|e| e.code().to_string()),
         RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
         RpcRequest::Dispatch { node, event } => {
             let ev = event.to_ui_event();

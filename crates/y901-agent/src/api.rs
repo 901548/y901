@@ -621,3 +621,57 @@ fn query_result(tree: &UiTree, policy: &Policy, q: &y901_ui::Query) -> Json {
         .set("count", items.len() as u32)
         .set("items", Json::Arr(items))
 }
+
+/// **统一入口**：RPC 与 MCP 都走这里。
+///
+/// 方法名同时接受短名（`query`）与工具名（`ui_query`），
+/// 这样 TCP 协议与 MCP 工具表可以各自命名，而执行逻辑只有一份。
+pub fn dispatch_request(
+    tree: &mut UiTree,
+    policy: &Policy,
+    method: &str,
+    params: &Json,
+) -> Result<Json, ApiError> {
+    let call = match method {
+        "get_tree" | "tree" | "ui_tree" => ApiCall::Tree,
+        "query" | "ui_query" => ApiCall::Query {
+            q: arg_str(params, "q")?,
+        },
+        "click" | "ui_click" => ApiCall::Click {
+            id: arg_str(params, "id")?,
+            if_rev: arg_u64(params, "if_rev"),
+        },
+        "type" | "ui_type_text" => ApiCall::Type {
+            id: arg_str(params, "id")?,
+            text: arg_str(params, "text")?,
+            if_rev: arg_u64(params, "if_rev"),
+        },
+        "scroll" | "ui_scroll" => ApiCall::Scroll {
+            id: arg_str(params, "id")?,
+            delta: params.get("delta").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
+            if_rev: arg_u64(params, "if_rev"),
+        },
+        "invoke" | "ui_invoke" => ApiCall::Invoke {
+            id: arg_str(params, "id")?,
+            action: arg_str(params, "action")?,
+            args: params.get("args").cloned().unwrap_or_else(Json::obj),
+            if_rev: arg_u64(params, "if_rev"),
+        },
+        other => {
+            return Err(ApiError::BadRequest(format!("unknown method: {other}")));
+        }
+    };
+    handle_call(tree, policy, call)
+}
+
+fn arg_str(params: &Json, key: &str) -> Result<String, ApiError> {
+    params
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| ApiError::BadRequest(format!("missing argument: {key}")))
+}
+
+fn arg_u64(params: &Json, key: &str) -> Option<u64> {
+    params.get(key).and_then(|v| v.as_f64()).map(|f| f as u64)
+}

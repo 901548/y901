@@ -368,6 +368,16 @@ fn switch_demo(app: &mut App, to: u8) {
 fn handle_rpc(app: &mut App, pending: Pending) {
     let result = match &pending.request {
         RpcRequest::GetTree => Ok(app.tree.snapshot_json()),
+        RpcRequest::Query { q } => {
+            // 与 MCP 的 ui_query 走同一个入口
+            let policy = y901_agent::Policy {
+                token: String::new(),
+                redact: true,
+            };
+            let params = Json::obj().set("q", q.clone());
+            y901_agent::dispatch_request(&mut app.tree, &policy, "query", &params)
+                .map_err(|e| e.code().to_string())
+        }
         RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
         RpcRequest::Dispatch { node, event } => {
             let ev = event.to_ui_event();
