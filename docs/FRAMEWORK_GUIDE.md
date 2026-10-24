@@ -128,6 +128,26 @@ fn semantics(&self) -> Semantics {
 **版本锁**：`revision()` 变化代表语义状态变了。AI 带 `if_rev` 调用时会比对它，
 不一致返回 409。文本类组件应在内容/光标变化时 bump。
 
+### 6.1 顶层语义字段 vs `state` 字段
+
+边界只有一条：**Agent 需要独立判断的东西放顶层，组件自有的结构化数据放 `state`**。
+
+| 字段 | 位置 | 理由 |
+|---|---|---|
+| `label` / `value` | 顶层 | Agent 直接读 |
+| `disabled` | **顶层** | "现在能不能点"，是独立语义 |
+| `sensitive` / `exposed_to_ai` | **顶层** | 决定"看不看得到、要不要打码" |
+| `actions` | **顶层** | 动作集 |
+| 其余（`text` / `caret` / `anchor` / `open` / `selected` …） | `state` | 组件自定义 |
+
+**禁止在 `state` 里重复顶层字段**（例如 `state("disabled", …)`）。原因：
+
+1. Agent 会看到两份，无法判断哪个是权威；
+2. revision 的哈希范围要覆盖二者时会重复计算，不覆盖时又会漏报；
+3. 两份值漂移时，没有任何机制能发现。
+
+同一条规则也适用于 `props`：`props` 只给调试看，**不进 Agent 输出，也不进哈希**。
+
 ## 7. 应用骨架
 
 ```rust

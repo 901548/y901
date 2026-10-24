@@ -678,7 +678,7 @@ impl Widget for TextInput {
             .state("caret", self.buffer.cursor())
             .state("anchor", self.buffer.anchor())
             .state("focused", self.focused)
-            .state("disabled", self.disabled)
+            // disabled 是顶层语义字段，不进 state（与 Button 保持一致）
             .disabled(self.disabled)
     }
 

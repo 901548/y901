@@ -126,3 +126,32 @@ fn disabled_matches_component_state() {
         "两种状态输出必须不同，否则字段是常量"
     );
 }
+
+/// disabled 只允许出现在顶层；state 里若出现就是双写，会让 Agent 困惑、
+/// 也会让 revision 的哈希范围含糊。此测试防止它被加回来。
+#[test]
+fn semantics_disabled_is_top_level_only() {
+    let tree = tree_with(true);
+    let btn = tree.find("ok").expect("button");
+    let sem = btn.semantics();
+    assert!(sem.disabled, "顶层 disabled 必须为 true");
+
+    if let y901_ui::Json::Obj(map) = &sem.state {
+        assert!(
+            !map.iter().any(|(k, _)| k == "disabled"),
+            "state 里不应再出现 disabled，实际 {:?}",
+            map.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    // TextInput 同样规则
+    let input = tree.find("field").expect("input");
+    let sem2 = input.semantics();
+    assert!(sem2.disabled);
+    if let y901_ui::Json::Obj(map) = &sem2.state {
+        assert!(
+            !map.iter().any(|(k, _)| k == "disabled"),
+            "TextInput 的 state 里也不应出现 disabled"
+        );
+    }
+}
