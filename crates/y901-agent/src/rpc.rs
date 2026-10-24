@@ -8,7 +8,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -190,97 +190,130 @@ impl RpcEvent {
     }
 }
 
-/// 一条待处理请求：UI 线程处理完把 JSON 塞进 `reply`。
+/// 一条待处理请求。
 ///
-/// 额外携带 `writer`：回包必须由 UI 线程**同步写回**，否则会与推送乱序
-/// （连接线程写回包、广播线程写推送，两者共用 socket 锁但先后不受控，
-/// 客户端可能先收到 `state_changed` 再收到 `subscribe` 的 ack）。
+/// **`writer_tx` 是该连接的唯一写路径**：回包与推送都进同一个有界 FIFO 队列，
+/// 由该连接的写线程按入队顺序写出。UI 线程只做 `send`/`send_timeout`，永不碰 socket。
+/// 早期实现里回包与推送由两个线程分别写 socket，先后顺序不受控，
+/// 曾导致客户端先收到 `state_changed`、后收到 `subscribe` 的 ack。
 pub struct Pending {
     pub request: RpcRequest,
     pub id: Json,
-    pub reply: Sender<Result<Json, String>>,
-    /// 该连接的写端。
-    pub writer: Arc<Mutex<TcpStream>>,
+    /// 该连接的写队列。
+    pub writer_tx: std::sync::mpsc::SyncSender<WriteJob>,
 }
 
-/// 启动 RPC 服务。
+/// 写线程的任务：回包与推送共用一条队列，保存入队顺序。
+pub enum WriteJob {
+    /// 回包：**不允许丢**（用阻塞 `send` + 超时）。
+    Reply(String),
+    /// 推送：可丢（用 `try_send`，满了丢弃并计数）。
+    Push(String),
+}
+
+/// 每条连接的写队列容量。
 ///
-/// 返回实际监听地址（端口传 0 时可拿到系统分配端口，测试用）。
+/// 取 1024：足够吸收一次突发（一帧多条 state_changed），
+/// 又能在客户端不读时尽快让 `try_send` 失败、推送被丢弃而不是堆积内存。
+const WRITE_QUEUE: usize = 1024;
+
+/// UI 线程向连接写队列投递回包时的最长等待。
+const REPLY_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// 推送总线：**UI 线程只投递字符串，绝不碰 socket**。
 ///
-/// - 有界队列（`std::sync::mpsc::sync_channel`），`send` 用 `try_send`：
-///   队列满时直接丢弃并计数，UI 线程永远不会被慢客户端拖住。
-/// - 后台线程独占连接池，负责 `writeln!` + `flush`，写失败的连接自动剔��。
+/// 每个连接一条有界队列；推送走 `try_send`（满了丢 + 计数），绝不阻塞 UI 线程。
 #[derive(Clone)]
 pub struct Broadcaster {
-    tx: std::sync::mpsc::SyncSender<String>,
-    conns: Arc<Mutex<Vec<Arc<Mutex<TcpStream>>>>>,
+    senders: Arc<Mutex<Vec<std::sync::mpsc::SyncSender<WriteJob>>>>,
     dropped: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Broadcaster {
-    /// 建一个总线（不启动线程）。返回接收端，方便测试验证"投递不阻塞"。
-    pub fn new(capacity: usize) -> (Self, std::sync::mpsc::Receiver<String>) {
-        let (tx, rx) = std::sync::mpsc::sync_channel(capacity);
-        (
-            Self {
-                tx,
-                conns: Arc::new(Mutex::new(Vec::new())),
-                dropped: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            },
-            rx,
-        )
-    }
-
-    /// 投递一行 JSON。**永不阻塞**：满了就丢，返回是否入队。
-    pub fn send(&self, line: &str) -> bool {
-        use std::sync::mpsc::TrySendError;
-        match self.tx.try_send(line.to_string()) {
-            Ok(()) => true,
-            Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
-                self.dropped
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                false
-            }
+    /// 建一个总线（不启动线程）。
+    pub fn new() -> Self {
+        Self {
+            senders: Arc::new(Mutex::new(Vec::new())),
+            dropped: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
-    /// 因队列满而丢弃的消息数（诊断）。
+    /// 投递一行 JSON 到所有连接。**永不阻塞**：满了就丢，返回是否全部入队。
+    pub fn send(&self, line: &str) -> bool {
+        use std::sync::mpsc::TrySendError;
+        let mut all = true;
+        let mut senders = match self.senders.lock() {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        senders.retain(|tx| match tx.try_send(WriteJob::Push(line.to_string())) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) => {
+                self.dropped
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                all = false;
+                true // 连接还活着，只是这条丢了
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                self.dropped
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                all = false;
+                false // 写线程已退出，注销该连接
+            }
+        });
+        all
+    }
+
+    /// 因队列满/断开而丢弃的消息数（诊断）。
     pub fn dropped(&self) -> u64 {
         self.dropped.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn connection_count(&self) -> usize {
-        self.conns.lock().map(|c| c.len()).unwrap_or(0)
+        self.senders.lock().map(|s| s.len()).unwrap_or(0)
     }
 
-    fn register(&self, stream: Arc<Mutex<TcpStream>>) {
-        if let Ok(mut conns) = self.conns.lock() {
-            conns.push(stream);
+    /// 连接数告警阈值：超过时打一行日志（不做硬上限，避免误拒真用户）。
+    const WARN_CONNECTIONS: usize = 64;
+
+    fn register(&self, tx: std::sync::mpsc::SyncSender<WriteJob>) {
+        if let Ok(mut senders) = self.senders.lock() {
+            senders.push(tx);
+            if senders.len() > Self::WARN_CONNECTIONS {
+                eprintln!(
+                    "[y901] RPC 连接数 {} 超过告警阈值 {}",
+                    senders.len(),
+                    Self::WARN_CONNECTIONS
+                );
+            }
         }
     }
+}
 
-    /// 后台写线程：从队列取数据，串行写给所有连接。
-    fn spawn_writer(self, rx: std::sync::mpsc::Receiver<String>) {
-        thread::Builder::new()
-            .name("y901-rpc-push".to_string())
-            .spawn(move || {
-                while let Ok(line) = rx.recv() {
-                    let mut conns = match self.conns.lock() {
-                        Ok(c) => c,
-                        Err(_) => break,
-                    };
-                    conns.retain(|conn| {
-                        let mut stream = match conn.lock() {
-                            Ok(s) => s,
-                            Err(_) => return false,
-                        };
-                        writeln!(stream, "{line}").is_ok() && stream.flush().is_ok()
-                    });
-                }
-            })
-            .ok();
+impl Default for Broadcaster {
+    fn default() -> Self {
+        Self::new()
     }
+}
+
+/// 每连接一个写线程：从队列取任务，按 FIFO 写 socket。
+///
+/// 退出条件（两条都会让线程结束）：
+/// 1. 所有 `Sender` 被 drop（连接被注销 + Pending 全部处理完）→ `recv` 返回 Err；
+/// 2. 写失败（对端关闭 / 重置）→ 立即 break，随后队列的 `Sender` 会收到 Disconnected。
+fn spawn_conn_writer(mut stream: TcpStream, rx: std::sync::mpsc::Receiver<WriteJob>) {
+    let _ = thread::Builder::new()
+        .name("y901-rpc-conn-writer".to_string())
+        .spawn(move || {
+            while let Ok(job) = rx.recv() {
+                let line = match job {
+                    WriteJob::Reply(s) | WriteJob::Push(s) => s,
+                };
+                if writeln!(stream, "{line}").is_err() || stream.flush().is_err() {
+                    break;
+                }
+            }
+        });
 }
 
 /// 启动 RPC 服务。
@@ -300,9 +333,7 @@ pub fn spawn_with_token(
     let listener = TcpListener::bind(addr)?;
     let local = listener.local_addr()?;
 
-    let (broadcaster, push_rx) = Broadcaster::new(1024);
-    broadcaster.clone().spawn_writer(push_rx);
-
+    let broadcaster = Broadcaster::new();
     let hub = broadcaster.clone();
     let token_for_conn = token;
     thread::Builder::new()
@@ -334,15 +365,15 @@ pub fn spawn_with_token(
 fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster, expected: String) {
     // 写超时：`reply_to` 在 UI 线程内同步写 socket，若客户端不读会把缓冲写满。
     // 100ms 是经验值（正常回包只有几百字节，远小于此），保证 UI 线程最多被占用 100ms。
-    // 彻底方案（每连接一个写线程 + 统一 FIFO 队列）记在 FRAMEWORK_GUIDE §16。
-    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(100)));
     let reader = match stream.try_clone() {
         Ok(s) => BufReader::new(s),
         Err(_) => return,
     };
-    // 写端共享：既能回包，也能被推送线程使用
-    let writer = Arc::new(Mutex::new(stream));
-    hub.register(writer.clone());
+    // 每连接一个写线程：回包与推送共用同一条有界 FIFO 队列。
+    // UI 线程只 send，永不碰 socket —— 客户端不读时阻塞的是写线程，不是 UI。
+    let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<WriteJob>(WRITE_QUEUE);
+    spawn_conn_writer(stream, job_rx);
+    hub.register(job_tx.clone());
 
     // 每请求鉴权：Token 非空时，所有请求必须携带 params.token
 
@@ -358,7 +389,9 @@ fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster, expected: Str
         let value = match Json::parse(&line) {
             Ok(v) => v,
             Err(err) => {
-                write_line(&writer, &error_response(Json::Null, &format!("parse error: {err}")));
+                let _ = job_tx.send(WriteJob::Reply(
+                    error_response(Json::Null, &format!("parse error: {err}")).to_string(),
+                ));
                 continue;
             }
         };
@@ -370,37 +403,45 @@ fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster, expected: Str
                 .and_then(|t| t.as_str());
             if presented != Some(expected.as_str()) {
                 let id = value.get("id").cloned().unwrap_or(Json::Null);
-                let mut body = error_response(id, "unauthorized: invalid or missing token");
-                body = body.set("status", 401u16).set("code", "unauthorized");
-                write_line(&writer, &body);
+                let body = error_response(id, "unauthorized: invalid or missing token")
+                    .set("status", 401u16)
+                    .set("code", "unauthorized");
+                let _ = job_tx.send(WriteJob::Reply(body.to_string()));
                 break; // 鉴权失败直接断开，不给穷举机会
             }
         }
 
-        let response = handle(value, &tx, &writer);
-        // `Null` 表示请求已转交 UI 线程，回包由 `reply_to` 同步写出
-        if matches!(response, Json::Null) {
-            continue;
-        }
-        if !write_line(&writer, &response) {
-            break;
+        let response = handle(value, &tx, &job_tx);
+        // `Deferred` 表示请求已转交 UI 线程，回包由 `reply_to` 走同一队列写出
+        if let Handled::Sync(response) = response {
+            let _ = job_tx.send(WriteJob::Reply(response.to_string()));
         }
     }
 }
 
-/// 写一行并 flush；返回是否成功。
-fn write_line(writer: &Arc<Mutex<TcpStream>>, response: &Json) -> bool {
-    let Ok(mut w) = writer.lock() else {
-        return false;
-    };
-    writeln!(w, "{response}").is_ok() && w.flush().is_ok()
+/// `handle` 的去向：同步回包，或已转交 UI 线程（回包稍后由 `reply_to` 写）。
+///
+/// 用枚举替代早期的 `Json::Null` 哨兵：类型系统强制调用方区分两种情况，
+/// 忘记处理会编译失败而不是静默丢回包。
+enum Handled {
+    Sync(Json),
+    Deferred,
 }
 
-fn handle(value: Json, tx: &Sender<Pending>, writer: &Arc<Mutex<TcpStream>>) -> Json {
+/// 同步错误的简写，保持 `handle` 内的 `return sync_err(..)` 与原签名同形。
+fn sync_err(id: Json, message: &str) -> Handled {
+    Handled::Sync(error_response(id, message))
+}
+
+fn handle(
+    value: Json,
+    tx: &Sender<Pending>,
+    writer_tx: &std::sync::mpsc::SyncSender<WriteJob>,
+) -> Handled {
     let id = value.get("id").cloned().unwrap_or(Json::Null);
     let method = match value.get("method").and_then(|m| m.as_str()) {
         Some(m) => m.to_string(),
-        None => return error_response(id, "missing method"),
+        None => return sync_err(id, "missing method"),
     };
 
     let params = value.get("params").cloned().unwrap_or_else(Json::obj);
@@ -411,23 +452,23 @@ fn handle(value: Json, tx: &Sender<Pending>, writer: &Arc<Mutex<TcpStream>>) -> 
         "dispatch" => {
             let node = match params.get("id").and_then(|v| v.as_str()) {
                 Some(v) => v.to_string(),
-                None => return error_response(id, "dispatch requires id"),
+                None => return sync_err(id, "dispatch requires id"),
             };
             let event = match params.get("event").map(RpcEvent::from_json) {
                 Some(Ok(ev)) => ev,
-                Some(Err(err)) => return error_response(id, &err),
-                None => return error_response(id, "dispatch requires event"),
+                Some(Err(err)) => return sync_err(id, &err),
+                None => return sync_err(id, "dispatch requires event"),
             };
             RpcRequest::Dispatch { node, event }
         }
         "invoke" => {
             let node = match params.get("id").and_then(|v| v.as_str()) {
                 Some(v) => v.to_string(),
-                None => return error_response(id, "invoke requires id"),
+                None => return sync_err(id, "invoke requires id"),
             };
             let action = match params.get("action").and_then(|v| v.as_str()) {
                 Some(v) => v.to_string(),
-                None => return error_response(id, "invoke requires action"),
+                None => return sync_err(id, "invoke requires action"),
             };
             let args = params.get("args").cloned().unwrap_or_else(Json::obj);
             RpcRequest::Invoke {
@@ -439,14 +480,14 @@ fn handle(value: Json, tx: &Sender<Pending>, writer: &Arc<Mutex<TcpStream>>) -> 
         "query" => {
             let q = match params.get("q").and_then(|v| v.as_str()) {
                 Some(v) => v.to_string(),
-                None => return error_response(id, "query requires q"),
+                None => return sync_err(id, "query requires q"),
             };
             RpcRequest::Query { q }
         }
         "subscribe" => {
             let node = match params.get("id").and_then(|v| v.as_str()) {
                 Some(v) => v.to_string(),
-                None => return error_response(id, "subscribe requires id"),
+                None => return sync_err(id, "subscribe requires id"),
             };
             let interval_ms = params
                 .get("interval_ms")
@@ -457,14 +498,14 @@ fn handle(value: Json, tx: &Sender<Pending>, writer: &Arc<Mutex<TcpStream>>) -> 
         "unsubscribe" => {
             let node = match params.get("id").and_then(|v| v.as_str()) {
                 Some(v) => v.to_string(),
-                None => return error_response(id, "unsubscribe requires id"),
+                None => return sync_err(id, "unsubscribe requires id"),
             };
             RpcRequest::Unsubscribe { node }
         }
         "focus" => {
             let node = match params.get("id").and_then(|v| v.as_str()) {
                 Some(v) => v.to_string(),
-                None => return error_response(id, "focus requires id"),
+                None => return sync_err(id, "focus requires id"),
             };
             RpcRequest::Focus { node }
         }
@@ -473,18 +514,16 @@ fn handle(value: Json, tx: &Sender<Pending>, writer: &Arc<Mutex<TcpStream>>) -> 
         },
     };
 
-    let (reply_tx, _reply_rx) = channel();
     let pending = Pending {
         request,
         id: id.clone(),
-        reply: reply_tx,
-        writer: writer.clone(),
+        writer_tx: writer_tx.clone(),
     };
     if tx.send(pending).is_err() {
-        return error_response(id, "ui thread is gone");
+        return sync_err(id, "ui thread is gone");
     }
-    // 已转交 UI 线程：回包由 reply_to 在 UI 线程内同步写出（保证早于推送）
-    Json::Null
+    // 已转交 UI 线程：回包由 reply_to 投递到同一条写队列
+    Handled::Deferred
 }
 
 fn error_response(id: Json, message: &str) -> Json {
@@ -494,11 +533,12 @@ fn error_response(id: Json, message: &str) -> Json {
         .set("error", message)
 }
 
-/// UI 线程侧：把请求处理结果**同步**写回该连接。
+/// UI 线程侧：把请求处理结果投递到该连接的写队列。
 ///
-/// 同步写出的关键作用：调用方（host）处理完请求后会紧接着 `hub.send` 推送，
-/// 推送走广播队列（另一个线程）。回包先落 socket、推送后落，
-/// 客户端因此不会先收到 `state_changed`、再收到本请求的 ack。
+/// **不碰 socket**：写由该连接的写线程完成，UI 线程永不被慢客户端阻塞。
+/// 回包不允许丢，所以用阻塞 `send_timeout`；超时上限 100ms。
+/// 顺序由队列保证：本函数入队后，调用方才会 `hub.send` 推送，
+/// 所以客户端一定先收到 ack、再收到该请求触发的推送。
 pub fn reply_to(pending: Pending, result: Result<Json, String>) {
     let body = match result {
         Ok(result) => Json::obj()
@@ -507,13 +547,36 @@ pub fn reply_to(pending: Pending, result: Result<Json, String>) {
             .set("result", result),
         Err(err) => error_response(pending.id.clone(), &err),
     };
-    if !write_line(&pending.writer, &body) {
-        // 写失败 = 客户端已断开，或写超时（对端不读）。
-        // 立刻 shutdown，让后续推送也尽早失败，避免每条消息都等满 100ms。
-        if let Ok(stream) = pending.writer.lock() {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
+    match enqueue_reply(&pending.writer_tx, WriteJob::Reply(body.to_string())) {
+        Ok(()) => {}
+        Err(err) => {
+            // 队列满（客户端不读，写线程堵在 socket 上）或连接已注销。
+            // 丢回包会让 Agent 永远等不到 ack，因此这里必须留下痕迹。
+            eprintln!("[y901] RPC 回复入队失败（连接过慢或已断开）：{err}");
         }
-        eprintln!("[y901] RPC 回复写入失败（对端断开或不读），关闭连接");
+    }
+}
+
+/// 向有界队列投递，最多等待 [`REPLY_SEND_TIMEOUT`]。
+///
+/// `SyncSender::send_timeout` 仍是 unstable 特性，这里用 `try_send` + 短睡眠轮询实现。
+/// 上限 100ms 保证 UI 线程不会被慢客户端长期占用；超时返回 `Err`。
+fn enqueue_reply(tx: &std::sync::mpsc::SyncSender<WriteJob>, job: WriteJob) -> Result<(), String> {
+    use std::sync::mpsc::TrySendError;
+    let deadline = std::time::Instant::now() + REPLY_SEND_TIMEOUT;
+    let mut job = job;
+    loop {
+        match tx.try_send(job) {
+            Ok(()) => return Ok(()),
+            Err(TrySendError::Full(back)) => {
+                if std::time::Instant::now() >= deadline {
+                    return Err("写队列已满（客户端不读）".to_string());
+                }
+                job = back;
+                std::thread::sleep(std::time::Duration::from_micros(200));
+            }
+            Err(TrySendError::Disconnected(_)) => return Err("连接已断开".to_string()),
+        }
     }
 }
 

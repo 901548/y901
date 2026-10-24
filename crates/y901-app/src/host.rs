@@ -24,7 +24,7 @@ impl Shell {
             policy,
             mcp: None,
             rpc_rx: None,
-            hub: y901_agent::Broadcaster::new(64).0,
+            hub: y901_agent::Broadcaster::new(),
         }
     }
 }

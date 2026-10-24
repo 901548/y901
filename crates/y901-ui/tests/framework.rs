@@ -1124,37 +1124,51 @@ fn layers_paint_in_order() {
 fn broadcast_never_blocks_ui() {
     use std::time::{Duration, Instant};
 
-    // 容量 2，且**不启动写线程**：队列必然被填满
-    let (hub, rx) = y901_agent::rpc::Broadcaster::new(2);
+    // 真实监听 + 一个"只连不读"的客户端：写线程会卡在 socket 上，
+    // 队列填满后 `send` 必须丢包而不是阻塞。
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let (addr, hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind");
+    let _client = std::net::TcpStream::connect(addr).expect("connect");
+    std::thread::sleep(Duration::from_millis(50)); // 等连接注册
 
+    // 每条 4KB：几百条就能把内核缓冲 + 1024 深度队列灌满
+    let payload = format!("{{\"event\":\"tick\",\"blob\":\"{}\"}}", "x".repeat(4000));
     let start = Instant::now();
-    for i in 0..1000 {
-        hub.send(&format!("{{\"event\":\"tick\",\"n\":{i}}}"));
+    for _ in 0..3000 {
+        hub.send(&payload);
     }
     let elapsed = start.elapsed();
 
     assert!(
-        elapsed < Duration::from_millis(50),
-        "1000 次投递必须立即返回，实际耗时 {elapsed:?}"
+        elapsed < Duration::from_millis(500),
+        "3000 次投递必须立即返回（不阻塞 UI），实际 {elapsed:?}"
     );
-    assert_eq!(rx.try_iter().count(), 2, "只有容量内的消息进入队列");
-    assert_eq!(hub.dropped(), 998, "其余全部被丢弃而不是阻塞");
+    assert!(
+        hub.dropped() > 0,
+        "队列应被灌满并丢弃多余推送，实际 dropped={}",
+        hub.dropped()
+    );
 }
 
 #[test]
 fn broadcast_writer_removes_dead_connections() {
-    // 建一个真实监听：客户端连上后立刻关闭，写线程应把它剔除
+    // 客户端连上后立刻关闭：写线程下一次写失败 → 线程退出 → 连接被注销。
     let (tx, _rx) = std::sync::mpsc::channel();
     let (addr, hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind");
     {
         let stream = std::net::TcpStream::connect(addr).expect("connect");
-        drop(stream); // 立即断开
+        drop(stream);
     }
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    for _ in 0..5 {
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let mut count = usize::MAX;
+    while std::time::Instant::now() < deadline {
         hub.send("{\"event\":\"ping\"}");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        count = hub.connection_count();
+        if count == 0 {
+            break;
+        }
     }
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    // 不 panic 即通过：写失败会自动剔除
-    assert!(hub.dropped() <= 5);
+    assert_eq!(count, 0, "断开连接必须被注销");
 }
