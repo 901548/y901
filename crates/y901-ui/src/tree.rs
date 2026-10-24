@@ -1319,12 +1319,20 @@ fn render_pass(
         if node.needs_paint(dirty) {
             node.render(ctx);
         }
+        // 滚动容器：子节点只能画在视口内
+        let clip = node.clip();
+        if let Some(c) = clip {
+            ctx.push_clip(c);
+        }
         if let Some(children) = node.children_mut() {
             for (i, child) in children.iter_mut().enumerate() {
                 path.push(i);
                 render_pass(child.as_mut(), ctx, dirty, effective, path, deferred);
                 path.pop();
             }
+        }
+        if clip.is_some() {
+            ctx.pop_clip();
         }
     } else {
         // 整个子树延后：只记路径，稍后按层统一回放
@@ -1337,10 +1345,17 @@ fn render_subtree(node: &mut dyn Widget, ctx: &mut dyn RenderCtx, dirty: &DirtyR
     if node.needs_paint(dirty) {
         node.render(ctx);
     }
+    let clip = node.clip();
+    if let Some(c) = clip {
+        ctx.push_clip(c);
+    }
     if let Some(children) = node.children_mut() {
         for child in children.iter_mut() {
             render_subtree(child.as_mut(), ctx, dirty);
         }
+    }
+    if clip.is_some() {
+        ctx.pop_clip();
     }
 }
 
