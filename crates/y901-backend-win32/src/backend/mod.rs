@@ -34,6 +34,17 @@ pub struct D3dBackend {
 }
 
 impl D3dBackend {
+    /// 初始化 D3D11 设备、交换链与 DirectWrite 文本引擎。
+    ///
+    /// # Safety
+    ///
+    /// 调用者必须保证：
+    /// - `hwnd` 是有效且未销毁的窗口句柄，且调用期间不会被其它线程销毁；
+    /// - 调用发生在拥有该窗口的线程上；
+    /// - `width`、`height` 均大于 0。
+    ///
+    /// 违反会导致：交换链绑定到悬垂 HWND，`Present` 时访问已释放的窗口内存
+    /// （未定义行为）；DirectWrite 一侧失败则返回 `Err`，可恢复。
     pub unsafe fn new(hwnd: HWND, width: u32, height: u32) -> Result<Self, String> {
         // 逐字节核对 CPU 实例布局与 GPU InputLayout：错一个字节整屏都是乱码。
         d3d11::verify_instance_layout()?;
@@ -78,6 +89,16 @@ impl D3dBackend {
     }
 
     /// 提交一帧。返回是否需要继续重绘。
+    ///
+    /// # Safety
+    ///
+    /// 调用者必须保证：
+    /// - `hwnd` 仍是创建本后端时使用的窗口，且尚未销毁；
+    /// - `width`、`height` 是**当前**客户区尺寸（不一致会走重建路径）；
+    /// - 同线程调用。
+    ///
+    /// 违反会导致：重建路径用悬垂 HWND 创建交换链（未定义行为），
+    /// 或尺寸反复不一致造成资源重建风暴。设备丢失属于预期，返回 `false` 而非崩溃。
     pub unsafe fn present(&mut self, hwnd: HWND, width: u32, height: u32) -> bool {
         if self.gfx.is_empty() {
             if let Err(err) = self.gfx.rebuild(hwnd, width, height) {
@@ -118,6 +139,16 @@ impl D3dBackend {
         !Gfx::is_occluded(hr)
     }
 
+    /// 记录新的客户区尺寸并尝试同步交换链。
+    ///
+    /// # Safety
+    ///
+    /// 调用者必须保证：
+    /// - `width`、`height` 大于 0（0 尺寸会让 `ResizeBuffers` 失败）；
+    /// - 同线程调用，且此刻没有外部代码持有本后端的 back buffer 引用。
+    ///
+    /// 违反会导致：`ResizeBuffers` 返回 `DXGI_ERROR_INVALID_CALL`；
+    /// 本方法只打印错误并保留旧尺寸，不会 panic。
     pub unsafe fn resize(&mut self, width: u32, height: u32) {
         self.viewport = Size::new(width as f32, height as f32);
         // 交换链尺寸更新交给 present 前的 rebuild 路径；这里只记尺寸。

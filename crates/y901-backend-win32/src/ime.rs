@@ -75,6 +75,16 @@ pub fn composition_flags(lparam: LPARAM) -> u32 {
 }
 
 /// 读 GCS_COMPSTR；空串时返回 None。
+///
+/// # Safety
+///
+/// 调用者必须保证：
+/// - `hwnd` 是有效且未销毁的窗口句柄，并且**调用线程**是该窗口的创建线程
+///   （IMM 上下文按线程绑定，跨线程调用 `ImmGetContext` 会拿到无效上下文）；
+/// - `flag` 是 IMM 认识的 GCS_* 位（如 `GCS_COMPSTR` / `GCS_RESULTSTR`）。
+///
+/// 违反会导致：`ImmGetContext` 返回空指针（本函数已判空并返回 `None`，安全），
+/// 或在错误的线程上读取到别的输入法上下文，返回垃圾 UTF-16 数据。
 pub unsafe fn get_composition_string(hwnd: HWND, flag: u32) -> Option<Vec<u16>> {
     let himc = ImmGetContext(hwnd);
     if himc.is_null() {
@@ -97,11 +107,20 @@ pub unsafe fn get_composition_string(hwnd: HWND, flag: u32) -> Option<Vec<u16>> 
     Some(buf)
 }
 
-/// 把候选窗与组合窗钉在客户区 (x, y)。
 /// 把候选窗/组合窗钉在客户区 (x, y)。
 ///
 /// 留作后续接线：TextInput 需要它把 IME 候选框贴到光标处，
 /// 当前应用还没调用（终端组件自己画预编辑串）。
+///
+/// # Safety
+///
+/// 调用者必须保证：
+/// - `hwnd` 有效且未销毁，且调用发生在该窗口的创建线程上（IMM 上下文按线程绑定）；
+/// - `x`、`y` 是**客户区**像素坐标（非屏幕坐标），并且落在合理范围内
+///   （超出 `i32` 表示范围会被截断）。
+///
+/// 违反会导致：`ImmGetContext` 返回空指针（本函数已判空返回，安全），
+/// 或把候选窗钉到错误位置；不会造成内存不安全。
 #[allow(dead_code)]
 pub unsafe fn set_composition_position(hwnd: HWND, x: f32, y: f32) {
     let himc = ImmGetContext(hwnd);
@@ -139,7 +158,20 @@ pub enum ImeAction {
     Commit(String),
 }
 
-/// 消息路由。
+/// 消息路由：把 WM_IME_* 翻译成 [`ImeAction`]。
+///
+/// # Safety
+///
+/// 调用者必须保证：
+/// - `hwnd` 有效且未销毁，且调用发生在该窗口的创建线程上；
+/// - `msg` 必须是 `WM_IME_STARTCOMPOSITION` / `WM_IME_COMPOSITION` /
+///   `WM_IME_ENDCOMPOSITION` 之一 —— `lparam` 的解释随 `msg` 变化，
+///   对普通消息调用会把 `lparam` 当位掩码解析；
+/// - `lparam` 必须来自对应 `msg` 的窗口过程调用（不可伪造）。
+///
+/// 违反会导致：把任意整数当 GCS 位掩码，进而调用 `ImmGetCompositionStringW`
+/// 读取不存在的组合串（返回错误码，本函数会降级为 `Redraw`），
+/// 或对错误窗口取上下文导致候选窗错位；不会造成内存不安全。
 pub unsafe fn handle_ime_message(
     hwnd: HWND,
     msg: u32,

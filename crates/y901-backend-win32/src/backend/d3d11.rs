@@ -1151,6 +1151,18 @@ pub struct Gfx {
 }
 
 impl Gfx {
+    /// 创建 D3D11 设备、交换链与管线，并绑定到给定窗口。
+    ///
+    /// # Safety
+    ///
+    /// 调用者必须保证：
+    /// - `hwnd` 是**有效且未销毁**的窗口句柄，且调用期间不会被其它线程销毁；
+    /// - 调用发生在拥有该窗口的线程上（D3D11 immediate context 非线程安全）；
+    /// - `width`、`height` 均大于 0。
+    ///
+    /// 违反任一条会导致：DXGI 创建失败（返回错误码，可恢复），
+    /// 或产生绑定到悬垂 HWND 的交换链，后续 `Present` 访问已释放窗口内存
+    /// （未定义行为，通常表现为进程崩溃）。
     pub unsafe fn new(hwnd: HWND, width: u32, height: u32) -> Result<Self, String> {
         let mut gfx = Self {
             atlas: None,
@@ -1168,6 +1180,16 @@ impl Gfx {
         Ok(gfx)
     }
 
+    /// 丢弃现有 COM 对象并整套重建（设备丢失或窗口重建后调用）。
+    ///
+    /// # Safety
+    ///
+    /// 调用者必须保证：
+    /// - `hwnd` 与 [`Gfx::new`] 的要求相同（有效、同线程、未销毁）；
+    /// - 重建期间没有外部代码持有本 `Gfx` 内部 COM 对象的裸指针副本
+    ///   （本方法会无条件释放 device / context / swap_chain / atlas）。
+    ///
+    /// 违反会导致：旧指针悬垂，后续提交命令时访问已释放的 COM 对象（未定义行为）。
     pub unsafe fn rebuild(&mut self, hwnd: HWND, width: u32, height: u32) -> Result<(), String> {
         self.atlas = None;
         self.pipeline = None;
@@ -1236,6 +1258,16 @@ impl Gfx {
     }
 
     /// 把 CPU 端的脏矩形拷进纹理。`reset = true` 时整张重传。
+    ///
+    /// # Safety
+    ///
+    /// 调用者必须保证：
+    /// - `data.len() >= (size as usize) * (size as usize)`（图集是 `size × size` 的 R8 单通道）；
+    /// - `size > 0` 且不超过设备最大纹理尺寸；
+    /// - `dirty` 中每个矩形满足 `x + width <= size`、`y + height <= size`。
+    ///
+    /// 违反会导致：`UpdateSubresource` 从 `data` 越界读取（未定义行为），
+    /// 或写入纹理越界区域（D3D11 报错或破坏相邻数据）。
     pub unsafe fn update_atlas(
         &mut self,
         data: &[u8],
@@ -1284,6 +1316,17 @@ impl Gfx {
         Ok(())
     }
 
+    /// 调整交换链缓冲尺寸，并重新绑定渲染目标。
+    ///
+    /// # Safety
+    ///
+    /// 调用者必须保证：
+    /// - `width`、`height` 均大于 0；
+    /// - 调用时没有任何外部代码仍持有旧的 back buffer / RTV 引用
+    ///   （本方法内部会先解绑并释放）。
+    ///
+    /// 违反会导致：DXGI 返回 `DXGI_ERROR_INVALID_CALL`（可恢复，本次 resize 失败），
+    /// 或旧引用与新建缓冲并存，造成画面错乱。
     pub unsafe fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
         if width == 0 || height == 0 || (width == self.width && height == self.height) {
             return Ok(());
@@ -1308,6 +1351,17 @@ impl Gfx {
         Ok(())
     }
 
+    /// 提交一帧：上传实例、画一次 `DrawInstanced`、`Present`。
+    ///
+    /// # Safety
+    ///
+    /// 调用者必须保证：
+    /// - `Gfx` 已通过 [`Gfx::new`] / [`Gfx::rebuild`] 成功初始化；
+    /// - 若图集存在，必须在此前调用过 [`Gfx::update_atlas`]（否则 PS 采样未绑定的 SRV）；
+    /// - 仍在创建窗口的线程上调用。
+    ///
+    /// `instances` 长度任意：内部按 `INSTANCE_CAPACITY` 截断，不会越界。
+    /// 违反前述任一条不会造成内存不安全，但会得到未定义的画面或设备错误码。
     pub unsafe fn render(&mut self, instances: &[Instance], sync_interval: u32) -> Hresult {
         let (Some(pipeline), Some(rtv), Some(context), Some(swap_chain)) = (
             self.pipeline.as_ref(),
