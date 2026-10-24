@@ -139,6 +139,16 @@ pub struct UiTree {
     subscriptions: Vec<Subscription>,
     /// 响应式失效队列（Signal 变化 → 节点标脏）。
     invalidation_queue: crate::signal::Invalidation,
+    /// 每个 id 的实例代号：`add_node` 时递增，用于识别 id 复用。
+    generations: HashMap<String, u64>,
+    /// 自增代号源。
+    next_generation: u64,
+    /// 上次观察到的语义面 `(generation, hash)`。
+    last_semantic: HashMap<String, (u64, u64)>,
+    /// 框架维护的 revision 计数器（与组件自己的 `revision()` 相加）。
+    rev: HashMap<String, u64>,
+    /// 待检查语义的节点：dispatch 触及的 + Signal 失效的。
+    pending_semantic: std::collections::HashSet<String>,
 }
 
 impl UiTree {
@@ -165,11 +175,24 @@ impl UiTree {
             focus_order: Vec::new(),
             subscriptions: Vec::new(),
             invalidation_queue: crate::signal::Invalidation::new(),
+            generations: HashMap::new(),
+            next_generation: 1,
+            last_semantic: HashMap::new(),
+            rev: HashMap::new(),
+            pending_semantic: std::collections::HashSet::new(),
         };
 
         // 初始树也要触发 on_mount：bind() 的 Signal 才能自动订阅
         let invalidation = this.invalidation_queue.clone();
         mount_recursive(this.root.as_mut(), &invalidation);
+        // 给初始树分配 generation 并登记待建基线（首帧不 bump）
+        let gen = this.next_generation;
+        this.next_generation += 1;
+        let ids = collect_ids(this.root.as_ref());
+        for id in ids {
+            this.generations.insert(id.clone(), gen);
+            this.pending_semantic.insert(id);
+        }
         this
     }
 
@@ -323,9 +346,36 @@ impl UiTree {
             }
         }
 
+        self.register_new_subtree(parent, true);
         self.cache.mark_dirty(parent);
         self.dirty = DirtyRegion::full();
         true
+    }
+
+    /// 给刚挂上的子树分配 generation 并登记待建基线（首帧不 bump）。
+    ///
+    /// `last = true` 取最后一个子节点（add_node）；否则需要调用方给定索引。
+    fn register_new_subtree(&mut self, parent: &str, last: bool) {
+        let ids = {
+            let Some(node) = self.find(parent) else {
+                return;
+            };
+            let child = if last {
+                node.children().last()
+            } else {
+                None
+            };
+            match child {
+                Some(c) => collect_ids(c.as_ref()),
+                None => return,
+            }
+        };
+        let gen = self.next_generation;
+        self.next_generation += 1;
+        for id in ids {
+            self.generations.insert(id.clone(), gen);
+            self.pending_semantic.insert(id);
+        }
     }
 
 
@@ -356,11 +406,30 @@ impl UiTree {
             }
         }
 
+        self.register_new_subtree_at(parent, at);
         self.cache.mark_dirty(parent);
         self.dirty = DirtyRegion::full();
         true
     }
-    /// 子树里是否有 id 已存在于当前树中。
+
+    /// 给插入位置 `at` 上的新子树分配 generation。
+    fn register_new_subtree_at(&mut self, parent: &str, at: usize) {
+        let ids = {
+            let Some(node) = self.find(parent) else {
+                return;
+            };
+            match node.children().get(at) {
+                Some(c) => collect_ids(c.as_ref()),
+                None => return,
+            }
+        };
+        let gen = self.next_generation;
+        self.next_generation += 1;
+        for id in ids {
+            self.generations.insert(id.clone(), gen);
+            self.pending_semantic.insert(id);
+        }
+    }
     fn subtree_has_duplicate(&self, node: &dyn Widget) -> bool {
         if self.find(node.id()).is_some() {
             return true;
@@ -400,6 +469,8 @@ impl UiTree {
         };
 
         // 卸载钩子（整棵被摘掉的子树）
+        // 同 id 将来若被复用，不能继承旧实例的哈希快照（否则会假 bump）
+        forget_recursive(removed.as_ref(), self);
         unmount_recursive(removed);
 
         let parent_id = self
@@ -435,10 +506,55 @@ impl UiTree {
         for id in &ids {
             self.cache.mark_dirty(id);
             self.invalidate(id);
+            // Signal 驱动的变化不经 dispatch，必须在这里登记语义检查
+            self.pending_semantic.insert(id.clone());
         }
         self.dirty = DirtyRegion::full();
         ids.len()
     }
+
+    // ---------- 语义 revision（方案 1'） ----------
+
+    /// 节点对 Agent 的"有效版本"：组件自己的 revision + 框架计数器。
+    ///
+    /// 输入：节点 id。失败：id 不存在时返回 0（不 panic）。
+    pub fn effective_revision(&self, id: &str) -> u64 {
+        let own = self.find(id).map(|n| n.revision()).unwrap_or(0);
+        own + self.rev.get(id).copied().unwrap_or(0)
+    }
+
+    /// 检查待定节点的语义面是否变化，变化则 bump。
+    ///
+    /// 幂等：没有待定节点时立即返回。失败：id 已不在树上时跳过。
+    pub fn refresh_semantics(&mut self) {
+        if self.pending_semantic.is_empty() {
+            return;
+        }
+        let ids: Vec<String> = self.pending_semantic.drain().collect();
+        for id in ids {
+            // 先结束不可变借用，再写 map
+            let Some((hash, gen)) = self
+                .find(&id)
+                .map(|node| (semantic_hash(node), self.generations.get(&id).copied().unwrap_or(0)))
+            else {
+                continue;
+            };
+            match self.last_semantic.get(&id).copied() {
+                // 同一实例、语义面变了 → bump
+                Some((g, h)) if g == gen && h != hash => {
+                    self.last_semantic.insert(id.clone(), (gen, hash));
+                    *self.rev.entry(id).or_insert(0) += 1;
+                }
+                // 同一实例、语义面未变 → 什么都不做（hover 走这条）
+                Some((g, _)) if g == gen => {}
+                // 新实例（generation 不同）或无记录 → 只记基线，不 bump
+                _ => {
+                    self.last_semantic.insert(id, (gen, hash));
+                }
+            }
+        }
+    }
+
     /// 取走组件请求的 IME 候选窗位置（应用层每帧调用一次）。
     pub fn take_pending_ime(&mut self) -> Option<Pos> {
         self.pending_ime.take()
@@ -656,6 +772,8 @@ impl UiTree {
     pub fn layout(&mut self, viewport: Size, metrics: &dyn TextMetrics) {
         // 响应式：Signal 变过的节点先标脏，再进布局
         self.drain_invalidation();
+        // Signal 与 dispatch 触及的节点在此统一比对语义面（方案 1'，一帧一次）
+        self.refresh_semantics();
         let viewport_changed = self.viewport != viewport;
         if viewport_changed {
             self.cache.mark_dirty(self.root.id());
@@ -1104,6 +1222,11 @@ impl UiTree {
             self.cache.mark_dirty(&target);
             self.dirty = DirtyRegion::full();
         }
+        // 目标节点的语义面可能在这次事件里变了：登记到待检查集合，
+        // 下一次 refresh_semantics 会比对哈希并决定是否 bump。
+        if !target.is_empty() {
+            self.pending_semantic.insert(target);
+        }
         self.pending.append(&mut ctx.commands);
 
         // 组件请求的 IME 候选窗位置：留给应用层下一帧落实
@@ -1469,5 +1592,62 @@ fn mount_recursive(node: &mut dyn Widget, invalidation: &crate::signal::Invalida
         for child in children.iter_mut() {
             mount_recursive(child.as_mut(), invalidation);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// revision 辅助：语义面哈希 / generation 登记
+// ---------------------------------------------------------------------------
+
+/// 语义面哈希：**Agent 可见的字段**才参与。
+///
+/// 进：role / label / value / actions / state / disabled / sensitive / exposed
+/// 不进：id（身份）、rect（几何）、props（调试信息）
+///
+/// 用 FNV-1a 增量写入，不构造中间 String（比 to_string 快数倍）。
+fn semantic_hash(node: &dyn Widget) -> u64 {
+    let sem = node.semantics();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut feed = |bytes: &[u8]| {
+        for b in bytes {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x1000_0000_01b3);
+        }
+        h ^= 0xff; // 字段分隔，避免 "ab"+"c" 与 "a"+"bc" 撞车
+        h = h.wrapping_mul(0x1000_0000_01b3);
+    };
+
+    feed(node.role().as_str().as_bytes());
+    feed(sem.label.as_bytes());
+    feed(sem.value.as_bytes());
+    feed(&u64::from(sem.disabled).to_le_bytes());
+    feed(&u64::from(sem.sensitive).to_le_bytes());
+    feed(&u64::from(sem.exposed_to_ai).to_le_bytes());
+    feed(sem.state.to_string().as_bytes());
+    for action in &sem.actions {
+        feed(action.name.as_bytes());
+        feed(&[action.input as u8]);
+    }
+    h
+}
+
+/// 收集子树里所有 id（前序）。
+fn collect_ids(node: &dyn Widget) -> Vec<String> {
+    let mut out = vec![node.id().to_string()];
+    for child in node.children() {
+        out.extend(collect_ids(child.as_ref()));
+    }
+    out
+}
+
+/// 把子树里每个 id 从所有 revision 相关 map 里清掉。
+fn forget_recursive(node: &dyn Widget, tree: &mut UiTree) {
+    let id = node.id().to_string();
+    tree.generations.remove(&id);
+    tree.last_semantic.remove(&id);
+    tree.rev.remove(&id);
+    tree.pending_semantic.remove(&id);
+    for child in node.children() {
+        forget_recursive(child.as_ref(), tree);
     }
 }

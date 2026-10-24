@@ -309,8 +309,13 @@ fn locate(tree: &UiTree, id: &str) -> Result<(Rect, u64), ApiError> {
     Ok((rect, node.revision()))
 }
 
-fn revision_of(tree: &UiTree, id: &str) -> u64 {
-    tree.find(id).map(|n| n.revision()).unwrap_or(0)
+/// 节点对 Agent 的有效 revision（组件自身 + 框架计数器）。
+///
+/// 先 `refresh_semantics()`：动作刚发生时语义面还没被下一帧 layout 检查过，
+/// 这里补一次，保证返回给 Agent 的 rev 是**动作之后**的值。
+fn revision_of(tree: &mut UiTree, id: &str) -> u64 {
+    tree.refresh_semantics();
+    tree.effective_revision(id)
 }
 
 fn check_rev(expected: Option<u64>, actual: u64) -> Result<(), ApiError> {
@@ -325,7 +330,7 @@ fn check_rev(expected: Option<u64>, actual: u64) -> Result<(), ApiError> {
 
 /// 给 AI 看的树：过滤作用域 + 脱敏。
 fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
-    fn walk(node: &dyn y901_ui::Widget, policy: &Policy) -> Option<Json> {
+    fn walk(node: &dyn y901_ui::Widget, tree: &UiTree, policy: &Policy) -> Option<Json> {
         let sem = node.semantics();
         if !sem.exposed_to_ai {
             return None;
@@ -335,7 +340,7 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
         let children: Vec<Json> = node
             .children()
             .iter()
-            .filter_map(|c| walk(c.as_ref(), policy))
+            .filter_map(|c| walk(c.as_ref(), tree, policy))
             .collect();
         Some(
             Json::obj()
@@ -349,7 +354,7 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
                         .set("w", rect.w)
                         .set("h", rect.h),
                 )
-                .set("revision", node.revision())
+                .set("revision", tree.effective_revision(node.id()))
                 .set("sensitive", merged.get("sensitive").cloned().unwrap_or(Json::Bool(false)))
                 // disabled 是 Agent 的可见语义（"现在点不了"），必须输出；
                 // 后续 revision 的哈希范围与这里保持一一对应。
@@ -364,7 +369,7 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
         )
     }
 
-    walk(tree.root(), policy).unwrap_or_else(Json::obj)
+    walk(tree.root(), tree, policy).unwrap_or_else(Json::obj)
 }
 
 /// 统一的节点脱敏：把 `Semantics` 转成给 AI 看的 JSON。
@@ -424,7 +429,7 @@ fn query_result(tree: &UiTree, policy: &Policy, q: &y901_ui::Query) -> Json {
                 .set("id", id)
                 .set("role", node.role().as_str())
                 .set("label", redacted.get("label").cloned().unwrap_or(Json::Null))
-                .set("revision", node.revision())
+                .set("revision", tree.effective_revision(node.id()))
                 // 与 public_tree 对齐：disabled 属于 Agent 可操作性的输入
                 .set("disabled", redacted.get("disabled").cloned().unwrap_or(Json::Bool(false)))
                 .set(

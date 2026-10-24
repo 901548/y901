@@ -155,3 +155,17 @@ fn semantics_disabled_is_top_level_only() {
         );
     }
 }
+/// disabled=false 时 state 里同样不应出现 disabled（防"只在 true 时删"的半吊子实现）。
+#[test]
+fn semantics_disabled_false_has_no_state_key() {
+    use y901_ui::Widget;
+    let btn = y901_widgets::Button::new("b", "x");
+    let sem = btn.semantics();
+    assert!(!sem.disabled, "默认应是可用的");
+    if let y901_ui::Json::Obj(map) = &sem.state {
+        assert!(
+            !map.iter().any(|(k, _)| k == "disabled"),
+            "disabled=false 时 state 也不应有 disabled"
+        );
+    }
+}
