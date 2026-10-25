@@ -346,3 +346,17 @@ fn subscribe_with_string_interval_returns_400() {
         "字符串 interval_ms 必须 400（不能静默退回默认值），实际 {out:?}"
     );
 }
+
+#[test]
+fn subscribe_with_nan_interval_returns_400() {
+    let mut tree = with_visible_button();
+    // Json::Num 是公开枚举变体，调用方可以直接构造 NaN，不依赖 JSON 解析器
+    let params = Json::obj()
+        .set("id", "btn")
+        .set("interval_ms", Json::Num(f64::NAN));
+    let result = dispatch_request(&mut tree, &Policy::default(), "subscribe", &params);
+    assert!(
+        matches!(result, Err(ApiError::BadRequest(_))),
+        "NaN 必须被范围检查拒绝，实际 {result:?}"
+    );
+}

@@ -3,9 +3,9 @@
 //! 关心的**不是**"状态被别人改了还硬用旧 rev"（那本来就该 409），
 //! 而是"Agent 刚做完动作，拿到的 rev 是否已经过期" —— 这才是 16ms 延迟的真实代价。
 //!
-//! 手动运行：
+//! 默认随 CI 运行（进程内直调，不经过 TCP）。
 //! ```text
-//! cargo test -p y901-widgets --test revision_latency -- --ignored --nocapture
+//! cargo test -p y901-widgets --test revision_latency -- --nocapture
 //! ```
 
 use y901_agent::{handle_call, ApiCall, ApiError, Policy};
@@ -53,7 +53,6 @@ fn rev_in_tree(view: &Json, id: &str) -> u64 {
 }
 
 #[test]
-#[ignore = "latency spike：手动运行，默认不进 CI"]
 fn action_rev_is_never_stale() {
     let mut tree = tree();
     let policy = Policy::default();
@@ -119,7 +118,6 @@ fn action_rev_is_never_stale() {
 }
 
 #[test]
-#[ignore = "latency spike：手动运行，默认不进 CI"]
 fn layout_is_not_required_between_action_and_read() {
     // 故意不调用 layout：验证 refresh 由 handle_call → revision_of 触发
     let mut tree = tree();

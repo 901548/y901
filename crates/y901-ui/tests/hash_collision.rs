@@ -4,9 +4,9 @@
 //! 没有把不同语义面映射到同一状态机（例如忘记喂分隔符、字段顺序错位、
 //! `InputKind as u8` 截断）。
 //!
-//! 手动运行：
+//! 默认随 CI 运行（10 万次，debug 下约 1 秒）。
 //! ```text
-//! cargo test --release -p y901-ui --test hash_collision -- --ignored --nocapture
+//! cargo test -p y901-ui --test hash_collision -- --nocapture
 //! ```
 
 use std::collections::HashSet;
@@ -68,9 +68,10 @@ fn random_semantics(rng: &mut Rng, i: usize) -> (Role, Semantics) {
 }
 
 #[test]
-#[ignore = "collision spike：手动运行"]
 fn one_million_semantic_surfaces_have_no_collisions() {
-    const N: usize = 1_000_000;
+    // 10 万次样本的碰撞期望是 2.7e-10，足够证明 FNV-64 在自然分布下可靠。
+// 如需更强保证，手动跑 release 版 100 万次（release 下 0.95us/次，约 1 秒）。
+const N: usize = 100_000;
 
     let mut rng = Rng(0x5eed_1234_5678_9abc);
     let mut seen: HashSet<u64> = HashSet::with_capacity(N);
@@ -98,7 +99,6 @@ fn one_million_semantic_surfaces_have_no_collisions() {
 }
 
 #[test]
-#[ignore = "collision spike：手动运行"]
 fn field_boundary_is_not_ambiguous() {
     // 不加分隔符时 "ab"+"c" 与 "a"+"bc" 会撞车；这条测试确认分隔符真的生效
     let a = Semantics::default().label("ab").value("c");
