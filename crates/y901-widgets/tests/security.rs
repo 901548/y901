@@ -94,11 +94,10 @@ fn sensitive_label_is_redacted_too() {
 // ---------- 2. Token ----------
 
 #[test]
-fn standard_mcp_initialize_without_token_succeeds() {
-    // 标准 MCP 客户端的 initialize 只带 protocolVersion / capabilities / clientInfo，
-    // 不带任何 token。stdio 是进程边界，鉴权在启动时由 Y901_TOKEN 决定。
-    let policy = Policy::with_token("s3cret");
-    let mut server = McpServer::new(policy);
+fn standard_mcp_initialize_when_no_token_configured() {
+    // P0-3 之后：配置了 token 才校验（token 由客户端通过 env 注入）；
+    // 未配置时保持开放——stdio 就是进程边界。
+    let mut server = McpServer::new(Policy::default());
     let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(Button::new("ok", "OK")))));
     tree.layout(Size::new(400.0, 300.0), &Mono);
 

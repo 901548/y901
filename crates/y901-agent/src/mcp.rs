@@ -50,6 +50,27 @@ impl McpServer {
             return Some(error_response(Json::Null, -32700, "parse error"));
         };
 
+        // P0-3：MCP 也必须校验 Token。
+        // Token 由启动 server 的客户端通过环境变量注入（MCP 标准 initialize 没有 token 字段），
+        // 不能用 params.token —— 那是之前修过的 P0。
+        let env_token = std::env::var("Y901_TOKEN").ok();
+        if self.policy.authorize_token(env_token.as_deref()).is_err() {
+            let id = msg.get("id").cloned().unwrap_or(Json::Null);
+            // error_response 已返回序列化后的字符串；附加字段需要走 Json 再序列化
+            let body = Json::obj()
+                .set("jsonrpc", "2.0")
+                .set("id", id)
+                .set("status", 401u16)
+                .set("code", "unauthorized")
+                .set(
+                    "error",
+                    Json::obj()
+                        .set("code", -32001)
+                        .set("message", "unauthorized: missing or invalid Y901_TOKEN"),
+                );
+            return Some(body.to_string());
+        }
+
         // JSON-RPC 2.0 版本字段必须存在且正确
         if msg.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") {
             let id = msg.get("id").cloned().unwrap_or(Json::Null);

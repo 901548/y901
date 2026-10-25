@@ -63,6 +63,32 @@ pub enum RpcEvent {
     Wheel { pos: y901_ui::Pos, delta: f32 },
 }
 
+/// `Key` -> 线上字符串（与 `from_json` 的解析表一一对应）。
+///
+/// 这是**唯一的序列化入口**：`to_json` 只能用它，避免两处各写一份映射而漂移。
+pub fn key_to_wire(key: y901_ui::Key) -> &'static str {
+    use y901_ui::Key;
+    match key {
+        Key::Enter => "enter",
+        Key::Tab => "tab",
+        Key::Backspace => "backspace",
+        Key::Escape => "escape",
+        Key::Up => "up",
+        Key::Down => "down",
+        Key::Left => "left",
+        Key::Right => "right",
+        Key::Delete => "delete",
+        Key::Home => "home",
+        Key::End => "end",
+        Key::PageUp => "page_up",
+        Key::PageDown => "page_down",
+        // 以下三类无法用名称表达（依赖具体字符/编号），序列化后 `from_json` 会拒绝：
+        // 这是有意的单向映射——RPC 的键盘注入只支持具名键。
+        Key::Char(_) => "char",
+        Key::Function(_) => "function",
+        Key::Unknown => "unknown",
+    }
+}
 impl RpcEvent {
     /// 还原成协议 JSON（RPC 转 gateway 时用，保证与 MCP 走同一套解析）。
     pub fn to_json(&self) -> Json {
@@ -72,7 +98,9 @@ impl RpcEvent {
             RpcEvent::Text(t) => Json::obj().set("type", "text").set("text", t.clone()),
             RpcEvent::Key(k) => Json::obj()
                 .set("type", "key")
-                .set("key", format!("{k:?}")),
+                // P0-4：必须与 from_json 的解析表一致（小写），
+                // 否则 to_json -> from_json 回环失败，RPC 键盘注入实际不可用。
+                .set("key", key_to_wire(*k)),
             RpcEvent::Compose(t) => Json::obj().set("type", "compose").set("text", t.clone()),
             RpcEvent::MouseDown { pos, button } => Json::obj()
                 .set("type", "mouse_down")
@@ -182,6 +210,11 @@ impl RpcEvent {
                     "down" => y901_ui::Key::Down,
                     "left" => y901_ui::Key::Left,
                     "right" => y901_ui::Key::Right,
+                    "delete" => y901_ui::Key::Delete,
+                    "home" => y901_ui::Key::Home,
+                    "end" => y901_ui::Key::End,
+                    "page_up" => y901_ui::Key::PageUp,
+                    "page_down" => y901_ui::Key::PageDown,
                     other => return Err(format!("unknown key: {other}")),
                 };
                 Ok(RpcEvent::Key(key))

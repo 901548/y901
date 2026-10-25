@@ -306,7 +306,9 @@ fn locate(tree: &UiTree, id: &str) -> Result<(Rect, u64), ApiError> {
         // 还没布局：拒绝而不是点 (0,0)
         return Err(ApiError::BadRequest(format!("node `{id}` has no geometry")));
     }
-    Ok((rect, node.revision()))
+    // P0-1：必须返回**有效** revision（组件自报 + 框架计数器），
+    // 与 get_tree / query / node_resource 的输出保持一致，否则 if_rev 恒 409。
+    Ok((rect, tree.effective_revision(id)))
 }
 
 /// 节点对 Agent 的有效 revision（组件自身 + 框架计数器）。
@@ -485,6 +487,10 @@ pub fn dispatch_request(
             let raw = params.get("event").cloned().unwrap_or(Json::Null);
             let ev = crate::rpc::RpcEvent::from_json(&raw)
                 .map_err(|e| ApiError::BadRequest(format!("bad event: {e}")))?;
+            // P0-2：dispatch 也必须过安全闸（能力 + 版本 + 几何），
+            // 否则 Agent 可以绕过 exposed/if_rev 向任意节点注入事件。
+            let (_rect, rev) = locate(tree, &id)?;
+            check_rev(arg_u64(params, "if_rev"), rev)?;
             let handled = tree.dispatch_to(&id, &ev.to_ui_event()).is_handled();
             return Ok(Json::obj().set("ok", handled).set("id", id));
         }

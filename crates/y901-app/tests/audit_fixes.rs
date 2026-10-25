@@ -42,8 +42,8 @@ impl Host for Recorder {
 // ---------- P0：标准 MCP 握手 ----------
 
 #[test]
-fn standard_mcp_handshake_without_token() {
-    let mut server = McpServer::new(Policy::with_token("s3cret"));
+fn standard_mcp_handshake_when_no_token_configured() {
+    let mut server = McpServer::new(Policy::default());
     let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(
         Button::new("ok", "OK").flex_item(FlexItem::height(24.0)),
     ))));
