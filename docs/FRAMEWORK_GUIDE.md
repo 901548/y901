@@ -344,3 +344,20 @@ trait 契约要求后端从 `Frame` 读脏矩形，但 D3D11 的图集归 `TextE
 - 在 CI/容器/远程会话：`[skip]` 是预期行为，不算失败。
 - `present` 里的图集未同步检查在 release 下会打**一次**警告（`ATLAS_WARNED`）：
   看到这条日志说明 `rebuild` 逻辑有 bug，不是正常现象。
+## §20 TODO：`set_focus` 无法区分失败原因
+
+`UiTree::set_focus` 返回 `bool`，无法区分三种失败：
+`Vetoed`（被 `ctx.veto_focus()` 拒绝）、`NotFocusable`（节点没有 `is_focusable`）、
+`NotFound`（id 不存在）。
+
+因此 `dispatch_request` 的 `focus` 方法在两种情况下都返回同一句
+`"focus vetoed: {id}"`，文案略误导（可能是"不可聚焦"而非"被拒绝"）。
+
+修法：`set_focus -> Result<(), FocusError>`，其中
+
+```rust
+pub enum FocusError { NotFound, NotFocusable, Vetoed }
+```
+
+`dispatch_request` 据此映射 404 / 400 / 409。
+改动会波及所有调用点（Tab 遍历、Modal 聚焦、RPC focus），故不在 P0 轮次做。

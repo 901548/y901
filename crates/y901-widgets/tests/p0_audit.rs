@@ -331,3 +331,18 @@ fn host_routes_focus_through_dispatch_request() {
 fn with_visible_button() -> UiTree {
     tree_with_button()
 }
+
+#[test]
+fn subscribe_with_string_interval_returns_400() {
+    let mut tree = with_visible_button();
+    let out = dispatch_request(
+        &mut tree,
+        &Policy::default(),
+        "subscribe",
+        &Json::obj().set("id", "btn").set("interval_ms", "abc"),
+    );
+    assert!(
+        matches!(out, Err(ApiError::BadRequest(_))),
+        "字符串 interval_ms 必须 400（不能静默退回默认值），实际 {out:?}"
+    );
+}

@@ -508,15 +508,22 @@ pub fn dispatch_request(
         "subscribe" => {
             let id = arg_str(params, "id")?;
             locate(tree, &id)?;
-            // interval 校验：负数/非数值 → 默认；超过 1 小时 → 400（防止误传毫秒/秒混淆）
-            let interval_ms = match params.get("interval_ms").and_then(|v| v.as_f64()) {
+            // interval 校验：**类型错误与范围错误都返回 400**，绝不静默退回默认值
+            // （否则 Agent 以为设了 5 秒、实际是 100ms，会造成推送风暴）。
+            // 上限 3_600_000ms（1 小时）是经验值：如有长轮询需求可调大。
+            let interval_ms = match params.get("interval_ms") {
                 None => 100.0,
-                Some(v) if !(0.0..=3_600_000.0).contains(&v) => {
+                Some(Json::Num(v)) if (0.0..=3_600_000.0).contains(v) => *v,
+                Some(Json::Num(v)) => {
                     return Err(ApiError::BadRequest(format!(
                         "interval_ms 必须在 [0, 3600000]，实际 {v}"
                     )))
                 }
-                Some(v) => v,
+                Some(other) => {
+                    return Err(ApiError::BadRequest(format!(
+                        "interval_ms 必须是数字，实际 {other:?}"
+                    )))
+                }
             };
             if !tree.subscribe(&id, std::time::Duration::from_millis(interval_ms as u64)) {
                 return Err(ApiError::NotFound { id });
