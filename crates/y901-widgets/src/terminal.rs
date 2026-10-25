@@ -399,11 +399,8 @@ impl Widget for TerminalWidget {
                 ts.bold = st.bold;
                 ts.underline = st.underline;
 
-                ctx.draw_text(
-                    Pos::new(rect.x + col as f32 * cell_w, y),
-                    &cell.ch.to_string(),
-                    &ts,
-                );
+                // P1-2：每格单字符，用 draw_char 避免每格一次 String 分配。
+                ctx.draw_char(Pos::new(rect.x + col as f32 * cell_w, y), cell.ch, &ts);
             }
         }
 
@@ -424,8 +421,10 @@ impl Widget for TerminalWidget {
             let mut pen = cx;
             let ts = TextStyle::fg(Color::WHITE);
             for ch in self.preedit.chars() {
-                ctx.draw_text(Pos::new(pen, cy), &ch.to_string(), &ts);
-                pen += cell_w * if (ch as u32) > 0x2E80 { 2.0 } else { 1.0 };
+                ctx.draw_char(Pos::new(pen, cy), ch, &ts);
+                // 宽字符判定与网格同源（unicode-width）；旧代码用 `> 0x2E80` 的启发式，
+                // 对 emoji（0x1F600）会错判成 1 格。组合字符宽度 0 → 不推进（正确行为）。
+                pen += cell_w * y901_core::Grid::width_of_char(ch) as f32;
             }
             ctx.fill_rect(
                 Rect::new(cx, cy + cell_h - 2.0, (pen - cx).max(cell_w), 2.0),

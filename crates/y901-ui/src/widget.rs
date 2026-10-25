@@ -311,6 +311,19 @@ pub trait RenderCtx: TextMetrics {
     /// 在 `origin`（左上角）画一行文本，返回前进宽度。
     fn draw_text(&mut self, origin: Pos, text: &str, style: &TextStyle) -> f32;
 
+    /// 绘制单个字符，返回实际占用宽度（像素）。
+    ///
+    /// 默认实现用**栈上** `[u8; 4]` 编码成 UTF-8 后转调 [`RenderCtx::draw_text`]，
+    /// 零堆分配。终端这类"每格一个字符"的场景必须用它，否则每格一次 `String` 分配
+    /// （80×24 = 每帧 1920 次）。
+    ///
+    /// 后端可以覆盖（例如直接查字形缓存），但默认实现对所有后端都够用。
+    fn draw_char(&mut self, pos: Pos, ch: char, style: &TextStyle) -> f32 {
+        let mut buf = [0u8; 4];
+        let s = ch.encode_utf8(&mut buf);
+        self.draw_text(pos, s, style)
+    }
+
     /// 裁剪栈：滚动容器由框架自动压栈，组件不需要手动调用。
     fn push_clip(&mut self, rect: Rect);
     fn pop_clip(&mut self);
