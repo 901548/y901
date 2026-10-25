@@ -518,9 +518,32 @@ impl UiTree {
     /// 节点对 Agent 的"有效版本"：组件自己的 revision + 框架计数器。
     ///
     /// 输入：节点 id。失败：id 不存在时返回 0（不 panic）。
+    ///
+    /// **注意复杂度**：内部调 `find(id)`，是 O(n)。不要在遍历中对每个节点调用，
+    /// 那会退化成 O(n²)；遍历场景请用 [`UiTree::rev_snapshot`]。
     pub fn effective_revision(&self, id: &str) -> u64 {
         let own = self.find(id).map(|n| n.revision()).unwrap_or(0);
         own + self.rev.get(id).copied().unwrap_or(0)
+    }
+
+    /// 一次遍历构建 `id -> effective_revision` 快照，**总成本 O(n)**。
+    ///
+    /// 用于网关输出整棵树（`public_tree` / `query_result`）：
+    /// 这些路径要对每个节点取有效 revision，逐个调 `effective_revision` 就是 O(n²)。
+    ///
+    /// 失败：无（空树返回空 map）。
+    pub fn rev_snapshot(&self) -> HashMap<String, u64> {
+        fn walk(node: &dyn Widget, counters: &HashMap<String, u64>, out: &mut HashMap<String, u64>) {
+            let effective = node.revision() + counters.get(node.id()).copied().unwrap_or(0);
+            out.insert(node.id().to_string(), effective);
+            for child in node.children() {
+                walk(child.as_ref(), counters, out);
+            }
+        }
+
+        let mut out = HashMap::new();
+        walk(self.root.as_ref(), &self.rev, &mut out);
+        out
     }
 
     /// 检查待定节点的语义面是否变化，变化则 bump。

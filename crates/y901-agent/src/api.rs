@@ -332,7 +332,14 @@ fn check_rev(expected: Option<u64>, actual: u64) -> Result<(), ApiError> {
 
 /// 给 AI 看的树：过滤作用域 + 脱敏。
 fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
-    fn walk(node: &dyn y901_ui::Widget, tree: &UiTree, policy: &Policy) -> Option<Json> {
+    // 一次遍历的 revision 快照（O(n)）；逐个调 effective_revision 会退化成 O(n²)。
+    let revs = tree.rev_snapshot();
+    fn walk(
+        node: &dyn y901_ui::Widget,
+        tree: &UiTree,
+        revs: &std::collections::HashMap<String, u64>,
+        policy: &Policy,
+    ) -> Option<Json> {
         let sem = node.semantics();
         if !sem.exposed_to_ai {
             return None;
@@ -342,7 +349,7 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
         let children: Vec<Json> = node
             .children()
             .iter()
-            .filter_map(|c| walk(c.as_ref(), tree, policy))
+            .filter_map(|c| walk(c.as_ref(), tree, revs, policy))
             .collect();
         Some(
             Json::obj()
@@ -356,7 +363,7 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
                         .set("w", rect.w)
                         .set("h", rect.h),
                 )
-                .set("revision", tree.effective_revision(node.id()))
+                .set("revision", revs.get(node.id()).copied().unwrap_or(0))
                 // 顶层 focused：框架拥有（来自 focus_path），组件不得设置
                 .set("focused", tree.focus() == Some(node.id()))
                 .set("sensitive", merged.get("sensitive").cloned().unwrap_or(Json::Bool(false)))
@@ -373,7 +380,7 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
         )
     }
 
-    walk(tree.root(), tree, policy).unwrap_or_else(Json::obj)
+    walk(tree.root(), tree, &revs, policy).unwrap_or_else(Json::obj)
 }
 
 /// 统一的节点脱敏：把 `Semantics` 转成给 AI 看的 JSON。
@@ -419,6 +426,8 @@ pub fn redact_node(sem: &y901_ui::Semantics, policy: &Policy) -> Json {
 /// 查询结果：只返回定位所需字段，避免整树 JSON。
 fn query_result(tree: &UiTree, policy: &Policy, q: &y901_ui::Query) -> Json {
     let ids = y901_ui::query_nodes(tree.root(), q);
+    // 一次遍历的 revision 快照（O(n)）；逐个调 effective_revision 会退化成 O(n²)。
+    let revs = tree.rev_snapshot();
     let mut items = Vec::new();
     for id in ids {
         let Some(node) = tree.find(&id) else { continue };
@@ -433,7 +442,7 @@ fn query_result(tree: &UiTree, policy: &Policy, q: &y901_ui::Query) -> Json {
                 .set("id", id)
                 .set("role", node.role().as_str())
                 .set("label", redacted.get("label").cloned().unwrap_or(Json::Null))
-                .set("revision", tree.effective_revision(node.id()))
+                .set("revision", revs.get(node.id()).copied().unwrap_or(0))
                 // 与 public_tree 对齐：disabled / focused 都属于 Agent 可操作性的输入
                 .set("disabled", redacted.get("disabled").cloned().unwrap_or(Json::Bool(false)))
                 .set("focused", tree.focus() == Some(node.id()))

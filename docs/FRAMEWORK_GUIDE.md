@@ -361,3 +361,11 @@ pub enum FocusError { NotFound, NotFocusable, Vetoed }
 
 `dispatch_request` 据此映射 404 / 400 / 409。
 改动会波及所有调用点（Tab 遍历、Modal 聚焦、RPC focus），故不在 P0 轮次做。
+## §21 TODO：结构测试依赖源码切片
+
+`setup_connection_propagates_write_timeout_failure` /
+`setup_connection_propagates_spawn_failure` 用 `include_str!` + `find("\n}")` 切出方法体。
+这依赖"方法体里没有顶格 `}`"（例如嵌套宏、`macro_rules!` 展开）。
+
+若未来方法体变复杂，需要改成 AST 级检查（`syn` crate），成本较高，留待后续。
+在那之前：**修改 `setup_connection` 的方法体格式时，记得跑这两条测试**。
