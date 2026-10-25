@@ -312,3 +312,13 @@ Agent 看到的 `revision` 不变，但 `get_tree` 的内容变了，
 - 测试改用 `#[doc(hidden)] pub fn mark_dead_for_test()` 构造。
 
 改动成本约 10 行，等有第二个真实调用方时再做。
+## §17 跨平台 TODO（不阻塞 RenderBackend 抽象）
+
+- **`unicode-width == 0` 的字符两侧行为不一致**：`y901-core` 的 `place_cell`
+  跳过它们（不占格），而 `draw_text` 里的 `span.max(1)` 会推进 1 格。
+  当前影响只限 widget 多字符文本（终端每格单字符不受影响）。
+  `max(1)` 是防死循环的必要防御，**不改**；正确修复是"span=0 时不推进，
+  但用独立循环保护"，留待后续。
+
+- **`glyph_offset` 只补偿水平方向**：垂直居中（baseline 与格高不符）未处理。
+  Linux/macOS 的后备字体链可能在垂直方向同样需要补偿。等第二个后端落地时一并验证。
