@@ -84,7 +84,12 @@ pub fn key_to_wire(key: y901_ui::Key) -> &'static str {
         Key::PageDown => "page_down",
         // 以下三类无法用名称表达（依赖具体字符/编号），序列化后 `from_json` 会拒绝：
         // 这是有意的单向映射——RPC 的键盘注入只支持具名键。
-        Key::Char(_) => "char",
+        // 不可达：`to_json` 对 `Key::Char` 走独立的 `type: "char"` 分支，不会调用本函数。
+        // 保留 arm 只为满足穷尽性；若真的走到这里说明有调用方漏判。
+        Key::Char(_) => {
+            debug_assert!(false, "Key::Char 不应走 key_to_wire，请走 type=char 分支");
+            "char"
+        }
         Key::Function(_) => "function",
         Key::Unknown => "unknown",
     }
@@ -379,39 +384,60 @@ pub fn configure_stream(stream: &TcpStream) -> std::io::Result<()> {
     stream.set_write_timeout(Some(WRITE_TIMEOUT))
 }
 
-/// 每连接一个写线程：从队列取任务，按 FIFO 写 socket。
+/// 写线程主体：从队列取任务，按 FIFO 写 socket。
 ///
-/// **必须设写超时**：否则客户端不读时 `writeln!` 永久阻塞，
-/// 线程既写不出这一条、也永远检查不到 `dead`，整个 B+ 设计会退化成"静默丢包"。
-/// 100ms 让线程周期性醒来检查 `dead`。
+/// **写超时由 `setup_connection` 在此之前设置**：没有它，客户端不读时
+/// `writeln!` 永久阻塞，线程既写不出这一条、也永远检查不到 `dead`，
+/// 整个 B+ 设计会退化成"静默丢包"。
 ///
 /// 退出条件：
 /// 1. `recv` 返回 Err（所有 Sender 被 drop）；
 /// 2. 写失败（超时 / EPIPE）；
-/// 3. 写完一条后发现 `dead` 为真 → `shutdown` 并退出。
-fn spawn_conn_writer(
-    mut stream: TcpStream,
-    rx: std::sync::mpsc::Receiver<WriteJob>,
-    dead: Arc<AtomicBool>,
-) {
-    let _ = configure_stream(&stream);
-    let _ = thread::Builder::new()
+/// 3. 读完一条后发现 `dead` 为真 → `shutdown` 并退出。
+fn writer_loop(mut stream: TcpStream, rx: std::sync::mpsc::Receiver<WriteJob>, dead: Arc<AtomicBool>) {
+    loop {
+        if dead.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            break;
+        }
+        let Ok(job) = rx.recv() else { break };
+        let line = match job {
+            WriteJob::Reply(s) | WriteJob::Push(s) => s,
+        };
+        if writeln!(stream, "{line}").is_err() || stream.flush().is_err() {
+            dead.store(true, std::sync::atomic::Ordering::Relaxed);
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            break;
+        }
+    }
+}
+
+/// 为一条连接建立写队列与写线程。
+///
+/// 输入：已 accept 的 `TcpStream`（**消耗所有权**）。
+/// 返回：`(写队列, 判死标志, 线程句柄)`。
+///
+/// 一条连接的写端三件套：队列、判死标志、写线程句柄。
+type ConnectionWriter = (
+    std::sync::mpsc::SyncSender<WriteJob>,
+    Arc<AtomicBool>,
+    std::thread::JoinHandle<()>,
+);
+
+/// 失败：`set_write_timeout` 失败，或写线程创建失败（都极罕见）。
+/// **失败时调用方必须关闭连接、且不要注册到 Broadcaster**——
+/// 否则会出现"连接在册但没有写线程"的僵尸：队列慢慢满、推送与回包全丢、
+/// 而连接永远不断开（B+ 的"快速失败"保证失效）。
+fn setup_connection(stream: TcpStream) -> Result<ConnectionWriter, String> {
+    configure_stream(&stream).map_err(|e| format!("set_write_timeout 失败: {e}"))?;
+    let (tx, rx) = std::sync::mpsc::sync_channel::<WriteJob>(WRITE_QUEUE);
+    let dead = Arc::new(AtomicBool::new(false));
+    let dead_for_thread = dead.clone();
+    let handle = thread::Builder::new()
         .name("y901-rpc-conn-writer".to_string())
-        .spawn(move || loop {
-            if dead.load(std::sync::atomic::Ordering::Relaxed) {
-                let _ = stream.shutdown(std::net::Shutdown::Both);
-                break;
-            }
-            let Ok(job) = rx.recv() else { break };
-            let line = match job {
-                WriteJob::Reply(s) | WriteJob::Push(s) => s,
-            };
-            if writeln!(stream, "{line}").is_err() || stream.flush().is_err() {
-                dead.store(true, std::sync::atomic::Ordering::Relaxed);
-                let _ = stream.shutdown(std::net::Shutdown::Both);
-                break;
-            }
-        });
+        .spawn(move || writer_loop(stream, rx, dead_for_thread))
+        .map_err(|e| format!("写线程创建失败: {e}"))?;
+    Ok((tx, dead, handle))
 }
 
 /// 启动 RPC 服务。
@@ -461,17 +487,23 @@ pub fn spawn_with_token(
 }
 
 fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster, expected: String) {
-    // 写超时：`reply_to` 在 UI 线程内同步写 socket，若客户端不读会把缓冲写满。
-    // 100ms 是经验值（正常回包只有几百字节，远小于此），保证 UI 线程最多被占用 100ms。
+    // 读端先克隆（写端所有权要交给 setup_connection）
     let reader = match stream.try_clone() {
         Ok(s) => BufReader::new(s),
         Err(_) => return,
     };
     // 每连接一个写线程：回包与推送共用同一条有界 FIFO 队列。
     // UI 线程只 send，永不碰 socket —— 客户端不读时阻塞的是写线程，不是 UI。
-    let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<WriteJob>(WRITE_QUEUE);
-    let dead = Arc::new(AtomicBool::new(false));
-    spawn_conn_writer(stream, job_rx, dead.clone());
+    //
+    // 失败时**必须**关闭连接且不注册：否则会留下"在册但没有写线程"的僵尸连接。
+    // `stream` 已被 setup_connection 消耗并在失败分支 drop → 内核发 FIN，连接自然关闭。
+    let (job_tx, dead, _writer_handle) = match setup_connection(stream) {
+        Ok(v) => v,
+        Err(err) => {
+            eprintln!("[y901] 连接初始化失败，已关闭: {err}");
+            return;
+        }
+    };
     hub.register(job_tx.clone(), dead.clone());
 
     // 每请求鉴权：Token 非空时，所有请求必须携带 params.token
@@ -669,3 +701,43 @@ pub fn reply_to(pending: Pending, result: Result<Json, String>) -> Result<(), St
 
 /// 便捷类型：UI 线程持有的接收端。
 pub type RpcReceiver = Receiver<Pending>;
+
+#[cfg(test)]
+mod connection_setup_tests {
+    /// 结构断言：`setup_connection` 里的 `configure_stream` 必须用 `?` 传播，
+    /// 不能退回 `let _ =`（后者会让连接在没有写超时的情况下运行）。
+    #[test]
+    fn setup_connection_propagates_write_timeout_failure() {
+        let src = include_str!("rpc.rs");
+        let start = src.find("fn setup_connection").expect("setup_connection 存在");
+        let rest = &src[start..];
+        let end = rest[1..].find("\n}").map(|i| i + 1).unwrap_or(rest.len());
+        let body = &rest[..end];
+        assert!(
+            body.contains("configure_stream(&stream).map_err") && body.contains("?"),
+            "写超时失败必须用 `?` 传播（不能 let _ 忽略），body:\n{body}"
+        );
+        assert!(
+            !body.contains(&format!("let {} = configure_stream", "_")),
+            "不得忽略 configure_stream 的失败"
+        );
+    }
+
+    /// 结构断言：写线程创建失败必须用 `?` 传播，不能 `.ok()` / `.is_err()` 忽略。
+    #[test]
+    fn setup_connection_propagates_spawn_failure() {
+        let src = include_str!("rpc.rs");
+        let start = src.find("fn setup_connection").expect("setup_connection 存在");
+        let rest = &src[start..];
+        let end = rest[1..].find("\n}").map(|i| i + 1).unwrap_or(rest.len());
+        let body = &rest[..end];
+        assert!(
+            body.contains(".spawn(") && body.contains(".map_err(|e| format!(\"写线程创建失败"),
+            "写线程创建失败必须用 `?` 传播，body:\n{body}"
+        );
+        assert!(
+            !body.contains(&format!("let {} = thread::Builder", "_")),
+            "不得忽略线程创建失败"
+        );
+    }
+}
