@@ -241,3 +241,93 @@ fn key_event_roundtrips_through_json() {
         assert_eq!(back, ev, "{key:?} 回环后不一致，json={json}");
     }
 }
+
+// ---------- P0-2 统一入口：focus / subscribe / unsubscribe ----------
+
+fn tree_with_hidden() -> UiTree {
+    let mut tree = UiTree::new(Box::new(
+        Flex::column("root").push(Box::new(Hidden {
+            id: "secret".into(),
+            rect: Rect::ZERO,
+        })),
+    ));
+    tree.layout(Size::new(300.0, 100.0), &Mono);
+    tree
+}
+
+#[test]
+fn dispatch_request_focus_checks_exposed() {
+    let mut tree = tree_with_hidden();
+    let out = dispatch_request(
+        &mut tree,
+        &Policy::default(),
+        "focus",
+        &Json::obj().set("id", "secret"),
+    );
+    assert!(
+        matches!(out, Err(ApiError::Forbidden { .. })),
+        "对未 exposed 节点 focus 必须 403，实际 {out:?}"
+    );
+}
+
+#[test]
+fn dispatch_request_subscribe_checks_exposed() {
+    let mut tree = tree_with_hidden();
+    let out = dispatch_request(
+        &mut tree,
+        &Policy::default(),
+        "subscribe",
+        &Json::obj().set("id", "secret").set("interval_ms", 100),
+    );
+    assert!(
+        matches!(out, Err(ApiError::Forbidden { .. })),
+        "对未 exposed 节点 subscribe 必须 403，实际 {out:?}"
+    );
+}
+
+#[test]
+fn dispatch_request_subscribe_rejects_bad_interval() {
+    let mut tree = with_visible_button();
+    for bad in [-1.0f64, 4_000_000.0f64] {
+        let out = dispatch_request(
+            &mut tree,
+            &Policy::default(),
+            "subscribe",
+            &Json::obj().set("id", "btn").set("interval_ms", bad),
+        );
+        assert!(
+            matches!(out, Err(ApiError::BadRequest(_))),
+            "interval_ms={bad} 必须 400，实际 {out:?}"
+        );
+    }
+}
+
+#[test]
+fn dispatch_request_unsubscribe_no_locate_needed() {
+    let mut tree = tree_with_hidden();
+    // 未 exposed 也能取消订阅：这只是移除本地状态，不泄露信息
+    let out = dispatch_request(
+        &mut tree,
+        &Policy::default(),
+        "unsubscribe",
+        &Json::obj().set("id", "secret"),
+    );
+    assert!(out.is_ok(), "unsubscribe 不应走能力闸，实际 {out:?}");
+}
+
+#[test]
+fn host_routes_focus_through_dispatch_request() {
+    // 结构断言：host.rs 的 focus/subscribe/unsubscribe 三个分支必须统一转发
+    let src = include_str!("../../../crates/y901-app/src/host.rs");
+    for method in ["focus", "subscribe", "unsubscribe"] {
+        let needle = format!("dispatch_request(tree, policy, \"{method}\"");
+        assert!(
+            src.contains(&needle),
+            "host.rs 必须把 {method} 转发给 dispatch_request（找不到 `{needle}`）"
+        );
+    }
+}
+
+fn with_visible_button() -> UiTree {
+    tree_with_button()
+}

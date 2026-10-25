@@ -494,6 +494,41 @@ pub fn dispatch_request(
             let handled = tree.dispatch_to(&id, &ev.to_ui_event()).is_handled();
             return Ok(Json::obj().set("ok", handled).set("id", id));
         }
+        // 焦点 / 订阅：同样是网关职责，host 只做转发（P0-2 统一入口）。
+        "focus" => {
+            let id = arg_str(params, "id")?;
+            // 能力闸 + 几何（locate 顺带拒绝未布局节点）
+            let _ = locate(tree, &id)?;
+            if tree.set_focus(Some(id.clone())) {
+                return Ok(Json::obj().set("ok", true).set("id", id));
+            }
+            // set_focus 返回 false = 被 veto 或节点不可聚焦
+            return Err(ApiError::BadRequest(format!("focus vetoed: `{id}`")));
+        }
+        "subscribe" => {
+            let id = arg_str(params, "id")?;
+            locate(tree, &id)?;
+            // interval 校验：负数/非数值 → 默认；超过 1 小时 → 400（防止误传毫秒/秒混淆）
+            let interval_ms = match params.get("interval_ms").and_then(|v| v.as_f64()) {
+                None => 100.0,
+                Some(v) if !(0.0..=3_600_000.0).contains(&v) => {
+                    return Err(ApiError::BadRequest(format!(
+                        "interval_ms 必须在 [0, 3600000]，实际 {v}"
+                    )))
+                }
+                Some(v) => v,
+            };
+            if !tree.subscribe(&id, std::time::Duration::from_millis(interval_ms as u64)) {
+                return Err(ApiError::NotFound { id });
+            }
+            return Ok(Json::obj().set("subscribed", id));
+        }
+        "unsubscribe" => {
+            // 取消订阅不涉及信息泄露，**不过能力闸**（否则 Agent 无法清理已隐藏节点的订阅）
+            let id = arg_str(params, "id")?;
+            tree.unsubscribe(&id);
+            return Ok(Json::obj().set("unsubscribed", id));
+        }
         "invoke" | "ui_invoke" => ApiCall::Invoke {
             id: arg_str(params, "id")?,
             action: arg_str(params, "action")?,

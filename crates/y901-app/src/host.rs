@@ -4,7 +4,7 @@
 //! 这样 `main.rs` 保持在启动器该有的体积。
 
 use std::sync::mpsc::Receiver;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use y901_agent::{McpServer, Pending, Policy, RpcRequest};
 use y901_runtime::Host;
@@ -92,31 +92,24 @@ fn handle_rpc(tree: &mut UiTree, policy: &Policy, pending: Pending) {
             y901_agent::dispatch_request(tree, policy, "invoke", &params)
                 .map_err(|e| e.code().to_string())
         }
-        // P0-2：Focus 也必须过能力闸（不可见节点不能被 Agent 抢焦点）。
-        RpcRequest::Focus { node } => match require_visible(tree, node) {
-            Err(err) => Err(err),
-            Ok(()) => {
-                if tree.set_focus(Some(node.clone())) {
-                    Ok(Json::obj().set("focused", node.clone()))
-                } else {
-                    Err(format!("unknown node: {node}"))
-                }
-            }
-        },
-        // P0-2：订阅同样过能力闸，否则 Agent 能收到不可见节点的增量推送。
-        RpcRequest::Subscribe { node, interval_ms } => match require_visible(tree, node) {
-            Err(err) => Err(err),
-            Ok(()) => {
-                if tree.subscribe(node, Duration::from_millis(*interval_ms)) {
-                    Ok(Json::obj().set("subscribed", node.clone()))
-                } else {
-                    Err(format!("unknown node: {node}"))
-                }
-            }
-        },
+        // P0-2：focus / subscribe / unsubscribe 全部转发给网关，
+        // host 不再自己实现能力闸——单一入口是 dispatch_request。
+        RpcRequest::Focus { node } => {
+            let params = Json::obj().set("id", node.clone());
+            y901_agent::dispatch_request(tree, policy, "focus", &params)
+                .map_err(|e| e.code().to_string())
+        }
+        RpcRequest::Subscribe { node, interval_ms } => {
+            let params = Json::obj()
+                .set("id", node.clone())
+                .set("interval_ms", *interval_ms as f64);
+            y901_agent::dispatch_request(tree, policy, "subscribe", &params)
+                .map_err(|e| e.code().to_string())
+        }
         RpcRequest::Unsubscribe { node } => {
-            tree.unsubscribe(node);
-            Ok(Json::obj().set("unsubscribed", node.clone()))
+            let params = Json::obj().set("id", node.clone());
+            y901_agent::dispatch_request(tree, policy, "unsubscribe", &params)
+                .map_err(|e| e.code().to_string())
         }
         RpcRequest::Unknown { method } => Err(format!("unknown method: {method}")),
     };
@@ -144,15 +137,3 @@ impl TextMetrics for HeadlessMetrics {
     }
 }
 
-/// 能力闸：节点必须存在且 `exposed_to_ai`。
-///
-/// 失败：`NotFound` / `Forbidden` 的字符串形式（RPC 的 error 字段）。
-fn require_visible(tree: &UiTree, id: &str) -> Result<(), String> {
-    let Some(node) = tree.find(id) else {
-        return Err(format!("unknown node: {id}"));
-    };
-    if !node.semantics().exposed_to_ai {
-        return Err(format!("forbidden: node `{id}` is not exposed to AI"));
-    }
-    Ok(())
-}
