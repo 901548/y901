@@ -310,6 +310,16 @@ impl Default for Broadcaster {
     }
 }
 
+/// 给连接设置写超时。
+///
+/// 单独抽出来是为了**可测**：测试可以建一对 socket、调用它、
+/// 再用 `TcpStream::write_timeout()` 读回实际值（行为断言，不靠 grep 源码）。
+///
+/// 失败：仅当系统调用失败时返回 `io::Error`（极少见）。
+pub fn configure_stream(stream: &TcpStream) -> std::io::Result<()> {
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))
+}
+
 /// 每连接一个写线程：从队列取任务，按 FIFO 写 socket。
 ///
 /// **必须设写超时**：否则客户端不读时 `writeln!` 永久阻塞，
@@ -325,7 +335,7 @@ fn spawn_conn_writer(
     rx: std::sync::mpsc::Receiver<WriteJob>,
     dead: Arc<AtomicBool>,
 ) {
-    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
+    let _ = configure_stream(&stream);
     let _ = thread::Builder::new()
         .name("y901-rpc-conn-writer".to_string())
         .spawn(move || loop {

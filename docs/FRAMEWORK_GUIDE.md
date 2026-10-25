@@ -301,3 +301,14 @@ Agent 看到的 `revision` 不变，但 `get_tree` 的内容变了，
 3. 每连接一个写线程：`for line in rx { write_all }`，写失败即断开并注销。
 4. 删除 `set_write_timeout`（写线程阻塞无害，UI 不受影响）。
 5. 测试：`rpc_write_timeout.rs` 改为断言"UI 线程零阻塞"，而不是"100ms 内返回"。
+### §16.1 TODO：`Pending.dead` 的可见性
+
+`Pending.dead: Arc<AtomicBool>` 目前是 `pub`，外部可以读、也可以**误置 true** 踢掉健康连接。
+
+当前风险低（调用方只有 `host.rs` 与 `rpc.rs` 内部，测试需要能构造 dead 连接），
+但更稳妥的形态是：
+
+- `dead` 私有 + `pub fn is_dead(&self) -> bool` 只读访问器；
+- 测试改用 `#[doc(hidden)] pub fn mark_dead_for_test()` 构造。
+
+改动成本约 10 行，等有第二个真实调用方时再做。

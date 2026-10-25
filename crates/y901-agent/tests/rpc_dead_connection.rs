@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use y901_agent::rpc::{reply_to, spawn, Pending, RpcRequest};
 use y901_ui::Json;
 
-fn send_ping(w: &mut TcpStream, id: u32) {
-    writeln!(w, r#"{{"id":{id},"method":"ping"}}"#).expect("write");
-    w.flush().expect("flush");
+fn send_ping(w: &mut TcpStream, id: u32) -> std::io::Result<()> {
+    writeln!(w, r#"{{"id":{id},"method":"ping"}}"#)?;
+    w.flush()
 }
 
 /// 测试 1：客户端连上不读，灌满写队列 → 连接被断开，客户端读到 EOF。
@@ -27,12 +27,13 @@ fn stalled_client_gets_disconnected() {
     let mut reader = BufReader::new(client.try_clone().expect("clone"));
     let mut writer = client;
 
-    // 2000 个请求：队列 1024 + 内核缓冲，足以触发溢出
+    // 持续发请求直到写失败（连接被服务端断开）：不依赖"2000 条能在 X ms 内发完"
     std::thread::spawn(move || {
-        for id in 0..2000 {
-            send_ping(&mut writer, id);
+        for id in 0..100_000u32 {
+            if send_ping(&mut writer, id).is_err() {
+                break; // EOF / EPIPE：服务端已断开
+            }
         }
-        std::thread::sleep(Duration::from_millis(300));
         let _ = writer.shutdown(std::net::Shutdown::Both);
     });
 
@@ -42,7 +43,7 @@ fn stalled_client_gets_disconnected() {
         while let Ok(pending) = rx.recv_timeout(Duration::from_millis(500)) {
             let _ = reply_to(pending, Ok(Json::obj().set("tag", "pong")));
             handled += 1;
-            if handled >= 2000 {
+            if handled >= 100_000 {
                 break;
             }
         }
@@ -123,7 +124,7 @@ fn slow_client_still_gets_replies_until_dead() {
 
     let n = 20u32;
     for id in 0..n {
-        send_ping(&mut writer, id);
+        let _ = send_ping(&mut writer, id);
     }
 
     let ui = std::thread::spawn(move || {
@@ -157,15 +158,29 @@ fn slow_client_still_gets_replies_until_dead() {
 }
 
 /// 测试 4：写线程必须设写超时（否则检查不到 dead）。
+///
+/// 行为断言：`configure_stream` 之后 `write_timeout()` 必须读回 `Some(100ms)`。
+/// 没设 → 返回 `None`，测试立刻红。
 #[test]
 fn write_timeout_is_set_on_connection() {
-    let src = include_str!("../src/rpc.rs");
-    assert!(
-        src.contains("set_write_timeout"),
-        "写线程必须设置写超时，否则客户端不读时会永久阻塞在 writeln"
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let _client = TcpStream::connect(addr).expect("connect");
+    let (server, _) = listener.accept().expect("accept");
+
+    // 未配置前：系统默认无写超时
+    assert_eq!(
+        server.write_timeout().expect("query"),
+        None,
+        "前置：新连接不应自带写超时"
     );
-    assert!(
-        src.contains("WRITE_TIMEOUT"),
-        "写超时值应来自具名常量"
+
+    y901_agent::rpc::configure_stream(&server).expect("configure");
+    assert_eq!(
+        server.write_timeout().expect("query"),
+        Some(std::time::Duration::from_millis(100)),
+        "写线程必须设置写超时（100ms），否则会永久阻塞在 writeln"
     );
 }
