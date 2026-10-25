@@ -360,3 +360,18 @@ fn subscribe_with_nan_interval_returns_400() {
         "NaN 必须被范围检查拒绝，实际 {result:?}"
     );
 }
+
+#[test]
+fn subscribe_with_infinity_interval_returns_400() {
+    let mut tree = with_visible_button();
+    let params = Json::obj()
+        .set("id", "btn")
+        .set("interval_ms", Json::Num(f64::INFINITY));
+    assert!(
+        matches!(
+            dispatch_request(&mut tree, &Policy::default(), "subscribe", &params),
+            Err(ApiError::BadRequest(_))
+        ),
+        "INFINITY 必须被拒绝（与 NaN 不同的数学性质，各测一次）"
+    );
+}

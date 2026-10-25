@@ -96,11 +96,18 @@ impl RpcEvent {
         let _: Option<UiEvent> = None;
         match self {
             RpcEvent::Text(t) => Json::obj().set("type", "text").set("text", t.clone()),
-            RpcEvent::Key(k) => Json::obj()
-                .set("type", "key")
-                // P0-4：必须与 from_json 的解析表一致（小写），
-                // 否则 to_json -> from_json 回环失败，RPC 键盘注入实际不可用。
-                .set("key", key_to_wire(*k)),
+            RpcEvent::Key(k) => match k {
+                // 字符键用码点表示：`{"type":"char","code":20013}`。
+                // 与 `Text`（输入一串文本、走 IME）语义不同，故独立 type。
+                y901_ui::Key::Char(ch) => {
+                    Json::obj().set("type", "char").set("code", *ch as u32)
+                }
+                other => Json::obj()
+                    .set("type", "key")
+                    // P0-4：必须与 from_json 的解析表一致（小写），
+                    // 否则 to_json -> from_json 回环失败，RPC 键盘注入实际不可用。
+                    .set("key", key_to_wire(*other)),
+            },
             RpcEvent::Compose(t) => Json::obj().set("type", "compose").set("text", t.clone()),
             RpcEvent::MouseDown { pos, button } => Json::obj()
                 .set("type", "mouse_down")
@@ -195,6 +202,25 @@ impl RpcEvent {
                 );
                 let delta = value.get("delta").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
                 Ok(RpcEvent::Wheel { pos, delta })
+            }
+            // 字符键：`{"type":"char","code":<码点>}`。只接受 code，拒绝 text 字段
+            // （text 与 RpcEvent::Text 语义重叠，会造成"按字符键"与"输入文本"混淆）。
+            "char" => {
+                let code = value.get("code").ok_or("char event requires code")?;
+                let v = match code {
+                    Json::Num(v) => *v,
+                    other => {
+                        return Err(format!("code must be a number, got {other:?}"));
+                    }
+                };
+                // 严格校验：有限、非负、整数、落在 u32 范围
+                if !v.is_finite() || v < 0.0 || v.fract() != 0.0 || v > u32::MAX as f64 {
+                    return Err(format!("code {v} 不是合法字符（代理区 0xD800-0xDFFF 或 > 0x10FFFF）"));
+                }
+                let ch = char::from_u32(v as u32).ok_or_else(|| {
+                    format!("code {v} 不是合法字符（代理区 0xD800-0xDFFF 或 > 0x10FFFF）")
+                })?;
+                Ok(RpcEvent::Key(y901_ui::Key::Char(ch)))
             }
             "key" => {
                 let name = value
