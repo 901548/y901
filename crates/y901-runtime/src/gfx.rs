@@ -26,11 +26,13 @@ pub enum PlatformWindowHandle {
     X11(u64),
     /// Wayland `wl_surface*`。
     Wayland(*mut core::ffi::c_void),
-    /// 其它平台：不透明句柄，由后端解释。
+    /// 未明确支持的平台。使用前必须由后端与 PlatformRuntime 共同约定
+    /// 指针的具体含义（例如 WASM 的 canvas 句柄、Metal 的 layer 指针）。
     Other(*mut core::ffi::c_void),
 }
 
-/// 一个绘制实例（与 GPU 顶点布局一一对应）。
+/// GPU 实例数据。字段顺序和大小必须与 `d3d11::Instance`（backend 实现）一致。
+/// 第 2 步的 `impl RenderBackend for D3dBackend` 必须做转换 + 布局校验。
 ///
 /// 字段顺序/类型与 `y901-backend-win32::backend::d3d11::Instance` 保持一致，
 /// 但**本模块不依赖那个类型**——后端负责在自己的实现里做转换或复用同一布局。
@@ -45,6 +47,12 @@ pub struct GfxInstance {
     /// RGBA（0..1）。
     pub color: [f32; 4],
 }
+
+/// 编译期布局断言：4 个字段共 12 个 f32 = 48 字节，且与 `d3d11::Instance` 相同。
+///
+/// 一旦有人加字段/改类型，这里会**编译失败**——这是唯一能在编译期发现的防线。
+/// 运行时还有 `debug_assert` + `gfx_instance_layout_matches_d3d_instance` 测试双保险。
+const _: () = assert!(core::mem::size_of::<GfxInstance>() == 48);
 
 /// 图集脏矩形：本帧需要上传到 GPU 的区域。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,7 +99,8 @@ pub trait RenderBackend {
     /// 失败：设备丢失、图集未同步等；返回 `Err` 后调用方通常会尝试 `rebuild`。
     fn present(&mut self, frame: &Frame) -> Result<(), String>;
 
-    /// 当前帧是否应该跳过绘制（窗口最小化 / 完全遮挡）。
+    /// 上一次 present 是否返回被遮挡（如 D3D11 的 DXGI_STATUS_OCCLUDED）。
+    /// 无参查询，因此是**缓存值**，不是实时状态。
     fn is_occluded(&self) -> bool;
 
     /// 上次 `present` 的实例数（诊断用）。

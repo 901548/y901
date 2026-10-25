@@ -31,6 +31,12 @@ pub struct D3dBackend {
     instances: Vec<Instance>,
     viewport: Size,
     clips: Vec<Rect>,
+    /// 窗口句柄：`RenderBackend::present` 无参，必须记住它。
+    hwnd: HWND,
+    /// 当前尺寸：trait 的 `present` 无参，必须记住它。
+    size: (u32, u32),
+    /// 上一次 `present` 是否被遮挡（D3D11 只能从 `Present` 返回值得知）。
+    last_occluded: bool,
 }
 
 impl D3dBackend {
@@ -62,6 +68,9 @@ impl D3dBackend {
             instances: Vec::with_capacity(4096),
             viewport: Size::new(width as f32, height as f32),
             clips: Vec::new(),
+            hwnd,
+            size: (width, height),
+            last_occluded: false,
         };
         backend.sync_atlas()?;
         Ok(backend)
@@ -232,6 +241,94 @@ impl D3dBackend {
     }
 }
 
+// ---------------------------------------------------------------------------
+// RenderBackend：平台无关的渲染契约实现（跨平台 v3 阶段 1 第 2 步）
+// ---------------------------------------------------------------------------
+
+/// `GfxInstance` → GPU 顶点结构。
+///
+/// 两者字段顺序与类型完全一致（48 字节）；`debug_assert` 在开发期兜底，
+/// 发布期由 `gfx_instance_layout_matches_d3d_instance` 测试保证。
+fn to_gpu_instance(i: &y901_runtime::gfx::GfxInstance) -> Instance {
+    debug_assert_eq!(
+        std::mem::size_of::<y901_runtime::gfx::GfxInstance>(),
+        std::mem::size_of::<Instance>(),
+        "GfxInstance 与 GPU Instance 布局不一致"
+    );
+    Instance {
+        pos: i.pos,
+        size: i.size,
+        uv_rect: i.uv_rect,
+        color: i.color,
+    }
+}
+
+impl y901_runtime::gfx::RenderBackend for D3dBackend {
+    /// 只有 Win32 句柄能交给 D3D11；其它平台直接拒绝。
+    fn create(
+        handle: y901_runtime::gfx::PlatformWindowHandle,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, String> {
+        use y901_runtime::gfx::PlatformWindowHandle;
+        let hwnd = match handle {
+            PlatformWindowHandle::Win32(ptr) => ptr as HWND,
+            PlatformWindowHandle::X11(_)
+            | PlatformWindowHandle::Wayland(_)
+            | PlatformWindowHandle::Other(_) => {
+                return Err("D3dBackend 只支持 Win32 窗口句柄".to_string())
+            }
+        };
+        // SAFETY: 调用方通过 `PlatformWindowHandle::Win32` 承诺句柄有效且同线程。
+        unsafe { Self::new(hwnd, width, height) }
+    }
+
+    fn rebuild(&mut self, width: u32, height: u32) -> Result<(), String> {
+        // SAFETY: hwnd 由 create 时保存，仍然有效（调用方负责窗口生命周期）。
+        unsafe { self.gfx.rebuild(self.hwnd, width, height) }?;
+        self.size = (width, height);
+        self.viewport = Size::new(width as f32, height as f32);
+        Ok(())
+    }
+
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        // SAFETY: 同 rebuild；尺寸来自当前客户区。
+        unsafe { D3dBackend::resize(self, width, height) };
+        self.size = (width, height);
+        Ok(())
+    }
+
+    fn present(&mut self, frame: &y901_runtime::gfx::Frame) -> Result<(), String> {
+        // 1) 用本帧实例替换内部缓冲（D3D11 的 present 从 self.instances 取数据）
+        self.instances.clear();
+        self.instances
+            .extend(frame.instances.iter().map(to_gpu_instance));
+
+        // 2) 图集：D3dBackend 的图集由 TextEngine 自己管理（sync_atlas 内部取脏区），
+        //    因此 `frame.atlas_updates` 在这里不被使用。这是当前实现的已知偏差：
+        //    平台无关后端（wgpu 等）会用它们；D3D11 后端不需要。
+        let (w, h) = self.size;
+        // SAFETY: hwnd 与尺寸均由本结构保存，调用方保证窗口存活。
+        let ok = unsafe { D3dBackend::present(self, self.hwnd, w, h) };
+        self.last_occluded = !ok;
+        if ok {
+            Ok(())
+        } else {
+            // false 可能表示"被遮挡"（非错误）或"设备丢失且重建失败"。
+            // 调用方用 `is_occluded()` 区分。
+            Err("present 未完成（遮挡或设备丢失，见 is_occluded）".to_string())
+        }
+    }
+
+    fn is_occluded(&self) -> bool {
+        self.last_occluded
+    }
+
+    fn instance_count(&self) -> usize {
+        self.instances.len()
+    }
+}
+
 impl TextMetrics for D3dBackend {
     fn measure_text(&self, text: &str, _style: &TextStyle) -> Size {
         let cols: u32 = text.chars().map(|c| self.text.cell_span(c)).sum();
@@ -364,5 +461,35 @@ mod glyph_offset_tests {
         assert!(off < 0.0);
         let center = off + 17.0 / 2.0;
         assert!((center - 8.0).abs() < 1e-4, "仍应居中，实际 {center}");
+    }
+}
+
+#[cfg(test)]
+mod gfx_layout_tests {
+    /// `GfxInstance` 与 GPU 顶点结构必须逐字节一致。
+    ///
+    /// 布局错位的后果不是"画面难看"，而是**整屏乱码**——
+    /// 这是本仓库里少数必须用测试钉死的不变量。
+    #[test]
+    fn gfx_instance_layout_matches_d3d_instance() {
+        use y901_runtime::gfx::GfxInstance;
+        assert_eq!(
+            std::mem::size_of::<GfxInstance>(),
+            std::mem::size_of::<super::Instance>(),
+            "GfxInstance 与 d3d11::Instance 大小不一致"
+        );
+        assert_eq!(std::mem::size_of::<GfxInstance>(), 48);
+        // 大小相同但字段错位同样会乱码：逐个字段喂不同值再比对
+        let a = GfxInstance {
+            pos: [1.0, 2.0],
+            size: [3.0, 4.0],
+            uv_rect: [5.0, 6.0, 7.0, 8.0],
+            color: [9.0, 10.0, 11.0, 12.0],
+        };
+        let b = super::to_gpu_instance(&a);
+        assert_eq!(b.pos, a.pos);
+        assert_eq!(b.size, a.size);
+        assert_eq!(b.uv_rect, a.uv_rect);
+        assert_eq!(b.color, a.color);
     }
 }
