@@ -393,6 +393,7 @@ name = "y901-backend-win32"
 version = "0.1.0"
 dependencies = [
  "windows-sys",
+ "y901-core",
  "y901-runtime",
  "y901-ui",
 ]

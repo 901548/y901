@@ -372,7 +372,12 @@ impl Grid {
         }
     }
 
-    fn width_of_char(ch: char) -> usize {
+    /// 字符占几个格：**格数的唯一来源**。
+    ///
+    /// 规则来自 `unicode-width`：0（组合符）→ 0，窄 → 1，宽/全角 → 2。
+    /// 后端渲染必须用它决定推进距离，**不得**用字体 advance 反推格数——
+    /// 两套来源会在"字体 advance 与 unicode-width 不一致"时导致错位。
+    pub fn width_of_char(ch: char) -> usize {
         match ch.width().unwrap_or(1) {
             0 => 0,
             1 => 1,

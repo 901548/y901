@@ -182,7 +182,13 @@ impl D3dBackend {
         }
     }
 
-    fn push_glyph(&mut self, x: f32, y: f32, ch: char, color: Color, bold: bool) {
+    /// 把字形推进实例列表。
+    ///
+    /// `span` 来自格契约（`y901_core::width_of_char`）：ASCII=1，CJK=2。
+    /// **不是**字形 advance，而是"这个字形应占几格"。
+    /// 居中补偿 `offset_x = (span*CELL_W - advance)/2`：字体 advance 与格宽
+    /// 不精确相等时（跨平台常见），字形仍落在格子中央而不是贴左。
+    fn push_glyph(&mut self, x: f32, y: f32, span: f32, ch: char, color: Color, bold: bool) {
         let atlas_size = self.text.atlas_size as f32;
         let ascent = self.text.ascent;
 
@@ -193,8 +199,9 @@ impl D3dBackend {
             return;
         }
 
+        let offset_x = glyph_offset(span, CELL_W, glyph.advance);
         let pos = Pos::new(
-            x + glyph.bearing_x as f32,
+            x + offset_x + glyph.bearing_x as f32,
             y + ascent + glyph.bearing_y as f32,
         );
         let size = [glyph.width as f32, glyph.height as f32];
@@ -283,7 +290,7 @@ impl RenderCtx for D3dBackend {
                 );
             }
             if ch != ' ' {
-                self.push_glyph(pen_x, origin.y, ch, style.fg, style.bold);
+                self.push_glyph(pen_x, origin.y, span, ch, style.fg, style.bold);
             }
             if style.underline {
                 self.fill_rect(
@@ -306,5 +313,56 @@ impl RenderCtx for D3dBackend {
 
     fn pop_clip(&mut self) {
         self.clips.pop();
+    }
+}
+
+/// 字形在格子里的水平居中偏移。
+///
+/// `span * cell_w` 是"该字形应占的宽度"（格契约），`advance` 是字体实际推进宽度。
+/// 二者不精确相等时（跨平台常见：后备字体、合成字形），把差值的一半作为左偏移，
+/// 让字形居中而不是贴左。
+///
+/// 精确 2:1 的字体（如 NSimSun 16px）会得到 0.0 —— Windows 外观不变。
+pub(crate) fn glyph_offset(span: f32, cell_w: f32, advance: f32) -> f32 {
+    (span * cell_w - advance) * 0.5
+}
+
+#[cfg(test)]
+mod glyph_offset_tests {
+    use super::glyph_offset;
+
+    /// 精确 2:1：offset 必须为 0（Windows 现有外观的回归保证）。
+    #[test]
+    fn exact_2to1_has_zero_offset() {
+        assert_eq!(glyph_offset(2.0, 8.0, 16.0), 0.0);
+        assert_eq!(glyph_offset(1.0, 8.0, 8.0), 0.0);
+    }
+
+    /// advance 偏小 10%（14.4 vs 16）：offset 为正，且字形居中在 2 格内。
+    #[test]
+    fn cjk_offset_centers_glyph_in_two_cells() {
+        let cell_w = 8.0;
+        let advance = 1.8 * cell_w; // 14.4
+        let off = glyph_offset(2.0, cell_w, advance);
+        assert!(off > 0.0, "advance 偏小时 offset 应为正，实际 {off}");
+        assert!(
+            (off - (2.0 * cell_w - advance) / 2.0).abs() < 1e-5,
+            "offset 必须是差值的一半"
+        );
+        // 字形左边界 = 0 + off，墨迹宽 = advance，中心应落在 2 格中点 (8.0)
+        let center = off + advance / 2.0;
+        assert!(
+            (center - cell_w).abs() < 1e-4,
+            "字形中心应落在 2 格中点 {cell_w}，实际 {center}"
+        );
+    }
+
+    /// advance 偏大（17 vs 16）：offset 为负，同样居中。
+    #[test]
+    fn oversized_advance_gets_negative_offset() {
+        let off = glyph_offset(2.0, 8.0, 17.0);
+        assert!(off < 0.0);
+        let center = off + 17.0 / 2.0;
+        assert!((center - 8.0).abs() < 1e-4, "仍应居中，实际 {center}");
     }
 }

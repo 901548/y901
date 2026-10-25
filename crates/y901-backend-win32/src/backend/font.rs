@@ -500,16 +500,23 @@ impl TextEngine {
                 design.advance_width as f32 * font_size / units_per_em
             };
 
+            // 字体度量与"格"的偏差只警告、不拒绝启动：
+            // 格数由 unicode-width 决定（`cell_span`），字体 advance 只影响居中偏移。
+            // 早期这里是硬 Err，导致非精确 2:1 的字体直接起不来（跨平台阻塞）。
             let ascii = advance_of('M');
-            if (ascii - cell_width).abs() > 0.01 {
-                return Err(format!("ASCII advance {ascii} != cell_width {cell_width}"));
+            let ascii_dev = (ascii - cell_width).abs();
+            if ascii_dev > 0.1 * cell_width && cell_width >= 8.0 {
+                eprintln!(
+                    "[y901] 警告：ASCII advance ({ascii:.2}px) 偏离 cell_width ({cell_width:.2}px) 超过 10%，字形将按居中补偿摆放"
+                );
             }
             let cjk = advance_of('\u{4e2d}');
-            if (cjk - cell_width * 2.0).abs() > 0.01 {
-                return Err(format!(
-                    "CJK advance {cjk} != 2 * cell_width {}",
+            let cjk_dev = (cjk - cell_width * 2.0).abs();
+            if cjk_dev > 0.1 * cell_width && cell_width >= 8.0 {
+                eprintln!(
+                    "[y901] 警告：CJK advance ({cjk:.2}px) 偏离 2*cell_width ({:.2}px) 超过 10%，字形将按居中补偿摆放",
                     cell_width * 2.0
-                ));
+                );
             }
 
             Ok(Self {
@@ -553,25 +560,13 @@ impl TextEngine {
         self.cache.get(&ch)
     }
 
-    /// 字符占用的格数：全角 = 2，其余 1。
+    /// 字符占用的格数：**直接来自 `y901_core::width_of_char`（唯一来源）**。
+    ///
+    /// 早期实现用字体 advance 阈值（`advance > 1.5 * cell_width`）反推，
+    /// 与网格存储侧的 unicode-width 判定可能不一致，导致字形错位/重叠。
+    /// 字体 advance 现在只用于渲染层的居中偏移（见 `glyph_offset`）。
     pub fn cell_span(&self, ch: char) -> u32 {
-        let advance = self.cached_advance(ch);
-        if advance > self.cell_width * 1.5 {
-            2
-        } else {
-            1
-        }
-    }
-
-    fn cached_advance(&self, ch: char) -> f32 {
-        match self.cache.get(&ch) {
-            Some(info) => info.advance,
-            None => {
-                let glyph = unsafe { self.face.glyph_index(ch as u16) };
-                let design = unsafe { self.face.design_metrics(glyph) };
-                design.advance_width as f32 * self.font_size / self.units_per_em
-            }
-        }
+        cell_span_of(ch)
     }
 
     /// 取出并清空脏区；reset = true 表示图集被整体重建。
@@ -798,4 +793,46 @@ impl TextEngine {
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// 格数的唯一实现：委托给 `y901_core`。
+///
+/// 独立成自由函数是为了可测（`TextEngine` 的构造需要 D3D 设备，单元测试起不来）。
+pub(crate) fn cell_span_of(ch: char) -> u32 {
+    y901_core::Grid::width_of_char(ch) as u32
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::cell_span_of;
+
+    /// 格契约的字符表：**backend 的格数必须与 core 一致**。
+    ///
+    /// 这不是端到端渲染测试（那需要 GPU），而是契约测试：
+    /// 若有人把 `cell_span_of` 改回"按字体 advance 反推"，这张表会立刻红。
+    #[test]
+    fn span_matches_core_implementation() {
+        let cases: &[(char, u32)] = &[
+            ('M', 1),
+            ('a', 1),
+            (' ', 1),
+            ('\u{4e2d}', 2),   // 中
+            ('\u{65e5}', 2),   // 日
+            ('\u{ff21}', 2),   // Ａ（全角）
+            ('\u{1f600}', 2),  // 😀（emoji，宽）
+            ('\u{200b}', 0),   // 零宽空格
+        ];
+        for (ch, want) in cases {
+            assert_eq!(
+                cell_span_of(*ch),
+                *want,
+                "字符 {ch:?} 的格数与 unicode-width 契约不符"
+            );
+            assert_eq!(
+                cell_span_of(*ch),
+                y901_core::Grid::width_of_char(*ch) as u32,
+                "backend 与 core 的格数必须同源"
+            );
+        }
+    }
 }
