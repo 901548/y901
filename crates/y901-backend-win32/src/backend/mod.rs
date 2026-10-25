@@ -288,6 +288,10 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
         unsafe { self.gfx.rebuild(self.hwnd, width, height) }?;
         self.size = (width, height);
         self.viewport = Size::new(width as f32, height as f32);
+        // 图集纹理随设备一起丢失：必须全量重传，否则后续 present 采样空纹理 → 整屏缺字。
+        // SAFETY: 同上；reset=true 表示整张重传。
+        unsafe { self.gfx.update_atlas(&self.text.atlas, self.text.atlas_size, true, &[]) }
+            .map_err(|err| format!("rebuild 后图集重传失败: {err}"))?;
         Ok(())
     }
 
@@ -307,6 +311,11 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
         // 2) 图集：D3dBackend 的图集由 TextEngine 自己管理（sync_atlas 内部取脏区），
         //    因此 `frame.atlas_updates` 在这里不被使用。这是当前实现的已知偏差：
         //    平台无关后端（wgpu 等）会用它们；D3D11 后端不需要。
+        //    TODO(§18)：抽 GlyphProvider 时把图集管理统一到 trait。
+        debug_assert!(
+            self.gfx.has_atlas() || self.text.atlas.is_empty(),
+            "present 时图集必须已同步（rebuild 后未重传图集 = 整屏缺字）"
+        );
         let (w, h) = self.size;
         // SAFETY: hwnd 与尺寸均由本结构保存，调用方保证窗口存活。
         let ok = unsafe { D3dBackend::present(self, self.hwnd, w, h) };
@@ -491,5 +500,43 @@ mod gfx_layout_tests {
         assert_eq!(b.size, a.size);
         assert_eq!(b.uv_rect, a.uv_rect);
         assert_eq!(b.color, a.color);
+    }
+}
+
+/// 真机测试：设备重建后图集必须被重传。
+///
+/// 需要真实窗口 + D3D11 设备，CI 跑不了，所以 `#[ignore]`。
+/// 手动运行：`cargo test -p y901-backend-win32 -- --ignored rebuild_reuploads_atlas`
+#[cfg(test)]
+mod rebuild_atlas_tests {
+    use y901_runtime::gfx::{PlatformWindowHandle, RenderBackend};
+
+    #[test]
+    #[ignore = "需要真实窗口与 D3D11 设备"]
+    fn rebuild_reuploads_atlas() {
+        let window = match crate::Window::create(&y901_runtime::Options::default()) {
+            Ok(w) => w,
+            Err(err) => {
+                eprintln!("[skip] 无法创建窗口（需要交互式桌面）：{err}");
+                return;
+            }
+        };
+        let hwnd = window.hwnd();
+        let handle = PlatformWindowHandle::Win32(hwnd);
+        let mut backend = match <super::D3dBackend as RenderBackend>::create(handle, 800, 600) {
+            Ok(b) => b,
+            Err(err) => {
+                // 无 GPU 访问（远程会话 / 权限受限）时跳过：这不是产品缺陷
+                eprintln!("[skip] 无法创建 D3D11 设备：{err}");
+                return;
+            }
+        };
+        assert!(backend.gfx.has_atlas(), "初次创建后应已有图集");
+
+        backend.rebuild(800, 600).expect("rebuild");
+        assert!(
+            backend.gfx.has_atlas(),
+            "rebuild 后必须重新上传图集，否则采样空纹理"
+        );
     }
 }

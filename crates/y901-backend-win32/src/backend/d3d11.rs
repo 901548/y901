@@ -1421,6 +1421,14 @@ impl Gfx {
         self.device.is_none()
     }
 
+    /// GPU 侧图集纹理是否已创建。
+    ///
+    /// `rebuild()` 会释放纹理，必须重新 `update_atlas(.., reset=true, ..)` 才能恢复；
+    /// `present` 前用 `debug_assert!` 校验这一点（否则采样到空纹理 = 整屏缺字）。
+    pub fn has_atlas(&self) -> bool {
+        self.atlas.is_some()
+    }
+
     pub fn device_lost(hr: Hresult) -> bool {
         matches!(
             hr as u32,

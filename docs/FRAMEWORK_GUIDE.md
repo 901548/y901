@@ -322,3 +322,13 @@ Agent 看到的 `revision` 不变，但 `get_tree` 的内容变了，
 
 - **`glyph_offset` 只补偿水平方向**：垂直居中（baseline 与格高不符）未处理。
   Linux/macOS 的后备字体链可能在垂直方向同样需要补偿。等第二个后端落地时一并验证。
+## §18 TODO：RenderBackend 的图集更新路径不一致
+
+`D3dBackend` 通过 `TextEngine::sync_atlas()` 内部处理图集更新，**忽略** `Frame.atlas_updates`。
+trait 契约要求后端从 `Frame` 读脏矩形，但 D3D11 的图集归 `TextEngine` 所有。
+
+第 3 步对拍时，`RecordingBackend` 的 `atlas_updates` 会和 `D3dBackend` 不一致——
+这正是抽象层没抽干净的信号，不是 mock 写错了。
+
+**正确修复**：抽 `GlyphProvider` 时把图集管理从 `TextEngine` 提到 trait 接口里，
+让"字形光栅化 + 图集分配 + 脏区上传"成为后端契约的一部分。
