@@ -71,8 +71,19 @@
 
 - 证据：`crates/y901-core/src/lib.rs:6` `use unicode_width::UnicodeWidthChar;`
 - 写入路径：`core/src/lib.rs:372` `if w == 2 { ... }`，`w` 由 `ch.width()` 得出（同一函数内）。
-- **结论：满足**。核心层不依赖字体度量计算格数。
-- 注意：`backend` 侧仍会用字体 advance 做**校验**（见 3.2），但不参与格数判定。
+- **结论：核心层满足，但渲染层不满足（两套来源）**。
+  - `y901-core` 用 unicode-width：`core/src/lib.rs:375-378` `fn width_of_char(ch) { match ch.width() … }`。
+  - `y901-backend-win32` **另有一套**：`font.rs:557-564`
+    ```rust
+    pub fn cell_span(&self, ch: char) -> u32 {
+        let advance = self.cached_advance(ch);
+        if advance > self.cell_width * 1.5 { 2 } else { 1 }   // ← 来自字体 advance，不是 unicode-width
+    }
+    ```
+  - 调用点：`backend/mod.rs:277` `self.text.cell_span(ch)`。
+- **风险**：同一个字符可能在"网格存储"里占 2 格（unicode-width 判定），在"渲染推进"里只占 1 格（字体 advance 判定），导致
+  后续字形重叠 / 错位。阈值 1.5 是经验值，`unicode-width == 2` 但 `advance ∈ (cell, 1.5*cell)` 的字符（模糊宽度、后备字体）必然踩中。
+- **v3 前置条件（比 3.2 更根本）**：`cell_span` 必须改为**只依赖 unicode-width**，字体 advance 只用于 3.2 的居中偏移。
 
 ### 3.2 CJK 2 格居中
 
@@ -95,7 +106,7 @@
   fn draw_text(&mut self, origin: Pos, text: &str, style: &TextStyle) -> f32 {
       let mut pen_x = origin.x;                    // 275
       for ch in text.chars() {
-          let span = self.text.cell_span(ch).max(1) as f32;   // 277 ← 格数来自 unicode-width
+          let span = self.text.cell_span(ch).max(1) as f32;   // 277 ← 注意：这里是**字体 advance** 判定，不是 unicode-width（见 3.1）
           ... Rect::new(pen_x, origin.y, span * CELL_W, CELL_H) // 281
           self.push_glyph(pen_x, origin.y, ch, ...);          // 286
           pen_x += span * CELL_W;                             // 294 ← 以"格"为单位累加
