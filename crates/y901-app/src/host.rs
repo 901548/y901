@@ -112,7 +112,9 @@ fn handle_rpc(tree: &mut UiTree, policy: &Policy, pending: Pending) {
         }
         RpcRequest::Unknown { method } => Err(format!("unknown method: {method}")),
     };
-    y901_agent::rpc::reply_to(pending, result);
+    // B+：回包入队失败（连接已判死）不需要额外处理——写线程会 shutdown，
+    // 客户端立刻看到 EOF。这里显式忽略返回值。
+    let _ = y901_agent::rpc::reply_to(pending, result);
 }
 
 /// 无窗口环境的等宽度量（headless 也要能算出真实 rect）。

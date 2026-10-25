@@ -491,7 +491,7 @@ fn rpc_get_tree_and_dispatch() {
             }
             y901_agent::RpcRequest::Unknown { method } => Err(format!("unknown method {method}")),
         };
-        y901_agent::rpc::reply_to(pending, result);
+        let _ = y901_agent::rpc::reply_to(pending, result);
     };
 
     let client = std::thread::spawn(move || {

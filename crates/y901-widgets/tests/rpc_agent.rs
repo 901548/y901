@@ -116,7 +116,7 @@ fn handle(tree: &mut UiTree, pending: Pending) {
         }
         RpcRequest::Unknown { method } => Err(format!("unknown method: {method}")),
     };
-    y901_agent::rpc::reply_to(pending, result);
+    let _ = y901_agent::rpc::reply_to(pending, result);
 }
 
 // ---------- 测试 ----------

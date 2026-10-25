@@ -46,7 +46,7 @@ fn drive(
             RpcRequest::Ping => "pong".to_string(),
             _ => "ok".to_string(),
         };
-        reply_to(pending, Ok(Json::obj().set("tag", tag)));
+        let _ = reply_to(pending, Ok(Json::obj().set("tag", tag)));
         if push_after_each {
             hub.send(&Json::obj().set("event", "tick").to_string());
         }
@@ -182,7 +182,7 @@ fn reply_to_stays_bounded_when_client_never_reads() {
     let pending = rx.recv_timeout(Duration::from_millis(200)).ok();
     if let Some(p) = pending {
         let t = Instant::now();
-        reply_to(p, Ok(Json::obj().set("blob", "x".repeat(1024))));
+        let _ = reply_to(p, Ok(Json::obj().set("blob", "x".repeat(1024))));
         assert!(
             t.elapsed() < Duration::from_millis(250),
             "reply_to 必须在有限时间内返回，实际 {:?}",

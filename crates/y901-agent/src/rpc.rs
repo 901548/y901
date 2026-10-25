@@ -9,6 +9,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -201,6 +202,11 @@ pub struct Pending {
     pub id: Json,
     /// 该连接的写队列。
     pub writer_tx: std::sync::mpsc::SyncSender<WriteJob>,
+    /// 该连接是否已被标记为"废"（写队列溢出）。
+    ///
+    /// `reply_to` 开头先看它：为真直接返回，**连 `try_send` 都不做**，
+    /// 保证 UI 线程零阻塞。设置的唯一时机是"第一次 `try_send` 失败"。
+    pub dead: Arc<AtomicBool>,
 }
 
 /// 写线程的任务：回包与推送共用一条队列，保存入队顺序。
@@ -218,14 +224,20 @@ pub enum WriteJob {
 const WRITE_QUEUE: usize = 1024;
 
 /// UI 线程向连接写队列投递回包时的最长等待。
-const REPLY_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+///
+/// B+ 之后 UI 线程**不再等待**：`try_send` 失败即标记 `dead` 并返回。
+/// 保留这个常量只作为写线程的写超时（同值），语义已从"UI 等待"变为"写线程周期"。
+const WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// 一条连接的注册项：写队列 + 判死标志。
+type ConnSlot = (std::sync::mpsc::SyncSender<WriteJob>, Arc<AtomicBool>);
 
 /// 推送总线：**UI 线程只投递字符串，绝不碰 socket**。
 ///
 /// 每个连接一条有界队列；推送走 `try_send`（满了丢 + 计数），绝不阻塞 UI 线程。
 #[derive(Clone)]
 pub struct Broadcaster {
-    senders: Arc<Mutex<Vec<std::sync::mpsc::SyncSender<WriteJob>>>>,
+    senders: Arc<Mutex<Vec<ConnSlot>>>,
     dropped: Arc<std::sync::atomic::AtomicU64>,
 }
 
@@ -246,15 +258,17 @@ impl Broadcaster {
             Ok(s) => s,
             Err(_) => return false,
         };
-        senders.retain(|tx| match tx.try_send(WriteJob::Push(line.to_string())) {
+        senders.retain(|(tx, dead)| match tx.try_send(WriteJob::Push(line.to_string())) {
             Ok(()) => true,
             Err(TrySendError::Full(_)) => {
+                // 推送可丢：**不**因此踢连接（丢推送是正常背压行为）
                 self.dropped
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 all = false;
-                true // 连接还活着，只是这条丢了
+                true
             }
             Err(TrySendError::Disconnected(_)) => {
+                dead.store(true, std::sync::atomic::Ordering::Relaxed);
                 self.dropped
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 all = false;
@@ -276,9 +290,9 @@ impl Broadcaster {
     /// 连接数告警阈值：超过时打一行日志（不做硬上限，避免误拒真用户）。
     const WARN_CONNECTIONS: usize = 64;
 
-    fn register(&self, tx: std::sync::mpsc::SyncSender<WriteJob>) {
+    fn register(&self, tx: std::sync::mpsc::SyncSender<WriteJob>, dead: Arc<AtomicBool>) {
         if let Ok(mut senders) = self.senders.lock() {
-            senders.push(tx);
+            senders.push((tx, dead));
             if senders.len() > Self::WARN_CONNECTIONS {
                 eprintln!(
                     "[y901] RPC 连接数 {} 超过告警阈值 {}",
@@ -298,20 +312,35 @@ impl Default for Broadcaster {
 
 /// 每连接一个写线程：从队列取任务，按 FIFO 写 socket。
 ///
-/// 退出条件（两条都会让线程结束）：
-/// 1. 所有 `Sender` 被 drop（连接被注销 + Pending 全部处理完）→ `recv` 返回 Err；
-/// 2. 写失败（对端关闭 / 重置）→ 立即 break，随后队列的 `Sender` 会收到 Disconnected。
-fn spawn_conn_writer(mut stream: TcpStream, rx: std::sync::mpsc::Receiver<WriteJob>) {
+/// **必须设写超时**：否则客户端不读时 `writeln!` 永久阻塞，
+/// 线程既写不出这一条、也永远检查不到 `dead`，整个 B+ 设计会退化成"静默丢包"。
+/// 100ms 让线程周期性醒来检查 `dead`。
+///
+/// 退出条件：
+/// 1. `recv` 返回 Err（所有 Sender 被 drop）；
+/// 2. 写失败（超时 / EPIPE）；
+/// 3. 写完一条后发现 `dead` 为真 → `shutdown` 并退出。
+fn spawn_conn_writer(
+    mut stream: TcpStream,
+    rx: std::sync::mpsc::Receiver<WriteJob>,
+    dead: Arc<AtomicBool>,
+) {
+    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
     let _ = thread::Builder::new()
         .name("y901-rpc-conn-writer".to_string())
-        .spawn(move || {
-            while let Ok(job) = rx.recv() {
-                let line = match job {
-                    WriteJob::Reply(s) | WriteJob::Push(s) => s,
-                };
-                if writeln!(stream, "{line}").is_err() || stream.flush().is_err() {
-                    break;
-                }
+        .spawn(move || loop {
+            if dead.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+                break;
+            }
+            let Ok(job) = rx.recv() else { break };
+            let line = match job {
+                WriteJob::Reply(s) | WriteJob::Push(s) => s,
+            };
+            if writeln!(stream, "{line}").is_err() || stream.flush().is_err() {
+                dead.store(true, std::sync::atomic::Ordering::Relaxed);
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+                break;
             }
         });
 }
@@ -372,8 +401,9 @@ fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster, expected: Str
     // 每连接一个写线程：回包与推送共用同一条有界 FIFO 队列。
     // UI 线程只 send，永不碰 socket —— 客户端不读时阻塞的是写线程，不是 UI。
     let (job_tx, job_rx) = std::sync::mpsc::sync_channel::<WriteJob>(WRITE_QUEUE);
-    spawn_conn_writer(stream, job_rx);
-    hub.register(job_tx.clone());
+    let dead = Arc::new(AtomicBool::new(false));
+    spawn_conn_writer(stream, job_rx, dead.clone());
+    hub.register(job_tx.clone(), dead.clone());
 
     // 每请求鉴权：Token 非空时，所有请求必须携带 params.token
 
@@ -411,7 +441,7 @@ fn serve(stream: TcpStream, tx: Sender<Pending>, hub: Broadcaster, expected: Str
             }
         }
 
-        let response = handle(value, &tx, &job_tx);
+        let response = handle(value, &tx, &job_tx, &dead);
         // `Deferred` 表示请求已转交 UI 线程，回包由 `reply_to` 走同一队列写出
         if let Handled::Sync(response) = response {
             let _ = job_tx.send(WriteJob::Reply(response.to_string()));
@@ -437,6 +467,7 @@ fn handle(
     value: Json,
     tx: &Sender<Pending>,
     writer_tx: &std::sync::mpsc::SyncSender<WriteJob>,
+    dead: &Arc<AtomicBool>,
 ) -> Handled {
     let id = value.get("id").cloned().unwrap_or(Json::Null);
     let method = match value.get("method").and_then(|m| m.as_str()) {
@@ -518,6 +549,7 @@ fn handle(
         request,
         id: id.clone(),
         writer_tx: writer_tx.clone(),
+        dead: dead.clone(),
     };
     if tx.send(pending).is_err() {
         return sync_err(id, "ui thread is gone");
@@ -535,11 +567,16 @@ fn error_response(id: Json, message: &str) -> Json {
 
 /// UI 线程侧：把请求处理结果投递到该连接的写队列。
 ///
-/// **不碰 socket**：写由该连接的写线程完成，UI 线程永不被慢客户端阻塞。
-/// 回包不允许丢，所以用阻塞 `send_timeout`；超时上限 100ms。
+/// **零阻塞**（B+）：开头先看 `dead`，为真直接返回；否则 `try_send` 一次，
+/// 失败即把连接标记为 `dead` 并返回，不再重试、不再睡眠。
+/// 写线程醒来看到 `dead` 会 `shutdown`，客户端立刻收到 EOF —— 快速失败。
+///
 /// 顺序由队列保证：本函数入队后，调用方才会 `hub.send` 推送，
 /// 所以客户端一定先收到 ack、再收到该请求触发的推送。
-pub fn reply_to(pending: Pending, result: Result<Json, String>) {
+pub fn reply_to(pending: Pending, result: Result<Json, String>) -> Result<(), String> {
+    if pending.dead.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err("连接已被标记断开".to_string());
+    }
     let body = match result {
         Ok(result) => Json::obj()
             .set("id", pending.id.clone())
@@ -547,35 +584,16 @@ pub fn reply_to(pending: Pending, result: Result<Json, String>) {
             .set("result", result),
         Err(err) => error_response(pending.id.clone(), &err),
     };
-    match enqueue_reply(&pending.writer_tx, WriteJob::Reply(body.to_string())) {
-        Ok(()) => {}
-        Err(err) => {
-            // 队列满（客户端不读，写线程堵在 socket 上）或连接已注销。
-            // 丢回包会让 Agent 永远等不到 ack，因此这里必须留下痕迹。
-            eprintln!("[y901] RPC 回复入队失败（连接过慢或已断开）：{err}");
-        }
-    }
-}
-
-/// 向有界队列投递，最多等待 [`REPLY_SEND_TIMEOUT`]。
-///
-/// `SyncSender::send_timeout` 仍是 unstable 特性，这里用 `try_send` + 短睡眠轮询实现。
-/// 上限 100ms 保证 UI 线程不会被慢客户端长期占用；超时返回 `Err`。
-fn enqueue_reply(tx: &std::sync::mpsc::SyncSender<WriteJob>, job: WriteJob) -> Result<(), String> {
-    use std::sync::mpsc::TrySendError;
-    let deadline = std::time::Instant::now() + REPLY_SEND_TIMEOUT;
-    let mut job = job;
-    loop {
-        match tx.try_send(job) {
-            Ok(()) => return Ok(()),
-            Err(TrySendError::Full(back)) => {
-                if std::time::Instant::now() >= deadline {
-                    return Err("写队列已满（客户端不读）".to_string());
-                }
-                job = back;
-                std::thread::sleep(std::time::Duration::from_micros(200));
-            }
-            Err(TrySendError::Disconnected(_)) => return Err("连接已断开".to_string()),
+    match pending.writer_tx.try_send(WriteJob::Reply(body.to_string())) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            // 第一次失败就判死：队列深度 1024，能填满说明写线程卡住或客户端不读，
+            // 这个连接已经废了。"连续 N 次才判死"只会延长"部分成功部分丢失"的窗口。
+            pending
+                .dead
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            eprintln!("[y901] RPC 回包入队失败，标记连接断开");
+            Err("写队列已满，连接已标记断开".to_string())
         }
     }
 }

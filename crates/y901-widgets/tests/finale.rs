@@ -68,7 +68,7 @@ fn rpc_accepts_requests_with_token() {
 
     // UI 侧处理
     let pending = rx.recv_timeout(Duration::from_secs(10)).expect("request");
-    y901_agent::rpc::reply_to(pending, Ok(y901_ui::Json::obj().set("pong", true)));
+    let _ = y901_agent::rpc::reply_to(pending, Ok(y901_ui::Json::obj().set("pong", true)));
 
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
