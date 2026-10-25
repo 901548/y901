@@ -332,3 +332,15 @@ trait 契约要求后端从 `Frame` 读脏矩形，但 D3D11 的图集归 `TextE
 
 **正确修复**：抽 `GlyphProvider` 时把图集管理从 `TextEngine` 提到 trait 接口里，
 让"字形光栅化 + 图集分配 + 脏区上传"成为后端契约的一部分。
+## §19 真机测试：`rebuild_reuploads_atlas`
+
+`cargo test -p y901-backend-win32 rebuild_reuploads_atlas -- --ignored --nocapture`
+
+需要**有 GPU 访问权限的桌面会话**。当前开发机是无显卡直通的虚拟显示适配器
+（`GameViewer Virtual Display Adapter`），`D3D11CreateDeviceAndSwapChain` 连 WARP
+兜底都返回 `0x80070005 (E_ACCESSDENIED)`，因此测试会打印 `[skip]` 并返回。
+
+- 在有独显/核显的机器上：应当通过（断言 `rebuild` 后 `has_atlas()` 为真）。
+- 在 CI/容器/远程会话：`[skip]` 是预期行为，不算失败。
+- `present` 里的图集未同步检查在 release 下会打**一次**警告（`ATLAS_WARNED`）：
+  看到这条日志说明 `rebuild` 逻辑有 bug，不是正常现象。

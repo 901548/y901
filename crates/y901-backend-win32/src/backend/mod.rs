@@ -23,6 +23,8 @@ use font::TextEngine;
 const CELL_W: f32 = 8.0;
 const CELL_H: f32 = 16.0;
 const FONT_SIZE: f32 = 16.0;
+/// 图集未同步的警告只打一次（避免每帧刷屏，同时 release 也有提示）。
+static ATLAS_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const FONT_FAMILY: &str = "NSimSun";
 
 pub struct D3dBackend {
@@ -312,10 +314,17 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
         //    因此 `frame.atlas_updates` 在这里不被使用。这是当前实现的已知偏差：
         //    平台无关后端（wgpu 等）会用它们；D3D11 后端不需要。
         //    TODO(§18)：抽 GlyphProvider 时把图集管理统一到 trait。
-        debug_assert!(
-            self.gfx.has_atlas() || self.text.atlas.is_empty(),
-            "present 时图集必须已同步（rebuild 后未重传图集 = 整屏缺字）"
-        );
+        //
+        // 图集未同步 = 采样空纹理 = 整屏缺字。debug 断言 + release 只警告一次。
+        if !self.gfx.has_atlas() && !self.text.atlas.is_empty() {
+            debug_assert!(false, "present 时图集未同步（rebuild 后未重传图集）");
+            if !ATLAS_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[y901] 严重：present 时图集未同步（rebuild 后未重传？），画面将缺字。\
+                     这条日志每个进程只打一次；看到它就说明 rebuild 逻辑有 bug。"
+                );
+            }
+        }
         let (w, h) = self.size;
         // SAFETY: hwnd 与尺寸均由本结构保存，调用方保证窗口存活。
         let ok = unsafe { D3dBackend::present(self, self.hwnd, w, h) };
@@ -537,6 +546,35 @@ mod rebuild_atlas_tests {
         assert!(
             backend.gfx.has_atlas(),
             "rebuild 后必须重新上传图集，否则采样空纹理"
+        );
+    }
+}
+
+#[cfg(test)]
+mod rebuild_source_tests {
+    /// 结构测试：`rebuild` 方法体里必须调用 `update_atlas`。
+    ///
+    /// 为什么不是行为测试：真实 rebuild 需要 GPU 设备，CI/无显卡环境跑不了。
+    /// 这条测试是"误删防线"：有人删掉重传逻辑时它会红。
+    /// 已知弱点：改注释也可能骗过它（源码级匹配的通病）。
+    #[test]
+    fn rebuild_calls_update_atlas() {
+        let src = include_str!("mod.rs");
+        let start = src.find("fn rebuild(&mut self").expect("rebuild 方法存在");
+        // 方法体到下一个同级方法（4 空格缩进的 `fn `）为止
+        let rest = &src[start..];
+        let end = rest[1..]
+            .find("\n    fn ")
+            .map(|i| i + 1)
+            .unwrap_or(rest.len());
+        let body = &rest[..end];
+        assert!(
+            body.contains("update_atlas"),
+            "rebuild 必须重传图集，否则设备重建后整屏缺字：\n{body}"
+        );
+        assert!(
+            body.contains("true"),
+            "重传时必须 reset=true（全量重传），body:\n{body}"
         );
     }
 }
