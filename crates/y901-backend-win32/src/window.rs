@@ -97,7 +97,66 @@ unsafe fn client_pos(hwnd: HWND) -> Pos {
     Pos::new(pt.x as f32, pt.y as f32)
 }
 
+/// 全局按键去重状态（`wndproc` 是无状态的 C 回调，只能放静态）。
+///
+/// 用 `Mutex` 而不是 `AtomicU32`：`CharFilter` 有"取走并清空"的复合语义，
+/// 用原子实现要两次 CAS，容易写错；窗口消息本来就在同一线程串行处理。
+static CHAR_FILTER: std::sync::Mutex<Option<CharFilter>> = std::sync::Mutex::new(None);
+
+/// 控制键的 VK → 它同时会产生的那个控制字符。
+///
+/// 只覆盖 `TranslateMessage` 会重发 `WM_CHAR` 的四个键：
+/// Enter(0x0D) / Tab(0x09) / Backspace(0x08) / Escape(0x1B)。
+/// 其它键没有"双写"问题，返回 `None`。
+fn control_char_for_vk(vk: u32) -> Option<char> {
+    match vk {
+        0x0D => Some('\r'),
+        0x09 => Some('\t'),
+        0x08 => Some('\u{8}'),
+        0x1B => Some('\u{1b}'),
+        _ => None,
+    }
+}
+
+/// 这个 `WM_CHAR` 是否是紧邻 `WM_KEYDOWN` 的重复投递（应当丢弃）。
+///
+/// 输入：`last_vk`（上一次 WM_KEYDOWN 的键码，0 表示没有）、`c`（WM_CHAR 的字符）。
+/// 返回：`true` = 已由 `WM_KEYDOWN` 处理过，丢弃。
+/// 失败：无（纯判断）。
+fn is_duplicate_control_char(last_vk: u32, c: char) -> bool {
+    control_char_for_vk(last_vk) == Some(c)
+}
+
+/// 按键去重的状态机：`WM_KEYDOWN` 记键码，`WM_CHAR` 判断是否重复。
+///
+/// 抽成结构体是为了**可测**：`wndproc` 本身需要真窗口才能跑，
+/// 但"按键 → 字符"的序列语义可以直接单测（见 `key_filter_tests`）。
+#[derive(Default)]
+struct CharFilter {
+    last_vk: u32,
+}
+
+impl CharFilter {
+    /// 记录一次 `WM_KEYDOWN`。
+    fn on_key_down(&mut self, vk: u32) {
+        self.last_vk = vk;
+    }
+
+    /// 处理一次 `WM_CHAR`：返回 `Some(c)` 表示应当投递，`None` 表示丢弃。
+    ///
+    /// 无论是否丢弃，键码都会被清空（`WM_CHAR` 只跟随一个 `WM_KEYDOWN`）。
+    fn on_char(&mut self, c: char) -> Option<char> {
+        let vk = std::mem::take(&mut self.last_vk);
+        if is_duplicate_control_char(vk, c) {
+            None
+        } else {
+            Some(c)
+        }
+    }
+}
+
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+
     match msg {
         WM_NCCREATE => {
             let create = lparam as *const CREATESTRUCTW;
@@ -142,6 +201,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_KEYDOWN => {
+            // 记下键码：若这个键还会产生一个控制字符的 WM_CHAR（见下方），
+            // 那个 WM_CHAR 必须被丢弃，否则组件会把一次按键处理两遍。
+            if let Ok(mut slot) = CHAR_FILTER.lock() {
+                slot.get_or_insert_with(CharFilter::default)
+                    .on_key_down(wparam as u32);
+            }
             push(RawEvent::KeyDown {
                 key: vk_to_key(wparam as u32),
                 mods: modifiers(),
@@ -149,8 +214,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_CHAR => {
+            // 取走上一次的键码（一次性）：控制键的 WM_CHAR 是 TranslateMessage 的重复投递。
             if let Some(c) = char::from_u32(wparam as u32) {
-                push(RawEvent::Char { c });
+                let deliver = match CHAR_FILTER.lock() {
+                    Ok(mut slot) => slot.get_or_insert_with(CharFilter::default).on_char(c),
+                    // 锁中毒：保守起见过滤掉控制字符，避免双写
+                    Err(_) => None,
+                };
+                if deliver.is_some() {
+                    push(RawEvent::Char { c });
+                }
             }
             0
         }
@@ -396,5 +469,118 @@ impl Window {
 impl Drop for Window {
     fn drop(&mut self) {
         self.backend = None;
+    }
+}
+
+#[cfg(test)]
+mod key_filter_tests {
+    use super::{control_char_for_vk, is_duplicate_control_char};
+
+    /// Enter：WM_KEYDOWN(VK_RETURN) 紧接着的 WM_CHAR(0x0D) 必须被丢弃。
+    #[test]
+    fn enter_key_does_not_double_fire() {
+        assert!(
+            is_duplicate_control_char(0x0D, '\r'),
+            "Enter 的 WM_CHAR(\\r) 是重复投递，必须丢弃"
+        );
+    }
+
+    /// Tab：同上（0x09）。
+    #[test]
+    fn tab_key_does_not_double_fire() {
+        assert!(is_duplicate_control_char(0x09, '\t'));
+    }
+
+    /// Backspace / Escape 同样只保留 WM_KEYDOWN 那一次。
+    #[test]
+    fn backspace_and_escape_do_not_double_fire() {
+        assert!(is_duplicate_control_char(0x08, '\u{8}'));
+        assert!(is_duplicate_control_char(0x1B, '\u{1b}'));
+    }
+
+    /// 可打印字符不受影响：字母键的 WM_CHAR 必须照常投递。
+    #[test]
+    fn printable_char_still_fires() {
+        // 'A' = VK 0x41，WM_CHAR 给 'a'
+        assert!(
+            !is_duplicate_control_char(0x41, 'a'),
+            "字母键的 WM_CHAR 不能被丢弃"
+        );
+        // 没有前置 WM_KEYDOWN 时，任何字符都照常投递
+        assert!(!is_duplicate_control_char(0, '\r'));
+        // 键码与字符不匹配时不丢弃（例如按 Enter 但 WM_CHAR 是别的字符）
+        assert!(!is_duplicate_control_char(0x0D, 'x'));
+    }
+
+    /// 映射表只覆盖四个键，其余返回 None。
+    #[test]
+    fn only_four_control_keys_are_mapped() {
+        assert_eq!(control_char_for_vk(0x0D), Some('\r'));
+        assert_eq!(control_char_for_vk(0x09), Some('\t'));
+        assert_eq!(control_char_for_vk(0x20), None, "空格不是控制键");
+        assert_eq!(control_char_for_vk(0x41), None);
+    }
+}
+
+#[cfg(test)]
+mod char_filter_tests {
+    use super::CharFilter;
+
+    /// Enter：KEYDOWN(VK_RETURN) 后紧跟的 CHAR('\r') 必须被丢弃，只投递一次。
+    #[test]
+    fn enter_key_does_not_double_fire() {
+        let mut f = CharFilter::default();
+        f.on_key_down(0x0D);
+        assert_eq!(f.on_char('\r'), None, "Enter 的 WM_CHAR 是重复投递");
+    }
+
+    /// Tab：同上（0x09）。终端里按 Tab 应只收到一次。
+    #[test]
+    fn tab_key_does_not_double_fire() {
+        let mut f = CharFilter::default();
+        f.on_key_down(0x09);
+        assert_eq!(f.on_char('\t'), None);
+    }
+
+    /// Backspace / Escape 同样只保留 WM_KEYDOWN 那一次。
+    #[test]
+    fn backspace_and_escape_do_not_double_fire() {
+        let mut f = CharFilter::default();
+        f.on_key_down(0x08);
+        assert_eq!(f.on_char('\u{8}'), None);
+
+        let mut f = CharFilter::default();
+        f.on_key_down(0x1B);
+        assert_eq!(f.on_char('\u{1b}'), None);
+    }
+
+    /// 可打印字符不受影响。
+    #[test]
+    fn printable_char_still_fires() {
+        let mut f = CharFilter::default();
+        f.on_key_down(0x41); // 'A'
+        assert_eq!(f.on_char('a'), Some('a'), "字母键的 WM_CHAR 必须投递");
+
+        // 没有前置 KEYDOWN（例如 IME 直接送字符）
+        let mut f = CharFilter::default();
+        assert_eq!(f.on_char('中'), Some('中'));
+    }
+
+    /// 键码只对紧随其后的那一个字符生效（不能影响后续输入）。
+    #[test]
+    fn key_state_is_consumed_by_exactly_one_char() {
+        let mut f = CharFilter::default();
+        f.on_key_down(0x0D);
+        assert_eq!(f.on_char('\r'), None);
+        // 下一个字符与上一次按键无关，必须投递
+        assert_eq!(f.on_char('\r'), Some('\r'));
+    }
+
+    /// 键码与字符不匹配时不丢弃。
+    #[test]
+    fn mismatched_key_and_char_still_delivers() {
+        let mut f = CharFilter::default();
+        f.on_key_down(0x0D); // 用户按的是 Enter
+        assert_eq!(f.on_char('x'), Some('x'));
     }
 }
