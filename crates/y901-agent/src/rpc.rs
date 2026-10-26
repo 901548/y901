@@ -347,6 +347,11 @@ impl Broadcaster {
         self.dropped.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// 当前在册连接数（诊断用）。
+    ///
+    /// 返回：`senders` 表长度。无副作用。
+    /// 注意：清理是**惰性**的——只有下一次 `send()` 发现 `Disconnected` 才会移除，
+    /// 因此长时间没有推送时读数会偏高（不影响正确性）。
     pub fn connection_count(&self) -> usize {
         self.senders.lock().map(|s| s.len()).unwrap_or(0)
     }

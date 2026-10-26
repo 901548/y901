@@ -39,6 +39,11 @@ pub enum ApiCall {
 }
 
 impl ApiCall {
+    /// 本次调用针对的节点 id。
+    ///
+    /// 返回：`Tree` / `Query` 这类"不针对单个节点"的调用返回 `None`；
+    /// 其余返回目标 id。
+    /// 副作用：无（纯字段投影，供日志与审计用）。
     pub fn id(&self) -> Option<&str> {
         match self {
             ApiCall::Tree | ApiCall::Query { .. } => None,
@@ -49,6 +54,10 @@ impl ApiCall {
         }
     }
 
+    /// 调用方带来的乐观锁版本（`if_rev`）。
+    ///
+    /// 返回：`None` = 不校验；`Some(n)` = 要求节点当前有效版本等于 `n`，否则 409。
+    /// 副作用：无。注意 `Tree`/`Query` 恒为 `None`（它们不做写入）。
     pub fn if_rev(&self) -> Option<u64> {
         match self {
             ApiCall::Tree | ApiCall::Query { .. } => None,
@@ -76,6 +85,9 @@ pub enum ApiError {
 }
 
 impl ApiError {
+    /// 映射到 HTTP 风格状态码（MCP/RPC 的错误响应里直接用）。
+    ///
+    /// 返回：401 / 403 / 404 / 409 / 400 之一。副作用：无。
     pub fn status(&self) -> u16 {
         match self {
             ApiError::Unauthorized => 401,
@@ -86,6 +98,10 @@ impl ApiError {
         }
     }
 
+    /// 机器可读的错误码（snake_case，稳定字符串，Agent 可据此分支）。
+    ///
+    /// 返回：`"unauthorized"` / `"forbidden"` / `"not_found"` / `"conflict"` / `"bad_request"`。
+    /// 副作用：无。与 `status()` 一一对应，改一个必须改另一个。
     pub fn code(&self) -> &'static str {
         match self {
             ApiError::Unauthorized => "unauthorized",
@@ -96,6 +112,11 @@ impl ApiError {
         }
     }
 
+    /// 序列化成返回给 Agent 的 JSON（`{ok:false, code, status, error}`）。
+    ///
+    /// 返回：`Json` 对象。副作用：无。
+    /// 注意：`Forbidden` / `NotFound` **不回显 id**——否则可以用错误码探测
+    /// 某个 id 是否存在（信息泄露）。
     pub fn to_json(&self) -> Json {
         let mut obj = Json::obj()
             .set("ok", false)
@@ -135,6 +156,11 @@ impl Default for Policy {
 }
 
 impl Policy {
+    /// 构造一个"要求 Token + 开启脱敏"的策略。
+    ///
+    /// 输入：期望的 token（`--rpc` 从 `Y901_TOKEN` 读；`--mcp` 与客户端注入的 env 比对）。
+    /// 返回：`Policy { token, redact: true }`。
+    /// 副作用：无。注意空字符串等价于"不校验"，不要用它做"允许匿名"之外的用途。
     pub fn with_token(token: impl Into<String>) -> Self {
         Self {
             token: token.into(),

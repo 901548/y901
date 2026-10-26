@@ -28,6 +28,11 @@ pub struct McpServer {
 }
 
 impl McpServer {
+    /// 新建一个 MCP 服务端，处于 `Uninitialized`（未握手）。
+    ///
+    /// 输入：`policy`（Token 与脱敏开关）。
+    /// 返回：可直接 `handle_line` 的实例。
+    /// 副作用：无（不启动线程、不读 env——`Y901_TOKEN` 在每次 `handle_line` 时读）。
     pub fn new(policy: Policy) -> Self {
         Self {
             policy,
@@ -35,6 +40,10 @@ impl McpServer {
         }
     }
 
+    /// 当前生效的策略（Token / 脱敏），供应用层读取或替换前的检查。
+    ///
+    /// 返回：只读引用。副作用：无。
+    /// 注意：返回引用意味着不能在同一作用域里再 `&mut self`（例如同时调 `handle_line`）。
     pub fn policy(&self) -> &Policy {
         &self.policy
     }

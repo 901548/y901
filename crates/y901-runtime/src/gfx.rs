@@ -145,6 +145,11 @@ pub struct RecordingBackend {
 }
 
 impl RecordingBackend {
+    /// 新建空的记录型后端（尚未 `create`，`calls` 为空）。
+    ///
+    /// 返回：可直接用于对拍的空实例。副作用：无。
+    /// 注意：正常流程应走 `RenderBackend::create`（会记录一条 `Create`）；
+    /// 直接 `new()` 只用于"只想记录 present"的测试。
     pub fn new() -> Self {
         Self::default()
     }
