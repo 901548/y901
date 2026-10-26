@@ -96,6 +96,9 @@ impl Default for SgrState {
 }
 
 impl SgrState {
+    /// 把当前 SGR 状态转成可驻留的 `CellStyle`（去掉了 `pending` 半成品）。
+    ///
+    /// 返回：`CellStyle`（Copy）。副作用：无。
     pub fn style(&self) -> CellStyle {
         CellStyle {
             fg: self.fg,
@@ -200,6 +203,9 @@ impl SgrState {
         }
     }
 
+    /// 复位到默认样式（SGR 0）：颜色、粗体、下划线、反显全部清空。
+    ///
+    /// 返回：无。副作用：原地改写自身；`pending`（未完成的扩展序列）也被丢弃。
     pub fn reset(&mut self) {
         *self = Self {
             pending: self.pending.take(),

@@ -29,6 +29,9 @@ pub struct VtFilter {
 }
 
 impl VtFilter {
+    /// 新建 ANSI 转义序列过滤器（地面状态，默认样式）。
+    ///
+    /// 返回：可直接 `feed` 的实例。副作用：无。
     pub fn new() -> Self {
         Self {
             state: VtState::Ground,
@@ -48,6 +51,12 @@ impl VtFilter {
         self.style_id
     }
 
+    /// 吃进一个字符，处理 CSI/SGR 等转义序列并写入网格。
+    ///
+    /// 输入：`ch`（来自 PTY 的 UTF-8 解码结果）、目标 `grid`。
+    /// 返回：无。
+    /// 副作用：会修改 `grid`（写字符、移动光标、改样式），并推进内部状态机；
+    /// **不完整**的序列留在状态机里等后续字符（不要假设"一次 feed 一次刷新"）。
     pub fn feed(&mut self, ch: char, grid: &mut Grid) {
         match self.state {
             VtState::Ground => match ch {

@@ -19,6 +19,10 @@ pub struct VerticalList {
 }
 
 impl VerticalList {
+    /// 新建纵向列表容器（**非虚拟化**：所有子节点都会被排布）。
+    ///
+    /// 输入：`id`（树内唯一）。返回：空列表（`gap = 4`、无内边距）。
+    /// 副作用：无。行数很多时请改用 `ListView`（虚拟化）。
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -30,21 +34,33 @@ impl VerticalList {
         }
     }
 
+    /// 设置内边距（子节点整体内缩）。
+    ///
+    /// 返回：自身。副作用：无（下次布局生效）。
     pub fn padding(mut self, padding: Edges) -> Self {
         self.padding = padding;
         self
     }
 
+    /// 设置行间距（像素，可为负但无意义）。
+    ///
+    /// 返回：自身。副作用：无。
     pub fn gap(mut self, gap: f32) -> Self {
         self.gap = gap;
         self
     }
 
+    /// 设置 flex 伸缩参数。
+    ///
+    /// 返回：自身。副作用：无。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
     }
 
+    /// 追加一行（任意组件，不限于文本）。
+    ///
+    /// 返回：自身。副作用：无（挂载前调用最安全；挂载后追加需自行触发重排）。
     pub fn push(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
         self
