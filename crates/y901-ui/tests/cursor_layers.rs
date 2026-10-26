@@ -1,16 +1,14 @@
-//! 复现：`cursor_at` 与 `hit_index` 在跨层重叠时的语义差异。
+//! `cursor_at` 与 `hit_index` 的三个语义差异（修复前后对比）。
 //!
-//! **这是一个待修复 bug 的复现测试，当前 `#[ignore]`。**
+//! `hit_index` 的语义（`rebuild_indices` 构建的索引）：
+//! 1. 关闭节点整棵跳过；
+//! 2. 祖先 `clip()` 逐层累加，命中用 `rect ∩ 累计clip`；
+//! 3. 按 layer 排序后取最上层。
 //!
-//! - `hit_index` 扫 `paint_order`（按 layer 稳定排序：Base → Overlay → Modal），
-//!   用 `rposition` 取最后一个匹配 → 命中**最上层**节点。
-//! - `cursor_at` 递归 `children()`（纯树序），后访问的覆盖先访问的 → 命中
-//!   **树序最后**的节点，与层级无关。
-//!
-//! 当树里 Overlay 节点排在 Base 节点**之前**时，两者结论相反。
+//! `cursor_at` 必须与之一致，否则"光标形状"会指向一个点不到的元素。
 
 use y901_ui::{
-    Constraints, Cursor, EventCtx, EventResult, Layer, Pos, Rect, RenderCtx, Semantics, Size,
+    Constraints, Cursor, EventCtx, EventResult, Flex, Layer, Pos, Rect, RenderCtx, Semantics, Size,
     TextStyle, TextMetrics, UiTree, Widget,
 };
 
@@ -28,12 +26,35 @@ impl TextMetrics for Mono {
     }
 }
 
-/// 固定矩形 + 固定光标的叶子。
+/// 固定矩形 + 固定光标 + 可配置 open/clip 的探针。
 struct Probe {
     id: &'static str,
     rect: Rect,
     layer: Layer,
     cursor: Cursor,
+    open: bool,
+    clip: Option<Rect>,
+}
+
+impl Probe {
+    fn new(id: &'static str, rect: Rect, cursor: Cursor) -> Self {
+        Self {
+            id,
+            rect,
+            layer: Layer::Base,
+            cursor,
+            open: true,
+            clip: None,
+        }
+    }
+    fn layer(mut self, l: Layer) -> Self {
+        self.layer = l;
+        self
+    }
+    fn closed(mut self) -> Self {
+        self.open = false;
+        self
+    }
 }
 
 impl Widget for Probe {
@@ -45,6 +66,12 @@ impl Widget for Probe {
     }
     fn cursor(&self) -> Cursor {
         self.cursor
+    }
+    fn is_open(&self) -> bool {
+        self.open
+    }
+    fn clip(&self) -> Option<Rect> {
+        self.clip
     }
     fn measure(
         &mut self,
@@ -67,21 +94,26 @@ impl Widget for Probe {
     }
 }
 
-/// 最小容器：按给定顺序持有子节点。
+/// 手动摆位的容器（不做 flex 计算，直接按给定顺序 arrange 到全屏）。
 struct Col {
+    id: &'static str,
     kids: Vec<Box<dyn Widget>>,
     rect: Rect,
+    clip: Option<Rect>,
 }
 
 impl Widget for Col {
     fn id(&self) -> &str {
-        "root"
+        self.id
     }
     fn children(&self) -> &[Box<dyn Widget>] {
         &self.kids
     }
     fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
         Some(&mut self.kids)
+    }
+    fn clip(&self) -> Option<Rect> {
+        self.clip
     }
     fn measure(
         &mut self,
@@ -91,11 +123,11 @@ impl Widget for Col {
     ) -> Size {
         c.max
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, r: Rect, m: &dyn TextMetrics, c: &mut y901_ui::layout::LayoutCache) {
         self.rect = r;
         let kids = std::mem::take(&mut self.kids);
         for mut k in kids {
-            k.arrange(r, _m, _c);
+            k.arrange(r, m, c);
             self.kids.push(k);
         }
     }
@@ -108,48 +140,128 @@ impl Widget for Col {
     fn render(&mut self, _c: &mut dyn RenderCtx) {}
 }
 
-fn tree_overlay_first() -> UiTree {
-    // 注意顺序：Overlay 在**前**，Base 在**后**（两者都覆盖 (10,10)）
-    let root = Col {
-        kids: vec![
-            Box::new(Probe {
-                id: "overlay",
-                rect: Rect::new(0.0, 0.0, 100.0, 100.0),
-                layer: Layer::Overlay,
-                cursor: Cursor::Pointer,
-            }),
-            Box::new(Probe {
-                id: "base",
-                rect: Rect::new(0.0, 0.0, 100.0, 100.0),
-                layer: Layer::Base,
-                cursor: Cursor::Text,
-            }),
-        ],
-        rect: Rect::ZERO,
-    };
-    let mut tree = UiTree::new(Box::new(root));
-    tree.layout(Size::new(120.0, 120.0), &Mono);
+fn layout(root: Box<dyn Widget>) -> UiTree {
+    let mut tree = UiTree::new(root);
+    tree.layout(Size::new(400.0, 400.0), &Mono);
     tree
 }
 
+// ---------- Bug 1：跨层重叠时取了下层的 cursor ----------
+
 #[test]
-#[ignore = "已知 bug：cursor_at 不看 layer，跨层重叠时与 hit_index 结论相反；修复后移除 ignore"]
-fn cursor_at_matches_hit_index_across_layers() {
-    let tree = tree_overlay_first();
-    let pos = Pos::new(10.0, 10.0);
+fn cursor_at_matches_hit_index_with_overlapping_layers() {
+    // Overlay 在前、Base 在后（树序），两者都覆盖 (10,10)
+    let root = Col {
+        id: "root",
+        kids: vec![
+            Box::new(
+                Probe::new("overlay", Rect::new(0.0, 0.0, 100.0, 100.0), Cursor::Pointer)
+                    .layer(Layer::Overlay),
+            ),
+            Box::new(Probe::new(
+                "base",
+                Rect::new(0.0, 0.0, 100.0, 100.0),
+                Cursor::Text,
+            )),
+        ],
+        rect: Rect::ZERO,
+        clip: None,
+    };
+    let tree = layout(Box::new(root));
 
-    let hit = tree.hit_test(pos).expect("应命中");
-    let cursor = tree.cursor_at(pos);
-
-    eprintln!("[repro] hit_test = {hit}, cursor_at = {cursor:?}");
-
+    assert_eq!(tree.hit_test(Pos::new(10.0, 10.0)).as_deref(), Some("overlay"));
     assert_eq!(
-        hit, "overlay",
-        "前置：paint_order 按 layer 排序后，Overlay 应在 Base 之上"
-    );
-    assert_eq!(
-        cursor,
+        tree.cursor_at(Pos::new(10.0, 10.0)),
         Cursor::Pointer,
-        "光标应来自最上层（overlay），实际 {cursor:?}"
+        "光标必须来自最上层（overlay），实际不是"
     );
+}
+
+// ---------- Bug 2：关闭的浮层仍贡献 cursor ----------
+
+#[test]
+fn cursor_at_skips_closed_overlay() {
+    let root = Col {
+        id: "root",
+        kids: vec![Box::new(
+            Probe::new("menu", Rect::new(0.0, 0.0, 100.0, 100.0), Cursor::Pointer)
+                .layer(Layer::Overlay)
+                .closed(),
+        )],
+        rect: Rect::ZERO,
+        clip: None,
+    };
+    let tree = layout(Box::new(root));
+
+    assert_ne!(
+        tree.hit_test(Pos::new(10.0, 10.0)).as_deref(),
+        Some("menu"),
+        "前置：关闭节点不参与命中（命中的只能是 root）"
+    );
+    assert_eq!(
+        tree.cursor_at(Pos::new(10.0, 10.0)),
+        Cursor::Default,
+        "关闭的浮层不能贡献光标"
+    );
+}
+
+// ---------- Bug 3：不累加祖先 clip() ----------
+
+#[test]
+fn cursor_at_respects_ancestor_clip() {
+    // 容器只允许 (0,0)-(100,100) 可见；子节点在 (200,200) 处（理论上永远不可见）
+    let outer = Col {
+        id: "viewport",
+        kids: vec![Box::new(Probe::new(
+            "hidden_child",
+            Rect::new(200.0, 200.0, 50.0, 50.0),
+            Cursor::Pointer,
+        ))],
+        rect: Rect::ZERO,
+        clip: Some(Rect::new(0.0, 0.0, 100.0, 100.0)),
+    };
+    let tree = layout(Box::new(outer));
+
+    // 命中测试在视口外：不命中
+    assert_eq!(
+        tree.hit_test(Pos::new(210.0, 210.0)),
+        None,
+        "前置：视口外的子节点不参与命中"
+    );
+    // 光标也必须不来自该子节点
+    assert_eq!(
+        tree.cursor_at(Pos::new(210.0, 210.0)),
+        Cursor::Default,
+        "祖先 clip 之外的子节点不能贡献光标"
+    );
+}
+
+// ---------- 回归：基本情形仍然工作 ----------
+
+#[test]
+fn cursor_at_still_works_for_simple_hover() {
+    let root = Col {
+        id: "root",
+        kids: vec![Box::new(Probe::new(
+            "btn",
+            Rect::new(0.0, 0.0, 200.0, 100.0),
+            Cursor::Pointer,
+        ))],
+        rect: Rect::ZERO,
+        clip: None,
+    };
+    let tree = layout(Box::new(root));
+
+    assert_eq!(tree.cursor_at(Pos::new(50.0, 50.0)), Cursor::Pointer);
+    assert_eq!(
+        tree.cursor_at(Pos::new(300.0, 300.0)),
+        Cursor::Default,
+        "不在任何节点上时必须是 Default"
+    );
+}
+
+// 占位：确认 Flex 仍可导入（后续测试会用）
+#[allow(dead_code)]
+fn _unused() -> Flex {
+    Flex::column("x")
 }

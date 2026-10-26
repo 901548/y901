@@ -1007,25 +1007,65 @@ impl UiTree {
     }
 
     /// 命中位置处最内层的非默认光标形状（应用层据此设置系统光标）。
+    ///
+    /// 语义必须与 `hit_index` 一致，否则光标会指向一个**点不到**的元素：
+    /// 1. 关闭节点（`is_open() == false`）整棵子树跳过（与 `rebuild_indices` 同构）；
+    /// 2. 祖先 `clip()` 逐层累加，可见区 = `rect ∩ 累计clip`（同上）；
+    /// 3. 优先级：`layer` 高者 > `depth` 深者 > 树序靠后者（`>=` 让后访问者胜出）。
+    ///
+    /// 返回：优先级最高的非 `Default` 光标；没有候选时返回 `Default`。
+    /// 副作用：无。复杂度 O(n)（每次 MouseMove 调用一次）。
     pub fn cursor_at(&self, pos: Pos) -> crate::widget::Cursor {
-        fn walk(node: &dyn Widget, pos: Pos, inherited: crate::widget::Cursor) -> crate::widget::Cursor {
-            let visible = match node.clip() {
+        use crate::widget::Cursor;
+
+        /// 递归收集候选，`best` 保存当前优先级最高的 `(layer, depth, cursor)`。
+        fn walk(
+            node: &dyn Widget,
+            pos: Pos,
+            inherited_clip: Option<Rect>,
+            depth: usize,
+            best: &mut Option<(Layer, usize, Cursor)>,
+        ) {
+            // 1) 关闭节点整棵跳过（与 rebuild_indices 一致）
+            if !node.is_open() {
+                return;
+            }
+            // 2) 祖先 clip 累加（与 rebuild_indices 一致）
+            let clip = match (inherited_clip, node.clip()) {
+                (Some(a), Some(b)) => Some(a.intersect(b)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            };
+            // 3) 可见区检查
+            let visible = match clip {
                 Some(c) => node.rect().intersect(c),
                 None => node.rect(),
             };
             if !visible.contains(pos) {
-                return inherited;
+                return;
             }
-            let mut found = match node.cursor_at(pos) {
-                crate::widget::Cursor::Default => inherited,
-                c => c,
-            };
+            // 4) 自己的光标进候选
+            let c = node.cursor_at(pos);
+            if c != Cursor::Default {
+                let layer = node.layer();
+                // `>=` 让同 layer 同 depth 的**后访问者**胜出（树序靠后者在上）
+                let better = best
+                    .map(|(bl, bd, _)| layer > bl || (layer == bl && depth >= bd))
+                    .unwrap_or(true);
+                if better {
+                    *best = Some((layer, depth, c));
+                }
+            }
+            // 5) 递归子节点
             for child in node.children() {
-                found = walk(child.as_ref(), pos, found);
+                walk(child.as_ref(), pos, clip, depth + 1, best);
             }
-            found
         }
-        walk(self.root.as_ref(), pos, crate::widget::Cursor::Default)
+
+        let mut best: Option<(Layer, usize, Cursor)> = None;
+        walk(self.root.as_ref(), pos, None, 0, &mut best);
+        best.map(|(_, _, c)| c).unwrap_or(Cursor::Default)
     }
     /// 命中测试：返回最深的、包含该点的节点 id。
     pub fn hit_test(&self, pos: Pos) -> Option<String> {
