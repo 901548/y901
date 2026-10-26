@@ -118,18 +118,22 @@ pub enum EventResult {
 }
 
 impl EventResult {
+    /// 合并两个结果：取更强的标志（Handled/Relayout/Redraw 依次累积）。
     pub fn merge(self, other: EventResult) -> EventResult {
         self.max(other)
     }
 
+    /// 是否已被处理（含 Redraw / Relayout）。
     pub fn is_handled(self) -> bool {
         self != EventResult::Ignored
     }
 
+    /// 是否需要重绘。
     pub fn needs_redraw(self) -> bool {
         self >= EventResult::Redraw
     }
 
+    /// 是否需要重新布局（布局失效 + 重绘）。
     pub fn needs_relayout(self) -> bool {
         self == EventResult::Relayout
     }

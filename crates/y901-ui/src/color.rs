@@ -26,6 +26,7 @@ impl Color {
         Self::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
     }
 
+    /// 返回同一颜色的新副本，alpha 换成 （0..=1）。
     pub fn with_alpha(self, a: f32) -> Self {
         Self { a, ..self }
     }
@@ -72,16 +73,19 @@ impl TextStyle {
         }
     }
 
+    /// 设置背景色并返回自身（构建器风格）。
     pub fn with_bg(mut self, color: Color) -> Self {
         self.bg = color;
         self
     }
 
+    /// 打开粗体。
     pub fn bold(mut self) -> Self {
         self.bold = true;
         self
     }
 
+    /// 打开下划线。
     pub fn underline(mut self) -> Self {
         self.underline = true;
         self

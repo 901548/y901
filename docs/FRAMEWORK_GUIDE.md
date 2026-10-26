@@ -217,7 +217,14 @@ panel.editor 里的一切：id~="panel.editor"
 
 ## §12 待清理的语义一致性问题
 
-以下问题已识别但**未修复**，留待后续轮次处理（不在当前改动范围内）：
+> **状态：已解决（2026-10）。** 保留原文作为历史记录。
+>
+> - `focused` 已统一为**顶层语义字段**，由 `UiTree::focus_path` 注入（见 §14）；
+>   `TextInput` / `Terminal` 的内部 `focused` 只用于渲染与按键门控，不再进 `state`。
+> - `disabled` 同样只出现在顶层（`sem.disabled`），`state` 里不再有它。
+> - `props` 仍未进哈希也未进 Agent 输出，但它是调试信息，不属于"语义重复"。
+
+以下为**历史原文**（当时未修复）：
 
 - **`focused` 字段的不一致**：`TextInput` 把 `focused` 放在 `state` 里，
   而 `Button` 没有这个概念。需要先确认「focused 是否应作为顶层语义字段」：
@@ -283,24 +290,26 @@ Agent 看到的 `revision` 不变，但 `get_tree` 的内容变了，
 顺带一条顺序保证：**回包永远先于该回包触发的推送**。
 实现上 `reply_to` 在 UI 线程内同步写 socket，推送随后才入广播队列；
 早期实现里两者由不同线程写，出现过"先收到 state_changed 再收到 ack"的乱序。
-## §16 TODO：把 RPC 回包移出 UI 线程（跨平台 v3 之后做）
+## §16 已实现：RPC 回包已移出 UI 线程
 
-**现状**：`reply_to` 在 UI 线程内同步写 socket，靠 `set_write_timeout(100ms)`
-把最坏阻塞压到 100ms；写失败/超时立即 `shutdown` 断开连接。
+> **状态：已实现（2026-10）。** 保留迁移记录作为设计依据。
 
-**为什么还不够**：UI 线程阻塞 100ms 就是一帧掉 6 帧（60fps）。
-正常路径不会触发，但对"性能至上"的框架来说，这是一笔不该存在的风险。
+**现状**：每连接一个写线程 + 统一 FIFO 队列（`WriteJob::{Reply, Push}`）。
+`reply_to` 只做 `try_send`，**不碰 socket**；队列满即标记 `dead` 并返回 `Err`，
+写线程看到 `dead` 后 `shutdown`，客户端立刻收到 EOF（B+ 快速失败）。
+`set_write_timeout(100ms)` 仍在，但作用于**写线程**（让它周期性醒来检查 `dead`），
+不再是"UI 线程的最坏阻塞"。
 
-**彻底方案**：每连接一个写线程 + 统一 FIFO 队列。
-回包与推送都进同一个队列，由写线程按入队顺序写出。
-收益：UI 线程**永不**碰 socket（零阻塞），且顺序由队列天然保证（§15 的顺序契约）。
+**为什么当初需要它**：UI 线程同步写 socket 时，客户端不读会把缓冲写满，
+100ms 的写超时仍是一帧掉 6 帧。现在 UI 线程零阻塞，该风险消失。
 
-**迁移步骤**
-1. `Pending` 携带该连接的 `Sender<String>`，`reply_to` 改为 `send`（非阻塞）。
-2. `Broadcaster` 从"持 socket"改为"持每条连接的 Sender"。
-3. 每连接一个写线程：`for line in rx { write_all }`，写失败即断开并注销。
-4. 删除 `set_write_timeout`（写线程阻塞无害，UI 不受影响）。
-5. 测试：`rpc_write_timeout.rs` 改为断言"UI 线程零阻塞"，而不是"100ms 内返回"。
+**当时的迁移步骤（已完成）**
+1. `Pending` 携带该连接的写队列 `Sender<WriteJob>`。✅
+2. `Broadcaster` 从"持 socket"改为"持每条连接的 Sender + dead 标志"。✅
+3. 每连接一个写线程：`for job in rx { write }`，写失败即断开并注销。✅
+4. 删除 UI 线程的 socket 写；`set_write_timeout` 改为写线程属性。✅
+5. 测试：`rpc_writer_thread.rs` / `rpc_dead_connection.rs` 断言队列语义。✅
+
 ### §16.1 TODO：`Pending.dead` 的可见性
 
 `Pending.dead: Arc<AtomicBool>` 目前是 `pub`，外部可以读、也可以**误置 true** 踢掉健康连接。
@@ -369,3 +378,34 @@ pub enum FocusError { NotFound, NotFocusable, Vetoed }
 
 若未来方法体变复杂，需要改成 AST 级检查（`syn` crate），成本较高，留待后续。
 在那之前：**修改 `setup_connection` 的方法体格式时，记得跑这两条测试**。
+## §22 行为变化记录：预编辑串的宽度判定
+
+**改动时间**：2026-10（P1-2，与 `draw_char` 同批）。
+
+**旧行为**：IME 预编辑串按 `if ch as u32 > 0x2E80 { 2.0 } else { 1.0 }` 推进。
+这是一个硬编码启发式：emoji（U+1F600）落在 0x2E80 以下 → 被当成 **1 格**，
+而网格里它可能是 2 格，导致预编辑串与最终上屏位置错位。
+
+**新行为**：`pen += cell_w * y901_core::Grid::width_of_char(ch)`，
+与网格存储**同源**（unicode-width）。emoji 现在占 2 格；组合字符宽度 0 不推进。
+
+**谁受影响**：终端里输入 emoji（或其它宽字符）时的预编辑显示位置。
+中文/ASCII 不受影响（它们的宽度判定本来就一致）。
+
+**为什么会顺手改**：它就与被替换的 `to_string()` 在同一行循环里。
+按纪律报备：这是**超出"消除分配"范围的行为变化**，如需独立提交可回退。
+
+## §23 TODO：`draw_char` 的"零分配"未实测
+
+`RenderCtx::draw_char` 的默认实现用栈缓冲（`[u8; 4]` + `encode_utf8`），
+理论上零堆分配。但**没有用分配计数器验证**：
+
+- 替换 `#[global_allocator]` 会污染整个测试二进制；
+- `String` 分配可能来自框架其它层，难以归因到"这一格"。
+
+当前防线是结构测试 `terminal_render_has_no_to_string`（`render` 方法体里无
+`to_string()`）。它的弱点是改注释也可能骗过。
+
+**若要坐实**：用 `dhat` 或自定义 allocator + 独立测试二进制，测"渲染一帧
+80×24 终端的分配次数"。成本约半天，收益是能抓住"未来有人在渲染路径里
+偷偷分配"的回归。

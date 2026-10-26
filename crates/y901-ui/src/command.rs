@@ -21,6 +21,7 @@ pub enum Command {
 }
 
 impl Command {
+    /// 构造"发给某个节点"的命令：`target` 是节点 id，`action` 由组件自己解释。
     pub fn node(target: impl Into<String>, action: impl Into<String>, args: Json) -> Self {
         Self::Node {
             target: target.into(),
@@ -29,6 +30,7 @@ impl Command {
         }
     }
 
+    /// 构造应用级命令：框架只路由到 `Host::command`，不认识 `name` 的语义。
     pub fn app(name: impl Into<String>, args: Json) -> Self {
         Self::App {
             name: name.into(),
@@ -36,6 +38,7 @@ impl Command {
         }
     }
 
+    /// 是否应用级命令（`target` 为空）。
     pub fn is_app(&self) -> bool {
         matches!(self, Command::App { .. })
     }
