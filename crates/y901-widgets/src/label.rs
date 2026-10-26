@@ -122,13 +122,25 @@ impl Widget for TextLabel {
     }
 
     fn event(&mut self, _ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
-        // 对外暴露一个 set_text 动作，谁调都行，组件不关心调用者
+        // 对外暴露动作，谁调都行，组件不关心调用者
         if let UiEvent::Action { name, args } = event {
             if name == "set_text" {
                 if let Some(text) = args.get("text").and_then(|v| v.as_str()) {
                     self.text = text.to_string();
                     return EventResult::Relayout;
                 }
+            }
+            if name == "set_color" {
+                let Some(raw) = args.get("color").and_then(|v| v.as_str()) else {
+                    // 参数缺失：不处理（网关会因 !handled 返回 400）
+                    return EventResult::Ignored;
+                };
+                let Ok(color) = parse_color(raw) else {
+                    // 格式非法：同样交给网关报 400（不静默改成默认色）
+                    return EventResult::Ignored;
+                };
+                self.color = color;
+                return EventResult::Redraw;
             }
         }
         EventResult::Ignored
@@ -143,10 +155,14 @@ impl Widget for TextLabel {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default().exposed(true)
+        Semantics::default()
+            .exposed(true)
             .label(self.current_text())
             .value(self.current_text())
             .action("set_text")
+            // 颜色是"视觉属性"，但 Agent 改它属于**有副作用的状态变更**，
+            // 因此声明为动作（走 invoke + if_rev），格式见 `parse_color`。
+            .action_spec("set_color", y901_ui::InputKind::Text)
     }
 
     fn on_mount(&mut self, ctx: &mut MountCtx) {
@@ -169,5 +185,36 @@ impl TextLabel {
         if let Some(sig) = &self.signal {
             self.text = sig.get();
         }
+    }
+}
+
+/// 解析颜色字符串：**只支持 `#rrggbb` 与 `#rrggbbaa`**。
+///
+/// 输入：`"#ff0000"`（RGB）或 `"#ff000080"`（RGBA，最后两位是 alpha）。
+/// 返回：`Color`（分量 0..=1）。
+/// 失败：长度不是 7/9、缺 `#`、含非 hex 字符 → `Err(说明支持格式的字符串)`。
+///
+/// 设计取舍：不支持命名颜色（`"red"`）与 `rgba(...)` 函数式写法——
+/// 多一种格式就多一条解析分支与一类边界，而 Agent 生成 hex 很容易。
+pub fn parse_color(raw: &str) -> Result<Color, String> {
+    let err = || "颜色格式必须是 #rrggbb 或 #rrggbbaa（例如 #ff0000 / #ff000080）".to_string();
+    let hex = raw.strip_prefix('#').ok_or_else(err)?;
+    let byte = |i: usize| -> Result<u8, String> {
+        u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| err())
+    };
+    match hex.len() {
+        6 => Ok(Color::rgba(
+            byte(0)? as f32 / 255.0,
+            byte(2)? as f32 / 255.0,
+            byte(4)? as f32 / 255.0,
+            1.0,
+        )),
+        8 => Ok(Color::rgba(
+            byte(0)? as f32 / 255.0,
+            byte(2)? as f32 / 255.0,
+            byte(4)? as f32 / 255.0,
+            byte(6)? as f32 / 255.0,
+        )),
+        _ => Err(err()),
     }
 }

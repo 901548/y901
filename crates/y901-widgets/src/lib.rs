@@ -27,7 +27,7 @@ pub mod text_input;
 pub mod vt;
 
 pub use button::Button;
-pub use label::TextLabel;
+pub use label::{parse_color, TextLabel};
 pub use list::VerticalList;
 pub use list_view::ListView;
 pub use overlay::{Dialog, Menu};
