@@ -49,6 +49,10 @@ pub struct DirtyRegion {
 }
 
 impl DirtyRegion {
+    /// 整窗脏区（等价于"全部重画"）。
+    ///
+    /// 注意：它不代表"一个覆盖全窗的矩形"，而是一个 `full` 标志——后续 `add()`
+    /// 会被忽略（已经是全量）。
     pub fn full() -> Self {
         Self {
             full: true,
@@ -56,6 +60,9 @@ impl DirtyRegion {
         }
     }
 
+    /// 把一个矩形并入脏区。
+    ///
+    /// 已在 `full` 状态或矩形为空时直接返回（无副作用）。
     pub fn add(&mut self, rect: Rect) {
         if self.full || rect.is_empty() {
             return;
@@ -152,6 +159,13 @@ pub struct UiTree {
 }
 
 impl UiTree {
+    /// 用根节点建一棵树。
+    ///
+    /// **副作用**：递归调用每个节点的 `on_mount`（Signal 的 `bind()` 靠它自动订阅），
+    /// 并为整棵树分配初始 generation、登记待检查的语义基线。
+    ///
+    /// 失败：无。初始状态是"未布局"（`viewport == Size::ZERO`），
+    /// 调用方必须随后调 `layout(viewport, metrics)`，否则 `rect_of` 全为空。
     pub fn new(root: Box<dyn Widget>) -> Self {
         let mut this = Self {
             root,
@@ -196,10 +210,17 @@ impl UiTree {
         this
     }
 
+    /// 当前鼠标悬停的节点 id（最近一次 `MouseMove` 命中且未被移除的结果）。
+    ///
+    /// 无副作用；返回 `None` 表示没有悬停节点（指针在窗口外或整棵树都不命中）。
     pub fn hovered(&self) -> Option<&str> {
         self.hovered.as_deref()
     }
 
+    /// 当前帧的脏区快照。
+    ///
+    /// 只读；`DirtyRegion::is_full()` 为真表示整窗都需要重绘。
+    /// 脏区在 `render()` 结束后清空，所以渲染完成后再读一定是空的。
     pub fn dirty(&self) -> &DirtyRegion {
         &self.dirty
     }
@@ -221,22 +242,39 @@ impl UiTree {
         self.cache.mark_dirty(id);
     }
 
+    /// 上一次 `layout()` 的统计（测量次数 / arrange 次数 / 是否被整体跳过）。
+    ///
+    /// 只读、无副作用，用于诊断"缓存是否生效"。
+    /// 注意它反映的是**最近一次** `layout()`；从未布局过时各计数为 0、`skipped` 为 false。
     pub fn layout_stats(&self) -> crate::layout::LayoutStats {
         self.cache.stats()
     }
 
+    /// 根节点（只读）。根节点的 `rect` 即整窗。
+    ///
+    /// 无副作用；仓库里不存在"没有根"的状态，因此调用方不需要判空。
     pub fn root(&self) -> &dyn Widget {
         self.root.as_ref()
     }
 
+    /// 根节点（可变）。
+    ///
+    /// **危险**：绕过框架直接改根节点不会触发布局失效/索引重建。
+    /// 只给测试与"换整棵树"的场景用；正常改结构请用 `add_node` / `remove_node`。
     pub fn root_mut(&mut self) -> &mut dyn Widget {
         self.root.as_mut()
     }
 
+    /// 上一次布局使用的视口尺寸（逻辑像素）。
+    ///
+    /// 无副作用；首次布局前是 `Size::ZERO`。
     pub fn viewport(&self) -> Size {
         self.viewport
     }
 
+    /// 当前持有键盘焦点的节点 id。
+    ///
+    /// 无副作用。这是**框架焦点**的权威来源；组件内部的 `focused` 字段只是镜像。
     pub fn focus(&self) -> Option<&str> {
         self.focus.as_deref()
     }
@@ -662,12 +700,20 @@ impl UiTree {
         Some(fingerprint(node, focused))
     }
 
+    /// 取消订阅某个节点的 `state_changed` 推送。
+    ///
+    /// 返回：**之前是否存在**该订阅（`false` 表示本来就没订阅，幂等）。
+    /// 失败：无；对不存在的 id 也返回 `false` 而不是错误。
     pub fn unsubscribe(&mut self, id: &str) -> bool {
         let before = self.subscriptions.len();
         self.subscriptions.retain(|s| s.id != id);
         self.subscriptions.len() != before
     }
 
+    /// 当前活跃的订阅数（诊断用）。
+    ///
+    /// 只读。订阅在 `remove_node` 删除目标节点时**不会**自动清理，
+    /// 而 `poll_subscriptions` 会跳过找不到的节点——因此它可能包含已失效的条目。
     pub fn subscription_count(&self) -> usize {
         self.subscriptions.len()
     }
@@ -1047,10 +1093,20 @@ impl UiTree {
         }
     }
 
+    /// 按 id 查节点（只读）。
+    ///
+    /// **复杂度 O(n)**：全树前序递归。遍历场景（对每个节点都要查）请改用
+    /// `rev_snapshot` 或直接递归 `children()`，否则会退化成 O(n²)。
+    ///
+    /// 返回：找到的第一个匹配（正常情况下 id 唯一）；找不到返回 `None`。
     pub fn find(&self, id: &str) -> Option<&dyn Widget> {
         find_in(self.root.as_ref(), id)
     }
 
+    /// 按 id 查节点（可变）。
+    ///
+    /// 复杂度与 `find` 相同（O(n)）。**绕过框架的字段修改不会触发重绘/重排**，
+    /// 组件内部状态请走 `dispatch` 或组件自己的方法。
     pub fn find_mut(&mut self, id: &str) -> Option<&mut dyn Widget> {
         find_in_mut(self.root.as_mut(), id)
     }
