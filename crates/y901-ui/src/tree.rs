@@ -225,19 +225,33 @@ impl UiTree {
         &self.dirty
     }
 
-    /// 把某个节点的矩形加入脏区。
+    /// 把某个节点的矩形加入脏区（下一帧只重绘这块）。
+    ///
+    /// 输入：`id`。**必须已经布局过**（`rects` 里找不到就静默什么都不做）。
+    /// 返回：无。
+    /// 副作用：累加脏区；不影响布局。若该节点已关闭（不在索引里）同样无效——
+    /// 关闭浮层的重绘应由 `EventResult::Relayout` 触发全窗重绘。
     pub fn invalidate(&mut self, id: &str) {
         if let Some(rect) = self.rects.get(id).copied() {
             self.dirty.add(rect);
         }
     }
 
-    /// 整窗重绘。
+    /// 整窗重绘：把脏区置为 `full`。
+    ///
+    /// 返回：无。副作用：下一帧会画所有 `needs_paint` 为真的节点。
+    /// 用在哪：窗口尺寸变化、主题切换、关闭浮层（旧内容需要被覆盖）等
+    /// "无法用矩形表达"的场景。不要每帧调用——它会让脏区剪枝完全失效。
     pub fn invalidate_all(&mut self) {
         self.dirty = DirtyRegion::full();
     }
 
-    /// 标记某节点的尺寸可能变化（模拟 EventResult::Relayout 的效果）。
+    /// 标记某节点的尺寸可能变化（等价于组件返回 `EventResult::Relayout` 的效果）。
+    ///
+    /// 输入：`id`。不存在的 id 会被忽略（`cache.mark_dirty` 内部处理）。
+    /// 返回：无。
+    /// 副作用：只标布局失效，**不**标脏区——下一帧 `layout()` 会重算，
+    /// 但要在 `layout` 之后再调 `invalidate`/`invalidate_all` 才会重绘。
     pub fn mark_layout_dirty(&mut self, id: &str) {
         self.cache.mark_dirty(id);
     }

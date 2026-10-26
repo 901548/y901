@@ -637,131 +637,228 @@ impl Semantics {
 /// 布局是**框架驱动**的：容器在 `measure`/`arrange` 里通过
 /// [`crate::layout::LayoutCache`] 访问子节点，缓存、去重、脏标记都由框架负责。
 pub trait Widget {
-    /// 树内唯一 id，例如 "panel.list"。
+    /// 树内唯一 id，例如 `"panel.list"`。
+    ///
+    /// 返回：稳定字符串引用（框架会大量比较它，别每次返回新分配的 `String`）。
+    /// 约束：**同一棵树内必须唯一**——重复 id 会让 `add_node` 拒绝插入，
+    /// 也会让 `find` / `dispatch_to` / 语义查询指向错误的节点。
+    /// 一旦挂载就不应改变（`step` 会按 id 缓存矩形与 revision）。
     fn id(&self) -> &str;
 
+    /// 语义角色：给 Agent 与 `query` 用的分类标签。
+    ///
+    /// 返回：`Role`（不是枚举，业务可自定义常量）。默认 `PANEL`。
+    /// 副作用：无。`role` 会参与语义面哈希，改动它会让 revision +1。
     fn role(&self) -> Role {
         Role::PANEL
     }
 
-    /// 自己在父容器里的伸缩参数。
+    /// 自己在父容器里的伸缩参数（宽/高的 `Dimension`）。
+    ///
+    /// 返回：`FlexItem`；默认 `Auto`（由内容决定）。
+    /// 副作用：无。容器在 `measure`/`arrange` 里读取它决定分配，**不写回**组件。
     fn flex(&self) -> FlexItem {
         FlexItem::default()
     }
 
     /// 绘制/命中层级。子节点继承父节点的层级（取最大值）。
+    ///
+    /// 返回：`Base`（普通）/ `Overlay`（浮层，可穿透点击）/ `Modal`（模态，吞外部点击）。
+    /// 副作用：无。层级影响**绘制顺序**（Base → Overlay → Modal）与命中顺序（反向），
+    /// 但不改变布局。
     fn layer(&self) -> Layer {
         Layer::Base
     }
 
     /// 是否可以获得键盘焦点（Tab 遍历、Modal 自动聚焦都用它）。
+    ///
+    /// 返回：`true` 表示愿意接收焦点。默认 `false`。
+    /// 约束：返回 true **不等于**当前持有焦点——焦点由 `UiTree::focus_path` 决定，
+    /// 组件应通过 `UiEvent::Focus(bool)` 得知自己拿到/失去焦点。
     fn focusable(&self) -> bool {
         false
     }
 
-    /// 语义版本：状态变化时 +1，供 RPC 增量推送快速判断。
-    /// 返回 0 表示不维护，框架退回对 state JSON 做指纹哈希。
+    /// 语义版本：组件自己维护的单调计数器，状态变化时 +1。
+    ///
+    /// 返回：当前版本；`0` 表示组件不自己维护。
+    /// 副作用：无。框架的 `effective_revision = 本值 + 框架计数器`，
+    /// 因此返回 0 只是"框架计数器独立生效"，**不是**关闭版本锁。
     fn revision(&self) -> u64 {
         0
     }
 
     /// 挂载：申请资源（订阅 Signal、启动后台任务）。
+    ///
+    /// 输入：`ctx.id`（本节点 id）、`ctx.invalidation`（共享失效队列）。
+    /// 时机：树构建时与 `add_node` / `insert_node` 插入后立即调用，**先于首次布局**。
+    /// 副作用：允许任意（这是唯一可以"申请资源"的地方）。
+    /// 失败：无返回值；资源申请失败请自己 `eprintln!` 并降级，不要 panic。
     fn on_mount(&mut self, _ctx: &mut MountCtx) {}
 
     /// 卸载：释放资源（取消订阅、关闭 PTY）。
+    ///
+    /// 时机：`remove_node` 时对整棵被摘掉的子树**自底向上**调用，随后节点被 drop。
+    /// 副作用：允许任意，但**不得**再访问树（此时树已不包含该节点）。
+    /// 注意：关闭浮层（`is_open=false`）**不会**触发卸载——只是不画不命中。
     fn on_unmount(&mut self) {}
 
-    /// 是否处于已打开状态。关闭的浮层不参与绘制、命中与布局。
+    /// 是否处于已打开状态。关闭的浮层不参与绘制、命中与索引。
+    ///
+    /// 返回：`true` 默认（普通节点永远"打开"）；浮层组件按自身状态返回。
+    /// 副作用：无（框架把它当纯查询）。
+    /// 重要：翻转它必须返回 `EventResult::Relayout`，否则索引不会重建，
+    /// 关闭的节点会残留在 `paint_order` 里（既占绘制又可能被误命中）。
     fn is_open(&self) -> bool {
         true
     }
 
     /// 是否被禁用。禁用节点会被排除在 Tab 遍历之外。
+    ///
+    /// 返回：`true` 表示不接收键盘焦点、不参与 Tab。
+    /// 副作用：无。注意它**不**阻止鼠标事件——组件应在 `event` 里自己判 `disabled`。
+    /// 与 `semantics().disabled` 不一致会导致 Agent 看到的状态与行为不符。
     fn is_disabled(&self) -> bool {
         false
     }
 
-    /// 裁剪矩形（屏幕坐标系）。子节点只能落在这一区域内。
+    /// 裁剪矩形（与 `rect()` 同一坐标系）。子节点只能落在这一区域内。
     ///
-    /// 滚动容器通过它声明视口；None 表示不裁剪。
+    /// 返回：`Some(rect)` 表示裁剪到该矩形（滚动容器声明视口）；`None` 不裁剪。
+    /// 副作用：无。框架在渲染时自动 `push_clip` / `pop_clip`，组件无需手写。
+    /// 注意：命中测试用 `rect ∩ clip` —— 看不见的区域点不到。
     fn clip(&self) -> Option<Rect> {
         None
     }
 
     /// 向下转型：容器需要就地修改子节点（虚拟化行复用）时用。
+    ///
+    /// 返回：`Some(self as &mut dyn Any)` 才能被 `downcast_mut`；默认 `None`（不支持）。
+    /// 副作用：返回的是可变借用，调用方拿到的期间不能再借用树。
+    /// 失败：`None` 表示该组件不支持向下转型，调用方应回退到"重建节点"。
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         None
     }
 
     /// 鼠标悬停时的光标形状（静态声明）。
+    ///
+    /// 返回：`Cursor`，由应用层映射到平台（框架不认识 `IDC_*`）。
+    /// 副作用：无；但框会在**每次 MouseMove** 都问一次（实现要够快）。
     fn cursor(&self) -> Cursor {
         Cursor::Default
     }
 
     /// 按指针位置计算光标形状（需要几何判断的组件覆写它）。
+    ///
+    /// 输入：`pos` 为屏幕坐标（同一坐标系下的指针位置）。
+    /// 返回：该位置对应的光标；默认退回 `cursor()`。
+    /// 副作用：无。仅当节点被命中时调用。
     fn cursor_at(&self, _pos: Pos) -> Cursor {
         self.cursor()
     }
 
     /// 子节点（容器才有）。
+    ///
+    /// 返回：只读切片；默认空切片（叶子组件）。
+    /// 副作用：无。框架用它建索引、算焦点顺序、递归查询语义。
+    /// 约束：返回的顺序就是**树序**（影响绘制先后与 Tab 顺序）。
     fn children(&self) -> &[Box<dyn Widget>] {
         &[]
     }
 
     /// 可变子节点。返回 `None` 表示叶子组件。
+    ///
+    /// 返回：`Some(&mut Vec<..>)` 才能被 `add_node` / `insert_node` / `remove_node`
+    /// 修改；默认 `None`（叶子）。
+    /// 副作用：调用方拿到可变借用期间不能再借用树。
+    /// 注意：直接改这个 Vec **不会**触发布局失效——请走 `UiTree` 的增删接口。
     fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
         None
     }
 
     /// 内容版本号：**内在尺寸**可能变化时 +1（文本变了、行数变了…）。
     ///
-    /// 框架用它判断 `measure` 结果能否复用。默认 0 = 永不变化。
-    /// 注意：只影响尺寸的状态才需要 bump；纯颜色/悬停态不要 bump，否则白白失效。
+    /// 返回：当前版本；默认 0 表示"尺寸永不变化"。
+    /// 副作用：无。框架用它判断 `measure` 结果能否复用。
+    /// 约束：只有**影响尺寸**的状态才 bump；纯颜色/悬停态不要 bump，
+    /// 否则每帧都会白白失效重算。
     fn layout_version(&self) -> u64 {
         0
     }
 
     /// 上报期望尺寸。父容器据此做 flex 分配。
     ///
-    /// 容器内部应通过 `cache.measure(child, metrics, constraints)` 测量子节点，
-    /// 而不是直接调用 `child.measure(...)` —— 否则会绕过缓存。
+    /// 输入：`metrics`（字体度量）、`constraints`（父给的最小/最大尺寸）、`cache`（布局缓存）。
+    /// 返回：受 `constraints` 约束后的尺寸。
+    /// 副作用：允许缓存内部测量结果（通常由 `cache` 代劳），**不得**修改树结构。
+    /// 约束：容器必须用 `cache.measure(child, …)` 而不是 `child.measure(…)`，
+    /// 否则会绕过缓存与去重，大树上退化成指数级重复测量。
     fn measure(&mut self, metrics: &dyn TextMetrics, constraints: Constraints, cache: &mut crate::layout::LayoutCache) -> Size;
 
     /// 父容器算好绝对矩形后回传。
     ///
-    /// 容器要在这里继续给子节点排布（框架提供 `layout::flex_arrange`），
-    /// 叶子只缓存 rect。递归由容器驱动，框架不预设"子节点怎么摆"。
+    /// 输入：`rect`（父坐标系里的绝对矩形）、`metrics`、`cache`。
+    /// 返回：无。
+    /// 副作用：**应当**把 `rect` 存下来（`rect()` 后续要靠它），容器还要给子节点排布。
+    /// 约束：递归由容器驱动（`layout::flex_arrange`），框架不预设子节点怎么摆。
     fn arrange(&mut self, rect: Rect, metrics: &dyn TextMetrics, cache: &mut crate::layout::LayoutCache);
 
     /// 自己当前的矩形（`arrange` 之后有效）。
+    ///
+    /// 返回：父坐标系矩形；布局前是 `Rect::ZERO`（因此 `rect_of` 会拒绝未布局的节点）。
+    /// 副作用：无（框架把它当纯查询，会高频调用）。
     fn rect(&self) -> Rect;
 
     /// 事件。返回 `Ignored` 表示不关心，让框架继续找别人。
+    ///
+    /// 输入：`ctx`（可提请焦点/捕获/重绘/发命令）、`event`（三阶段之一）。
+    /// 返回：`EventResult`；`Handled` 阻止继续冒泡，`Redraw`/`Relayout` 追加标志。
+    /// 副作用：允许改自身状态（这是唯一的状态变更入口之一，另一个是 `on_mount`）。
+    /// 约束：**Capture 阶段只拦截，不要在这里做响应**——否则响应会执行两次。
     fn event(&mut self, _ctx: &mut EventCtx, _event: &UiEvent) -> EventResult {
         EventResult::Ignored
     }
 
     /// 出图。只允许通过 `RenderCtx`。
+    ///
+    /// 输入：`ctx`（`fill_rect` / `draw_text` / `draw_char` / 裁剪栈 / 主题）。
+    /// 返回：无。
+    /// 副作用：**不得有任何副作用**——不能改自身状态、不能 dispatch、不能读写外部可变状态。
+    /// 原因：revision 的哈希时机在 `layout()` 之前，`render` 里改的状态不会被捕获。
     fn render(&mut self, _ctx: &mut dyn RenderCtx);
 
-    /// 语义信息。
+    /// 语义信息。给 Agent 看的**唯一**来源。
+    ///
+    /// 返回：`Semantics`；默认 `exposed_to_ai = false`（不给 AI 用）。
+    /// 副作用：无（但会被高频调用：查询、哈希、推送）。
+    /// 约束：会参与语义面哈希（label/value/state/disabled/sensitive/exposed/focused），
+    /// 因此**不要**把悬停、动画帧等瞬时状态放进去，否则 revision 会被淹没。
     fn semantics(&self) -> Semantics {
         Semantics::default()
     }
 
     /// 内边距：容器用它把子节点内缩。
+    ///
+    /// 返回：`Edges`（逻辑像素）；默认 `ZERO`。
+    /// 副作用：无。只影响容器的排布，不改变自身矩形。
     fn padding(&self) -> Edges {
         Edges::ZERO
     }
 
     /// 本帧是否必须全量重绘（例如全屏遮罩、动画）。
     ///
-    /// 返回 false 时，框架会用 `needs_paint` 决定是否跳过整棵子树。
+    /// 返回：`true` 表示忽略脏区、整棵子树都画；默认 `false`。
+    /// 副作用：无。返回 true 会让脏区剪枝失效，**只给真正每帧都变的节点用**。
     fn always_paints(&self) -> bool {
         false
     }
 
     /// 脏区剪枝：与脏区不相交就可以整棵子树跳过。
+    ///
+    /// 输入：当前帧脏区。返回：是否需要绘制本节点。
+    /// 副作用：无。默认实现是 `always_paints() || dirty.intersects(rect())`。
+    /// 注意：节点矩形为空（未布局）时 `intersects` 为 false → 整棵跳过，
+    /// 这是"未布局不绘制"的机制保证。
     fn needs_paint(&self, dirty: &crate::tree::DirtyRegion) -> bool {
         self.always_paints() || dirty.intersects(self.rect())
     }
