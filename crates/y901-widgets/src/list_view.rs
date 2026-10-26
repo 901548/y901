@@ -90,6 +90,11 @@ pub struct ListView {
 }
 
 impl ListView {
+    /// 新建虚拟化列表：只排布可见行（10k 行也只有几十个 `Row` 实例）。
+    ///
+    /// 输入：`id`（树内唯一，滚动条 id 为 `{id}.bar`）、`row_height`（像素，最小 1）。
+    /// 返回：空列表（`items` 为空、无选中、无回调）。
+    /// 副作用：无。
     pub fn new(id: impl Into<String>, row_height: f32) -> Self {
         let id = id.into();
         Self {
@@ -110,16 +115,27 @@ impl ListView {
         }
     }
 
+    /// 设置数据行（构建器版）。
+    ///
+    /// 返回：自身。副作用：无（不重置 offset，也不清理选中——挂载前用最安全）。
     pub fn items(mut self, items: Vec<String>) -> Self {
         self.items = items;
         self
     }
 
+    /// 替换数据行（运行时版），**同时把滚动位置重置到顶部**。
+    ///
+    /// 输入：新的行文本。返回：无。
+    /// 副作用：`offset = 0`；**不清理 `selected`**（若旧索引超出新长度，
+    /// `selected_index()` 仍会返回越界值——调用方需自行重置）。
     pub fn set_items(&mut self, items: Vec<String>) {
         self.items = items;
         self.offset = 0.0;
     }
 
+    /// 设置 flex 伸缩参数（虚拟化列表通常用 `FlexItem::fill()`）。
+    ///
+    /// 返回：自身。副作用：无。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
@@ -137,6 +153,10 @@ impl ListView {
         self
     }
 
+    /// 当前选中行的**数据索引**（不是屏幕行号）。
+    ///
+    /// 返回：`None` = 未选中；`Some(i)` = 第 i 行（滚动后不变）。
+    /// 副作用：无。注意它不校验 `< row_count()`——`set_items` 之后可能越界。
     pub fn selected_index(&self) -> Option<usize> {
         self.selected
     }
@@ -155,6 +175,9 @@ impl ListView {
         (index < self.items.len()).then_some(index)
     }
 
+    /// 当前滚动偏移（像素）。
+    ///
+    /// 返回：`0..=max(0, content_height - 视口高)`。副作用：无。
     pub fn offset(&self) -> f32 {
         self.offset
     }
@@ -164,10 +187,17 @@ impl ListView {
         self.arranged_rows
     }
 
+    /// 全部行的总高（`row_count * row_height`，像素）。
+    ///
+    /// 返回：虚拟滚动的依据，**不是**实际排布高度（实际只排可见的几十行）。
+    /// 副作用：无。
     pub fn content_height(&self) -> f32 {
         self.items.len() as f32 * self.row_height
     }
 
+    /// 数据行数（`items.len()`）。
+    ///
+    /// 返回：行数。副作用：无。与 `arranged_rows()`（实际排布的行数）不同。
     pub fn row_count(&self) -> usize {
         self.items.len()
     }

@@ -29,6 +29,10 @@ pub struct Menu {
 }
 
 impl Menu {
+    /// 新建下拉菜单（初始关闭，命令名默认 `menu.select`）。
+    ///
+    /// 输入：`id`（树内唯一）。返回：空菜单（无选项）。
+    /// 副作用：无。
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -43,30 +47,51 @@ impl Menu {
         }
     }
 
+    /// 设置菜单项（顺序即显示顺序）。
+    ///
+    /// 返回：自身。副作用：无（不重置 `highlighted` 与 `open`）。
     pub fn items(mut self, items: Vec<String>) -> Self {
         self.items = items;
         self
     }
 
+    /// 选中菜单项时发给应用层的命令名（默认 `"menu.select"`）。
+    ///
+    /// 输入：命令名。返回：自身。
+    /// 副作用：无。命令参数固定为 `{index, label}`；框架不认识这个名字，
+    /// 由 `Host::command` 处理。
     pub fn action(mut self, name: impl Into<String>) -> Self {
         self.action = name.into();
         self
     }
 
+    /// 打开菜单，并把高亮重置到第一项。
+    ///
+    /// 返回：无。副作用：无（不会自动聚焦；需要键盘导航时由应用层 `set_focus`）。
     pub fn open(&mut self) {
         self.open = true;
         self.highlighted = 0;
     }
 
+    /// 当前高亮的项下标（键盘 Up/Down 或悬停会改它）。
+    ///
+    /// 返回：`0..items.len()`；菜单为空时恒为 0。副作用：无。
+    /// 注意：它是"键盘光标"不是"选中项"——选中要通过命令发给应用层。
     pub fn highlighted(&self) -> usize {
         self.highlighted
     }
 
+    /// 关闭菜单，并清掉悬停态。
+    ///
+    /// 返回：无。副作用：无（不重置 `highlighted`，下次 `open` 会重置）。
     pub fn close(&mut self) {
         self.open = false;
         self.hover = None;
     }
 
+    /// 菜单是否已打开（关闭时不绘制、不命中、不进索引）。
+    ///
+    /// 返回：`true` = 可见可交互。副作用：无。
     pub fn is_open(&self) -> bool {
         self.open
     }
@@ -256,6 +281,11 @@ pub struct Dialog {
 }
 
 impl Dialog {
+    /// 新建模态对话框（初始关闭，无内容、无按钮）。
+    ///
+    /// 输入：`id`（树内唯一）、`title`（标题栏文字）。
+    /// 返回：未挂载的对话框。副作用：无。
+    /// 注意：打开后焦点被限制在子树内（Modal 作用域）。
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -270,11 +300,18 @@ impl Dialog {
         }
     }
 
+    /// 追加一个内容子节点（按调用顺序纵向排列）。
+    ///
+    /// 返回：自身。副作用：无（每个子节点都会在 Dialog 的 `children_mut` 里被排布）。
     pub fn push(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
         self
     }
 
+    /// 打开对话框（Modal 层：吞外部点击、焦点限制在子树内）。
+    ///
+    /// 返回：无。副作用：无（框架在下一次布局时执行 `enforce_modal_focus`，
+    /// 自动把焦点移到第一个可聚焦子节点）。
     pub fn open(&mut self) {
         self.open = true;
     }
@@ -288,10 +325,17 @@ impl Dialog {
         self
     }
 
+    /// 关闭对话框（不触发 `on_close` 回调——`Dialog` 没有回调，
+    /// 关闭动作通过命令发给应用层）。
+    ///
+    /// 返回：无。副作用：无。框架会把焦点还给之前的节点（若有）。
     pub fn close(&mut self) {
         self.open = false;
     }
 
+    /// 是否已打开（关闭时不绘制、不命中、不进索引）。
+    ///
+    /// 返回：`true` = 模态生效中。副作用：无。
     pub fn is_open(&self) -> bool {
         self.open
     }
