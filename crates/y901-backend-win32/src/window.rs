@@ -136,6 +136,28 @@ struct CharFilter {
     last_vk: u32,
 }
 
+/// 键盘消息 → 平台事件（纯函数，**可单测**）。
+///
+/// 输入：`msg`（只处理 `WM_KEYDOWN` / `WM_CHAR`）、`wparam`、去重状态。
+/// 返回：`Some(event)` 表示应当投递；`None` 表示丢弃（重复的控制字符、
+/// 非法码点、或与该函数无关的消息）。
+/// 失败：无（纯逻辑；除 `modifiers()` 读键盘状态外无副作用）。
+fn handle_wm_msg(msg: u32, wparam: u64, filter: &mut CharFilter) -> Option<RawEvent> {
+    match msg {
+        WM_KEYDOWN => {
+            filter.on_key_down(wparam as u32);
+            Some(RawEvent::KeyDown {
+                key: vk_to_key(wparam as u32),
+                mods: modifiers(),
+            })
+        }
+        WM_CHAR => {
+            let c = char::from_u32(wparam as u32)?;
+            filter.on_char(c).map(|c| RawEvent::Char { c })
+        }
+        _ => None,
+    }
+}
 impl CharFilter {
     /// 记录一次 `WM_KEYDOWN`。
     fn on_key_down(&mut self, vk: u32) {
@@ -200,29 +222,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             });
             0
         }
-        WM_KEYDOWN => {
-            // 记下键码：若这个键还会产生一个控制字符的 WM_CHAR（见下方），
-            // 那个 WM_CHAR 必须被丢弃，否则组件会把一次按键处理两遍。
+        WM_KEYDOWN | WM_CHAR => {
+            // 键盘消息统一走纯函数 `handle_wm_msg`（可单测）：它负责去重，
+            // wndproc 只做"取状态 + 投递"。
             if let Ok(mut slot) = CHAR_FILTER.lock() {
-                slot.get_or_insert_with(CharFilter::default)
-                    .on_key_down(wparam as u32);
-            }
-            push(RawEvent::KeyDown {
-                key: vk_to_key(wparam as u32),
-                mods: modifiers(),
-            });
-            0
-        }
-        WM_CHAR => {
-            // 取走上一次的键码（一次性）：控制键的 WM_CHAR 是 TranslateMessage 的重复投递。
-            if let Some(c) = char::from_u32(wparam as u32) {
-                let deliver = match CHAR_FILTER.lock() {
-                    Ok(mut slot) => slot.get_or_insert_with(CharFilter::default).on_char(c),
-                    // 锁中毒：保守起见过滤掉控制字符，避免双写
-                    Err(_) => None,
-                };
-                if deliver.is_some() {
-                    push(RawEvent::Char { c });
+                let filter = slot.get_or_insert_with(CharFilter::default);
+                if let Some(ev) = handle_wm_msg(msg, wparam as u64, filter) {
+                    push(ev);
                 }
             }
             0
@@ -582,5 +588,67 @@ mod char_filter_tests {
         let mut f = CharFilter::default();
         f.on_key_down(0x0D); // 用户按的是 Enter
         assert_eq!(f.on_char('x'), Some('x'));
+    }
+}
+
+#[cfg(test)]
+mod wndproc_sequence_tests {
+    use super::{handle_wm_msg, CharFilter, RawEvent, WM_CHAR, WM_KEYDOWN};
+
+    /// Enter：KEYDOWN(VK_RETURN) 产出 KeyDown，紧随的 CHAR(0x0D) 被丢掉。
+    /// 这是 P0-3 的端到端断言（走与 wndproc 相同的纯函数）。
+    #[test]
+    fn enter_key_produces_exactly_one_event() {
+        let mut f = CharFilter::default();
+        let first = handle_wm_msg(WM_KEYDOWN, 0x0D, &mut f);
+        let second = handle_wm_msg(WM_CHAR, 0x0D, &mut f);
+
+        assert!(
+            matches!(first, Some(RawEvent::KeyDown { .. })),
+            "第一次应产出 KeyDown，实际 {first:?}"
+        );
+        assert!(
+            second.is_none(),
+            "紧随的 WM_CHAR(\\r) 必须被丢弃，实际 {second:?}"
+        );
+    }
+
+    /// Tab：同上（0x09）。
+    #[test]
+    fn tab_key_produces_exactly_one_event() {
+        let mut f = CharFilter::default();
+        assert!(matches!(
+            handle_wm_msg(WM_KEYDOWN, 0x09, &mut f),
+            Some(RawEvent::KeyDown { .. })
+        ));
+        assert!(handle_wm_msg(WM_CHAR, 0x09, &mut f).is_none());
+    }
+
+    /// 可打印字符：KeyDown + Char 都投递（组件靠 Char 拿到实际字符）。
+    #[test]
+    fn printable_key_produces_keydown_and_char() {
+        let mut f = CharFilter::default();
+        assert!(matches!(
+            handle_wm_msg(WM_KEYDOWN, 0x41, &mut f),
+            Some(RawEvent::KeyDown { .. })
+        ));
+        assert!(matches!(
+            handle_wm_msg(WM_CHAR, 0x61, &mut f),
+            Some(RawEvent::Char { c: 'a' })
+        ));
+    }
+
+    /// 与键盘无关的消息不产出事件。
+    #[test]
+    fn unrelated_message_yields_nothing() {
+        let mut f = CharFilter::default();
+        assert!(handle_wm_msg(0x000F, 0, &mut f).is_none()); // WM_PAINT
+    }
+
+    /// 非法码点（代理区）不产出事件、也不 panic。
+    #[test]
+    fn invalid_codepoint_is_dropped() {
+        let mut f = CharFilter::default();
+        assert!(handle_wm_msg(WM_CHAR, 0xD800, &mut f).is_none());
     }
 }
