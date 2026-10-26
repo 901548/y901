@@ -1172,15 +1172,28 @@ impl UiTree {
     ///
     /// 路径只解析一次，派发沿路径递归一趟，每个节点只访问一次。
     pub fn dispatch(&mut self, event: &UiEvent) -> EventResult {
-        // Tab / Shift+Tab：直接走焦点遍历，不再派发给组件
-        if let UiEvent::Key { key: crate::event::Key::Tab, modifiers } = event {
-            let delta = if modifiers.shift { -1 } else { 1 };
-            let moved = self.focus_next(delta);
-            return if moved {
-                EventResult::Redraw
-            } else {
-                EventResult::Handled
-            };
+        // Tab / Shift+Tab：**焦点组件声明要自己处理时放行**，否则走焦点遍历。
+        // 终端用它做 shell 补全；单行输入框不声明（Tab 仍切焦点）。
+        if let UiEvent::Key {
+            key: crate::event::Key::Tab,
+            modifiers,
+        } = event
+        {
+            let wants = self
+                .focus
+                .as_deref()
+                .and_then(|id| self.find(id))
+                .map(|n| n.wants_tab())
+                .unwrap_or(false);
+            if !wants {
+                let delta = if modifiers.shift { -1 } else { 1 };
+                let moved = self.focus_next(delta);
+                return if moved {
+                    EventResult::Redraw
+                } else {
+                    EventResult::Handled
+                };
+            }
         }
 
         // 悬停追踪：只让"旧节点 + 新节点"两块区域变脏。

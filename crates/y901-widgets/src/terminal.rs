@@ -253,6 +253,16 @@ impl Widget for TerminalWidget {
         self.item
     }
 
+    /// 终端必须可聚焦，否则收不到键盘输入（此前缺失，导致 Tab 无法进入终端）。
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    /// 终端消费 Tab：shell 的补全就是用 Tab 触发的。
+    fn wants_tab(&self) -> bool {
+        true
+    }
+
     fn measure(
         &mut self,
         metrics: &dyn TextMetrics,
