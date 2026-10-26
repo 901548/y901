@@ -18,10 +18,17 @@ pub struct Invalidation {
 }
 
 impl Invalidation {
+    /// 新建空队列（通常由 `UiTree` 持有，组件通过 `MountCtx` 拿到 clone）。
+    ///
+    /// 返回：与其它 clone 共享同一底层集合的句柄。
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// 把一个 id 推进队列（**去重**：同一帧内重复推只保留一份）。
+    ///
+    /// 输入：owner id。返回：无。副作用：加入集合；不触发任何重绘。
+    /// 失败：无。注意它只登记"谁失效了"，真正标脏在 `drain` 之后由框架做。
     pub fn push(&self, id: impl Into<String>) {
         self.inner.borrow_mut().insert(id.into());
     }
@@ -34,10 +41,17 @@ impl Invalidation {
         out
     }
 
+    /// 队列是否为空（没有待处理的失效）。
+    ///
+    /// 返回：`true` = 自上次 `drain` 以来没有任何变化。无副作用。
     pub fn is_empty(&self) -> bool {
         self.inner.borrow().is_empty()
     }
 
+    /// 队列里待处理的 id 数量（诊断用）。
+    ///
+    /// 返回：去重后的个数。无副作用。
+    /// 注意：这是"本帧有多少个节点需要重新检查"，不是"发生了几次 set"。
     pub fn len(&self) -> usize {
         self.inner.borrow().len()
     }
@@ -64,6 +78,10 @@ impl<T: Clone> Clone for Signal<T> {
 }
 
 impl<T: Clone + 'static> Signal<T> {
+    /// 新建一个信号，初始值 `value`，无订阅者。
+    ///
+    /// 返回：可 `clone()` 的句柄（clone 共享同一份值与订阅表，不是深拷贝）。
+    /// 副作用：无。失败：无。
     pub fn new(value: T) -> Self {
         Self {
             value: Rc::new(RefCell::new(value)),
@@ -71,11 +89,20 @@ impl<T: Clone + 'static> Signal<T> {
         }
     }
 
+    /// 读当前值的**克隆**。
+    ///
+    /// 返回：值的副本（`T: Clone`，因此每次读都复制——大对象请用 `update` 就地改）。
+    /// 副作用：无。失败：无。
+    /// 注意：在 `RefCell` 已被可变借用期间调用会 panic（同线程重入）。
     pub fn get(&self) -> T {
         self.value.borrow().clone()
     }
 
     /// 写入新值；**只有真的变了**才通知（避免无意义重绘）。
+    ///
+    /// 输入：新值；比较用 `PartialEq`。
+    /// 返回：`true` = 值变了并已通知订阅者；`false` = 值相同，什么都没发生。
+    /// 副作用：值变化时把每个订阅者的 id 推进各自失效队列（不直接重绘）。
     pub fn set(&self, value: T) -> bool
     where
         T: PartialEq,
@@ -91,19 +118,31 @@ impl<T: Clone + 'static> Signal<T> {
         true
     }
 
-    /// 无条件写入（值不实现 PartialEq 时用）。
+    /// 无条件写入并通知（值不实现 `PartialEq` 时用）。
+    ///
+    /// 输入：新值。返回：无。
+    /// 副作用：**即使值相同也会通知**——订阅者会收到一次无意义的失效。
+    /// 失败：无。适用场景：类型没有 `PartialEq`，或"相同值也需要刷新"的显式语义。
     pub fn replace(&self, value: T) {
         *self.value.borrow_mut() = value;
         self.notify();
     }
 
-    /// 就地修改并通知。
+    /// 就地修改并通知（避免为大对象做一次克隆）。
+    ///
+    /// 输入：`f`（拿到 `&mut T`）。返回：无。
+    /// 副作用：无条件通知订阅者（哪怕 `f` 什么都没改）。
+    /// 失败：`f` 里若再调 `get()`/`set()` 会触发 `RefCell` 双重借用 panic。
     pub fn update(&self, f: impl FnOnce(&mut T)) {
         f(&mut self.value.borrow_mut());
         self.notify();
     }
 
-    /// 组件在 `on_mount` 里调用：登记自己，值变化时把 id 推进失效队列。
+    /// 登记订阅者：值变化时把 `owner` 推进 `queue`。
+    ///
+    /// 输入：`owner`（通常是节点 id）、`queue`（`MountCtx::invalidation`）。
+    /// 返回：无。副作用：加入订阅表；**同一 owner 重复订阅会覆盖队列而非重复登记**。
+    /// 时机：只在 `on_mount` 里调（框架此时才提供 `MountCtx`）。
     pub fn subscribe(&self, owner: impl Into<String>, queue: Invalidation) {
         let owner = owner.into();
         let mut list = self.listeners.borrow_mut();
@@ -114,11 +153,20 @@ impl<T: Clone + 'static> Signal<T> {
         list.push(Listener { owner, queue });
     }
 
-    /// 组件在 `on_unmount` 里调用。
+    /// 取消订阅（按 owner 精确匹配）。
+    ///
+    /// 输入：`owner`。返回：无。
+    /// 副作用：从订阅表移除；owner 不存在时是 no-op（幂等）。
+    /// 时机：`on_unmount` 里调，否则节点销毁后仍会被推进失效队列（泄漏 + 无意义失效）。
     pub fn unsubscribe(&self, owner: &str) {
         self.listeners.borrow_mut().retain(|l| l.owner != owner);
     }
 
+    /// 当前订阅者数量（诊断用）。
+    ///
+    /// 返回：订阅表长度。无副作用。
+    /// 注意：它**不**区分 owner 是否还活着——节点被 `remove_node` 删除时
+    /// 若没走 `on_unmount`，这里的计数会偏高。
     pub fn subscriber_count(&self) -> usize {
         self.listeners.borrow().len()
     }

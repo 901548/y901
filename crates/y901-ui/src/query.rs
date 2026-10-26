@@ -27,7 +27,13 @@ pub struct Query {
 }
 
 impl Query {
-    /// 解析失败返回 Err（错误信息面向人类，便于调试）。
+    /// 解析选择器字符串，例如 `role=button & label~="Save" & limit=5`。
+    ///
+    /// 语法：`&` 分隔条件；`=` 精确相等；`~=` 子串包含；值两侧引号会被剥掉。
+    /// 合法键：`id` / `role` / `label` / `value` / `disabled` / `exposed` / `limit`。
+    /// 返回：解析后的 `Query`；空串与纯空白得到"匹配一切"的空查询。
+    /// 失败：未知键、缺少键、`limit` 非非负整数、无法解析的条件 → `Err(人类可读信息)`。
+    /// 副作用：无（纯函数）。
     pub fn parse(input: &str) -> Result<Self, String> {
         let mut q = Query::default();
         for raw in input.split('&') {
@@ -61,7 +67,13 @@ impl Query {
         Ok(q)
     }
 
-    /// 节点是否匹配（只匹配 `exposed_to_ai` 的节点由调用方决定）。
+    /// 判断单个节点是否命中查询。
+    ///
+    /// 输入：`id`（节点 id）+ `sem`（**已由框架注入 `role` 的**语义）。
+    /// 返回：所有条件同时成立才为 `true`；空查询恒为 `true`。
+    /// 副作用：无。
+    /// 注意：本方法**不**检查 `exposed_to_ai`——是否把不可见节点纳入结果由调用方决定
+    /// （网关侧会过滤，否则 Agent 能查到不该看的节点）。
     pub fn matches(&self, id: &str, sem: &Semantics) -> bool {
         self.clauses.iter().all(|c| match c {
             Clause::Eq(k, v) => match *k {
