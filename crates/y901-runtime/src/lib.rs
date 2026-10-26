@@ -61,6 +61,35 @@ pub struct Options {
     pub title: String,
     pub width: u32,
     pub height: u32,
+    /// 主题（`None` = [`y901_ui::theme::DARK_THEME`]）。
+    ///
+    /// 主题是**渲染属性**，由后端持有；`UiTree` 不保存主题（树不关心颜色）。
+    /// 若将来需要"运行时切主题"，再引入 `set_theme`——当前只支持启动时注入。
+    pub theme: Option<y901_ui::theme::Theme>,
+    /// 字体（`None` = NSimSun / 16px）。
+    pub font: Option<FontConfig>,
+}
+
+/// 字体配置：族名 + 逻辑像素字号。
+///
+/// **注意**：字号是**全局**的——文本引擎只用一个字号，
+/// 不支持同一文档内不同字号（富文本）。若将来需要富文本，
+/// 再给 `TextStyle` 加 `font_size` 字段并让 `measure_text` 读它。
+#[derive(Clone, Debug, PartialEq)]
+pub struct FontConfig {
+    /// 字体族名（DirectWrite family name），例如 `"NSimSun"` / `"JetBrains Mono"`。
+    pub family: String,
+    /// 字号（逻辑像素）。
+    pub size: f32,
+}
+
+impl Default for FontConfig {
+    fn default() -> Self {
+        Self {
+            family: "NSimSun".to_string(),
+            size: 16.0,
+        }
+    }
 }
 
 impl Default for Options {
@@ -69,6 +98,8 @@ impl Default for Options {
             title: "Y901".to_string(),
             width: 1200,
             height: 800,
+            theme: None,
+            font: None,
         }
     }
 }

@@ -836,3 +836,78 @@ mod span_tests {
         }
     }
 }
+
+/// 由字号推出单元格尺寸（逻辑像素），**纯函数**（不碰 DirectWrite）。
+///
+/// 输入：`font_size`（逻辑像素，<=0 时按 1 处理）。
+/// 返回：`(cell_width, cell_height)`；等宽字体下宽度 = 字号的一半（16 → 8×16）。
+/// 说明：真实字形宽度仍由 DirectWrite 测量（`cell_span_of` 决定跨几格），
+/// 这里只给"一个格子的名义尺寸"，供网格与图集分配使用。
+pub fn cell_metrics_for(font_size: f32) -> (f32, f32) {
+    let size = if font_size.is_finite() && font_size > 0.0 {
+        font_size
+    } else {
+        1.0
+    };
+    ((size * 0.5).round().max(1.0), size.round().max(1.0))
+}
+
+#[cfg(test)]
+mod cell_metrics_tests {
+    use super::cell_metrics_for;
+
+    /// 默认 16px → 8×16（与历史常量一致，回归保护）。
+    #[test]
+    fn default_font_still_16px() {
+        assert_eq!(cell_metrics_for(16.0), (8.0, 16.0));
+    }
+
+    /// 换字号会改变单元格尺寸（20px → 10×20）。
+    #[test]
+    fn font_size_changes_cell_size() {
+        assert_eq!(cell_metrics_for(20.0), (10.0, 20.0));
+        assert_ne!(cell_metrics_for(20.0).0, 8.0);
+    }
+
+    /// 非法字号不 panic，且至少 1px。
+    #[test]
+    fn invalid_font_size_is_clamped() {
+        assert_eq!(cell_metrics_for(0.0), (1.0, 1.0));
+        assert_eq!(cell_metrics_for(-5.0), (1.0, 1.0));
+        assert_eq!(cell_metrics_for(f32::NAN), (1.0, 1.0));
+    }
+}
+
+#[cfg(test)]
+mod options_tests {
+    use y901_runtime::{FontConfig, Options};
+
+    /// 默认选项：不指定主题与字体（走 DARK + NSimSun/16）。
+    #[test]
+    fn defaults_are_none() {
+        let o = Options::default();
+        assert!(o.theme.is_none(), "默认不注入主题");
+        assert!(o.font.is_none(), "默认不注入字体");
+    }
+
+    /// 默认字体：NSimSun / 16px（与历史常量一致）。
+    #[test]
+    fn default_font_is_nsimsun_16() {
+        let f = FontConfig::default();
+        assert_eq!(f.family, "NSimSun");
+        assert_eq!(f.size, 16.0);
+    }
+
+    /// 显式指定字体后，cell 尺寸随之变化（P0-1 的核心断言）。
+    #[test]
+    fn font_config_changes_cell_size() {
+        let f = FontConfig {
+            family: "JetBrains Mono".to_string(),
+            size: 20.0,
+        };
+        let (w, h) = super::cell_metrics_for(f.size);
+        assert_ne!(w, 8.0, "20px 字体的单元格宽度不应还是 8");
+        assert_eq!((w, h), (10.0, 20.0));
+        assert_eq!(f.family, "JetBrains Mono");
+    }
+}

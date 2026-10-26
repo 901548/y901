@@ -22,10 +22,25 @@ use font::TextEngine;
 /// 逻辑像素下的单元格尺寸。终端组件会通过 `measure_text("M")` 拿到同样的值。
 const CELL_W: f32 = 8.0;
 const CELL_H: f32 = 16.0;
+/// 默认字体尺寸（逻辑像素）。真实值来自 `Options.font`，这里只作为文档与默认值来源。
+///
+/// **字号是全局的**：文本引擎只用一个字号，不支持同一文档内不同字号（富文本）。
+/// 若将来需要富文本，再给 `TextStyle` 加 `font_size` 字段并让 `measure_text` 读它。
 const FONT_SIZE: f32 = 16.0;
 /// 图集未同步的警告只打一次（避免每帧刷屏，同时 release 也有提示）。
 static ATLAS_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 默认字体族（与 `FontConfig::default()` 保持一致）。
 const FONT_FAMILY: &str = "NSimSun";
+
+/// 默认字体配置的唯一来源：常量与 `FontConfig::default()` 必须一致。
+///
+/// 用 `debug_assert` 固化，避免两处各改一半。
+fn default_font_config() -> y901_runtime::FontConfig {
+    let cfg = y901_runtime::FontConfig::default();
+    debug_assert_eq!(cfg.family, FONT_FAMILY, "默认族名不一致");
+    debug_assert_eq!(cfg.size, FONT_SIZE, "默认字号不一致");
+    cfg
+}
 
 pub struct D3dBackend {
     pub gfx: Gfx,
@@ -39,6 +54,8 @@ pub struct D3dBackend {
     size: (u32, u32),
     /// 上一次 `present` 是否被遮挡（D3D11 只能从 `Present` 返回值得知）。
     last_occluded: bool,
+    /// 渲染主题（启动时由 Options.theme 注入，None 时用 DARK）。
+    theme: y901_ui::theme::Theme,
 }
 
 impl D3dBackend {
@@ -53,12 +70,20 @@ impl D3dBackend {
     ///
     /// 违反会导致：交换链绑定到悬垂 HWND，`Present` 时访问已释放的窗口内存
     /// （未定义行为）；DirectWrite 一侧失败则返回 `Err`，可恢复。
-    pub unsafe fn new(hwnd: HWND, width: u32, height: u32) -> Result<Self, String> {
+    pub unsafe fn new(
+        hwnd: HWND,
+        width: u32,
+        height: u32,
+        theme: y901_ui::theme::Theme,
+        font: &y901_runtime::FontConfig,
+    ) -> Result<Self, String> {
         // 逐字节核对 CPU 实例布局与 GPU InputLayout：错一个字节整屏都是乱码。
         d3d11::verify_instance_layout()?;
 
         let gfx = Gfx::new(hwnd, width, height)?;
-        let text = TextEngine::new(FONT_FAMILY, FONT_SIZE, CELL_W, CELL_H)?;
+        // 字号是全局的（不支持富文本）：cell 尺寸由字号推出，见 cell_metrics_for。
+        let (cell_w, cell_h) = crate::backend::font::cell_metrics_for(font.size);
+        let text = TextEngine::new(&font.family, font.size, cell_w, cell_h)?;
         eprintln!(
             "[y901] backend ready: ascent={:.2} descent={:.2} atlas={}",
             text.ascent, text.descent, text.atlas_size
@@ -73,6 +98,7 @@ impl D3dBackend {
             hwnd,
             size: (width, height),
             last_occluded: false,
+            theme,
         };
         backend.sync_atlas()?;
         Ok(backend)
@@ -282,7 +308,17 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
             }
         };
         // SAFETY: 调用方通过 `PlatformWindowHandle::Win32` 承诺句柄有效且同线程。
-        unsafe { Self::new(hwnd, width, height) }
+        // 这里只能用默认主题/字体：`RenderBackend::create` 不接收 `Options`，
+        // 需要自定义时走 `D3dBackend::new`（`Window::create` 就是这么做的）。
+        unsafe {
+            Self::new(
+                hwnd,
+                width,
+                height,
+                y901_ui::theme::Theme::DARK,
+                &default_font_config(),
+            )
+        }
     }
 
     fn rebuild(&mut self, width: u32, height: u32) -> Result<(), String> {
@@ -365,6 +401,11 @@ impl TextMetrics for D3dBackend {
 impl RenderCtx for D3dBackend {
     fn size(&self) -> Size {
         self.viewport
+    }
+
+    /// 主题来自 `Options.theme`（`Window::create` 注入），默认 DARK。
+    fn theme(&self) -> &y901_ui::theme::Theme {
+        &self.theme
     }
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {

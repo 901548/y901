@@ -373,7 +373,9 @@ impl Window {
             (rect.bottom - rect.top).max(1) as u32,
         );
 
-        let backend = D3dBackend::new(hwnd, viewport.0, viewport.1)
+        let theme = options.theme.unwrap_or(y901_ui::theme::Theme::DARK);
+        let font = options.font.clone().unwrap_or_default();
+        let backend = D3dBackend::new(hwnd, viewport.0, viewport.1, theme, &font)
             .map_err(|e| format!("D3D11 init failed: {e}"))?;
 
         ShowWindow(hwnd, SW_SHOW);
