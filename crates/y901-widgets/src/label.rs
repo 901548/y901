@@ -159,10 +159,13 @@ impl Widget for TextLabel {
             .exposed(true)
             .label(self.current_text())
             .value(self.current_text())
-            .action("set_text")
+            // 历史 bug：这里原本是 `.action("set_text")`（InputKind::None），
+            // 但 event 里读的是 `args.text` —— 声明与实现不符，
+            // 网关会以 "expects None argument" 拒绝任何带参数的 set_text。
+            .action_spec("set_text", y901_ui::InputKind::Text)
             // 颜色是"视觉属性"，但 Agent 改它属于**有副作用的状态变更**，
             // 因此声明为动作（走 invoke + if_rev），格式见 `parse_color`。
-            .action_spec("set_color", y901_ui::InputKind::Text)
+            .action_spec_named("set_color", y901_ui::InputKind::Text, "color")
     }
 
     fn on_mount(&mut self, ctx: &mut MountCtx) {
@@ -196,6 +199,7 @@ impl TextLabel {
 ///
 /// 设计取舍：不支持命名颜色（`"red"`）与 `rgba(...)` 函数式写法——
 /// 多一种格式就多一条解析分支与一类边界，而 Agent 生成 hex 很容易。
+#[doc(hidden)]
 pub fn parse_color(raw: &str) -> Result<Color, String> {
     let err = || "颜色格式必须是 #rrggbb 或 #rrggbbaa（例如 #ff0000 / #ff000080）".to_string();
     let hex = raw.strip_prefix('#').ok_or_else(err)?;

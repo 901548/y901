@@ -437,3 +437,20 @@ pub enum FocusError { NotFound, NotFocusable, Vetoed }
 （`hit_index` 是 O(命中数)）。注意祖先链上的 cursor 继承语义要一并保留。
 
 当前不优化。
+## §26 `action_spec_named`：自定义动作参数名
+
+默认情况下，动作的入参名由类型决定（`InputKind::Text` → `text`，
+`Number` → `value`，`Bool` → `flag`，`None` → 无参数）。
+当参数名不落俗套时（例如 `set_color` 的参数应该叫 `color`），用：
+
+```rust
+Semantics::default()
+    .action_spec_named("set_color", InputKind::Text, "color")
+```
+
+- 网关按 `ActionSpec::arg_name()` 从 `args` 取键（自定义名优先，否则回退默认名）；
+- `to_json` 只在**自定义**参数名时额外输出 `"arg"` 字段，
+  默认名的动作 JSON 形状不变（既有 Agent 解析不受影响）；
+- 参数类型校验（`accepts`）不变，仍然按 `InputKind`。
+
+**不要**为了换个参数名而改 `InputKind`——那会同时改变类型校验。

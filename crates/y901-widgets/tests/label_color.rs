@@ -178,8 +178,68 @@ fn label_tree() -> UiTree {
     tree
 }
 
+// ---------- 回归：自定义参数名不影响既有动作 ----------
+
 #[test]
-#[ignore = "阻塞：动作入参名被 InputKind 写死为 text；等参数名约定决策（见汇报方案 B）"]
+fn custom_arg_name_does_not_break_existing_actions() {
+    use y901_ui::{ActionSpec, InputKind};
+
+    // 默认参数名（回退到 InputKind）
+    let none = ActionSpec::new("click", InputKind::None);
+    assert_eq!(none.arg_name(), "", "无参动作的参数名必须是空串");
+    let text = ActionSpec::new("set_text", InputKind::Text);
+    assert_eq!(text.arg_name(), "text", "Text 的默认参数名必须是 text");
+    let num = ActionSpec::new("scroll", InputKind::Number);
+    assert_eq!(num.arg_name(), "value");
+
+    // 自定义参数名
+    let named = ActionSpec::named("set_color", InputKind::Text, "color");
+    assert_eq!(named.arg_name(), "color");
+
+    // JSON 形状：默认名**不**输出 arg 字段（保证既有 Agent 解析不受影响）
+    assert!(
+        none.to_json().get("arg").is_none(),
+        "默认参数名不应输出 arg 字段"
+    );
+    assert!(text.to_json().get("arg").is_none());
+    // 自定义名输出 arg 字段，Agent 才知道该传什么键
+    assert_eq!(
+        named.to_json().get("arg").and_then(|v| v.as_str()),
+        Some("color")
+    );
+}
+
+#[test]
+fn invoke_set_text_still_uses_text_argument() {
+    let mut tree = label_tree();
+    let ok = dispatch_request(
+        &mut tree,
+        &Policy::default(),
+        "invoke",
+        &Json::obj()
+            .set("id", "label")
+            .set("action", "set_text")
+            .set("args", Json::obj().set("text", "hello")),
+    );
+    assert!(ok.is_ok(), "set_text 仍应接受 text 参数：{ok:?}");
+
+    // 用错参数名应被拒（证明校验仍在工作）
+    let bad = dispatch_request(
+        &mut tree,
+        &Policy::default(),
+        "invoke",
+        &Json::obj()
+            .set("id", "label")
+            .set("action", "set_text")
+            .set("args", Json::obj().set("color", "#ff0000")),
+    );
+    assert!(
+        matches!(bad, Err(ApiError::BadRequest(_))),
+        "set_text 不接受 color 参数：{bad:?}"
+    );
+}
+
+#[test]
 fn invoke_set_color_changes_label_color() {
     let mut tree = label_tree();
 

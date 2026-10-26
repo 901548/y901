@@ -508,19 +508,44 @@ impl InputKind {
 pub struct ActionSpec {
     pub name: String,
     pub input: InputKind,
+    /// 自定义参数名；`None` 时回退到 [`InputKind::arg_name`]（text/value/flag）。
+    ///
+    /// 用于参数名不落俗套的动作（例如 `set_color` 的参数叫 `color` 而非 `text`）。
+    pub arg_name: Option<&'static str>,
 }
 
 impl ActionSpec {
+    /// 用默认参数名（由 `InputKind` 决定）构造。
     pub fn new(name: impl Into<String>, input: InputKind) -> Self {
         Self {
             name: name.into(),
             input,
+            arg_name: None,
         }
     }
 
+    /// 用自定义参数名构造（参数名固定为 `'static str`，避免运行期分配）。
+    pub fn named(name: impl Into<String>, input: InputKind, arg_name: &'static str) -> Self {
+        Self {
+            name: name.into(),
+            input,
+            arg_name: Some(arg_name),
+        }
+    }
+
+    /// 网关从 `args` 里取参数时用的键名。
+    ///
+    /// 返回：自定义名（若有），否则 `input.arg_name()`。
+    pub fn arg_name(&self) -> &str {
+        self.arg_name.unwrap_or_else(|| self.input.arg_name())
+    }
+
     /// 语义树里的紧凑表示：`{"name":"click","input":"none"}`。
+    ///
+    /// `arg_name` 为 `Some` 时额外输出 `"arg"` 字段（Agent 据此知道参数名）；
+    /// 默认参数名的动作**不输出**该字段——保持既有 JSON 形状不变。
     pub fn to_json(&self) -> crate::json::Json {
-        crate::json::Json::obj()
+        let obj = crate::json::Json::obj()
             .set("name", self.name.clone())
             .set(
                 "input",
@@ -530,7 +555,11 @@ impl ActionSpec {
                     InputKind::Number => "number",
                     InputKind::Bool => "bool",
                 },
-            )
+            );
+        match self.arg_name {
+            Some(name) => obj.set("arg", name),
+            None => obj,
+        }
     }
 }
 /// 语义描述：给 Agent 读的节点信息。
@@ -617,9 +646,26 @@ impl Semantics {
         self
     }
 
-    /// 声明一个带参数类型的动作。
+    /// 声明一个带参数类型的动作（参数名由 `input` 决定：text / value / flag）。
     pub fn action_spec(mut self, name: impl Into<String>, input: InputKind) -> Self {
         self.actions.push(ActionSpec::new(name, input));
+        self
+    }
+
+    /// 声明一个**参数名自定义**的带参动作。
+    ///
+    /// 输入：动作名、参数类型、参数键名（`'static`，不分配）。
+    /// 返回：自身。
+    /// 用在哪：参数名不落俗套时（如 `set_color` 用 `color` 而不是 `text`）。
+    /// 影响：网关按这个键从 `args` 取值，`to_json` 会额外输出 `"arg"` 字段。
+    pub fn action_spec_named(
+        mut self,
+        name: impl Into<String>,
+        input: InputKind,
+        arg_name: &'static str,
+    ) -> Self {
+        self.actions
+            .push(ActionSpec::named(name, input, arg_name));
         self
     }
 

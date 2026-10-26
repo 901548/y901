@@ -282,15 +282,16 @@ pub fn handle_call(tree: &mut UiTree, policy: &Policy, call: ApiCall) -> Result<
             // 参数类型必须与 ActionSpec.input 匹配
             if let Some(node) = tree.find(&id) {
                 if let Some(spec) = node.semantics().actions.iter().find(|a| a.name == action) {
-                    let value = args.get(spec.input.arg_name()).cloned().unwrap_or(Json::Null);
+                    // 参数名可能被动作自定义（`action_spec_named`），不能再用 input 推导
+                    let arg_key = spec.arg_name().to_string();
+                    let value = args.get(&arg_key).cloned().unwrap_or(Json::Null);
                     // 无参动作不接受任何多余参数
                     let extra = matches!(spec.input, y901_ui::InputKind::None)
                         && matches!(&args, Json::Obj(map) if !map.is_empty());
                     if extra || !spec.input.accepts(&value) {
                         return Err(ApiError::BadRequest(format!(
-                            "action `{action}` expects {:?} argument `{}`",
-                            spec.input,
-                            spec.input.arg_name()
+                            "action `{action}` expects {:?} argument `{arg_key}`",
+                            spec.input
                         )));
                     }
                 }
