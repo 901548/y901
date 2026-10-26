@@ -260,6 +260,113 @@ fn cursor_at_still_works_for_simple_hover() {
     );
 }
 
+// ---------- depth 分支：父子同层时更深者胜 ----------
+
+/// 带光标与子节点的容器（父节点自己也可能贡献 cursor）。
+struct CursorBox {
+    id: &'static str,
+    rect: Rect,
+    cursor: Cursor,
+    kids: Vec<Box<dyn Widget>>,
+}
+
+impl Widget for CursorBox {
+    fn id(&self) -> &str {
+        self.id
+    }
+    fn cursor(&self) -> Cursor {
+        self.cursor
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.kids
+    }
+    fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        Some(&mut self.kids)
+    }
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
+        c.max
+    }
+    fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {}
+    fn rect(&self) -> Rect {
+        self.rect
+    }
+    fn event(&mut self, _c: &mut EventCtx, _e: &y901_ui::UiEvent) -> EventResult {
+        EventResult::Ignored
+    }
+    fn render(&mut self, _c: &mut dyn RenderCtx) {}
+    fn semantics(&self) -> Semantics {
+        Semantics::default().exposed(true)
+    }
+}
+
+/// 父节点（Base, Pointer）与子节点（Base, Text）同点重叠：子节点更深 → 胜出。
+///
+/// 这条测试盯的是 `depth` 分支：若把 `depth >= bd` 改成 `depth > bd`，
+/// 同深度时先访问的父节点会胜出，测试立刻红。
+#[test]
+fn cursor_at_child_overrides_parent_same_layer() {
+    let parent = CursorBox {
+        id: "parent",
+        rect: Rect::new(0.0, 0.0, 100.0, 100.0),
+        cursor: Cursor::Pointer,
+        kids: vec![Box::new(Probe::new(
+            "child",
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+            Cursor::Text,
+        ))],
+    };
+    let tree = layout(Box::new(parent));
+
+    assert_eq!(
+        tree.cursor_at(Pos::new(10.0, 10.0)),
+        Cursor::Text,
+        "同层重叠时，更深的子节点应覆盖父节点的光标"
+    );
+}
+
+/// 同层同深度的**兄弟**重叠：树序靠后者胜（与 `hit_index` 的 `rposition` 一致）。
+///
+/// 这条测试盯的是 `>=` 与 `>` 的差别：
+/// - `>=`（当前实现）：后访问的兄弟胜出 → 与 paint_order 的 rposition 一致；
+/// - `>`（若被误改）：先访问的兄弟胜出 → 与 hit_index 相反，本测试立刻红。
+#[test]
+fn cursor_at_later_sibling_wins_same_layer() {
+    let root = Col {
+        id: "root",
+        kids: vec![
+            Box::new(Probe::new(
+                "first",
+                Rect::new(0.0, 0.0, 100.0, 100.0),
+                Cursor::Pointer,
+            )),
+            Box::new(Probe::new(
+                "second",
+                Rect::new(0.0, 0.0, 100.0, 100.0),
+                Cursor::Text,
+            )),
+        ],
+        rect: Rect::ZERO,
+        clip: None,
+    };
+    let tree = layout(Box::new(root));
+
+    // 前置：命中测试取 paint_order 最后一个匹配 → second
+    assert_eq!(
+        tree.hit_test(Pos::new(10.0, 10.0)).as_deref(),
+        Some("second")
+    );
+    assert_eq!(
+        tree.cursor_at(Pos::new(10.0, 10.0)),
+        Cursor::Text,
+        "同层同深度时，树序靠后的兄弟必须胜出（与 hit_index 一致）"
+    );
+}
+
 // 占位：确认 Flex 仍可导入（后续测试会用）
 #[allow(dead_code)]
 fn _unused() -> Flex {

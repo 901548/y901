@@ -100,6 +100,10 @@ pub struct TextInput {
 }
 
 impl TextInput {
+    /// 新建一个空输入框，默认样式（深色底 + 白字），未聚焦。
+    ///
+    /// 输入：`id`（树内唯一）。返回：未挂载的组件。
+    /// 副作用：无（不读剪贴板、不订阅）。
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -126,6 +130,10 @@ impl TextInput {
         }
     }
 
+    /// 设置初始文本，并把光标放到末尾。
+    ///
+    /// 输入：任意文本（含中文/emoji）。返回：自身（构建器）。
+    /// 副作用：版本号 +1、标记布局失效（挂载后调用会触发一次重排）。
     pub fn with_text(mut self, text: impl Into<String>) -> Self {
         self.buffer = TextBuffer::from_text(text);
         self.version += 1;
@@ -133,17 +141,26 @@ impl TextInput {
         self
     }
 
+    /// 覆盖文本样式（前景/背景/粗体等）。
+    ///
+    /// 返回：自身。副作用：标记布局失效（字体变化会影响测量宽度）。
     pub fn style(mut self, style: TextStyle) -> Self {
         self.style = style;
         self.layout_dirty = true;
         self
     }
 
+    /// 设置内边距（文字与边框的距离）。
+    ///
+    /// 返回：自身。副作用：影响 `measure` 结果，挂载后改需自行触发重排。
     pub fn padding(mut self, padding: Edges) -> Self {
         self.padding = padding;
         self
     }
 
+    /// 设置 flex 伸缩参数（宽/高策略）。
+    ///
+    /// 返回：自身。副作用：无（只在父容器 `measure` 时被读取）。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
@@ -155,6 +172,10 @@ impl TextInput {
         self
     }
 
+    /// 替换剪贴板实现（默认 `NullClipboard`：Ctrl+C/V 无效果）。
+    ///
+    /// 输入：`Box<dyn Clipboard>`（应用层接系统剪贴板）。
+    /// 返回：自身。副作用：无（只换实现，不读写）。
     pub fn with_clipboard(mut self, clipboard: Box<dyn Clipboard>) -> Self {
         self.clipboard = clipboard;
         self
@@ -162,30 +183,53 @@ impl TextInput {
 
     // ---------- 只读访问（测试 / 语义树） ----------
 
+    /// 当前文本内容（不含 IME 预编辑串）。
+    ///
+    /// 返回：`&str`（借用内部缓冲，零拷贝）。副作用：无。
     pub fn text(&self) -> &str {
         self.buffer.text()
     }
 
+    /// 底层文本缓冲（含光标/选择/撤销等全部状态）。
+    ///
+    /// 返回：只读引用。副作用：无。复杂编辑逻辑（按行取文本等）走它。
     pub fn buffer(&self) -> &TextBuffer {
         &self.buffer
     }
 
+    /// 光标字节偏移（不是字符数；中文/emoji 各占多字节）。
+    ///
+    /// 返回：`0..=len_bytes()`。副作用：无。
+    /// 注意：用它切字符串前必须确认落在 UTF-8 边界上（`TextBuffer` 保证是）。
     pub fn cursor(&self) -> usize {
         self.buffer.cursor()
     }
 
+    /// 选择锚点（Shift+方向键选区的另一端）。
+    ///
+    /// 返回：字节偏移；没有选区时等于 `cursor()`。副作用：无。
     pub fn anchor(&self) -> usize {
         self.buffer.anchor()
     }
 
+    /// 当前选区（已排序的 `[start, end)` 字节区间）。
+    ///
+    /// 返回：`None` = 无选区（光标与锚点重合）。副作用：无。
     pub fn selection(&self) -> Option<(usize, usize)> {
         self.buffer.selection()
     }
 
+    /// 组件自己记录的聚焦状态（框架 `Focus` 事件的镜像）。
+    ///
+    /// 返回：`true` 表示正在接收键盘输入。副作用：无。
+    /// 注意：权威焦点是 `UiTree::focus()`；两者不一致说明有别处绕过框架改了状态。
     pub fn is_focused(&self) -> bool {
         self.focused
     }
 
+    /// 水平滚动偏移（文本比可视区宽时，为保证光标可见而滚动）。
+    ///
+    /// 返回：像素偏移（0 表示没滚动）。副作用：无。
     pub fn scroll_x(&self) -> f32 {
         self.scroll_x
     }

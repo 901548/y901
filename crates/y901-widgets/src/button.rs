@@ -24,6 +24,10 @@ pub struct Button {
 }
 
 impl Button {
+    /// 新建按钮：`id` 树内唯一，`label` 是显示文字。
+    ///
+    /// 默认点击发送 `click` 命令（无参数），可用 `on_click` 覆盖。
+    /// 副作用：无。
     pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -45,11 +49,18 @@ impl Button {
         self
     }
 
+    /// 禁用按钮：不参与 Tab 遍历，点击不再发命令。
+    ///
+    /// 返回：自身。副作用：语义里 `disabled=true`（Agent 可见）；
+    /// 视觉上使用 `State::Disabled` 的配色。
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// 设置 flex 伸缩参数（宽/高策略）。
+    ///
+    /// 返回：自身。副作用：无（只在父容器测量时被读取）。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self

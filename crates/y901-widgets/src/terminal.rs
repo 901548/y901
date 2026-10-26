@@ -64,20 +64,33 @@ impl TerminalWidget {
         }
     }
 
+    /// 只读模式：键盘输入不再写入 PTY（仍可滚动与选择）。
+    ///
+    /// 返回：自身。副作用：无。用于"查看日志"场景。
     pub fn read_only(mut self) -> Self {
         self.read_only = true;
         self
     }
 
+    /// 设置 flex 伸缩参数（终端通常用 `FlexItem::fill()` 占满）。
+    ///
+    /// 返回：自身。副作用：无。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
     }
 
+    /// 终端网格（只读）：行、单元格、光标、scrollback 都在这里。
+    ///
+    /// 返回：`&Grid`。副作用：无。
     pub fn grid(&self) -> &Grid {
         &self.grid
     }
 
+    /// 终端网格（可变）：直接改它会绕过 PTY 与 reflow。
+    ///
+    /// 返回：`&mut Grid`。副作用：**不会**自动标记布局失效或重绘；
+    /// 只给测试与"注入历史输出"的场景用，产品路径请走 PTY。
     pub fn grid_mut(&mut self) -> &mut Grid {
         &mut self.grid
     }
@@ -139,6 +152,10 @@ impl TerminalWidget {
         Ok(())
     }
 
+    /// 是否已接上真实 shell（`attach_shell` 成功过）。
+    ///
+    /// 返回：`true` = 输入会写进 PTY；`false` = 纯展示（测试/日志视图）。
+    /// 副作用：无。
     pub fn has_shell(&self) -> bool {
         self.pty.is_some()
     }

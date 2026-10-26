@@ -409,3 +409,31 @@ pub enum FocusError { NotFound, NotFocusable, Vetoed }
 **若要坐实**：用 `dhat` 或自定义 allocator + 独立测试二进制，测"渲染一帧
 80×24 终端的分配次数"。成本约半天，收益是能抓住"未来有人在渲染路径里
 偷偷分配"的回归。
+## §24 为什么 `cursor_at` 要累加 `inherited_clip`（**防御性，不是修 bug**）
+
+`cursor_at` 的递归里，每个祖先都会先检查
+`node.rect().intersect(可见clip).contains(pos)`，不在可见区就**直接返回**——
+子孙根本不会被访问。因此"是否把祖先 clip 累加到 `inherited_clip`"对最终
+`contains(pos)` 的判定是**等价的**（早退 ≡ 累加）。
+
+曾经怀疑这是 bug（"不累加祖先 clip 会让视口外的子节点贡献光标"），
+实测与推导都证明**不成立**：`cursor_at_respects_ancestor_clip` 在修复前就是绿的。
+
+那为什么仍然显式累加？
+
+1. 与 `rebuild_indices` 的 `entry.clip` **同构**，便于两个函数对照；
+2. 防止未来有人为了"性能"去掉祖先早退——届时若 `inherited_clip` 没累加，
+   就会出现"祖先可见区不含 pos，但子孙仍被访问"的错误。
+
+**改 `cursor_at` 的递归结构时，必须跑 `cursor_at_respects_ancestor_clip`，
+并确认早退与累加仍然一致。**
+
+## §25 TODO：`cursor_at` 的复杂度是 O(n)
+
+每次 `MouseMove` 遍历全树。10k 节点树约 1ms/次，高频移动可能有感知延迟。
+（旧实现也是 O(n)，本轮修复未变差。）
+
+优化方向：复用 `hit_index` 的命中路径——先取命中节点，再只沿它的祖先链问 cursor
+（`hit_index` 是 O(命中数)）。注意祖先链上的 cursor 继承语义要一并保留。
+
+当前不优化。
