@@ -454,3 +454,18 @@ Semantics::default()
 - 参数类型校验（`accepts`）不变，仍然按 `InputKind`。
 
 **不要**为了换个参数名而改 `InputKind`——那会同时改变类型校验。
+## §27 真机验证清单（需要 GPU）
+
+以下行为在 CI 与当前开发机上**无法验证**（虚拟显卡拒绝 D3D11 设备创建，
+`D3D11CreateDeviceAndSwapChain` 返回 `0x80070005`），需要用户在真实 GPU 环境跑一次：
+
+1. `Options { theme: Some(Theme::LIGHT), .. }` → 窗口真的变亮
+   （不只是 `D3dBackend.theme` 字段变了）。
+2. `Options { font: Some(FontConfig { family: "JetBrains Mono".into(), size: 20.0 }), .. }`
+   → 字号真的变大，`cell_width ≈ 10.0`。
+3. 终端里按 Enter → 命令只执行一次（控制键去重生效；此前是双写）。
+4. 终端里按 Tab → shell 补全生效，且**不切换焦点**。
+
+前两条的"接线"由结构测试 `options_theme_reaches_backend` /
+`options_font_reaches_text_engine` 守着（`grep` 源码断言，防止链路被拆），
+但结构测试**不能**证明"窗口真的变亮/变大"——那一层必须有设备。
