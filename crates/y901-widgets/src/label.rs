@@ -18,6 +18,11 @@ pub struct TextLabel {
 }
 
 impl TextLabel {
+    /// 新建静态文本标签。
+    ///
+    /// 输入：`id`（树内唯一）、`text`（初始文本）。
+    /// 返回：未挂载的组件；不带 Signal（文本不会自动更新）。
+    /// 副作用：无。
     pub fn new(id: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -44,20 +49,37 @@ impl TextLabel {
         }
     }
 
+    /// 覆盖文字颜色。
+    ///
+    /// 返回：自身。副作用：无（下次绘制生效；颜色不进脏区计算，
+    /// 因此单独改颜色需要调用方自行 `invalidate`）。
     pub fn color(mut self, color: Color) -> Self {
         self.color = color;
         self
     }
 
+    /// 设置 flex 伸缩参数。
+    ///
+    /// 返回：自身。副作用：无（父容器测量时读取）。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
     }
 
+    /// 当前应显示的文本（**分配一个新 `String`**）。
+    ///
+    /// 返回：绑定了 Signal 时取 Signal 的当前值，否则取内部文本。
+    /// 副作用：无（但每次调用都会克隆，不要在渲染循环里反复调）。
     pub fn text(&self) -> String {
         self.current_text()
     }
 
+    /// 直接替换内部文本（**不影响已绑定的 Signal**）。
+    ///
+    /// 输入：任意文本。返回：无。
+    /// 副作用：改内部字段，**不**标记布局失效、**不**触发重绘——
+    /// 挂载后调用需要调用方自己 `tree.mark_layout_dirty(id)` + `invalidate(id)`。
+    /// 若绑定了 Signal，`text()` 仍会返回 Signal 的值（内部字段被忽略）。
     pub fn set_text(&mut self, text: impl Into<String>) {
         self.text = text.into();
     }

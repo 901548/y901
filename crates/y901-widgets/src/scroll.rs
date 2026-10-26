@@ -32,6 +32,11 @@ pub struct ScrollView {
 }
 
 impl ScrollView {
+    /// 新建滚动容器：单个子节点 + 右侧自动出现的滚动条。
+    ///
+    /// 输入：`id`（树内唯一，滚动条 id 为 `{id}.bar`）、`child`（内容）。
+    /// 返回：未挂载的容器，`offset = 0`。
+    /// 副作用：无（滚动条是子组件，随容器一起挂载/卸载）。
     pub fn new(id: impl Into<String>, child: Box<dyn Widget>) -> Self {
         let id = id.into();
         Self {
@@ -47,15 +52,24 @@ impl ScrollView {
         }
     }
 
+    /// 设置 flex 伸缩参数（滚动容器常用 `FlexItem::fill()`）。
+    ///
+    /// 返回：自身。副作用：无。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
     }
 
+    /// 当前滚动偏移（像素，往下的距离）。
+    ///
+    /// 返回：`0..=max_offset()`；内容不足一屏时恒为 0。副作用：无。
     pub fn offset(&self) -> f32 {
         self.offset
     }
 
+    /// 伴随滚动条的 id（`{容器 id}.bar`），供 Agent `query` / `invoke` 定位。
+    ///
+    /// 返回：借用字符串。副作用：无。
     pub fn bar_id(&self) -> &str {
         &self.bar.id
     }
@@ -262,6 +276,12 @@ pub struct Scrollbar {
 }
 
 impl Scrollbar {
+    /// 新建独立滚动条（也可以被 `ScrollView` 内部创建）。
+    ///
+    /// 输入：`id`、`target`（它控制哪个容器的 offset；仅记录，供拆分为独立
+    /// 组件时使用）。
+    /// 返回：不可见（`visible = false`，等 `arrange_at` 决定）。
+    /// 副作用：无。
     pub fn new(id: impl Into<String>, target: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -351,6 +371,11 @@ impl Scrollbar {
         self
     }
 
+    /// 独立使用时记录的滚动偏移（由 `tracker()` 的初始值或拖拽更新）。
+    ///
+    /// 返回：像素偏移。副作用：无。
+    /// 注意：作为 `ScrollView` 的子组件时，真实偏移在父容器里，
+    /// 这里的值可能未被同步（两者通过 `scroll_to` 命令协作）。
     pub fn offset(&self) -> f32 {
         self.offset
     }

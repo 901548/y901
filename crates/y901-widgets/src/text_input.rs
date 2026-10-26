@@ -222,7 +222,11 @@ impl TextInput {
     /// 组件自己记录的聚焦状态（框架 `Focus` 事件的镜像）。
     ///
     /// 返回：`true` 表示正在接收键盘输入。副作用：无。
-    /// 注意：权威焦点是 `UiTree::focus()`；两者不一致说明有别处绕过框架改了状态。
+    ///
+    /// **契约**：权威来源是 `UiTree::focus()`；正常路径下两者一致
+    /// （框架派发 `UiEvent::Focus(bool)` 时本字段同步更新）。
+    /// 若出现不一致，说明有代码绕过了框架直接改 `focused` 字段——那是调用方的 bug，
+    /// 不是 `is_focused` 的责任（它只如实反映镜像值）。
     pub fn is_focused(&self) -> bool {
         self.focused
     }

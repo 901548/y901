@@ -32,6 +32,11 @@ pub struct SplitView {
 }
 
 impl SplitView {
+    /// 新建分栏容器：两栏 + 中间可拖拽的分隔条。
+    ///
+    /// 输入：`id`、`axis`（水平=左右分栏，垂直=上下分栏）、两个子节点。
+    /// 返回：默认 `ratio = 0.28`、最小宽 120 / 200 像素。
+    /// 副作用：无。子节点顺序即"第一栏 / 第二栏"。
     pub fn new(id: impl Into<String>, axis: Axis, first: Box<dyn Widget>, second: Box<dyn Widget>) -> Self {
         Self {
             id: id.into(),
@@ -47,30 +52,50 @@ impl SplitView {
         }
     }
 
+    /// `new(id, Axis::Horizontal, …)` 的快捷方式：左右分栏。
+    ///
+    /// 返回：未挂载的分栏容器。副作用：无。
     pub fn horizontal(id: impl Into<String>, first: Box<dyn Widget>, second: Box<dyn Widget>) -> Self {
         Self::new(id, Axis::Horizontal, first, second)
     }
 
+    /// `new(id, Axis::Vertical, …)` 的快捷方式：上下分栏。
+    ///
+    /// 返回：未挂载的分栏容器。副作用：无。
     pub fn vertical(id: impl Into<String>, first: Box<dyn Widget>, second: Box<dyn Widget>) -> Self {
         Self::new(id, Axis::Vertical, first, second)
     }
 
+    /// 设置第一栏占比（0..1）。
+    ///
+    /// 输入：`ratio`，**会被夹到 [0.05, 0.95]**（防止把某一栏拖没）。
+    /// 返回：自身。副作用：无（下一次布局生效）。
     pub fn ratio(mut self, ratio: f32) -> Self {
         self.ratio = ratio.clamp(0.05, 0.95);
         self
     }
 
+    /// 两栏的最小像素尺寸（拖拽时不会低于它）。
+    ///
+    /// 输入：`first` / `second`，**负数会被夹到 0**。
+    /// 返回：自身。副作用：无。
     pub fn min_sizes(mut self, first: f32, second: f32) -> Self {
         self.min_first = first.max(0.0);
         self.min_second = second.max(0.0);
         self
     }
 
+    /// 设置 flex 伸缩参数。
+    ///
+    /// 返回：自身。副作用：无（父容器测量时读取）。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
     }
 
+    /// 当前实际占比（拖拽后的真实值，可能因最小尺寸约束而与 `ratio()` 不同）。
+    ///
+    /// 返回：`0.05..=0.95` 之间的浮点。副作用：无。
     pub fn current_ratio(&self) -> f32 {
         self.ratio
     }
