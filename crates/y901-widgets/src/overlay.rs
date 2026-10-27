@@ -357,8 +357,12 @@ impl Dialog {
 
     /// 运行时设置打开状态（`open()` / `close()` 的二合一）。
     ///
-    /// 副作用：只改字段。调用方随后必须 `tree.invalidate_all()`
-    /// （`is_open` 变化影响索引与命中，框架在 layout 时会重建索引）。
+    /// 副作用：只改字段。
+    ///
+    /// **调用方必须 `tree.invalidate_all()`**（不是 `invalidate(id)`）——
+    /// `is_open` 变化影响全局 `paint_order` / `modal_root` / `focus_order`，
+    /// 不只是该节点矩形。只标该节点会导致索引/焦点仍按旧状态（bug：焦点会跑进
+    /// 已关闭的对话框）。同时需要 `tree.mark_layout_dirty(id)` 让索引重建。
     pub fn set_open(&mut self, open: bool) {
         self.open = open;
     }
@@ -420,6 +424,12 @@ impl Widget for Dialog {
 
     fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
         Some(&mut self.children)
+    }
+
+    /// 向下转型：`Host` 要在运行时调 `set_title` / `set_buttons` / `set_open`，
+    /// 唯一的公开路径是 `tree.find_mut(id)?.as_any_mut()`（`UiTree` 不暴露具体类型）。
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {

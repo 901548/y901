@@ -1006,6 +1006,12 @@ impl UiTree {
     /// 前序遍历一遍，收集所有 focusable 节点；Modal 存在时只看它子树。
     fn rebuild_focus_order(&mut self) {
         fn walk(node: &dyn Widget, path: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+            // 关闭节点整棵子树跳过：与 `rebuild_indices` / `render_pass` / `cursor_at`
+            // 完全同构。少这一条会让"关闭的 Dialog 里的 TextInput"进入 Tab 遍历——
+            // 表现为焦点跑到看不见的控件上（点不到、画不出，却能拿到键盘）。
+            if !node.is_open() {
+                return;
+            }
             if node.focusable() && !node.is_disabled() {
                 out.push(path.clone());
             }

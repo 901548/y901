@@ -552,3 +552,17 @@ if need_layout || external > 0 || structural {
 **为什么这样分工**：`add_node` 是框架 API，框架当然知道"树变了"；
 而 `dialog.set_title(..)` 只是组件自己的字段赋值，框架无从得知——
 让组件去反向持有树会破坏分层（组件之间、组件与树之间都靠事件通信）。
+### §29.1 `set_open` 与其他 `set_*` 的标脏区别
+
+| 方法 | 影响面 | 调用方必须 |
+|---|---|---|
+| `Dialog::set_title` | 只有该 Dialog 的标题文字 | `invalidate(id)` |
+| `Dialog::set_buttons` | 该 Dialog 的按钮条（布局变化） | `mark_layout_dirty(id)` + `invalidate(id)` |
+| `Dialog::set_open` | **全局**：`paint_order` / `modal_root` / `focus_order` | `mark_layout_dirty(id)` + **`invalidate_all()`** |
+| `TextInput::set_text` | 该节点内容（尺寸可能变） | `mark_layout_dirty(id)` + `invalidate(id)` |
+| `TextLabel::set_text` | 该节点内容（尺寸可能变） | `mark_layout_dirty(id)` + `invalidate(id)` |
+
+为什么 `set_open` 特殊：`is_open() == false` 的子树在**四个地方**被跳过——
+`rebuild_indices`（不绘制、不命中）、`render_pass`（不画）、`cursor_at`（不改光标）、
+`rebuild_focus_order`（不进 Tab 遍历）。前三个跳过的是"这块矩形"，
+第四个跳过的是"这张全局焦点表"，所以只 `invalidate(id)` 不够。
