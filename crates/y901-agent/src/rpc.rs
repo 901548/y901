@@ -156,6 +156,7 @@ impl RpcEvent {
             },
             RpcEvent::MouseMove { pos } => UiEvent::MouseMove { pos: *pos },
             RpcEvent::Wheel { pos, delta } => UiEvent::Wheel {
+            mods: y901_ui::Modifiers::default(),
                 delta: *delta,
                 pos: *pos,
             },

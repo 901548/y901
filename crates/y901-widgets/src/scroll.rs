@@ -203,7 +203,7 @@ impl Widget for ScrollView {
                     EventResult::Ignored
                 }
             }
-            UiEvent::Wheel { pos, delta } => {
+            UiEvent::Wheel { pos, delta, .. } => {
                 if !self.inner.contains(*pos) {
                     return EventResult::Ignored;
                 }

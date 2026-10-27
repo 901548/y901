@@ -56,6 +56,8 @@ pub enum UiEvent {
     Wheel {
         delta: f32,
         pos: Pos,
+        /// 滚轮时的修饰键（Ctrl+滚轮常用来缩放）。
+        mods: Modifiers,
     },
     MouseDown {
         pos: Pos,

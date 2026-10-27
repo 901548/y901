@@ -21,8 +21,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW,
     IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IDC_SIZEALL, MSG, PM_REMOVE, SW_SHOW,
     WM_CHAR, WM_DESTROY, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION,
-    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-    WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_SETCURSOR, WM_SIZE, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_SETCURSOR, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
 
 use y901_runtime::{Options, RawEvent};
@@ -90,6 +91,22 @@ fn vk_to_key(vk: u32) -> Key {
     }
 }
 
+/// `WM_SYSKEYDOWN`（Alt+键）专用的键码映射。
+///
+/// 与 [`vk_to_key`] 的区别：Alt 组合键**不会**产生 `WM_CHAR`（字符被系统吞掉），
+/// 因此字母/数字必须在这里翻译成 `Key::Char`，否则 `SystemKeyDown` 永远只有
+/// `Key::Unknown`，宿主无法知道用户按了哪个键。
+///
+/// 说明：普通 `WM_KEYDOWN` 仍走 [`vk_to_key`]——字母字符由 `WM_CHAR` 投递，
+/// 若这里也返回 `Key::Char`，组件（`TextInput` 的 Ctrl+A/C 分支）会处理两次。
+fn vk_to_key_for_system(vk: u32) -> Key {
+    match vk {
+        0x41..=0x5A => char::from_u32(vk + 0x20).map(Key::Char).unwrap_or(Key::Unknown),
+        0x30..=0x39 => char::from_u32(vk).map(Key::Char).unwrap_or(Key::Unknown),
+        _ => vk_to_key(vk),
+    }
+}
+
 unsafe fn client_pos(hwnd: HWND) -> Pos {
     let mut pt = POINT { x: 0, y: 0 };
     let _ = GetCursorPos(&mut pt);
@@ -132,7 +149,9 @@ fn is_duplicate_control_char(last_vk: u32, c: char) -> bool {
 /// 抽成结构体是为了**可测**：`wndproc` 本身需要真窗口才能跑，
 /// 但"按键 → 字符"的序列语义可以直接单测（见 `key_filter_tests`）。
 #[derive(Default)]
-struct CharFilter {
+/// 见 [handle_wm_msg]：按键去重状态机（跨 crate 可见以便集成测试）。
+#[doc(hidden)]
+pub struct CharFilter {
     last_vk: u32,
 }
 
@@ -142,20 +161,74 @@ struct CharFilter {
 /// 返回：`Some(event)` 表示应当投递；`None` 表示丢弃（重复的控制字符、
 /// 非法码点、或与该函数无关的消息）。
 /// 失败：无（纯逻辑；除 `modifiers()` 读键盘状态外无副作用）。
-fn handle_wm_msg(msg: u32, wparam: u64, filter: &mut CharFilter) -> Option<RawEvent> {
+/// 见模块文档：键盘/鼠标消息 → 平台事件（跨 crate 可见以便集成测试）。
+#[doc(hidden)]
+pub fn handle_wm_msg(
+    msg: u32,
+    wparam: u64,
+    lparam: i64,
+    mods: Modifiers,
+    filter: &mut CharFilter,
+) -> Option<RawEvent> {
+    // 鼠标消息的坐标在 lparam 里（客户区坐标，低 16 位 x、高 16 位 y）
+    let (mx, my) = (
+        (lparam as u32 & 0xFFFF) as i16 as f32,
+        (((lparam as u32) >> 16) & 0xFFFF) as i16 as f32,
+    );
     match msg {
         WM_KEYDOWN => {
             filter.on_key_down(wparam as u32);
             Some(RawEvent::KeyDown {
                 key: vk_to_key(wparam as u32),
-                mods: modifiers(),
+                mods,
             })
         }
+        // Alt+键：系统键单独成事件，避免与普通按键混淆
+        WM_SYSKEYDOWN => Some(RawEvent::SystemKeyDown {
+            key: vk_to_key_for_system(wparam as u32),
+            mods,
+        }),
+        WM_KEYUP => Some(RawEvent::KeyUp {
+            key: vk_to_key(wparam as u32),
+            mods,
+        }),
         WM_CHAR => {
             let c = char::from_u32(wparam as u32)?;
             filter.on_char(c).map(|c| RawEvent::Char { c })
         }
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => Some(RawEvent::MouseDown {
+            x: mx,
+            y: my,
+            button: button_of(msg),
+        }),
+        WM_LBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP => Some(RawEvent::MouseUp {
+            x: mx,
+            y: my,
+            button: button_of(msg),
+        }),
         _ => None,
+    }
+}
+
+/// 鼠标消息 → 按键枚举。
+fn button_of(msg: u32) -> MouseButton {
+    match msg {
+        WM_RBUTTONDOWN | WM_RBUTTONUP => MouseButton::Right,
+        WM_MBUTTONDOWN | WM_MBUTTONUP => MouseButton::Middle,
+        _ => MouseButton::Left,
+    }
+}
+
+/// 滚轮事件（纯函数，可单测）：`wparam` 高 16 位是 ±120 的倍数。
+/// 滚轮事件构造（跨 crate 可见以便集成测试）。
+#[doc(hidden)]
+pub fn wheel_event(x: f32, y: f32, wparam: u64, mods: Modifiers) -> RawEvent {
+    let delta = ((wparam >> 16) as u16 as i16) as f32;
+    RawEvent::Wheel {
+        x,
+        y,
+        delta,
+        mods,
     }
 }
 impl CharFilter {
@@ -201,33 +274,27 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             push(RawEvent::MouseMove { x, y });
             0
         }
-        WM_LBUTTONDOWN | WM_LBUTTONUP => {
-            let x = (lparam as u32 & 0xFFFF) as i16 as f32;
-            let y = ((lparam as u32 >> 16) & 0xFFFF) as i16 as f32;
-            let button = MouseButton::Left;
-            if msg == WM_LBUTTONDOWN {
-                push(RawEvent::MouseDown { x, y, button });
-            } else {
-                push(RawEvent::MouseUp { x, y, button });
+        WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN
+        | WM_MBUTTONUP => {
+            if let Ok(mut slot) = CHAR_FILTER.lock() {
+                let filter = slot.get_or_insert_with(CharFilter::default);
+                if let Some(ev) = handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter) {
+                    push(ev);
+                }
             }
             0
         }
         WM_MOUSEWHEEL => {
-            let delta = ((wparam >> 16) as u16 as i16) as f32;
             let pos = client_pos(hwnd);
-            push(RawEvent::Wheel {
-                x: pos.x,
-                y: pos.y,
-                delta,
-            });
+            push(wheel_event(pos.x, pos.y, wparam as u64, modifiers()));
             0
         }
-        WM_KEYDOWN | WM_CHAR => {
+        WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_CHAR => {
             // 键盘消息统一走纯函数 `handle_wm_msg`（可单测）：它负责去重，
             // wndproc 只做"取状态 + 投递"。
             if let Ok(mut slot) = CHAR_FILTER.lock() {
                 let filter = slot.get_or_insert_with(CharFilter::default);
-                if let Some(ev) = handle_wm_msg(msg, wparam as u64, filter) {
+                if let Some(ev) = handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter) {
                     push(ev);
                 }
             }
@@ -620,14 +687,15 @@ mod char_filter_tests {
 #[cfg(test)]
 mod wndproc_sequence_tests {
     use super::{handle_wm_msg, CharFilter, RawEvent, WM_CHAR, WM_KEYDOWN};
+    use y901_ui::Modifiers;
 
     /// Enter：KEYDOWN(VK_RETURN) 产出 KeyDown，紧随的 CHAR(0x0D) 被丢掉。
     /// 这是 P0-3 的端到端断言（走与 wndproc 相同的纯函数）。
     #[test]
     fn enter_key_produces_exactly_one_event() {
         let mut f = CharFilter::default();
-        let first = handle_wm_msg(WM_KEYDOWN, 0x0D, &mut f);
-        let second = handle_wm_msg(WM_CHAR, 0x0D, &mut f);
+        let first = handle_wm_msg(WM_KEYDOWN, 0x0D, 0, Modifiers::default(), &mut f);
+        let second = handle_wm_msg(WM_CHAR, 0x0D, 0, Modifiers::default(), &mut f);
 
         assert!(
             matches!(first, Some(RawEvent::KeyDown { .. })),
@@ -644,10 +712,10 @@ mod wndproc_sequence_tests {
     fn tab_key_produces_exactly_one_event() {
         let mut f = CharFilter::default();
         assert!(matches!(
-            handle_wm_msg(WM_KEYDOWN, 0x09, &mut f),
+            handle_wm_msg(WM_KEYDOWN, 0x09, 0, Modifiers::default(), &mut f),
             Some(RawEvent::KeyDown { .. })
         ));
-        assert!(handle_wm_msg(WM_CHAR, 0x09, &mut f).is_none());
+        assert!(handle_wm_msg(WM_CHAR, 0x09, 0, Modifiers::default(), &mut f).is_none());
     }
 
     /// 可打印字符：KeyDown + Char 都投递（组件靠 Char 拿到实际字符）。
@@ -655,11 +723,11 @@ mod wndproc_sequence_tests {
     fn printable_key_produces_keydown_and_char() {
         let mut f = CharFilter::default();
         assert!(matches!(
-            handle_wm_msg(WM_KEYDOWN, 0x41, &mut f),
+            handle_wm_msg(WM_KEYDOWN, 0x41, 0, Modifiers::default(), &mut f),
             Some(RawEvent::KeyDown { .. })
         ));
         assert!(matches!(
-            handle_wm_msg(WM_CHAR, 0x61, &mut f),
+            handle_wm_msg(WM_CHAR, 0x61, 0, Modifiers::default(), &mut f),
             Some(RawEvent::Char { c: 'a' })
         ));
     }
@@ -668,13 +736,13 @@ mod wndproc_sequence_tests {
     #[test]
     fn unrelated_message_yields_nothing() {
         let mut f = CharFilter::default();
-        assert!(handle_wm_msg(0x000F, 0, &mut f).is_none()); // WM_PAINT
+        assert!(handle_wm_msg(0x000F, 0, 0, Modifiers::default(), &mut f).is_none()); // WM_PAINT
     }
 
     /// 非法码点（代理区）不产出事件、也不 panic。
     #[test]
     fn invalid_codepoint_is_dropped() {
         let mut f = CharFilter::default();
-        assert!(handle_wm_msg(WM_CHAR, 0xD800, &mut f).is_none());
+        assert!(handle_wm_msg(WM_CHAR, 0xD800, 0, Modifiers::default(), &mut f).is_none());
     }
 }

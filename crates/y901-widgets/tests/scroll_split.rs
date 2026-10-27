@@ -75,6 +75,7 @@ fn hit_test_respects_clip_after_scroll() {
     tree.dispatch(&UiEvent::Wheel {
         pos: Pos::new(50.0, 50.0),
         delta: -480.0,
+        mods: y901_ui::Modifiers::default(),
     });
     // 需要重新 arrange 才能把新 offset 反映到子节点位置
     tree.layout(Size::new(200.0, 100.0), &Mono);
@@ -100,6 +101,7 @@ fn scrolled_out_rows_cannot_be_hit() {
         tree.dispatch(&UiEvent::Wheel {
             pos: Pos::new(50.0, 50.0),
             delta: -480.0,
+            mods: y901_ui::Modifiers::default(),
         });
     }
     tree.layout(Size::new(200.0, 100.0), &Mono);

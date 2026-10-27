@@ -252,7 +252,14 @@ pub fn handle_call(tree: &mut UiTree, policy: &Policy, call: ApiCall) -> Result<
             check_rev(if_rev, node_rev)?;
             let pos = Pos::new(rect.x + rect.w * 0.5, rect.y + rect.h * 0.5);
             let handled = tree
-                .dispatch_to(&id, &UiEvent::Wheel { pos, delta })
+                .dispatch_to(
+            &id,
+            &UiEvent::Wheel {
+                pos,
+                delta,
+                mods: y901_ui::Modifiers::default(),
+            },
+        )
                 .is_handled();
             Ok(Json::obj()
                 .set("ok", true)

@@ -363,7 +363,7 @@ impl Widget for ListView {
                     EventResult::Ignored
                 }
             }
-            UiEvent::Wheel { pos, delta } => {
+            UiEvent::Wheel { pos, delta, .. } => {
                 if !self.inner.contains(*pos) {
                     return EventResult::Ignored;
                 }
@@ -456,6 +456,7 @@ mod tests {
                 &UiEvent::Wheel {
                     pos: Pos::new(10.0, 10.0),
                     delta: -120.0,
+                    mods: y901_ui::Modifiers::default(),
                 },
             );
             list.arrange(Rect::new(0.0, 0.0, 300.0, 100.0), &Mono, &mut cache);

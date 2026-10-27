@@ -160,6 +160,7 @@ fn scrollview_child_outside_viewport_is_not_clickable_until_scrolled() {
     tree.dispatch(&UiEvent::Wheel {
         pos: Pos::new(50.0, 60.0),
         delta: -480.0,
+        mods: y901_ui::Modifiers::default(),
     });
     tree.layout(Size::new(300.0, 120.0), &Mono);
 
