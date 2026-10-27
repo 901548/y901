@@ -585,3 +585,6 @@ if need_layout || external > 0 || structural {
 **注意**：条件 4 意味着"程序化聚焦"也只能落在可聚焦节点上。
 如果某个节点需要被代码聚焦但不想进 Tab 序列，给它 `focusable() == true` 即可
 （`focusable` 决定"能否聚焦"，Tab 序列还额外要求 `!is_disabled()`）。
+**已知语义耦合**：`focusable()` 同时决定"能否进 Tab 序列"和"能否被 `set_focus` 接受"。
+如果将来出现"代码聚焦但不进 Tab"的需求（比如模态内自动聚焦一个不可 Tab 的节点），
+需要引入 `programmatically_focusable()` 之类的第二开关。当前没有这种需求，所以不拆。
