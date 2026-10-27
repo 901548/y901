@@ -65,7 +65,10 @@ impl PlatformRuntime for Win32Runtime {
             // 避免同一帧多次 layout）。有请求时走完整 resize（内含 layout）——
             // `window.resize` 的代价只有一次尺寸比较，交换链在尺寸不变时会短路。
             let external = tree.drain_external_invalidations();
-            if need_layout || external > 0 {
+            // 结构性变化（add_node / insert_node / remove_node）必须重排：
+            // Host 在 command() 里改树时，这一帧还没有任何 Relayout 事件。
+            let structural = tree.take_layout_request();
+            if need_layout || external > 0 || structural {
                 window.resize(&mut tree);
             }
 

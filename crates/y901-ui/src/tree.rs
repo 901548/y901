@@ -148,6 +148,8 @@ pub struct UiTree {
     invalidation_queue: crate::signal::Invalidation,
     /// 后台线程用的标脏句柄（`Send + Sync`；**不持有树**，因此可跨线程）。
     external: crate::invalidate::InvalidationHandle,
+    /// 结构性变化（增删节点）后置位：主循环据此决定这一帧是否要 layout。
+    layout_requested: bool,
     /// 每个 id 的实例代号：`add_node` 时递增，用于识别 id 复用。
     generations: HashMap<String, u64>,
     /// 自增代号源。
@@ -192,6 +194,7 @@ impl UiTree {
             subscriptions: Vec::new(),
             invalidation_queue: crate::signal::Invalidation::new(),
             external: crate::invalidate::InvalidationHandle::new(),
+            layout_requested: false,
             generations: HashMap::new(),
             next_generation: 1,
             last_semantic: HashMap::new(),
@@ -425,6 +428,20 @@ impl UiTree {
         count
     }
 
+    /// 取走"需要重新 layout"的请求（主循环在 layout 之前调用）。
+    ///
+    /// 返回：`true` = 自上次 take 以来发生过**结构性变化**
+    /// （`add_node` / `insert_node` / `remove_node` 成功），本帧需要 layout。
+    /// 副作用：清零标志（一次只消费一次）。
+    ///
+    /// 为什么需要它：主循环只在 `need_layout`（来自 `EventResult::Relayout` 或窗口尺寸
+    /// 变化）时调 layout。没有这个标志，Host 在 `command()` 里 `add_node` 之后
+    /// 这一帧不会重排——新节点会带着旧矩形被画出来，直到下一次窗口 resize。
+    #[doc(hidden)]
+    pub fn take_layout_request(&mut self) -> bool {
+        std::mem::take(&mut self.layout_requested)
+    }
+
     /// 把 parent 挂到一个新子节点下。返回是否成功。
     ///
     /// 会：调用 `on_mount` → 标记父节点布局失效 → 整窗重绘。
@@ -453,6 +470,7 @@ impl UiTree {
         self.register_new_subtree(parent, true);
         self.cache.mark_dirty(parent);
         self.dirty = DirtyRegion::full();
+        self.layout_requested = true;
         true
     }
 
@@ -513,6 +531,7 @@ impl UiTree {
         self.register_new_subtree_at(parent, at);
         self.cache.mark_dirty(parent);
         self.dirty = DirtyRegion::full();
+        self.layout_requested = true;
         true
     }
 
@@ -598,6 +617,7 @@ impl UiTree {
 
         self.cache.mark_dirty(&parent_id);
         self.dirty = DirtyRegion::full();
+        self.layout_requested = true;
         true
     }
 

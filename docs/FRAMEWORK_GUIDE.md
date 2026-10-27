@@ -528,3 +528,27 @@ if need_layout || external > 0 {
 
 **应用层的责任**：后台更新频率极高时（例如每 16ms 一次），应用应自己节流
 （例如 100ms 合并一次 `invalidate`），而不是依赖框架的脏区优化。
+## §29 组件 `set_*` 之后的重绘责任
+
+`Dialog::set_title` / `set_buttons` / `push_child` / `clear_children` / `set_open`，
+`TextInput::set_text` / `clear` 等 `&mut self` 方法**不会自动标脏**——
+组件碰不到 `UiTree`，这是分层原则（组件不知道自己被挂在哪棵树上）。
+
+调用方（通常是 `Host`）在 `set_*` 之后必须自己补两件事：
+
+1. `tree.mark_layout_dirty(id)` —— 尺寸/子节点可能变了；
+2. `tree.invalidate(id)` —— 内容变了（或用 `invalidate_all` 保守处理）。
+
+例外：**结构性变化**（`add_node` / `insert_node` / `remove_node`）由框架负责——
+这三个方法会置 `layout_requested`，主循环下一帧自动 layout：
+
+```rust
+let structural = tree.take_layout_request();
+if need_layout || external > 0 || structural {
+    window.resize(&mut tree);   // 内含 layout
+}
+```
+
+**为什么这样分工**：`add_node` 是框架 API，框架当然知道"树变了"；
+而 `dialog.set_title(..)` 只是组件自己的字段赋值，框架无从得知——
+让组件去反向持有树会破坏分层（组件之间、组件与树之间都靠事件通信）。

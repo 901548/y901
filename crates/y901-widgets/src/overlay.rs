@@ -316,6 +316,58 @@ impl Dialog {
         self.open = true;
     }
 
+    /// 运行时修改标题。
+    ///
+    /// 输入：新标题。返回：无。
+    /// 副作用：只改字段——**不自动标脏**（组件碰不到 `UiTree`，这是分层原则）。
+    /// 调用方随后必须 `tree.invalidate(id)`（标题不影响布局，不需要 mark_layout_dirty）。
+    pub fn set_title(&mut self, title: impl Into<String>) {
+        self.title = title.into();
+    }
+
+    /// 运行时替换按钮条。
+    ///
+    /// 输入：`(文案, 动作名)` 列表；动作名由应用层解释。
+    /// 副作用：**清空 `button_rects`**（旧矩形与按钮数不匹配会导致命中错位），
+    /// 等下一次 `arrange` 重建。**不自动标脏**：调用方随后必须
+    /// `tree.mark_layout_dirty(id)` + `tree.invalidate(id)`（按钮数变化影响布局）。
+    pub fn set_buttons(&mut self, buttons: Vec<(String, String)>) {
+        self.buttons = buttons;
+        self.button_rects.clear();
+    }
+
+    /// 运行时清空全部子节点（并 `on_unmount` 它们）。
+    ///
+    /// 副作用：子节点被 drop；**不自动标脏**——调用方随后必须
+    /// `tree.mark_layout_dirty(id)` + `tree.invalidate(id)`。
+    pub fn clear_children(&mut self) {
+        for mut child in self.children.drain(..) {
+            child.on_unmount();
+        }
+    }
+
+    /// 运行时追加子节点（纵向排列，见 `arrange`）。
+    ///
+    /// 副作用：新子节点**不会被自动 `on_mount`**（它还没进树）。
+    /// 如果这个 Dialog 已在树里，请改用 `tree.add_node(dialog_id, child)`，
+    /// 那条路径会挂载、判重、标脏并请求重排。本方法只用于"组装还没挂载的 Dialog"。
+    pub fn push_child(&mut self, child: Box<dyn Widget>) {
+        self.children.push(child);
+    }
+
+    /// 运行时设置打开状态（`open()` / `close()` 的二合一）。
+    ///
+    /// 副作用：只改字段。调用方随后必须 `tree.invalidate_all()`
+    /// （`is_open` 变化影响索引与命中，框架在 layout 时会重建索引）。
+    pub fn set_open(&mut self, open: bool) {
+        self.open = open;
+    }
+
+    /// 子节点（inherent 版本，Demo 不必 `use y901_ui::Widget`）。
+    pub fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+
     /// 配置底部按钮条：`[("Cancel", "cancel"), ("OK", "ok")]`。
     pub fn buttons(mut self, buttons: Vec<(impl Into<String>, impl Into<String>)>) -> Self {
         self.buttons = buttons
@@ -394,8 +446,22 @@ impl Widget for Dialog {
             inner.w,
             (inner.h - 28.0 - bar_h).max(0.0),
         );
-        if let Some(first) = self.children.first_mut() {
-            first.arrange(body, m, cache);
+        // 子节点纵向排列（**全部**，不是只有第一个）。
+        //
+        // 历史 bug：这里原本只 `children.first_mut()`，导致 `push_child` 追加的
+        // 第二个子节点永远拿不到矩形（既不排布也不会被画在正确位置）。
+        // 现在按顺序排：每个子节点先测高，再给剩余高度，累加间距；
+        // 剩余高度不足时给 0（不 panic、不越过 body 底部）。
+        {
+            const GAP: f32 = 8.0;
+            let mut y = body.y;
+            for child in self.children.iter_mut() {
+                let remaining = (body.bottom() - y).max(0.0);
+                let size = child.measure(m, Constraints::loose(Size::new(body.w, remaining)), cache);
+                let h = size.h.min(remaining);
+                child.arrange(Rect::new(body.x, y, body.w, h), m, cache);
+                y += h + GAP;
+            }
         }
 
         // 按钮条：右对齐排布，等宽 88px，间距 8px

@@ -183,6 +183,26 @@ impl TextInput {
 
     // ---------- 只读访问（测试 / 语义树） ----------
 
+    /// 运行时设置文本（预填用）：重置光标到末尾、清空选区与预编辑。
+    ///
+    /// 输入：任意文本（含中文/emoji；非法 UTF-8 由 `&str` 类型排除）。
+    /// 副作用：`version += 1` → `layout_version()` 变 → 测量缓存失效；
+    /// **不自动标脏**（组件碰不到 `UiTree`）：调用方随后必须
+    /// `tree.mark_layout_dirty(id)` + `tree.invalidate(id)`。
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.buffer = TextBuffer::from_text(text);
+        self.version += 1;
+        self.layout_dirty = true;
+        self.preedit.clear();
+    }
+
+    /// 清空文本、光标、选区与预编辑（等价于 `set_text("")`）。
+    ///
+    /// 副作用：同 [`TextInput::set_text`]（版本 +1、需调用方标脏）。
+    pub fn clear(&mut self) {
+        self.set_text("");
+    }
+
     /// 当前文本内容（不含 IME 预编辑串）。
     ///
     /// 返回：`&str`（借用内部缓冲，零拷贝）。副作用：无。
@@ -426,6 +446,13 @@ impl Widget for TextInput {
 
     fn flex(&self) -> FlexItem {
         self.item
+    }
+
+    /// 向下转型：Host 需要拿到 `&mut TextInput` 本体（例如读光标、设选区）时用。
+    ///
+    /// 只读文本**优先**走 `semantics().value`（不需要 downcast）。
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     fn layout_version(&self) -> u64 {
