@@ -513,3 +513,18 @@ if need_layout || external > 0 {
 - 同帧多条请求合并：只要有一条 `invalidate_all()`，结果就是整窗脏区；
 - `drain` 之后 `has_pending()` 归零；第二次 drain 返回 0；
 - 句柄可以比树活得久（树销毁后 push 不会 panic，只是永远不会被 drain）。
+### §28.1 保守策略：`One(id)` 也触发整窗重绘
+
+`drain_external_invalidations` 对 `PendingInvalidation::One(id)` 也置
+`DirtyRegion::full()`。这不是遗漏，是**有意的保守策略**：
+
+- 后台任务改的多是内容（SFTP 列表更新、AI 消息追加），需要重排；
+- 重排后节点位置可能变化，只标旧矩形会漏画新位置的节点；
+- 整窗重绘是唯一能保证"重排后所有变化节点都被画到"的方式。
+
+**代价**：后台每帧标脏 = 每帧全窗重绘。如果未来出现"只重绘不重排"的高频场景
+（高频进度条、光标闪烁），可以引入 `PendingInvalidation::RedrawOnly(id)` 变体：
+只标该节点矩形、不触发 layout。**当前不加**——没有真实场景证明它必需。
+
+**应用层的责任**：后台更新频率极高时（例如每 16ms 一次），应用应自己节流
+（例如 100ms 合并一次 `invalidate`），而不是依赖框架的脏区优化。
