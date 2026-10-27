@@ -70,6 +70,26 @@ impl PlatformRuntime for Win32Runtime {
                 window.set_ime_position(x, y);
             }
 
+            // 运行时主题/字体切换：Host 表达意图，平台层执行。
+            // 两者都只改渲染状态，**重绘/重排由这里负责**（后端不认识树）。
+            if let Some(theme) = host.take_theme_request() {
+                if let Err(err) = window.set_theme(theme) {
+                    eprintln!("[y901] 切换主题失败: {err}");
+                } else {
+                    tree.invalidate_all();
+                }
+            }
+            if let Some(font) = host.take_font_request() {
+                match window.set_font(&font) {
+                    Ok(()) => {
+                        // cell 尺寸变了：先重排（用后端的新度量），再全量重绘
+                        window.resize(&mut tree);
+                        tree.invalidate_all();
+                    }
+                    Err(err) => eprintln!("[y901] 切换字体失败（保持旧字体）: {err}"),
+                }
+            }
+
             if let Some(pos) = mouse {
                 window.set_cursor(tree.cursor_at(pos));
             }

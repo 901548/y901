@@ -387,6 +387,30 @@ impl Window {
         })
     }
 
+    /// 运行时切换主题（转发到后端）。
+    ///
+    /// 返回：`Ok(())` 已切换；`Err` 表示后端尚未就绪。
+    /// 副作用：主题字段更新。**全量重绘需要调用方做**
+    /// （`UiTree::invalidate_all`）——窗口不认识 UI 树。
+    pub fn set_theme(&mut self, theme: y901_ui::theme::Theme) -> Result<(), String> {
+        match self.backend.as_mut() {
+            Some(b) => b.set_theme(theme),
+            None => Err("渲染后端尚未就绪".to_string()),
+        }
+    }
+
+    /// 运行时切换字体（转发到后端）。
+    ///
+    /// 返回：`Ok(())` 已切换；`Err` = 后端未就绪或字体加载失败（此时旧字体保持不变）。
+    /// 副作用：图集将在下一帧整张重传；**重排需要调用方做**
+    /// （cell 尺寸变了 → `mark_layout_dirty` + 重新 `layout`）。
+    pub fn set_font(&mut self, font: &y901_runtime::FontConfig) -> Result<(), String> {
+        match self.backend.as_mut() {
+            Some(b) => b.set_font(font),
+            None => Err("渲染后端尚未就绪".to_string()),
+        }
+    }
+
     pub fn hwnd(&self) -> HWND {
         self.hwnd
     }

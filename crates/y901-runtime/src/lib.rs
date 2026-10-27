@@ -40,6 +40,23 @@ pub trait Host {
         Policy::default()
     }
 
+    /// 应用请求切换主题（`Host` 表达意图，平台层执行）。
+    ///
+    /// 返回：`Some(theme)` = 请求切换，平台层在本帧末尾应用；`None` = 无请求。
+    /// 一次请求只生效一次（平台层取走后即清空），避免每帧重复设置。
+    /// 默认实现返回 `None`（不支持运行时切换的宿主无需实现）。
+    fn take_theme_request(&mut self) -> Option<y901_ui::theme::Theme> {
+        None
+    }
+
+    /// 应用请求切换字体（族名 + 字号）。
+    ///
+    /// 返回：`Some(font)` = 请求切换；`None` = 无请求。
+    /// 失败语义由平台层决定：字体加载失败时保留旧字体，并在 stderr 报告。
+    fn take_font_request(&mut self) -> Option<FontConfig> {
+        None
+    }
+
     /// 组件请求把 IME 候选窗钉到某处时调用。
     fn ime_position(&mut self, _tree: &mut UiTree) -> Option<(f32, f32)> {
         None

@@ -19,9 +19,9 @@ use y901_ui::{Color, Pos, Rect, RenderCtx, Size, TextStyle, TextMetrics};
 use d3d11::{Gfx, Instance};
 use font::TextEngine;
 
-/// 逻辑像素下的单元格尺寸。终端组件会通过 `measure_text("M")` 拿到同样的值。
-const CELL_W: f32 = 8.0;
-const CELL_H: f32 = 16.0;
+/// 单元格尺寸不再有常量：它由字号推出（`cell_metrics_for`），
+/// 存在 `D3dBackend::cell` 里，随 `set_font` 更新。
+/// 16px 时是 8×16（与历史行为一致，由 `cell_metrics_for` 的测试固化）。
 /// 默认字体尺寸（逻辑像素）。真实值来自 `Options.font`，这里只作为文档与默认值来源。
 ///
 /// **字号是全局的**：文本引擎只用一个字号，不支持同一文档内不同字号（富文本）。
@@ -56,6 +56,10 @@ pub struct D3dBackend {
     last_occluded: bool,
     /// 渲染主题（启动时由 Options.theme 注入，None 时用 DARK）。
     theme: y901_ui::theme::Theme,
+    /// 当前单元格尺寸（由字号推出；set_font 会更新它）。
+    ///
+    /// **必须与 TextEngine 使用的 cell 尺寸一致**：measure_text/line_height/glyph_offset/draw_text 都读它。
+    cell: Size,
 }
 
 impl D3dBackend {
@@ -99,9 +103,45 @@ impl D3dBackend {
             size: (width, height),
             last_occluded: false,
             theme,
+            cell: Size::new(cell_w, cell_h),
         };
         backend.sync_atlas()?;
         Ok(backend)
+    }
+
+    /// 运行时切换主题：只改字段，**不碰图集**。
+    ///
+    /// 输入：新主题（`Theme` 是 `Copy`，开销可忽略）。
+    /// 返回：`Ok(())`；当前实现不会失败（保留 `Result` 是为了将来"主题影响图集"时
+    /// 不改签名）。
+    /// 副作用：`theme()` 立即返回新值；**需要调用方触发全量重绘**（颜色变了）——
+    /// 后端不认识 `UiTree`，由 runtime 调 `tree.invalidate_all()`。
+    ///
+    /// 说明：主题只含颜色，不含字形信息，因此**不需要重建图集**。
+    pub fn set_theme(&mut self, theme: y901_ui::theme::Theme) -> Result<(), String> {
+        self.theme = theme;
+        Ok(())
+    }
+
+    /// 运行时切换字体：重建文本引擎，换字体族与字号。
+    ///
+    /// 输入：新字体配置（`family` + `size`）。
+    /// 返回：`Ok(())` = 已切换；`Err(msg)` = 新引擎创建失败。
+    /// 副作用（成功时）：`self.text` 换成新引擎（其图集为空、`reset_pending = true`，
+    /// 下一帧全量重传）、`self.cell` 更新为新字号推出的尺寸。
+    /// **需要调用方**：`tree.invalidate_all()` + `mark_layout_dirty` + 重排
+    /// （cell 尺寸变了，所有排版都得重算）。
+    ///
+    /// **失败时保持旧引擎，不破坏当前渲染状态**——顺序是"先建新的，成功后才换"，
+    /// 绝不出现"新引擎建失败但图集已清空"的中间态（那会整屏缺字）。
+    pub fn set_font(&mut self, font: &y901_runtime::FontConfig) -> Result<(), String> {
+        let (cell_w, cell_h) = crate::backend::font::cell_metrics_for(font.size);
+        // 1) 先创建新引擎：这一步失败就直接返回，旧引擎与旧 cell 尺寸原封不动
+        let text = TextEngine::new(&font.family, font.size, cell_w, cell_h)?;
+        // 2) 成功后才替换（新引擎的 reset_pending = true → 图集整张重传）
+        self.text = text;
+        self.cell = Size::new(cell_w, cell_h);
+        Ok(())
     }
 
     /// 每帧开始：清空实例数组，并推进图集帧号（LRU 用）。
@@ -236,7 +276,7 @@ impl D3dBackend {
             return;
         }
 
-        let offset_x = glyph_offset(span, CELL_W, glyph.advance);
+        let offset_x = glyph_offset(span, self.cell.w, glyph.advance);
         let pos = Pos::new(
             x + offset_x + glyph.bearing_x as f32,
             y + ascent + glyph.bearing_y as f32,
@@ -386,11 +426,11 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
 impl TextMetrics for D3dBackend {
     fn measure_text(&self, text: &str, _style: &TextStyle) -> Size {
         let cols: u32 = text.chars().map(|c| self.text.cell_span(c)).sum();
-        Size::new(cols as f32 * CELL_W, CELL_H)
+        Size::new(cols as f32 * self.cell.w, self.cell.h)
     }
 
     fn line_height(&self, _style: &TextStyle) -> f32 {
-        CELL_H
+        self.cell.h
     }
 
     fn scale(&self) -> f32 {
@@ -441,7 +481,7 @@ impl RenderCtx for D3dBackend {
             // 背景（如果有）
             if style.bg.a > 0.0 {
                 self.fill_rect(
-                    Rect::new(pen_x, origin.y, span * CELL_W, CELL_H),
+                    Rect::new(pen_x, origin.y, span * self.cell.w, self.cell.h),
                     style.bg,
                 );
             }
@@ -450,11 +490,11 @@ impl RenderCtx for D3dBackend {
             }
             if style.underline {
                 self.fill_rect(
-                    Rect::new(pen_x, origin.y + CELL_H - 2.0, span * CELL_W, 1.0),
+                    Rect::new(pen_x, origin.y + self.cell.h - 2.0, span * self.cell.w, 1.0),
                     style.fg,
                 );
             }
-            pen_x += span * CELL_W;
+            pen_x += span * self.cell.w;
         }
         pen_x - origin.x
     }
