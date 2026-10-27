@@ -9,7 +9,6 @@ use y901_ui::{Key, Modifiers, MouseButton};
 
 // Windows 消息号（与 windows-sys 常量一致）
 const WM_KEYDOWN: u32 = 0x0100;
-const WM_KEYUP: u32 = 0x0101;
 const WM_CHAR: u32 = 0x0102;
 const WM_SYSKEYDOWN: u32 = 0x0104;
 const WM_LBUTTONDOWN: u32 = 0x0201;
@@ -111,22 +110,6 @@ fn alt_key_produces_system_key_down() {
             mods
         }),
         "Alt+键必须走 SystemKeyDown，且带上 alt 修饰键"
-    );
-}
-
-#[test]
-fn key_up_produces_key_up() {
-    let mut f = CharFilter::default();
-    let mods = Modifiers::default();
-    // VK_CONTROL = 0x11
-    let ev = handle_wm_msg(WM_KEYUP, 0x11, 0, mods, &mut f);
-    assert_eq!(
-        ev,
-        Some(RawEvent::KeyUp {
-            key: Key::Unknown,
-            mods
-        }),
-        "松开 Ctrl 必须产生 KeyUp（VK_CONTROL 不是字符键 → Key::Unknown）"
     );
 }
 

@@ -136,9 +136,6 @@ pub enum RawEvent {
     KeyDown { key: Key, mods: Modifiers },
     /// Alt+键（WM_SYSKEYDOWN）：系统键，不与普通 KeyDown 混用。
     SystemKeyDown { key: Key, mods: Modifiers },
-    /// 键松开（WM_KEYUP）。**不产生新的 UiEvent 变体**：`translate` 把它折成
-    /// `UiEvent::Key`（靠 `Modifiers` 的实时状态区分按下/松开），避免破坏所有组件。
-    KeyUp { key: Key, mods: Modifiers },
     Char { c: char },
     Ime { text: String, composition: bool },
     Resize { w: u32, h: u32 },
@@ -165,14 +162,13 @@ pub fn translate(raw: &RawEvent, viewport: Size) -> Option<UiEvent> {
             delta: *delta,
             mods: *mods,
         }),
-        // Alt+键 与 键松开 都折叠成 UiEvent::Key：组件不需要区分，Host 需要时
-        // 可读 Modifiers（松开时修饰键状态已更新）。
-        RawEvent::SystemKeyDown { key, mods } | RawEvent::KeyUp { key, mods } => {
-            Some(UiEvent::Key {
-                key: *key,
-                modifiers: *mods,
-            })
-        }
+        // Alt+键 折叠成 `UiEvent::Key`：组件不需要区分来源。
+        // 修饰键状态由平台层用 `GetKeyState` 实时查询，不靠"松开事件"维护，
+        // 因此本层**没有**松开事件（将来若需要松开检测，再单独加并明确语义）。
+        RawEvent::SystemKeyDown { key, mods } => Some(UiEvent::Key {
+            key: *key,
+            modifiers: *mods,
+        }),
         RawEvent::KeyDown { key, mods } => Some(UiEvent::Key {
             key: *key,
             modifiers: *mods,

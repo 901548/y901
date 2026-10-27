@@ -465,6 +465,10 @@ Semantics::default()
    → 字号真的变大，`cell_width ≈ 10.0`。
 3. 终端里按 Enter → 命令只执行一次（控制键去重生效；此前是双写）。
 4. 终端里按 Tab → shell 补全生效，且**不切换焦点**。
+5. `Host::take_font_request()` 返回 `Some(20px)` → 字号真的变大，所有组件重排，无错位
+   （`D3dBackend::cell` 与 `TextEngine` 的格子必须一致；此前修过一次错位 bug）。
+6. 右键点击 → `UiEvent::MouseDown { button: Right }` 真的触发；
+   中键点击 → `button: Middle`。Alt+键 → 不产生系统提示音（`WM_SYSCHAR` 已吞掉）。
 
 前两条的"接线"由结构测试 `options_theme_reaches_backend` /
 `options_font_reaches_text_engine` 守着（`grep` 源码断言，防止链路被拆），

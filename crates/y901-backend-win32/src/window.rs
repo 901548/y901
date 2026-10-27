@@ -21,9 +21,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW,
     IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IDC_SIZEALL, MSG, PM_REMOVE, SW_SHOW,
     WM_CHAR, WM_DESTROY, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION,
-    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
     WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN,
-    WM_RBUTTONUP, WM_SETCURSOR, WM_SIZE, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+    WM_RBUTTONUP, WM_SETCURSOR, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
 
 use y901_runtime::{Options, RawEvent};
@@ -184,14 +184,12 @@ pub fn handle_wm_msg(
             })
         }
         // Alt+键：系统键单独成事件，避免与普通按键混淆
+
         WM_SYSKEYDOWN => Some(RawEvent::SystemKeyDown {
             key: vk_to_key_for_system(wparam as u32),
             mods,
         }),
-        WM_KEYUP => Some(RawEvent::KeyUp {
-            key: vk_to_key(wparam as u32),
-            mods,
-        }),
+
         WM_CHAR => {
             let c = char::from_u32(wparam as u32)?;
             filter.on_char(c).map(|c| RawEvent::Char { c })
@@ -289,7 +287,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             push(wheel_event(pos.x, pos.y, wparam as u64, modifiers()));
             0
         }
-        WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_CHAR => {
+        WM_KEYDOWN | WM_SYSKEYDOWN | WM_CHAR => {
             // 键盘消息统一走纯函数 `handle_wm_msg`（可单测）：它负责去重，
             // wndproc 只做"取状态 + 投递"。
             if let Ok(mut slot) = CHAR_FILTER.lock() {
@@ -300,6 +298,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             0
         }
+        // WM_SYSCHAR 是 Windows 在 WM_SYSKEYDOWN 之后发的"系统菜单输入"；
+        // 框架不处理系统菜单，直接吞掉（返回 0），避免 Alt+键触发系统提示音。
+        WM_SYSCHAR => 0,
         WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION => {
             let action = {
                 let mut ime = ime_state();
