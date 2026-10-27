@@ -114,6 +114,11 @@ impl Widget for Leaf {
         self.item
     }
 
+    /// 测试夹具：Leaf 需要能被 set_focus（新语义要求目标 `focusable()`）。
+    fn focusable(&self) -> bool {
+        true
+    }
+
     fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         bump_measure();
         c.constrain(Size::new(10.0, 20.0))
@@ -991,6 +996,11 @@ impl Layered {
 impl Widget for Layered {
     fn id(&self) -> &str {
         &self.id
+    }
+
+    /// 测试夹具：Modal 内的 `modal_btn` 需要能被 set_focus。
+    fn focusable(&self) -> bool {
+        true
     }
     fn layer(&self) -> Layer {
         self.layer

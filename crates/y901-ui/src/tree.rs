@@ -299,6 +299,31 @@ impl UiTree {
         self.focus.as_deref()
     }
 
+    /// 路径上所有祖先（含根、含自身）是否都处于 open 状态。
+    ///
+    /// 输入：从根开始的子节点下标路径（`find_path` 的返回值）。
+    /// 返回：`true` = 整条路径可见；`false` = 路径越界或任一节点 `is_open() == false`。
+    /// 失败：路径非法时返回 `false`（不 panic）。
+    ///
+    /// 用途：`set_focus` 用它拒绝"把焦点送进关闭子树"——与 `rebuild_indices` /
+    /// `render_pass` / `cursor_at` / `rebuild_focus_order` 的 `is_open` 跳过保持一致。
+    fn path_is_open(&self, path: &[usize]) -> bool {
+        let mut node = self.root.as_ref();
+        if !node.is_open() {
+            return false;
+        }
+        for &i in path {
+            let Some(child) = node.children().get(i) else {
+                return false;
+            };
+            if !child.is_open() {
+                return false;
+            }
+            node = child.as_ref();
+        }
+        true
+    }
+
     /// 切换焦点。事件走完整的三阶段路由，因此可以被"焦点守卫"否决。
     ///
     /// - `Focus(false)` 先发给旧节点：它在 Capture/Target 里调 `ctx.veto_focus()`
@@ -318,6 +343,18 @@ impl UiTree {
                 if !path.starts_with(scope.as_slice()) {
                     return false;
                 }
+            }
+            // 条件 3：路径上所有祖先（含自身）必须 open。
+            // 否则焦点会被送进"关闭的 Dialog"里——画不出来、点不到，却能收键盘。
+            if !self.path_is_open(&path) {
+                return false;
+            }
+            // 条件 4：目标必须可聚焦且未禁用（与 focus_order 的收集条件一致）。
+            let Some(widget) = self.node_at_ref(&path) else {
+                return false;
+            };
+            if !widget.focusable() || widget.is_disabled() {
+                return false;
             }
         }
         if self.focus == id {

@@ -566,3 +566,22 @@ if need_layout || external > 0 || structural {
 `rebuild_indices`（不绘制、不命中）、`render_pass`（不画）、`cursor_at`（不改光标）、
 `rebuild_focus_order`（不进 Tab 遍历）。前三个跳过的是"这块矩形"，
 第四个跳过的是"这张全局焦点表"，所以只 `invalidate(id)` 不够。
+### §29.2 `set_focus` 的语义条件
+
+`set_focus(id)` 返回 `true` 当且仅当四条同时成立：
+
+1. 节点存在（`find_path` 能解析）；
+2. 在 Modal 作用域内（`modal_root` 存在时，路径必须以其为前缀）；
+3. 路径上**所有祖先（含自身）** `is_open() == true`；
+4. 目标 `focusable() == true && !is_disabled()`。
+
+条件 3、4 保证"关闭的子树不可聚焦"与 `rebuild_indices` / `render_pass` /
+`cursor_at` / `rebuild_focus_order` 完全一致——五个地方用同一条规则。
+
+**为什么不用 `focus_order.contains(&path)`**：`main.rs` 在**首次 layout 之前**就调
+`set_focus(Some("title"))`，那时 `focus_order` 还是空表。用 `focus_order` 判定会把
+合法的初始聚焦也拒掉。`path_is_open` 只看树结构，与是否已完成布局无关。
+
+**注意**：条件 4 意味着"程序化聚焦"也只能落在可聚焦节点上。
+如果某个节点需要被代码聚焦但不想进 Tab 序列，给它 `focusable() == true` 即可
+（`focusable` 决定"能否聚焦"，Tab 序列还额外要求 `!is_disabled()`）。

@@ -250,6 +250,11 @@ impl Widget for Probe {
     fn id(&self) -> &str {
         &self.id
     }
+
+    /// 测试夹具：Probe 需要能被 set_focus（新语义要求目标 `focusable()`）。
+    fn focusable(&self) -> bool {
+        true
+    }
     fn measure(
         &mut self,
         _m: &dyn TextMetrics,
