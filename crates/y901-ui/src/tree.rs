@@ -146,6 +146,8 @@ pub struct UiTree {
     subscriptions: Vec<Subscription>,
     /// 响应式失效队列（Signal 变化 → 节点标脏）。
     invalidation_queue: crate::signal::Invalidation,
+    /// 后台线程用的标脏句柄（`Send + Sync`；**不持有树**，因此可跨线程）。
+    external: crate::invalidate::InvalidationHandle,
     /// 每个 id 的实例代号：`add_node` 时递增，用于识别 id 复用。
     generations: HashMap<String, u64>,
     /// 自增代号源。
@@ -189,6 +191,7 @@ impl UiTree {
             focus_order: Vec::new(),
             subscriptions: Vec::new(),
             invalidation_queue: crate::signal::Invalidation::new(),
+            external: crate::invalidate::InvalidationHandle::new(),
             generations: HashMap::new(),
             next_generation: 1,
             last_semantic: HashMap::new(),
@@ -371,6 +374,55 @@ impl UiTree {
     /// 响应式失效队列（组件在 on_mount 里会拿到它）。
     pub fn invalidation(&self) -> crate::signal::Invalidation {
         self.invalidation_queue.clone()
+    }
+
+    /// 取一个**线程安全**的标脏句柄，交给后台任务。
+    ///
+    /// 返回：`Send + Sync` 的句柄。后台线程调用 `invalidate(id)` /
+    /// `invalidate_all()` 之后，UI 线程下一帧
+    /// [`UiTree::drain_external_invalidations`] 会把它合并进脏区。
+    /// 副作用：无（只是 `Arc` 克隆，不借用树）。
+    ///
+    /// **它只通知"有变化"，不是线程安全的状态容器**：后台线程不能借此直接改组件字段，
+    /// 跨线程数据必须由应用自己用 `Arc<Mutex<…>>` 管理，在 UI 线程 drain 后再写进组件。
+    /// 组件的重绘请求仍走 [`crate::EventResult`]。
+    pub fn invalidation_handle(&self) -> crate::invalidate::InvalidationHandle {
+        self.external.clone()
+    }
+
+    /// 把后台线程的标脏请求合并进当前脏区（**框架内部接口**）。
+    ///
+    /// 返回：本次处理的请求数（0 = 没有后台请求）。
+    /// 规则：`One(id)` → 该节点布局失效 + 标脏 + 登记语义检查；
+    /// 只要出现一条 `All` → 整窗脏区（合并取最强，不会漏块）。
+    ///
+    /// **必须在 `layout()` 之前调用**（主循环在 `window.resize` 之前 drain），
+    /// 否则本帧按旧脏区布局、下一帧才重排。
+    /// 注意：与 `UiTree::invalidate(id)` 一样，id 不存在时静默忽略。
+    #[doc(hidden)]
+    pub fn drain_external_invalidations(&mut self) -> usize {
+        let requests = self.external.drain();
+        if requests.is_empty() {
+            return 0;
+        }
+        let mut count = 0;
+        let mut whole_window = false;
+        for request in requests {
+            count += 1;
+            match request {
+                crate::invalidate::PendingInvalidation::One(id) => {
+                    self.cache.mark_dirty(&id);
+                    self.invalidate(&id);
+                    self.pending_semantic.insert(id);
+                }
+                crate::invalidate::PendingInvalidation::All => whole_window = true,
+            }
+        }
+        // 有请求就一定重绘：`invalidate(id)` 只覆盖单个矩形，但后台任务改的
+        // 往往是"看不见的内容"（例如列表里的数据），整窗重绘最稳妥。
+        let _ = whole_window;
+        self.dirty = DirtyRegion::full();
+        count
     }
 
     /// 把 parent 挂到一个新子节点下。返回是否成功。

@@ -473,3 +473,43 @@ Semantics::default()
 前两条的"接线"由结构测试 `options_theme_reaches_backend` /
 `options_font_reaches_text_engine` 守着（`grep` 源码断言，防止链路被拆），
 但结构测试**不能**证明"窗口真的变亮/变大"——那一层必须有设备。
+## §28 `InvalidationHandle`：后台线程如何触发重绘
+
+**它是通知，不是状态容器。** 后台线程拿到
+`let handle = tree.invalidation_handle();` 后，只能做两件事：
+
+```rust
+handle.invalidate("file_list");  // 下一帧标脏该节点
+handle.invalidate_all();         // 下一帧整窗重绘
+```
+
+**不能**借它改组件字段——句柄里没有 `UiTree`、没有任何组件引用（这是它能
+`Send + Sync` 的前提）。跨线程数据必须由应用自己管理：
+
+```rust
+let rows = Arc::new(Mutex::new(Vec::new()));
+let handle = tree.invalidation_handle();
+std::thread::spawn(move || {
+    let fetched = fetch();                    // 后台干活
+    *rows.lock().unwrap() = fetched;          // 应用自己的锁
+    handle.invalidate("file_list");           // 只通知"该重绘了"
+});
+// UI 线程：Host::idle 里读 rows，写进组件；框架在 layout 前自动 drain 标脏请求
+```
+
+框架侧接线（主循环，`drain` 必须在 `layout` 之前）：
+
+```rust
+host.idle(&mut tree);
+let external = tree.drain_external_invalidations();
+if need_layout || external > 0 {
+    window.resize(&mut tree);   // 内含 layout；尺寸不变时不重建交换链
+}
+```
+
+要点：
+
+- 与组件的分工：**组件走 `EventResult::Redraw`，异步任务走 `InvalidationHandle`**；
+- 同帧多条请求合并：只要有一条 `invalidate_all()`，结果就是整窗脏区；
+- `drain` 之后 `has_pending()` 归零；第二次 drain 返回 0；
+- 句柄可以比树活得久（树销毁后 push 不会 panic，只是永远不会被 drain）。

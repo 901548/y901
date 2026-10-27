@@ -54,16 +54,20 @@ impl PlatformRuntime for Win32Runtime {
                 }
             }
 
-            if need_layout {
-                window.resize(&mut tree);
-            }
-
             // 业务命令：Host 说没处理就丢弃（框架不猜语义）
             for cmd in tree.drain_commands() {
                 let _ = host.command(&mut tree, cmd);
             }
 
             host.idle(&mut tree);
+
+            // 后台线程的标脏请求：**必须在 layout 之前** drain（本帧只 drain 一次，
+            // 避免同一帧多次 layout）。有请求时走完整 resize（内含 layout）——
+            // `window.resize` 的代价只有一次尺寸比较，交换链在尺寸不变时会短路。
+            let external = tree.drain_external_invalidations();
+            if need_layout || external > 0 {
+                window.resize(&mut tree);
+            }
 
             // IME 候选窗跟随光标
             if let Some((x, y)) = host.ime_position(&mut tree) {
