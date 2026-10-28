@@ -699,3 +699,34 @@ tree.find_mut(id)?
 另外 `Flex` **刻意不实现** `as_any_mut`：运行时加子节点的正确路径是
 `tree.add_node(flex_id, child)`（会 `on_mount`、查重、标脏、置 layout 请求）；
 用 downcast 直接 `push_boxed` 会跳过挂载，是坑。
+## §33 黑屏 bug：没有脏区时不能 Present
+
+**现象**：窗口启动后全黑，点一下鼠标闪出一帧内容，随即又黑。
+
+**根因**（`Window::render` + `UiTree::render` 的组合）：
+
+1. runtime 每帧都调 `window.render()`；
+2. `UiTree::render` 在 `dirty.is_empty()` 时**直接返回**（不产生任何实例）；
+3. 但 `Window::render` 无条件 `backend.begin()`（清空实例）→ `present()`；
+4. 于是"零实例"的帧被 Present 出来 = 清屏成背景色；下次输入产生脏区才画一帧，
+   下一帧又被清掉。表现为"闪一下又黑"。
+
+**修法**：
+
+```rust
+pub fn render(&mut self, tree: &mut UiTree) {
+    if tree.dirty().is_empty() { return; }   // 不清屏、不 Present，保留上一帧
+    …
+}
+```
+
+**配套：遮挡 / 最小化恢复**。D3D 交换链的内容**不受** Windows 保护，
+遮挡或最小化恢复后客户区是未定义的（黑或花）。而"有脏区才画"意味着此时通常
+没有脏区，所以必须显式请求一次全量：
+
+- `WM_PAINT` → `request_full_redraw()`（置一次性标志，只 Begin/EndPaint 不够）；
+- runtime 每帧 `if window.take_repaint_request() { tree.invalidate_all(); }`
+  （必须在 `window.render` **之前**）。
+
+**为什么不改成"每帧都重画"**：那是纯浪费（空转 CPU/GPU），而且仍然会在
+`present` 失败或设备丢失时闪；"保留上一帧"才是正确的呈现模型。

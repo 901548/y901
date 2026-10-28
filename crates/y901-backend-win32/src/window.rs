@@ -114,6 +114,29 @@ unsafe fn client_pos(hwnd: HWND) -> Pos {
     Pos::new(pt.x as f32, pt.y as f32)
 }
 
+/// "下一帧必须整窗重绘"标记：由 `WM_PAINT` 置位，由 runtime 取走。
+///
+/// 为什么需要：D3D 交换链的内容**不受** Windows 保护——
+/// 遮挡/最小化恢复后，窗口客户区是未定义的（黑或花）。
+/// 而我们的渲染是"有脏区才画"，恢复时通常没有脏区，所以必须显式请求一次全量。
+static NEED_FULL_REDRAW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 请求下一帧整窗重绘（`WM_PAINT` 走这里）。
+///
+/// 副作用：置位一次性标志；不会被覆盖、不会重复触发（多次调用等价于一次）。
+#[doc(hidden)]
+pub fn request_full_redraw() {
+    NEED_FULL_REDRAW.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 取走"整窗重绘"请求（runtime 每帧调一次）。
+///
+/// 返回：`true` = 有人在上一帧之后请求过；取走即清零。
+#[doc(hidden)]
+pub fn take_full_redraw() -> bool {
+    NEED_FULL_REDRAW.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// 全局按键去重状态（`wndproc` 是无状态的 C 回调，只能放静态）。
 ///
 /// 用 `Mutex` 而不是 `AtomicU32`：`CharFilter` 有"取走并清空"的复合语义，
@@ -352,6 +375,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             };
             windows_sys::Win32::Graphics::Gdi::BeginPaint(hwnd, &mut ps);
             windows_sys::Win32::Graphics::Gdi::EndPaint(hwnd, &ps);
+            // 系统要求重画（遮挡后恢复、最小化恢复、首帧）：**不能**只 Begin/EndPaint，
+            // D3D 的交换链内容不会被 Windows 恢复，必须让 runtime 下一帧整窗重绘，
+            // 否则窗口是黑的/花的。这里只置标记，真正的 invalidate_all 由 runtime 做
+            // （wndproc 拿不到 UiTree）。
+            request_full_redraw();
             0
         }
         WM_DESTROY => {
@@ -511,6 +539,14 @@ impl Window {
 
     /// 把 UI 树画到交换链。
     pub fn render(&mut self, tree: &mut UiTree) {
+        // **没有脏区就不清屏、不 Present**：保留上一帧。
+        //
+        // 之前每帧都 begin()+present()：`begin` 清空实例，`tree.render` 在脏区为空时
+        // 直接返回，于是 Present 出一个"零实例"的空帧 → 屏幕变黑；
+        // 下次输入产生脏区才画一帧，然后又被下一帧冲掉（表现为"闪一下又黑"）。
+        if tree.dirty().is_empty() {
+            return;
+        }
         let Some(backend) = self.backend.as_mut() else {
             return;
         };
@@ -520,6 +556,15 @@ impl Window {
         unsafe {
             let _ = backend.present(self.hwnd, w, h);
         }
+    }
+
+    /// 取走"系统要求重画"的请求（`WM_PAINT` 置位）。
+    ///
+    /// 返回：`true` = 窗口被遮挡/最小化后恢复，或 Windows 要求重画，
+    /// 调用方应 `tree.invalidate_all()` 触发一次整窗重绘。
+    /// 这是**一次性**标志，取走即清零。
+    pub fn take_repaint_request(&self) -> bool {
+        take_full_redraw()
     }
 
     /// 重新布局（尺寸变化后调用）。

@@ -97,6 +97,12 @@ impl PlatformRuntime for Win32Runtime {
                 }
             }
 
+            // 系统要求重画（遮挡/最小化恢复）：D3D 交换链内容不会被 Windows 恢复，
+            // 而"有脏区才画"意味着此时通常没有脏区 → 必须显式请求一次整窗重绘。
+            if window.take_repaint_request() {
+                tree.invalidate_all();
+            }
+
             if let Some(pos) = mouse {
                 window.set_cursor(tree.cursor_at(pos));
             }
