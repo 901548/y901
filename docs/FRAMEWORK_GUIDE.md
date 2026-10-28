@@ -656,3 +656,46 @@ for (id, on) in [("btn-dark", dark), ("btn-light", light), ("btn-system", sys)] 
     tree.invalidate(id);
 }
 ```
+## §32 组件作者守则：什么时候必须实现 `as_any_mut`
+
+`Widget::as_any_mut` 是运行时 downcast 的**唯一**路径：
+
+```rust
+tree.find_mut(id)?
+    .as_any_mut()?
+    .downcast_mut::<MyWidget>()?
+```
+
+**规则**：如果你的组件有 `&mut self` 的运行时方法（`set_text` / `set_open` /
+`set_selected` / `push_child` / `write` / `pump` 等），**必须**实现 `as_any_mut`——
+否则 Host / Agent 无法在运行时调用这些方法，功能**静默失效**（不报错、不 panic，
+只是什么都不发生）。
+
+**反例（不需要 `as_any_mut`）**：
+
+- 只有构建器（`fn x(mut self) -> Self`）——构建期调用，不需要运行时 downcast；
+- 只有 `&self` 只读方法——`find(id)` 就够；
+- 内部组件（如 `ListView` 的 `Row`）——由父容器自己 downcast。
+
+**已实现 `as_any_mut` 的组件（截至 §32 编写时）**：
+
+| 组件 | 运行时方法 |
+|---|---|
+| `Button` | `set_selected` |
+| `TextInput` | `set_text` / `set_password` / `clear` |
+| `TextLabel` | `set_text` / `refresh` |
+| `Dialog` | `set_title` / `set_buttons` / `set_open` / `set_size` / `clear_children` / `push_child` / `close` |
+| `ListView` | `set_items` |
+| `Menu` | `open` / `close` |
+| `TerminalWidget` | `write` / `pump` / `attach_shell` / `grid_mut` |
+| `Row`（内部） | 行复用（父容器调用） |
+
+**为什么不在 `Widget` trait 里提供默认实现**：`as_any_mut` 返回 `&mut dyn Any`，
+而 `dyn Any` 必须指向**具体类型**（`Self`）——默认实现在 `dyn Widget` 上无法返回
+`Self`（`Self: Sized` 之外的类型擦除限制）。这是 dyn 类型系统的限制，
+所以每个需要运行时 downcast 的组件必须显式实现。
+
+**反模式**：不要为了"能 downcast"而给只读组件补 `as_any_mut`——只读用 `find(id)`。
+另外 `Flex` **刻意不实现** `as_any_mut`：运行时加子节点的正确路径是
+`tree.add_node(flex_id, child)`（会 `on_mount`、查重、标脏、置 layout 请求）；
+用 downcast 直接 `push_boxed` 会跳过挂载，是坑。

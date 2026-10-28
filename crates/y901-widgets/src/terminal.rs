@@ -245,6 +245,11 @@ impl Widget for TerminalWidget {
         crate::ROLE_TERMINAL
     }
 
+
+    /// 向下转型：Host 驱动 PTY（`write` / `pump` / `attach_shell`）的唯一路径。
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
     fn revision(&self) -> u64 {
         self.revision
     }

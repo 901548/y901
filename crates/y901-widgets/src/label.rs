@@ -108,6 +108,11 @@ impl Widget for TextLabel {
         c.constrain(Size::new(metrics.measure_text(&self.current_text(), &style).w, metrics.line_height(&style)))
     }
 
+
+    /// 向下转型：Host 运行时调 `set_text` 的唯一路径（UiTree 不暴露具体类型）。
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
     fn arrange(
         &mut self,
         rect: Rect,

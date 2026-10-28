@@ -107,6 +107,11 @@ impl Menu {
 }
 
 impl Widget for Menu {
+    /// 向下转型：Host 运行时调 `open` / `close` 的唯一路径。
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+
     fn id(&self) -> &str {
         &self.id
     }

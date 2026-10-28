@@ -217,6 +217,11 @@ impl ListView {
 }
 
 impl Widget for ListView {
+    /// 向下转型：Host 运行时调 `set_items` 的唯一路径。
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+
     fn id(&self) -> &str {
         &self.id
     }
@@ -249,6 +254,7 @@ impl Widget for ListView {
 
     fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
         self.viewport = rect;
+
         self.show_bar = self.content_height() > rect.h;
         let bar_w = if self.show_bar { BAR_WIDTH } else { 0.0 };
         self.inner = Rect::new(rect.x, rect.y, (rect.w - bar_w).max(0.0), rect.h);
