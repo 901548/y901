@@ -234,7 +234,10 @@ struct FontFaceVtbl {
     get_design_glyph_metrics:
         unsafe extern "system" fn(*mut c_void, *const u16, u32, *mut GlyphMetrics, BOOL) -> Hresult,
     // 11：GetGlyphIndices
-    get_glyph_indices: unsafe extern "system" fn(*mut c_void, *const u16, u32, *mut u16) -> Hresult,
+    /// DWrite 的原型是 GetGlyphIndices(const UINT32 *codePoints, UINT16 *glyphIndices, UINT32 glyphCount)。
+    /// **码点必须是 32 位**：声明成 *const u16 会让 DWrite 每次读 4 字节，
+    /// Release/LTO 下栈布局变化后高 16 位是垃圾值 → 查不到字形（整屏缺字）。
+    get_glyph_indices: unsafe extern "system" fn(*mut c_void, *const u32, u32, *mut u16) -> Hresult,
 }
 
 #[repr(C)]
@@ -356,11 +359,23 @@ impl FontFace {
         metrics
     }
 
-    unsafe fn glyph_index(&self, codepoint: u16) -> u16 {
+    /// 查一个码点（**32 位**，不用 UTF-16 代理项）的字形下标。
+    ///
+    /// 输入：`codepoint` = `char as u32`（非 BMP 直接是完整码点）。
+    /// 返回：`Ok(glyph)`；`Ok(0)` 表示字体里没有这个字形（`.notdef`）。
+    /// 失败：`GetGlyphIndices` 返回负 HRESULT 时给 `Err`（含码点与 HRESULT），
+    /// **不静默返回 0**——否则上层只会看到 "glyph missing"，查不到真正原因。
+    unsafe fn glyph_index(&self, codepoint: u32) -> Result<u16, String> {
         let table = vtbl::<FontFaceVtbl>(self.as_ptr());
         let mut glyph = 0u16;
-        (table.get_glyph_indices)(self.as_ptr(), &codepoint, 1, &mut glyph);
-        glyph
+        let hr = (table.get_glyph_indices)(self.as_ptr(), &codepoint, 1, &mut glyph);
+        if hr < 0 {
+            return Err(format!(
+                "GetGlyphIndices failed: codepoint=U+{codepoint:04X} hr=0x{:08X}",
+                hr as u32
+            ));
+        }
+        Ok(glyph)
     }
 }
 
@@ -494,10 +509,17 @@ impl TextEngine {
             let ascent = metrics.ascent as f32 * font_size / units_per_em;
             let descent = metrics.descent as f32 * font_size / units_per_em;
 
-            let advance_of = |ch: char| {
-                let glyph = face.glyph_index(ch as u16);
-                let design = face.design_metrics(glyph);
-                design.advance_width as f32 * font_size / units_per_em
+            // 用 **32 位码点**（`ch as u32`）查字形：非 BMP 字符不能走 UTF-16 代理项。
+            // 查询失败只警告（启动不该因为某个字形查不到就失败），返回 0 让偏差检查跳过。
+            let advance_of = |ch: char| match face.glyph_index(ch as u32) {
+                Ok(glyph) => {
+                    let design = face.design_metrics(glyph);
+                    design.advance_width as f32 * font_size / units_per_em
+                }
+                Err(err) => {
+                    eprintln!("[y901] 警告：查字形 advance 失败（{ch:?}）：{err}");
+                    0.0
+                }
             };
 
             // 字体度量与"格"的偏差只警告、不拒绝启动：
@@ -569,6 +591,16 @@ impl TextEngine {
         cell_span_of(ch)
     }
 
+    /// 诊断用：查某个字符的字形下标（不做任何缓存与图集写入）。
+    ///
+    /// 输入：`ch`。返回：`Ok(glyph)`（0 = 字体里没有该字形）；
+    /// 失败：`GetGlyphIndices` 返回失败 HRESULT 时给出含码点的错误。
+    /// 用途：`font_probe` 测试验证"Debug 与 Release 查字形结果一致"。
+    pub fn probe_glyph_index(&self, ch: char) -> Result<u16, String> {
+        // SAFETY: face 由 TextEngine 持有且在 self 生命周期内有效。
+        unsafe { self.face.glyph_index(ch as u32) }
+    }
+
     /// 取出并清空脏区；reset = true 表示图集被整体重建。
     pub fn take_dirty(&mut self) -> (bool, Vec<DirtyRect>) {
         let reset = std::mem::replace(&mut self.reset_pending, false);
@@ -582,11 +614,11 @@ impl TextEngine {
     }
 
     unsafe fn rasterize(&mut self, ch: char) -> Result<GlyphInfo, String> {
-        let mut utf16 = [0u16; 2];
-        let codepoints = ch.encode_utf16(&mut utf16);
-        let glyph = self.face.glyph_index(codepoints[0]);
+        // **不要用 `encode_utf16()[0]`**：非 BMP 字符（emoji 等）会得到代理项，
+        // 查不到字形；DWrite 的 GetGlyphIndices 本来就要 32 位码点。
+        let glyph = self.face.glyph_index(ch as u32)?;
         if glyph == 0 {
-            return Err(format!("glyph missing ({:?})", ch));
+            return Err(format!("glyph missing ({:?}, U+{:04X})", ch, ch as u32));
         }
 
         let design = self.face.design_metrics(glyph);
@@ -909,5 +941,41 @@ mod options_tests {
         assert_ne!(w, 8.0, "20px 字体的单元格宽度不应还是 8");
         assert_eq!((w, h), (10.0, 20.0));
         assert_eq!(f.family, "JetBrains Mono");
+    }
+}
+
+/// 最小字体探针：**Debug 与 Release 都必须能查到字形**。
+///
+/// 这个测试存在的唯一理由：曾经 `FontFaceVtbl::get_glyph_indices` 把码点声明成
+/// `*const u16`，而 DWrite 读的是 32 位；Debug 下栈上的相邻字节恰好是 0，
+/// 所以一直是对的；Release/LTO 重新布局栈后高 16 位是垃圾 → 所有字形查不到 →
+/// 整屏缺字（只在 release 出现，极难定位）。
+#[cfg(test)]
+mod font_probe {
+    use super::TextEngine;
+
+    #[test]
+    fn font_probe() {
+        let engine = TextEngine::new("NSimSun", 16.0, 8.0, 16.0)
+            .expect("TextEngine::new 需要 D3D/DirectWrite 设备");
+
+        // 每个字符都必须拿到非 0 字形
+        for ch in ['C', 'n', '.', 'A', '中'] {
+            let g = engine
+                .probe_glyph_index(ch)
+                .unwrap_or_else(|e| panic!("查字形失败 {ch:?}: {e}"));
+            assert_ne!(
+                g, 0,
+                "字符 {ch:?} (U+{:04X}) 的字形下标是 0 —— 字体里没有或查询路径错",
+                ch as u32
+            );
+            eprintln!("[probe] {ch:?} U+{:04X} -> glyph {}", ch as u32, g);
+        }
+
+        // 非 BMP（emoji）走完整码点，不能是代理项
+        match engine.probe_glyph_index('\u{1F600}') {
+            Ok(g) => eprintln!("[probe] emoji -> glyph {g}（字体可能没有该字形，0 也可接受）"),
+            Err(e) => eprintln!("[probe] emoji 查询返回错误（可接受）：{e}"),
+        }
     }
 }
