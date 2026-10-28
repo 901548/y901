@@ -150,6 +150,8 @@ pub struct UiTree {
     external: crate::invalidate::InvalidationHandle,
     /// 结构性变化（增删节点）后置位：主循环据此决定这一帧是否要 layout。
     layout_requested: bool,
+    /// 广播事件（`Tick` 等）中"要求重绘"节点的矩形（复用缓冲，避免每帧分配）。
+    broadcast_rects: Vec<Rect>,
     /// 每个 id 的实例代号：`add_node` 时递增，用于识别 id 复用。
     generations: HashMap<String, u64>,
     /// 自增代号源。
@@ -195,6 +197,7 @@ impl UiTree {
             invalidation_queue: crate::signal::Invalidation::new(),
             external: crate::invalidate::InvalidationHandle::new(),
             layout_requested: false,
+            broadcast_rects: Vec::new(),
             generations: HashMap::new(),
             next_generation: 1,
             last_semantic: HashMap::new(),
@@ -1410,7 +1413,21 @@ impl UiTree {
         } else if result.needs_redraw() {
             match target_id.as_deref() {
                 Some(id) => self.invalidate(id),
-                None => self.invalidate_all(),
+                // 广播事件没有单一 target：用 broadcast 期间收集到的矩形逐块标脏。
+                // 之前这里 `invalidate_all()`，于是"终端每帧 Tick 读到 PTY 数据"
+                // 会触发整窗重绘（§35 的性能隐患）。
+                None => {
+                    if self.broadcast_rects.is_empty() {
+                        self.invalidate_all();
+                    } else {
+                        let rects = std::mem::take(&mut self.broadcast_rects);
+                        for r in &rects {
+                            self.dirty.add(*r);
+                        }
+                        self.broadcast_rects = rects;
+                        self.broadcast_rects.clear();
+                    }
+                }
             }
         }
 
@@ -1506,7 +1523,10 @@ impl UiTree {
         let mut ctx = EventCtx::new(self.focus.clone(), viewport);
         ctx.phase = EventPhase::Target;
         let mut acc = EventResult::Ignored;
-        broadcast(self.root.as_mut(), &mut ctx, event, &mut acc);
+        let mut rects = std::mem::take(&mut self.broadcast_rects);
+        rects.clear();
+        broadcast(self.root.as_mut(), &mut ctx, event, &mut acc, &mut rects);
+        self.broadcast_rects = rects;
         self.finish_dispatch(ctx, acc)
     }
     /// 取出并处理命令队列。
@@ -1631,11 +1651,18 @@ fn broadcast(
     ctx: &mut EventCtx,
     event: &UiEvent,
     acc: &mut EventResult,
+    redraw_rects: &mut Vec<Rect>,
 ) {
-    *acc = acc.merge(node.event(ctx, event));
+    let r = node.event(ctx, event);
+    if r.needs_redraw() {
+        // 广播事件（Tick 等）没有单一 target：记录每个**真的要求重绘**的节点矩形，
+        // 稍后逐块标脏，而不是整窗重绘（见 §35）。
+        redraw_rects.push(node.rect());
+    }
+    *acc = acc.merge(r);
     if let Some(children) = node.children_mut() {
         for child in children.iter_mut() {
-            broadcast(child.as_mut(), ctx, event, acc);
+            broadcast(child.as_mut(), ctx, event, acc, redraw_rects);
         }
     }
 }

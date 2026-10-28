@@ -783,3 +783,47 @@ if !had_work && tree.dirty().is_empty() {
 `invalidate_all()`。如果终端光标闪烁或 PTY 轮询每帧触发一次 Tick，就会每帧全量重绘。
 当前没有把它改细，因为"重排后位置可能变、只标旧矩形会漏画"（§28.1 同样的理由）。
 若真出现掉帧，可以考虑：`Tick` 的 Redraw 收集各响应节点的矩形后逐块标脏。
+## §35 广播事件的重绘粒度 + 帧耗时打点
+
+### 35.1 Tick 曾经导致整窗重绘
+
+`Host::idle` 每帧派发 `UiEvent::Tick`（最多 8 轮）。`dispatch` 的通用分支是：
+
+```rust
+} else if result.needs_redraw() {
+    match target_id {
+        Some(id) => self.invalidate(id),
+        None => self.invalidate_all(),   // ← Tick 是广播，永远走这里
+    }
+}
+```
+
+于是"终端每帧从 PTY 读到数据" → `Redraw` → **整窗重绘**。窗口越大越慢。
+
+修法：`broadcast()` 在遍历时收集**真的返回了 `Redraw`** 的节点矩形
+（`UiTree::broadcast_rects`，复用缓冲不分配），`dispatch` 的 `None` 分支改为
+逐块 `dirty.add(rect)`；只有收集为空时才退回 `invalidate_all()`。
+
+### 35.2 帧耗时打点（`Y901_PROFILE=1`）
+
+`Win32Runtime::run` 内置统计，每 2 秒向 stderr 打一行：
+
+```
+[profile] frames=431 rendered=57 full=57 partial=0 avg=317us max=2531us
+```
+
+- `frames`：2 秒内循环次数（≈ 上限 125/s，受 8ms 休眠限制）；
+- `rendered`：真正执行了 `present` 的帧数（0 = 完全空闲）；
+- `full` / `partial`：整窗重绘 vs 局部重绘；
+- `avg` / `max`：单帧耗时（从 `pump` 到 `present` 返回）。
+
+默认关闭，开启时只有几次 `Instant::now()` 的开销。
+
+实测（本机虚拟显卡，release）：
+
+| 场景 | CPU（占单核） | 平均帧 | 最大帧 |
+|---|---|---|---|
+| 空闲 | **0.17%** | 10–104us | 2.5ms |
+| 连续拉伸窗口（60 次/2s） | **6.3%** | 317us | 5.7ms |
+
+两者都远低于 16ms 预算。

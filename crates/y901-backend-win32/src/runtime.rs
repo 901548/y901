@@ -20,7 +20,19 @@ impl PlatformRuntime for Win32Runtime {
         // 首帧布局：后端与文本度量都就绪后才能算
         window.resize(&mut tree);
 
+        // 帧耗时打点（`Y901_PROFILE=1` 时每 2 秒打印一次）。
+        // 只在显式开启时有一点开销，默认零成本。
+        let profile = std::env::var_os("Y901_PROFILE").is_some();
+        let mut stat_frames: u32 = 0;
+        let mut stat_rendered: u32 = 0;
+        let mut stat_full: u32 = 0;
+        let mut stat_partial: u32 = 0;
+        let mut stat_total_us: u128 = 0;
+        let mut stat_max_us: u128 = 0;
+        let mut stat_since = std::time::Instant::now();
+
         loop {
+            let frame_start = std::time::Instant::now();
             if !window.pump() {
                 break;
             }
@@ -110,7 +122,44 @@ impl PlatformRuntime for Win32Runtime {
                 window.set_cursor(tree.cursor_at(pos));
             }
 
+            let dirty_full = tree.dirty().is_full();
+            let dirty_any = !tree.dirty().is_empty();
             window.render(&mut tree);
+
+            if profile {
+                let us = frame_start.elapsed().as_micros();
+                stat_frames += 1;
+                stat_total_us += us;
+                if us > stat_max_us {
+                    stat_max_us = us;
+                }
+                if dirty_any {
+                    stat_rendered += 1;
+                    if dirty_full {
+                        stat_full += 1;
+                    } else {
+                        stat_partial += 1;
+                    }
+                }
+                if stat_since.elapsed().as_millis() >= 2000 {
+                    let avg = if stat_frames > 0 {
+                        stat_total_us / stat_frames as u128
+                    } else {
+                        0
+                    };
+                    eprintln!(
+                        "[profile] frames={} rendered={} full={} partial={} avg={}us max={}us",
+                        stat_frames, stat_rendered, stat_full, stat_partial, avg, stat_max_us
+                    );
+                    stat_frames = 0;
+                    stat_rendered = 0;
+                    stat_full = 0;
+                    stat_partial = 0;
+                    stat_total_us = 0;
+                    stat_max_us = 0;
+                    stat_since = std::time::Instant::now();
+                }
+            }
 
             // 空闲休眠：**没有事件、也没有画任何东西**时阻塞等消息。
             //
