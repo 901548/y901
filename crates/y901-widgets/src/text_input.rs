@@ -97,6 +97,10 @@ pub struct TextInput {
     version: u64,
     /// 禁用：不参与 Tab，也不接收事件。
     disabled: bool,
+    /// 密码模式：渲染与语义全部打码（原文仍可从 `text()` 读到）。
+    password: bool,
+    /// 占位提示（不进 buffer，空文本时临时绘制）。
+    placeholder: Option<String>,
 }
 
 impl TextInput {
@@ -127,7 +131,34 @@ impl TextInput {
             clipboard: Box::new(NullClipboard),
             version: 0,
             disabled: false,
+            password: false,
+            placeholder: None,
         }
+    }
+
+    /// 密码模式（构建器）：渲染与 `semantics()` 全部打码，`text()` 仍返回原文。
+    ///
+    /// 打码范围：正文每个字符画 `*`（空格也画，否则长度不可见）、IME 预编辑串
+    /// 同样打码、`semantics().label/value/state("text")` 全部替换为 `*`，
+    /// 并置 `sensitive = true`（网关二次脱敏）。
+    pub fn password(mut self, on: bool) -> Self {
+        self.password = on;
+        self
+    }
+
+    /// 运行时开关密码模式（**不自动标脏**：调用方随后必须 `invalidate(id)`，
+    /// 因为渲染结果变了但尺寸不变，不需要 `mark_layout_dirty`）。
+    pub fn set_password(&mut self, on: bool) {
+        self.password = on;
+    }
+
+    /// 占位提示（构建器）：**不进 `TextBuffer`**，只在
+    /// `buffer.text().is_empty() && preedit.is_empty()` 时以暗灰绘制。
+    ///
+    /// 不参与布局、不参与语义；文本一变就自动消失。
+    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
+        self.placeholder = Some(text.into());
+        self
     }
 
     /// 设置初始文本，并把光标放到末尾。
@@ -667,6 +698,20 @@ impl Widget for TextInput {
         let text_y = inner.y + ((inner.h - line_h) * 0.5).max(0.0);
         let origin_x = inner.x - self.scroll_x;
 
+        // 占位提示：只在"真的一点内容都没有"时画（含 IME 预编辑也算内容）。
+        // 不参与布局，画完就结束——后续选区/正文/光标逻辑完全不感知它。
+        if self.buffer.text().is_empty() && self.preedit.is_empty() {
+            if let Some(hint) = self.placeholder.as_deref() {
+                if !hint.is_empty() {
+                    ctx.draw_text(
+                        Pos::new(inner.x, text_y),
+                        hint,
+                        &TextStyle::fg(Color::rgba(0.55, 0.58, 0.64, 1.0)),
+                    );
+                }
+            }
+        }
+
         // 3) 选区高亮（画在文字下面）
         if let Some((start, end)) = self.buffer.selection() {
             let sx = origin_x + self.x_of_byte(start);
@@ -695,6 +740,11 @@ impl Widget for TextInput {
                 break;
             }
             if let Some(ch) = self.buffer.text()[g.byte..].chars().next() {
+                // 密码模式：每个字符都画 `*`（**空格也要画**，否则长度不可见）
+                if self.password {
+                    ctx.draw_text(Pos::new(x, text_y), "*", &text);
+                    continue;
+                }
                 if ch == ' ' {
                     continue;
                 }
@@ -709,7 +759,12 @@ impl Widget for TextInput {
             let preedit_style = TextStyle::fg(self.style.fg);
             for ch in self.preedit.chars() {
                 let mut buf = [0u8; 4];
-                let s = ch.encode_utf8(&mut buf);
+                // 密码模式：预编辑串同样打码（否则中文输入法会把明文画出来）
+                let s = if self.password {
+                    "*"
+                } else {
+                    ch.encode_utf8(&mut buf)
+                };
                 let w = ctx.measure_text(s, &preedit_style).w;
                 if pen + w >= inner.x && pen <= inner.right() {
                     ctx.draw_text(Pos::new(pen, text_y), s, &preedit_style);
@@ -737,9 +792,21 @@ impl Widget for TextInput {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default().exposed(true)
-            .label(self.buffer.text().to_string())
-            .value(self.buffer.text().to_string())
+        // 密码模式：**原文一个字都不能出现在语义里**（Agent 只读语义）。
+        // 掩码长度用字符数而非字节数——"中" 显示 1 个 `*`，不是 3 个。
+        let masked: String = if self.password {
+            "*".repeat(self.buffer.text().chars().count())
+        } else {
+            self.buffer.text().to_string()
+        };
+        let label = if self.password {
+            "password".to_string()
+        } else {
+            self.buffer.text().to_string()
+        };
+        let sem = Semantics::default().exposed(true)
+            .label(label)
+            .value(masked.clone())
             .action_spec("set_text", y901_ui::InputKind::Text)
             .action("focus")
             .prop("cursor", self.buffer.cursor().to_string())
@@ -747,12 +814,14 @@ impl Widget for TextInput {
             .prop("len", self.buffer.len_bytes().to_string())
             .prop("focused", self.focused.to_string())
             .prop("scroll_x", format!("{:.1}", self.scroll_x))
-            .state("text", self.buffer.text())
+            .state("text", masked)
             .state("caret", self.buffer.cursor())
             .state("anchor", self.buffer.anchor())
             // focused 是框架拥有的语义字段，由 UiTree 注入顶层；不进 state
             // disabled 是顶层语义字段，不进 state（与 Button 保持一致）
             .disabled(self.disabled)
+            .sensitive(self.password);
+        sem
     }
 
     fn padding(&self) -> Edges {

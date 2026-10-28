@@ -278,6 +278,8 @@ pub struct Dialog {
     /// arrange 时算出的按钮矩形，与 buttons 一一对应。
     button_rects: Vec<Rect>,
     item: FlexItem,
+    /// 面板尺寸（运行时可由 `set_size` 改；默认 420×220）。
+    panel_size: Size,
 }
 
 impl Dialog {
@@ -297,6 +299,7 @@ impl Dialog {
             buttons: Vec::new(),
             button_rects: Vec::new(),
             item: FlexItem::default(),
+            panel_size: Size::new(420.0, 220.0),
         }
     }
 
@@ -353,6 +356,23 @@ impl Dialog {
     /// 那条路径会挂载、判重、标脏并请求重排。本方法只用于"组装还没挂载的 Dialog"。
     pub fn push_child(&mut self, child: Box<dyn Widget>) {
         self.children.push(child);
+    }
+
+    /// 运行时设置面板尺寸（clamp 到 200..=800 × 150..=600）。
+    ///
+    /// 输入：期望宽高（逻辑像素）。负值/NaN 会被 clamp 到下限。
+    /// 副作用：只改字段——**不自动标脏**。调用方随后必须
+    /// `tree.mark_layout_dirty(id)` + `tree.invalidate(id)`，否则新尺寸不会生效。
+    /// 实际绘制尺寸还会被窗口约束：`min(panel_size, 父矩形 - 40)`。
+    pub fn set_size(&mut self, width: f32, height: f32) {
+        let clamp = |v: f32, lo: f32, hi: f32| {
+            if v.is_finite() {
+                v.clamp(lo, hi)
+            } else {
+                lo
+            }
+        };
+        self.panel_size = Size::new(clamp(width, 200.0, 800.0), clamp(height, 150.0, 600.0));
     }
 
     /// 运行时设置打开状态（`open()` / `close()` 的二合一）。
@@ -438,8 +458,8 @@ impl Widget for Dialog {
 
     fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = rect;
-        let w = 420.0_f32.min(rect.w - 40.0);
-        let h = 220.0_f32.min(rect.h - 40.0);
+        let w = self.panel_size.w.min(rect.w - 40.0);
+        let h = self.panel_size.h.min(rect.h - 40.0);
         self.panel = Rect::new(
             rect.x + (rect.w - w) * 0.5,
             rect.y + (rect.h - h) * 0.5,
