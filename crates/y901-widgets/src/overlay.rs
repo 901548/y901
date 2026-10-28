@@ -358,6 +358,15 @@ impl Dialog {
         self.children.push(child);
     }
 
+    /// 当前面板矩形（`arrange` 之后有效；未布局时是 `Rect::ZERO`）。
+    ///
+    /// 用途：测试与诊断（例如断言 `set_size` 真的生效）——不是渲染或命中路径。
+    /// 注意它已经过窗口约束（`min(panel_size, 父矩形 - 40)`），因此可能小于
+    /// `set_size` 传入的值。
+    pub fn panel_rect(&self) -> Rect {
+        self.panel
+    }
+
     /// 运行时设置面板尺寸（clamp 到 200..=800 × 150..=600）。
     ///
     /// 输入：期望宽高（逻辑像素）。负值/NaN 会被 clamp 到下限。

@@ -588,3 +588,41 @@ if need_layout || external > 0 || structural {
 **已知语义耦合**：`focusable()` 同时决定"能否进 Tab 序列"和"能否被 `set_focus` 接受"。
 如果将来出现"代码聚焦但不进 Tab"的需求（比如模态内自动聚焦一个不可 Tab 的节点），
 需要引入 `programmatically_focusable()` 之类的第二开关。当前没有这种需求，所以不拆。
+## §30 密码输入的安全契约
+
+`TextInput::password(true)` 时，`semantics()` 的**所有文本字段必须 mask**，
+且 `sensitive = true`：
+
+- `label`：`"password"`（不显示原文）；
+- `value`：`"*".repeat(chars().count())`（按**字符数**，不是字节数——"中"是 1 个 `*`）；
+- `state("text")`：同 `value`；
+- `sensitive`：`true`；
+- `cursor` / `anchor` / `len`：**保留**（长度已通过 `*` 的数暴露，这是有意接受的）；
+- `text()`：**仍返回原文**（Host 提交给 SSH / 保存时用）。
+
+**为什么是硬需求**：Agent 通过 `get_tree` / `query` / `subscribe` 读取 `semantics`。
+不 mask 就等于把密码明文交给 AI。这不是便利性，是安全边界。
+
+**渲染约束**：
+
+- 正文每个字符（**含空格**）画 `*`——空格也要画，否则长度不可见；
+- IME 预编辑串同样 mask（否则中文输入法会把明文画在光标处）；
+- 光标 / 选区 / 点击位置仍按**原文本坐标**计算，交互完全不变。
+
+**复制粘贴**：密码框的 `Ctrl+C` / `Ctrl+V` **保持正常**——用户从密码管理器
+粘贴密码是常见操作，禁止粘贴会让密码管理器不可用。密码框的语义是"隐藏显示"，
+不是"禁止复制"。应用如果想禁止，自己在应用层拦 `Ctrl+C`，不是框架的事。
+
+## §30.1 占位提示（placeholder）
+
+`TextInput::placeholder` 只在 `buffer.text().is_empty() && preedit.is_empty()` 时渲染；
+**不进 `TextBuffer`、不进 `semantics`、不参与布局**。
+
+当前颜色固定为暗灰（`rgba(0.55, 0.58, 0.64, 1.0)`），不跟主题走。
+
+## TODO（框架侧，等需求触发）
+
+- 主题加 `placeholder_fg` 字段，让占位提示跟随主题（当前固定暗灰）。
+- `Dialog::set_size` 之后调用方必须 `mark_layout_dirty(id)` + `invalidate(id)`；
+  `set_size` 的 doc comment 与 §29 都写明了，但容易被忽略——若将来出现
+  "调用方忘了标脏"的实际问题，考虑让 `set_size` 走 `Command` 路径返回 `Relayout`。

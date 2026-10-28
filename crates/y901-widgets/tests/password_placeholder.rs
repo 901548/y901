@@ -243,19 +243,21 @@ fn dialog_set_size_changes_arrange() {
     let mut d = Dialog::new("dlg", "T");
     d.set_open(true);
     arranged_dialog(&mut d, Size::new(1200.0, 900.0));
-    let default_panel = d.rect(); // 面板在 rect 之外，这里只断言不 panic
-    let _ = default_panel;
+    assert_eq!(
+        d.panel_rect().size(),
+        Size::new(420.0, 220.0),
+        "默认面板必须是 420×220"
+    );
 
     d.set_size(600.0, 400.0);
     arranged_dialog(&mut d, Size::new(1200.0, 900.0));
+    assert_eq!(d.panel_rect().w, 600.0, "set_size 后宽度必须生效");
+    assert_eq!(d.panel_rect().h, 400.0, "set_size 后高度必须生效");
 
-    // 面板尺寸通过 hit/clip 观察不到，用 render 的 fill 面积间接验证：
-    // 这里改用"按钮条位置随面板移动"来断言面板确实变了
-    let mut rec = Rec::default();
-    d.render(&mut rec);
-    assert!(rec.texts.iter().any(|t| t == "T"));
+    // 面板必须居中（1200×900 的窗口里，(1200-600)/2 = 300）
+    assert_eq!(d.panel_rect().x, 300.0);
+    assert_eq!(d.panel_rect().y, 250.0);
 }
-
 #[test]
 fn dialog_set_size_clamps() {
     let mut d = Dialog::new("dlg", "T");
