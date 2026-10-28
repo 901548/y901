@@ -147,7 +147,11 @@ impl D3dBackend {
     /// 每帧开始：清空实例数组，并推进图集帧号（LRU 用）。
     pub fn begin(&mut self) {
         self.instances.clear();
+        // **基座裁剪 = 客户区**：之后所有 fill_rect / 字形都必须落在窗口内。
+        // 少了这一层，组件只要把内容画到负坐标（例如终端多算了一行），
+        // 就会画到窗口标题栏缝隙里。
         self.clips.clear();
+        self.clips.push(Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h));
         self.text.begin_frame();
     }
 
@@ -290,10 +294,19 @@ impl D3dBackend {
         ];
         let rgba = [color.r, color.g, color.b, color.a];
 
+        // 字形也要裁剪：`clip_of` 只作用于 fill_rect，字形是带 UV 的矩形，
+        // 必须按裁剪框缩放并重映射 UV（否则会画到客户区外，见 §34）。
+        let Some(clip) = self.clips.last().copied() else {
+            return;
+        };
+        let Some(quad) = clip_quad(pos, size, uv, clip) else {
+            return;
+        };
+
         self.instances.push(Instance {
-            pos: [pos.x, pos.y],
-            size,
-            uv_rect: uv,
+            pos: [quad.pos.x, quad.pos.y],
+            size: quad.size,
+            uv_rect: quad.uv,
             color: rgba,
         });
 
@@ -512,6 +525,51 @@ impl RenderCtx for D3dBackend {
     }
 }
 
+/// 一个带纹理坐标的矩形（供裁剪使用）。
+struct ClippedQuad {
+    pos: Pos,
+    size: [f32; 2],
+    uv: [f32; 4],
+}
+
+/// 把带 UV 的矩形裁到 `clip` 内，并按比例重映射 UV。
+///
+/// 输入：`pos`/`size`（屏幕矩形）、`uv = [u0, v0, u1, v1]`、`clip`（裁剪框）。
+/// 返回：完全在框外时 `None`；否则返回裁剪后的矩形与重映射的 UV。
+/// 失败：无（纯几何运算，不 panic）。
+///
+/// 为什么需要：字形以实例矩形绘制，`clip_of` 只服务于 `fill_rect`。
+/// 不做这一步，越界字形会画到客户区外（终端多算一行时表现为
+/// "文字画到标题栏缝隙里"）。
+fn clip_quad(pos: Pos, size: [f32; 2], uv: [f32; 4], clip: Rect) -> Option<ClippedQuad> {
+    if size[0] <= 0.0 || size[1] <= 0.0 {
+        return None;
+    }
+    let quad = Rect::new(pos.x, pos.y, size[0], size[1]);
+    let inter = quad.intersect(clip);
+    if inter.is_empty() {
+        return None;
+    }
+    // 比例：裁剪后占原来的多少
+    let sx = inter.w / quad.w;
+    let sy = inter.h / quad.h;
+    let du = uv[2] - uv[0];
+    let dv = uv[3] - uv[1];
+    // 相对于原矩形左上角的偏移比例
+    let ox = (inter.x - quad.x) / quad.w;
+    let oy = (inter.y - quad.y) / quad.h;
+    Some(ClippedQuad {
+        pos: Pos::new(inter.x, inter.y),
+        size: [inter.w, inter.h],
+        uv: [
+            uv[0] + du * ox,
+            uv[1] + dv * oy,
+            uv[0] + du * (ox + sx),
+            uv[1] + dv * (oy + sy),
+        ],
+    })
+}
+
 /// 字形在格子里的水平居中偏移。
 ///
 /// `span * cell_w` 是"该字形应占的宽度"（格契约），`advance` 是字体实际推进宽度。
@@ -657,5 +715,68 @@ mod rebuild_source_tests {
             body.contains("true"),
             "重传时必须 reset=true（全量重传），body:\n{body}"
         );
+    }
+}
+
+#[cfg(test)]
+mod clip_quad_tests {
+    use super::clip_quad;
+    use y901_ui::{Pos, Rect};
+
+    /// 完全在裁剪框内：原样返回（UV 不变）。
+    #[test]
+    fn inside_is_unchanged() {
+        let q = clip_quad(
+            Pos::new(10.0, 10.0),
+            [8.0, 16.0],
+            [0.0, 0.0, 0.1, 0.2],
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+        )
+        .expect("应保留");
+        assert_eq!(q.pos, Pos::new(10.0, 10.0));
+        assert_eq!(q.size, [8.0, 16.0]);
+        assert_eq!(q.uv, [0.0, 0.0, 0.1, 0.2]);
+    }
+
+    /// 完全在框外：丢弃（这就是"文字画到标题栏外"的修复点）。
+    #[test]
+    fn outside_is_dropped() {
+        let q = clip_quad(
+            Pos::new(-50.0, -50.0),
+            [8.0, 16.0],
+            [0.0, 0.0, 0.1, 0.2],
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+        );
+        assert!(q.is_none(), "框外字形必须丢弃");
+    }
+
+    /// 顶部越界一半：高度减半，V 坐标同步减半（UV 重映射正确）。
+    #[test]
+    fn partial_top_overflow_shrinks_and_remaps_uv() {
+        // 字形在 y=-8，高 16 → 上半 8px 在框外
+        let q = clip_quad(
+            Pos::new(10.0, -8.0),
+            [8.0, 16.0],
+            [0.0, 0.0, 0.1, 1.0],
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+        )
+        .expect("部分可见应保留");
+        assert_eq!(q.pos.y, 0.0, "裁剪后应从 y=0 开始");
+        assert!((q.size[1] - 8.0).abs() < 1e-4, "高度应减半，实际 {}", q.size[1]);
+        // 原来 v 从 0..1，被切掉上半 → 剩下的 v 是 0.5..1.0
+        assert!((q.uv[1] - 0.5).abs() < 1e-4, "v0 应为 0.5，实际 {}", q.uv[1]);
+        assert!((q.uv[3] - 1.0).abs() < 1e-4, "v1 应为 1.0，实际 {}", q.uv[3]);
+    }
+
+    /// 零尺寸不产生实例（避免除零 / 退化四边形）。
+    #[test]
+    fn zero_size_is_dropped() {
+        assert!(clip_quad(
+            Pos::new(0.0, 0.0),
+            [0.0, 10.0],
+            [0.0, 0.0, 1.0, 1.0],
+            Rect::new(0.0, 0.0, 100.0, 100.0)
+        )
+        .is_none());
     }
 }

@@ -28,6 +28,8 @@ impl PlatformRuntime for Win32Runtime {
             let (w, h) = window.viewport();
             let viewport = Size::new(w as f32, h as f32);
             let mut need_layout = false;
+            // 本帧是否处理过事件（决定空闲时是否需要休眠，见循环末尾）
+            let mut had_work = false;
             let mut mouse = None;
 
             for raw in window.drain_events() {
@@ -43,6 +45,7 @@ impl PlatformRuntime for Win32Runtime {
                     _ => {}
                 }
 
+                had_work = true;
                 if let Some(ev) = translate(&raw, viewport) {
                     // Host 先处理：返回 Handled 表示它接管了这条事件
                     if host.event(&mut tree, &ev).is_handled() {
@@ -108,6 +111,15 @@ impl PlatformRuntime for Win32Runtime {
             }
 
             window.render(&mut tree);
+
+            // 空闲休眠：**没有事件、也没有画任何东西**时阻塞等消息。
+            //
+            // 之前主循环是无条件 `PeekMessage` 死循环：既没有消息也不渲染时仍然
+            // 全速空转，吃满一个核 → 输入延迟、拖拽卡顿。
+            // 不能无限等：PTY 输出走 channel 而不是 Windows 消息，必须周期性醒来。
+            if !had_work && tree.dirty().is_empty() {
+                let _ = window.wait_message(8);
+            }
         }
 
         // 退出前把最后的 Tick 跑完，避免 PTY 数据丢失

@@ -730,3 +730,56 @@ pub fn render(&mut self, tree: &mut UiTree) {
 
 **为什么不改成"每帧都重画"**：那是纯浪费（空转 CPU/GPU），而且仍然会在
 `present` 失败或设备丢失时闪；"保留上一帧"才是正确的呈现模型。
+## §34 卡顿与裁剪：主循环空转 + 客户区裁剪缺失
+
+### 34.1 主循环空转（极度卡顿的真凶）
+
+`Win32Runtime::run` 原本是：
+
+```rust
+loop {
+    if !window.pump() { break }   // PeekMessage：**非阻塞**
+    … 处理事件 / 布局 / render …
+}
+```
+
+`PeekMessage` 没有消息时立刻返回，于是"没有输入、没有脏区"时这个循环
+**全速空转**吃满一个核——表现为鼠标移动/点击有明显延迟（Windows 输入线程抢不到 CPU）。
+
+修法：空闲时阻塞等待消息（有限超时）：
+
+```rust
+if !had_work && tree.dirty().is_empty() {
+    let _ = window.wait_message(8);   // MsgWaitForMultipleObjectsEx(QS_ALLINPUT, 8ms)
+}
+```
+
+- **不能无限等**：PTY 输出走 channel 而不是 Windows 消息，必须周期性醒来 `pump`；
+- 8ms ≈ 125 次/秒的空转上限，相比 100% 占满已可忽略。
+
+### 34.2 客户区裁剪缺失（文本画到标题栏外）
+
+两个独立缺口：
+
+1. `D3dBackend::begin()` 只 `clips.clear()`，**没有基座裁剪**——
+   于是 `clip_of()` 在 `clips` 为空时原样返回矩形，什么都没裁。
+2. `push_glyph()` **完全不裁剪**：`clip_of` 只被 `fill_rect` 调用，
+   字形实例是无条件 push 的。
+
+修法：
+
+1. `begin()` 压入客户区作为基座裁剪：`clips.push(Rect::new(0, 0, viewport.w, viewport.h))`；
+2. 字形按裁剪框缩放 + 重映射 UV（`clip_quad`）：完全在框外直接丢弃，
+   部分越界则裁剪矩形并按比例重算 UV——比整字形丢弃更平滑（不会出现半截字突然消失）。
+
+**为什么不上 GPU scissor**：需要新增 `RSSetScissorRects` vtable 槽 + RECT 结构 +
+光栅化状态改写，属于未测试过的 unsafe 路径；CPU 侧 `clip_quad` 是纯函数，
+可单测（见 `clip_quad_tests`），风险低得多。等有 GPU 环境验证后再考虑 GPU scissor。
+
+### 34.3 仍存在的性能隐患（未修）
+
+`finish_dispatch` 与 `dispatch` 的通用分支：**任何 `Relayout` 都会把脏区置为 full**，
+而 `UiEvent::Tick` 是广播事件（`target_id == None`），组件返回 `Redraw` 时也会
+`invalidate_all()`。如果终端光标闪烁或 PTY 轮询每帧触发一次 Tick，就会每帧全量重绘。
+当前没有把它改细，因为"重排后位置可能变、只标旧矩形会漏画"（§28.1 同样的理由）。
+若真出现掉帧，可以考虑：`Tick` 的 Redraw 收集各响应节点的矩形后逐块标脏。

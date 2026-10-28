@@ -16,7 +16,8 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
-    LoadCursorW, PeekMessageW, PostQuitMessage, RegisterClassExW,
+    LoadCursorW, MsgWaitForMultipleObjectsEx, PeekMessageW, PostQuitMessage, QS_ALLINPUT,
+    RegisterClassExW,
     SetCursor, SetWindowLongPtrW, ShowWindow, TranslateMessage,
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW,
     IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IDC_SIZEALL, MSG, PM_REMOVE, SW_SHOW,
@@ -530,6 +531,29 @@ impl Window {
         // 尺寸可能在本轮变化
         self.viewport = *SIZE.lock().unwrap_or_else(|e| e.into_inner());
         true
+    }
+
+    /// 空闲等待：**没有消息时阻塞**，避免主循环空转吃满 CPU。
+    ///
+    /// 输入：`timeout_ms`（毫秒）。期间若有消息到达会提前返回。
+    /// 返回：`true` = 等到了输入或超时；`false` = 收到退出信号（WM_QUIT）。
+    /// 失败：无（等待失败按超时处理）。
+    ///
+    /// 为什么不能无限等：PTY 输出走的是 channel 而不是 Windows 消息，
+    /// 主循环必须周期性醒来 `pump` 一次，所以这里用**有限超时**。
+    pub fn wait_message(&self, timeout_ms: u32) -> bool {
+        unsafe {
+            // 第 1 个参数 0 表示不等待任何句柄，只看消息队列。
+            let r = MsgWaitForMultipleObjectsEx(
+                0,
+                std::ptr::null(),
+                timeout_ms,
+                QS_ALLINPUT,
+                0,
+            );
+            // WAIT_OBJECT_0..WAIT_OBJECT_0+1 都可能出现；超时是 WAIT_TIMEOUT(258)
+            r != 258
+        }
     }
 
     /// 取走本轮平台事件。
