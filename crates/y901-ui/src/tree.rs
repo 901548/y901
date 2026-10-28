@@ -106,6 +106,30 @@ impl DirtyRegion {
         self.full = false;
         self.rects.clear();
     }
+
+    /// 脏矩形列表（`is_full()` 为真时无意义——那时整窗都要重绘）。
+    ///
+    /// 返回：只读切片，供渲染后端做 scissor / 局部绘制。
+    /// 副作用：无。
+    pub fn rects(&self) -> &[Rect] {
+        &self.rects
+    }
+
+    /// 把所有脏矩形合并成一个包围盒（忽略空集）。
+    ///
+    /// 返回：`None` = 没有脏矩形（且不是 full）；否则是覆盖全部脏块的矩形。
+    /// 用途：后端设置单一 scissor 时用它，避免逐矩形多次 draw。
+    pub fn bounds(&self) -> Option<Rect> {
+        let mut it = self.rects.iter().filter(|r| !r.is_empty());
+        let first = *it.next()?;
+        Some(it.fold(first, |acc, r| {
+            let x0 = acc.x.min(r.x);
+            let y0 = acc.y.min(r.y);
+            let x1 = acc.right().max(r.right());
+            let y1 = acc.bottom().max(r.bottom());
+            Rect::new(x0, y0, x1 - x0, y1 - y0)
+        }))
+    }
 }
 
 pub struct UiTree {
@@ -1653,7 +1677,14 @@ fn broadcast(
     acc: &mut EventResult,
     redraw_rects: &mut Vec<Rect>,
 ) {
-    let r = node.event(ctx, event);
+    // `Tick` 是每帧心跳：只发给显式订阅的节点（`wants_tick`），
+    // 否则每帧 8 轮 × 全树虚调用。其他广播事件（Focus/Resize）照常全员送达。
+    let wants = !matches!(event, UiEvent::Tick) || node.wants_tick();
+    let r = if wants {
+        node.event(ctx, event)
+    } else {
+        EventResult::Ignored
+    };
     if r.needs_redraw() {
         // 广播事件（Tick 等）没有单一 target：记录每个**真的要求重绘**的节点矩形，
         // 稍后逐块标脏，而不是整窗重绘（见 §35）。

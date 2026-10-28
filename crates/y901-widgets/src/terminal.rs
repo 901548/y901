@@ -268,6 +268,11 @@ impl Widget for TerminalWidget {
         true
     }
 
+    /// 终端订阅每帧心跳：`Tick` 里拉 PTY 输出（不订阅就永远收不到）。
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     fn measure(
         &mut self,
         metrics: &dyn TextMetrics,

@@ -30,6 +30,11 @@ impl Widget for Blinker {
     fn id(&self) -> &str {
         self.id
     }
+
+    /// 订阅 Tick：`Tick` 广播现在只发给订阅者（`wants_tick`）。
+    fn wants_tick(&self) -> bool {
+        true
+    }
     fn measure(
         &mut self,
         _m: &dyn TextMetrics,
