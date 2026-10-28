@@ -21,6 +21,8 @@ pub struct Button {
     disabled: bool,
     hovered: bool,
     pressed: bool,
+    /// 持久选中态（按钮组单选用）。
+    selected: bool,
 }
 
 impl Button {
@@ -39,6 +41,7 @@ impl Button {
             disabled: false,
             hovered: false,
             pressed: false,
+            selected: false,
         }
     }
 
@@ -47,6 +50,22 @@ impl Button {
         self.command = command.into();
         self.args = args;
         self
+    }
+
+    /// 选中态（构建器）：用于"按钮组单选"（主题切换、模式选择等）。
+    ///
+    /// 返回：自身。副作用：无（只改字段，渲染时映射到 `State::Selected`）。
+    pub fn selected(mut self, on: bool) -> Self {
+        self.selected = on;
+        self
+    }
+
+    /// 运行时切换选中态。
+    ///
+    /// 副作用：只改字段——**不自动标脏**（组件碰不到 `UiTree`）。
+    /// 调用方随后必须 `tree.invalidate(id)`。
+    pub fn set_selected(&mut self, on: bool) {
+        self.selected = on;
     }
 
     /// 禁用按钮：不参与 Tab 遍历，点击不再发命令。
@@ -94,6 +113,12 @@ impl Widget for Button {
         } else {
             y901_ui::Cursor::Pointer
         }
+    }
+
+    /// 向下转型：`Host` 运行时调 `set_selected` 的唯一路径
+    /// （`UiTree` 不暴露具体类型，只能 `find_mut(id).as_any_mut()`）。
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     fn flex(&self) -> FlexItem {
@@ -167,8 +192,13 @@ impl Widget for Button {
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
         // 颜色全部来自主题：组件不持有任何业务色
+        // 优先级：Disabled > Selected > Pressed > Hovered > Normal。
+        // Selected 是**持久**状态（"当前选中的主题"），必须始终可见；
+        // Pressed/Hovered 是瞬时反馈，不覆盖它。
         let state = if self.disabled {
             State::Disabled
+        } else if self.selected {
+            State::Selected
         } else if self.pressed {
             State::Pressed
         } else if self.hovered {
@@ -197,6 +227,9 @@ impl Widget for Button {
             .disabled(self.disabled)
             .prop("hovered", self.hovered.to_string())
             .prop("pressed", self.pressed.to_string())
+            // 选中态是**持久状态**：放 state（结构化），供 Agent 判断
+            // "当前是哪个主题/模式"。hovered/pressed 是瞬时的，留在 prop。
+            .state("selected", self.selected)
     }
 }
 

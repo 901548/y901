@@ -16,13 +16,24 @@ pub enum State {
     Pressed,
     Focused,
     Disabled,
+    /// 持久选中态（按钮组单选）。**没有独立主题列**——由 Normal 向 Pressed 混色派生。
+    Selected,
 }
 
 impl State {
+    /// 主题表的列数（`Normal..=Disabled` 五列；`Selected` 是派生状态，不占列）。
     pub const COUNT: usize = 5;
 
-    pub const fn index(self) -> usize {
-        self as usize
+    /// 主题表列下标。`Selected` 没有列，返回 `None`。
+    pub const fn table_index(self) -> Option<usize> {
+        match self {
+            State::Normal => Some(0),
+            State::Hovered => Some(1),
+            State::Pressed => Some(2),
+            State::Focused => Some(3),
+            State::Disabled => Some(4),
+            State::Selected => None,
+        }
     }
 }
 
@@ -48,6 +59,28 @@ impl Style {
             padding: Edges::ZERO,
             selection: Color::rgba(0.24, 0.45, 0.75, 0.55),
             caret: Color::rgba(0.85, 0.90, 1.0, 1.0),
+        }
+    }
+
+    /// 把背景与边框向 `other` 混色 `t`（0..=1），其余字段保持不变。
+    ///
+    /// 用途：`State::Selected` 的派生（Normal → Pressed 方向混 55%）。
+    /// 输入：`other` 目标样式、`t` 混合比例（越界自动 clamp）。
+    /// 返回：新 `Style`（Copy，无分配）。
+    pub fn blend_toward(self, other: Style, t: f32) -> Style {
+        let t = t.clamp(0.0, 1.0);
+        let mix = |a: Color, b: Color| {
+            Color::rgba(
+                a.r + (b.r - a.r) * t,
+                a.g + (b.g - a.g) * t,
+                a.b + (b.b - a.b) * t,
+                a.a + (b.a - a.a) * t,
+            )
+        };
+        Style {
+            bg: mix(self.bg, other.bg),
+            border: mix(self.border, other.border),
+            ..self
         }
     }
 
@@ -98,8 +131,20 @@ impl Theme {
     }
 
     /// 查表。未知角色回退到 panel。
-    pub const fn style(&self, role: Role, state: State) -> Style {
-        self.table[Theme::slot(role)][state.index()]
+    ///
+    /// `State::Selected`（持久选中）没有独立列：由该角色的 `Normal` 向 `Pressed`
+    /// 混色 55% 得到——比 Normal 深、比 Pressed 浅，符合"选中"的视觉预期。
+    /// 这样所有角色都自动拥有选中态，不必给 12 行主题表各加一列。
+    pub fn style(&self, role: Role, state: State) -> Style {
+        let slot = Theme::slot(role);
+        match state.table_index() {
+            Some(index) => self.table[slot][index],
+            None => {
+                let normal = self.table[slot][State::Normal.table_index().unwrap_or(0)];
+                let pressed = self.table[slot][State::Pressed.table_index().unwrap_or(2)];
+                normal.blend_toward(pressed, 0.55)
+            }
+        }
     }
 
     /// 默认暗色主题。组件不得再硬编码颜色。

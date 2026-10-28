@@ -626,3 +626,33 @@ if need_layout || external > 0 || structural {
 - `Dialog::set_size` 之后调用方必须 `mark_layout_dirty(id)` + `invalidate(id)`；
   `set_size` 的 doc comment 与 §29 都写明了，但容易被忽略——若将来出现
   "调用方忘了标脏"的实际问题，考虑让 `set_size` 走 `Command` 路径返回 `Relayout`。
+## §31 Button 的选中态
+
+`Button::selected(bool)` 用于"按钮组单选"场景（主题切换、Agent/QA 模式、SSH 类型等）。
+
+- **渲染状态优先级**：`Disabled > Selected > Pressed > Hovered > Normal`。
+  `Selected` 是**持久**状态（"当前选中的是哪个"），必须始终可见；
+  `Pressed` / `Hovered` 是瞬时反馈，不覆盖它。
+- **`Selected` 的配色**：没有独立主题列，由该角色的 `Normal` 向 `Pressed`
+  混色 55% 派生（`Style::blend_toward`）——比 Normal 深、比 Pressed 浅。
+  这样所有角色自动拥有选中态，不必给两张主题表各加 6 列。
+- **`set_selected` 不自动标脏**：组件碰不到 `UiTree`，调用方必须 `tree.invalidate(id)`。
+- **语义**：`semantics().state["selected"]` 是布尔值，Agent 据此判断
+  "当前是暗色主题 / 当前是 QA 模式"。
+- **运行时改选中态的唯一路径**：`tree.find_mut(id).as_any_mut().downcast_mut::<Button>()`
+  （`Button` 已实现 `as_any_mut`）。
+
+典型用法（三选一）：
+
+```rust
+// 构建
+Button::new("btn-dark", "暗").selected(theme == Theme::Dark)
+// 切换（Host 里）
+for (id, on) in [("btn-dark", dark), ("btn-light", light), ("btn-system", sys)] {
+    if let Some(b) = tree.find_mut(id).and_then(|w| w.as_any_mut())
+        .and_then(|a| a.downcast_mut::<Button>()) {
+        b.set_selected(on);
+    }
+    tree.invalidate(id);
+}
+```
