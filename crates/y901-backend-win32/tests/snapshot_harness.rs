@@ -62,6 +62,13 @@ impl Widget for Scene {
             Color::rgba(0.95, 0.55, 0.15, 1.0),
             26.0,
         );
+        // 圆角描边（验证 SDF 轮廓带）：放在下方，与其他图元不重叠
+        ctx.stroke_round_rect(
+            Rect::new(self.rect.x + 360.0, self.rect.y + 160.0, 200.0, 64.0),
+            Color::rgba(0.35, 0.95, 0.55, 1.0),
+            10.0,
+            14.0,
+        );
         // 一个纯色块（验证 fill_rect 路径）
         ctx.fill_rect(
             Rect::new(self.rect.x + 16.0, self.rect.y + 150.0, 120.0, 60.0),
@@ -282,4 +289,74 @@ fn round_rect_sdf_matches_math() {
     // 边缘带：周长约 2*(200+120) = 640 像素 → 1px 过渡带应有数百个点
     assert!(edge > 150, "边缘过渡带太窄，可能没做抗锯齿：{edge}");
     eprintln!("[round] SDF 验证通过：内部 {inside}、外部 {outside}、边缘带 {edge} 像素");
+}
+
+/// GPU SDF 圆角描边：只画轮廓带，内部必须透出背景。
+#[test]
+#[ignore = "需要真实 GPU：cargo test -p y901-backend-win32 --release --test snapshot_harness -- --ignored --nocapture"]
+fn round_stroke_draws_ring_only() {
+    let options = Options {
+        title: "y901 stroke harness".to_string(),
+        width: 640,
+        height: 240,
+        theme: None,
+        font: None,
+    };
+    let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
+    let mut tree = UiTree::new(Box::new(Scene {
+        rect: Rect::ZERO,
+        text_rect: Rect::ZERO,
+    }));
+    window.resize(&mut tree);
+    window.request_snapshot();
+    tree.invalidate_all();
+    window.render(&mut tree);
+    let (px, w, h) = window.take_snapshot().expect("快照失败");
+
+    // 后端会把矩形裁到视口内再交给着色器，这里必须用**裁剪后**的几何算期望，
+    // 否则算出来的 d 和 GPU 看到的不是同一个矩形（第一版就这么错的）。
+    let (rx0, ry0, rw0, rh0, radius, width_px) =
+        (360.0f32, 160.0f32, 200.0f32, 64.0f32, 14.0f32, 10.0f32);
+    let (rx, ry) = (rx0, ry0);
+    let rw = rw0.min(w as f32 - rx0);
+    let rh = rh0.min(h as f32 - ry0);
+    let half = [rw * 0.5, rh * 0.5];
+    let stroke_rgb = [89i32, 242, 140]; // (0.35, 0.95, 0.55) * 255
+    let mut ring = 0;
+    let mut inner = 0;
+    let mut outside = 0;
+
+    for y in (ry as u32)..((ry + rh) as u32).min(h) {
+        for x in (rx as u32)..((rx + rw) as u32).min(w) {
+            let p = [x as f32 - rx - half[0] + 0.5, y as f32 - ry - half[1] + 0.5];
+            let q = [p[0].abs() - half[0] + radius, p[1].abs() - half[1] + radius];
+            let ext = (q[0].max(0.0).powi(2) + q[1].max(0.0).powi(2)).sqrt();
+            let d = q[0].max(q[1]).min(0.0) + ext - radius;
+            let i = ((y * w + x) * 4) as usize;
+            let got = [px[i + 2] as i32, px[i + 1] as i32, px[i] as i32];
+            let is_stroke = (got[0] - stroke_rgb[0]).abs() <= 12
+                && (got[1] - stroke_rgb[1]).abs() <= 12
+                && (got[2] - stroke_rgb[2]).abs() <= 12;
+
+            if d.abs() <= width_px * 0.5 - 2.0 {
+                // 带内：必须是描边色
+                ring += 1;
+                assert!(is_stroke, "({x},{y}) d={d:.2} 应在描边带内，实际 {got:?}");
+            } else if d < -(width_px * 0.5 + 2.0) {
+                // 内部：必须不是描边色（证明是轮廓而不是实心）
+                inner += 1;
+                assert!(!is_stroke, "({x},{y}) d={d:.2} 内部不应被描边填满，实际 {got:?}");
+            } else if d > width_px * 0.5 + 2.0 {
+                outside += 1;
+                assert!(!is_stroke, "({x},{y}) d={d:.2} 外部不应有描边，实际 {got:?}");
+            }
+        }
+    }
+    // 矩形被视口裁到 200x33：轮廓带约 900，内部约 3400
+    assert!(ring > 600, "轮廓带像素太少：{ring}");
+    assert!(inner > 2000, "内部像素太少：{inner}");
+    // 说明：矩形被视口下沿裁切，下两个圆角实际不存在，
+    // 所以"外部"像素很少；这里只要求不会误判。
+    let _ = outside;
+    eprintln!("[stroke] SDF 描边验证通过：轮廓带 {ring}、内部 {inner}、外部 {outside} 像素");
 }

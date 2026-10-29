@@ -98,6 +98,22 @@ impl Instance {
         inst
     }
 
+    /// 圆角描边实例：只画"轮廓带"（`|d| <= width/2`），内部与外部都 discard。
+    ///
+    /// 输入：位置、尺寸、颜色、描边宽度（像素）、圆角半径。
+    pub fn round_stroke(
+        pos: [f32; 2],
+        size: [f32; 2],
+        color: [f32; 4],
+        width: f32,
+        radius: f32,
+    ) -> Self {
+        let r = radius.clamp(0.0, size[0].min(size[1]) * 0.5);
+        let mut inst = Self::solid(pos, size, [0.0, 0.0, 0.0, 0.0], color);
+        inst.params = [r, 1.0, width.max(0.0), 0.0];
+        inst
+    }
+
     /// 线性渐变实例。
     ///
     /// 输入：矩形（像素）、起点色、终点色、`dir`（像素空间方向向量，无需归一化）。
@@ -1183,7 +1199,10 @@ float4 ps_main(VSOutput input) : SV_Target
     // 圆角：SDF（有向距离场）覆盖率。d<0 在内，d>0 在外。
     // 覆盖率 = saturate(0.5 - d / softness)，softness=1 时就是 1px 过渡带（完美 AA）。
     float sdf_cov = 1.0;
-    if (input.params.x > 0.0)
+    // params = (radius, softness, stroke_width, 0)
+    //   radius > 0 或 stroke_width > 0 时走 SDF；
+    //   stroke_width > 0 时只保留"轮廓带" |d| <= width/2（圆角描边）。
+    if (input.params.x > 0.0 || input.params.z > 0.0)
     {
         float2 half_size = input.size * 0.5;
         float2 p = input.local * input.size - half_size;
@@ -1191,7 +1210,16 @@ float4 ps_main(VSOutput input) : SV_Target
         float2 q = abs(p) - half_size + r;
         float d = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
         float soft = max(input.params.y, 0.001);
-        sdf_cov = saturate(0.5 - d / soft);
+        if (input.params.z > 0.0)
+        {
+            // 描边：距离"轮廓中线" |d| 与半宽比较
+            float w = input.params.z;
+            sdf_cov = saturate(0.5 - (abs(d) - w * 0.5) / soft);
+        }
+        else
+        {
+            sdf_cov = saturate(0.5 - d / soft);
+        }
         if (sdf_cov <= 0.0)
         {
             discard;

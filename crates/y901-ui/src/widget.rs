@@ -364,6 +364,70 @@ pub trait RenderCtx: TextMetrics {
         }
     }
 
+    /// 圆角描边（只画轮廓，不填内部）。
+    ///
+    /// 输入：`rect`、`color`、`width`（描边宽度，居中于边界）、`radius`。
+    /// 默认实现（CPU 兜底）：先画外圆角再用背景色挖内部是不行的（会覆盖下层），
+    /// 所以这里抽象为"上下左右四条带 + 四个圆角环"：直边用 `fill_rect`，
+    /// 圆角用逐行弦长差异画出带宽度的弧。后端（D3D）应覆盖为 SDF 单实例。
+    fn stroke_round_rect(&mut self, rect: Rect, color: Color, width: f32, radius: f32) {
+        let w = width.max(0.0);
+        if w <= 0.0 || rect.is_empty() {
+            return;
+        }
+        let r = radius.clamp(0.0, rect.w.min(rect.h) * 0.5);
+        if r <= 0.5 {
+            self.stroke_rect(rect, color, w);
+            return;
+        }
+        // 直边（上下各一条、左右两条只到圆角起点）
+        self.fill_rect(Rect::new(rect.x + r, rect.y, rect.w - 2.0 * r, w), color);
+        self.fill_rect(
+            Rect::new(rect.x + r, rect.bottom() - w, rect.w - 2.0 * r, w),
+            color,
+        );
+        self.fill_rect(Rect::new(rect.x, rect.y + r, w, rect.h - 2.0 * r), color);
+        self.fill_rect(
+            Rect::new(rect.right() - w, rect.y + r, w, rect.h - 2.0 * r),
+            color,
+        );
+        // 四个圆角：逐行画出弦长差（外弧 - 内弧）
+        let steps = (r.ceil() as i32).max(1);
+        for i in 0..steps {
+            let dy = r - (i as f32 + 0.5);
+            let outer = (r * r - dy * dy).max(0.0).sqrt();
+            let inner_r = (r - w).max(0.0);
+            let inner = if dy.abs() <= inner_r {
+                (inner_r * inner_r - dy * dy).max(0.0).sqrt()
+            } else {
+                0.0
+            };
+            let band = (outer - inner).max(0.0);
+            if band <= 0.0 {
+                continue;
+            }
+            // 左上 / 右上
+            self.fill_rect(
+                Rect::new(rect.x + r - outer, rect.y + i as f32, band, 1.0),
+                color,
+            );
+            self.fill_rect(
+                Rect::new(rect.right() - r + inner, rect.y + i as f32, band, 1.0),
+                color,
+            );
+            // 左下 / 右下
+            let y = rect.bottom() - 1.0 - i as f32;
+            self.fill_rect(
+                Rect::new(rect.x + r - outer, y, band, 1.0),
+                color,
+            );
+            self.fill_rect(
+                Rect::new(rect.right() - r + inner, y, band, 1.0),
+                color,
+            );
+        }
+    }
+
     /// 圆角单行：左/右边界像素按覆盖率给 alpha，中间实色。
     fn fill_round_row(&mut self, rect: Rect, y: f32, inset: f32, color: Color) {
         let x0 = rect.x + inset;

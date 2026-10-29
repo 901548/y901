@@ -544,6 +544,26 @@ impl RenderCtx for D3dBackend {
         ));
     }
 
+    /// 圆角描边：GPU SDF 单实例（`|d| <= width/2` 的轮廓带）。
+    ///
+    /// 与 CPU 兜底的差别：CPU 版用"直边四条 + 四个圆角逐行弦长" 拼接，
+    /// 接缝处有瞬断；GPU 版是同一个 `d`，天然连续且 1 次 draw。
+    fn stroke_round_rect(&mut self, rect: Rect, color: Color, width: f32, radius: f32) {
+        let Some(r) = self.clip_of(rect) else {
+            return;
+        };
+        if width <= 0.0 {
+            return;
+        }
+        self.instances.push(Instance::round_stroke(
+            [r.x, r.y],
+            [r.w, r.h],
+            [color.r, color.g, color.b, color.a],
+            width,
+            radius,
+        ));
+    }
+
     fn stroke_rect(&mut self, rect: Rect, color: Color, width: f32) {
         self.fill_rect(Rect::new(rect.x, rect.y, rect.w, width), color);
         self.fill_rect(
