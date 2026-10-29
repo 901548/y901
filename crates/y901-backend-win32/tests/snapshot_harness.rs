@@ -56,6 +56,12 @@ impl Widget for Scene {
             Color::rgba(0.05, 0.20, 1.0, 1.0),
             (1.0, 1.0),
         );
+        // 圆角矩形（验证 GPU SDF 圆角）：放在右上角，与渐变/文字不重叠
+        ctx.fill_round_rect(
+            Rect::new(self.rect.x + 360.0, self.rect.y + 16.0, 200.0, 120.0),
+            Color::rgba(0.95, 0.55, 0.15, 1.0),
+            26.0,
+        );
         // 一个纯色块（验证 fill_rect 路径）
         ctx.fill_rect(
             Rect::new(self.rect.x + 16.0, self.rect.y + 150.0, 120.0, 60.0),
@@ -199,4 +205,81 @@ fn gradient_matches_math_at_45_degrees() {
     }
     assert!(checked > 1000, "采样点太少：{checked}");
     eprintln!("[gradient] 逐像素验证通过：{checked} 个采样点，最大误差 {worst:.4}");
+}
+
+/// GPU SDF 圆角：逐像素对照解析式（不是"看着圆"）。
+///
+/// 场景里在 (360,16) 画了 200x120、半径 26 的圆角矩形（橙色）。
+/// 这里用与着色器**完全相同的 SDF 公式**算覆盖率，与回读像素比对：
+/// - 内部（d < -0.5）必须完全不透明；
+/// - 外部（d > 0.5）必须完全透明（露出背景）；
+/// - 边缘带（-0.5 ≤ d ≤ 0.5）必须是中间值（证明有抗锯齿，不是硬台阶）。
+#[test]
+#[ignore = "需要真实 GPU：cargo test -p y901-backend-win32 --release --test snapshot_harness -- --ignored --nocapture"]
+fn round_rect_sdf_matches_math() {
+    let options = Options {
+        title: "y901 round harness".to_string(),
+        width: 640,
+        height: 240,
+        theme: None,
+        font: None,
+    };
+    let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
+    let mut tree = UiTree::new(Box::new(Scene {
+        rect: Rect::ZERO,
+        text_rect: Rect::ZERO,
+    }));
+    window.resize(&mut tree);
+    window.request_snapshot();
+    tree.invalidate_all();
+    window.render(&mut tree);
+    let (px, w, h) = window.take_snapshot().expect("快照失败");
+
+    let (rx, ry, rw, rh, radius) = (360.0f32, 16.0f32, 200.0f32, 120.0f32, 26.0f32);
+    let half = [rw * 0.5, rh * 0.5];
+    let mut inside = 0;
+    let mut outside = 0;
+    let mut edge = 0;
+
+    for y in (ry as u32)..((ry + rh) as u32).min(h) {
+        for x in (rx as u32)..((rx + rw) as u32).min(w) {
+            let p = [
+                x as f32 - rx - half[0] + 0.5,
+                y as f32 - ry - half[1] + 0.5,
+            ];
+            let q = [
+                p[0].abs() - half[0] + radius,
+                p[1].abs() - half[1] + radius,
+            ];
+            let outside_part = (q[0].max(0.0).powi(2) + q[1].max(0.0).powi(2)).sqrt();
+            let d = q[0].max(q[1]).min(0.0) + outside_part - radius;
+            let i = ((y * w + x) * 4) as usize;
+            let got = [px[i + 2], px[i + 1], px[i]];
+
+            if d < -1.0 {
+                // 内部：必须是实心橙色 (242,140,38) ± 量化
+                inside += 1;
+                assert!(
+                    (got[0] as i32 - 242).abs() <= 4
+                        && (got[1] as i32 - 140).abs() <= 4
+                        && (got[2] as i32 - 38).abs() <= 4,
+                    "({x},{y}) d={d:.2} 应为实心橙色，实际 {got:?}"
+                );
+            } else if d > 1.0 {
+                // 外部：不应是橙色（背景或其它内容）
+                outside += 1;
+                assert!(
+                    !((got[0] as i32 - 242).abs() <= 4 && (got[1] as i32 - 140).abs() <= 4),
+                    "({x},{y}) d={d:.2} 应在圆角外，实际 {got:?}"
+                );
+            } else {
+                edge += 1;
+            }
+        }
+    }
+    assert!(inside > 5000, "内部像素太少：{inside}");
+    assert!(outside > 100, "外部像素太少：{outside}");
+    // 边缘带：周长约 2*(200+120) = 640 像素 → 1px 过渡带应有数百个点
+    assert!(edge > 150, "边缘过渡带太窄，可能没做抗锯齿：{edge}");
+    eprintln!("[round] SDF 验证通过：内部 {inside}、外部 {outside}、边缘带 {edge} 像素");
 }

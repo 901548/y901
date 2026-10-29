@@ -42,7 +42,7 @@ use windows_sys::Win32::Foundation::HWND;
 
 pub type Hresult = i32;
 
-pub const INSTANCE_SIZE: usize = 80;
+pub const INSTANCE_SIZE: usize = 96;
 pub const INSTANCE_CAPACITY: usize = 10_000;
 
 /// 一个绘制实例（轴对齐四边形）。
@@ -56,6 +56,7 @@ pub const INSTANCE_CAPACITY: usize = 10_000;
 /// | 32 | color      | 纯色 / 渐变起点色 |
 /// | 48 | color_end  | 渐变终点色（纯色时等于 `color`） |
 /// | 64 | gradient   | `(dir.x, dir.y, mode, offset)`；mode=1 表示线性渐变 |
+/// | 80 | params     | `(radius, softness, 0, 0)`；radius>0 时走 SDF 圆角 |
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Instance {
@@ -65,6 +66,9 @@ pub struct Instance {
     pub color: [f32; 4],
     pub color_end: [f32; 4],
     pub gradient: [f32; 4],
+    /// `(radius, softness, reserved, reserved)`；`radius > 0` 时像素着色器
+    /// 用 SDF 计算圆角覆盖率（`softness` 默认 1.0 = 1px 过渡）。
+    pub params: [f32; 4],
 }
 
 impl Instance {
@@ -80,7 +84,18 @@ impl Instance {
             color,
             color_end: color,
             gradient: [0.0, 0.0, 0.0, 0.0],
+            params: [0.0, 1.0, 0.0, 0.0],
         }
+    }
+
+    /// 圆角矩形实例：像素着色器用 SDF 算覆盖率（GPU 解析式抗锯齿）。
+    ///
+    /// 输入：位置、尺寸、颜色、半径（像素，自动夹到半宽/半高）。
+    pub fn round_rect(pos: [f32; 2], size: [f32; 2], color: [f32; 4], radius: f32) -> Self {
+        let r = radius.clamp(0.0, size[0].min(size[1]) * 0.5);
+        let mut inst = Self::solid(pos, size, [0.0, 0.0, 0.0, 0.0], color);
+        inst.params = [r, 1.0, 0.0, 0.0];
+        inst
     }
 
     /// 线性渐变实例。
@@ -124,6 +139,7 @@ impl Instance {
                 1.0,
                 -t_min / span,
             ],
+            params: [0.0, 1.0, 0.0, 0.0],
         }
     }
 }
@@ -148,6 +164,7 @@ pub fn verify_instance_layout() -> Result<(), String> {
         ("color", std::mem::offset_of!(Instance, color), 32),
         ("color_end", std::mem::offset_of!(Instance, color_end), 48),
         ("gradient", std::mem::offset_of!(Instance, gradient), 64),
+        ("params", std::mem::offset_of!(Instance, params), 80),
     ];
     for (name, actual, expected) in offsets {
         if actual != expected {
@@ -158,13 +175,14 @@ pub fn verify_instance_layout() -> Result<(), String> {
     }
 
     println!(
-        "[y901] Instance layout ok: size={size} stride={INSTANCE_SIZE} offsets=pos:{} size:{} uv:{} color:{} end:{} grad:{}",
+        "[y901] Instance layout ok: size={size} stride={INSTANCE_SIZE} offsets=pos:{} size:{} uv:{} color:{} end:{} grad:{} params:{}",
         std::mem::offset_of!(Instance, pos),
         std::mem::offset_of!(Instance, size),
         std::mem::offset_of!(Instance, uv_rect),
         std::mem::offset_of!(Instance, color),
         std::mem::offset_of!(Instance, color_end),
         std::mem::offset_of!(Instance, gradient),
+        std::mem::offset_of!(Instance, params),
     );
     Ok(())
 }
@@ -1104,6 +1122,7 @@ struct VSInput
     float4 color    : TEXCOORD3;
     float4 color_end: TEXCOORD4;
     float4 gradient : TEXCOORD5;
+    float4 params   : TEXCOORD6;
 };
 
 struct VSOutput
@@ -1116,6 +1135,7 @@ struct VSOutput
     float4 color_end: TEXCOORD4;
     float4 gradient : TEXCOORD5;
     float2 size     : TEXCOORD6;
+    float4 params   : TEXCOORD7;
 };
 
 VSOutput vs_main(uint vertex_id : SV_VertexID, VSInput input)
@@ -1144,6 +1164,7 @@ VSOutput vs_main(uint vertex_id : SV_VertexID, VSInput input)
     output.color = input.color;
     output.color_end = input.color_end;
     output.gradient = input.gradient;
+    output.params = input.params;
     output.size = input.size;
     output.local = corner;
     // uv.zw == uv.xy 表示"纯色矩形"（背景、光标），不需要采样图集。
@@ -1159,15 +1180,34 @@ float4 ps_main(VSOutput input) : SV_Target
     //   1. 渐变（gradient.z > 0.5）：不采样图集，按局部坐标投影插值
     //   2. 纯色（uv.xy == uv.zw）：直接输出顶点色
     //   3. 字形：采样图集覆盖率
+    // 圆角：SDF（有向距离场）覆盖率。d<0 在内，d>0 在外。
+    // 覆盖率 = saturate(0.5 - d / softness)，softness=1 时就是 1px 过渡带（完美 AA）。
+    float sdf_cov = 1.0;
+    if (input.params.x > 0.0)
+    {
+        float2 half_size = input.size * 0.5;
+        float2 p = input.local * input.size - half_size;
+        float r = clamp(input.params.x, 0.0, min(half_size.x, half_size.y));
+        float2 q = abs(p) - half_size + r;
+        float d = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+        float soft = max(input.params.y, 0.001);
+        sdf_cov = saturate(0.5 - d / soft);
+        if (sdf_cov <= 0.0)
+        {
+            discard;
+        }
+    }
+
     if (input.gradient.z > 0.5)
     {
         float2 px = input.local * input.size;
         float t = saturate(dot(px, input.gradient.xy) + input.gradient.w);
-        return lerp(input.color, input.color_end, t);
+        float4 c = lerp(input.color, input.color_end, t);
+        return float4(c.rgb * sdf_cov, c.a * sdf_cov);
     }
     if (input.solid > 0.5)
     {
-        return input.color;
+        return float4(input.color.rgb * sdf_cov, input.color.a * sdf_cov);
     }
     // 子像素（ClearType）：R/G/B 三个通道是各自的覆盖率，分别调制颜色通道。
     float3 cov = saturate(atlas_texture.Sample(atlas_sampler, input.uv).rgb);
@@ -1179,7 +1219,7 @@ float4 ps_main(VSOutput input) : SV_Target
     // 漏乘 alpha 会让覆盖率=0 的像素变成"不透明黑块"（字形命中框内的
     // 空白区会被涂黑）——这是真实遇到过的 bug。
     float a = input.color.a * dot(cov, float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
-    return float4(input.color.rgb * cov, a);
+    return float4(input.color.rgb * cov, a * sdf_cov);
 }
 
 // 全屏 blit：把自持 RT 原样搬到交换链后备缓冲（1:1，线性采样精确）。
@@ -1325,6 +1365,16 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
             format: DXGI_FORMAT_R32G32B32A32_FLOAT,
             input_slot: 0,
             aligned_byte_offset: 64,
+            input_slot_class: D3D11_INPUT_PER_INSTANCE_DATA,
+            instance_data_step_rate: 1,
+        },
+        // (radius, softness, 0, 0)
+        InputElementDesc {
+            semantic_name: b"TEXCOORD\0".as_ptr(),
+            semantic_index: 6,
+            format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            input_slot: 0,
+            aligned_byte_offset: 80,
             input_slot_class: D3D11_INPUT_PER_INSTANCE_DATA,
             instance_data_step_rate: 1,
         },

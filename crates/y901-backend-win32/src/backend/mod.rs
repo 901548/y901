@@ -372,6 +372,7 @@ fn to_gpu_instance(i: &y901_runtime::gfx::GfxInstance) -> Instance {
         color: i.color,
         color_end: i.color_end,
         gradient: i.gradient,
+        params: i.params,
     }
 }
 
@@ -519,6 +520,27 @@ impl RenderCtx for D3dBackend {
             [from.r, from.g, from.b, from.a],
             [to.r, to.g, to.b, to.a],
             [dir.0, dir.1],
+        ));
+    }
+
+    /// 圆角矩形：GPU SDF（提交 1 个实例，像素着色器算覆盖率）。
+    ///
+    /// 与 CPU 默认实现的区别：
+    /// - CPU 版逐扫描线拼矩形，每行 3 次 draw，且覆盖率是“整行平均”的近似；
+    /// - GPU 版逐像素精确 SDF，1 次 draw，且四角与直边连接处天然连续。
+    fn fill_round_rect(&mut self, rect: Rect, color: Color, radius: f32) {
+        let Some(r) = self.clip_of(rect) else {
+            return;
+        };
+        if radius <= 0.5 {
+            self.fill_rect(r, color);
+            return;
+        }
+        self.instances.push(Instance::round_rect(
+            [r.x, r.y],
+            [r.w, r.h],
+            [color.r, color.g, color.b, color.a],
+            radius,
         ));
     }
 
@@ -683,8 +705,8 @@ mod gfx_layout_tests {
             std::mem::size_of::<super::Instance>(),
             "GfxInstance 与 d3d11::Instance 大小不一致"
         );
-        // 80 = pos(8) + size(8) + uv(16) + color(16) + color_end(16) + gradient(16)
-        assert_eq!(std::mem::size_of::<GfxInstance>(), 80);
+        // 96 = pos(8) + size(8) + uv(16) + color(16) + color_end(16) + gradient(16) + params(16)
+        assert_eq!(std::mem::size_of::<GfxInstance>(), 96);
         // 大小相同但字段错位同样会乱码：逐个字段喂不同值再比对
         let a = GfxInstance {
             pos: [1.0, 2.0],
@@ -693,6 +715,7 @@ mod gfx_layout_tests {
             color: [9.0, 10.0, 11.0, 12.0],
             color_end: [13.0, 14.0, 15.0, 16.0],
             gradient: [17.0, 18.0, 1.0, 19.0],
+            params: [20.0, 21.0, 22.0, 23.0],
         };
         let b = super::to_gpu_instance(&a);
         assert_eq!(b.pos, a.pos);
@@ -701,6 +724,7 @@ mod gfx_layout_tests {
         assert_eq!(b.color, a.color);
         assert_eq!(b.color_end, a.color_end, "渐变终点色必须逐字节传递");
         assert_eq!(b.gradient, a.gradient, "渐变参数必须逐字节传递");
+        assert_eq!(b.params, a.params, "圆角参数必须逐字节传递");
     }
 }
 
