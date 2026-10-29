@@ -1030,6 +1030,9 @@ impl UiTree {
     fn mark_moved(&mut self, before: &[(String, Rect)]) {
         for (id, old) in before {
             let Some(new) = self.rects.get(id).copied() else {
+                // 节点消失了（弹窗关闭、列表删行、子树被隐藏）：
+                // **旧矩形必须重绘**，否则原来的内容留在屏幕上（弹窗残影）。
+                self.dirty.add(*old);
                 continue;
             };
             if new != *old {
@@ -1312,6 +1315,25 @@ impl UiTree {
     }
 
     /// 一次遍历求出 id 对应的路径（子索引序列）。
+    /// 借出某个节点的可变引用（找不到返回 `false`）。
+    ///
+    /// 输入：`id`；`f` 拿到 `&mut dyn Widget`（通常再 `as_any_mut().downcast_mut::<T>()`）。
+    /// 返回：是否找到该节点。
+    /// 用途：应用层改组件状态（关弹窗、设文本）而不必自己遍历树。
+    /// 注意：**不会**自动标脏——改完记得 `invalidate(id)` / `mark_layout_dirty(id)`。
+    pub fn with_node_mut(&mut self, id: &str, f: &mut dyn FnMut(&mut dyn Widget)) -> bool {
+        let Some(path) = self.find_path(id) else {
+            return false;
+        };
+        match self.node_at_mut(&path) {
+            Some(node) => {
+                f(node);
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn find_path(&self, id: &str) -> Option<Vec<usize>> {
         fn walk(node: &dyn Widget, target: &str, acc: &mut Vec<usize>) -> bool {
             if node.id() == target {

@@ -15,6 +15,17 @@ impl PlatformRuntime for Win32Runtime {
         options: Options,
     ) -> Result<(), String> {
         let mut window = Window::create(&options)?;
+
+        // 把跨线程唤醒器交给 Host：后台线程（PTY/RPC）拿到数据时 wake()，
+        // 主循环的阻塞等待会被立刻打断（否则要等下一次鼠标/键盘输入）。
+        struct WindowWaker(crate::window::WakeHandle);
+        impl y901_runtime::Waker for WindowWaker {
+            fn wake(&self) {
+                self.0.wake();
+            }
+        }
+        host.attach_waker(std::sync::Arc::new(WindowWaker(window.wake_handle())));
+
         let mut tree = build();
 
         // 首帧布局：后端与文本度量都就绪后才能算
@@ -167,7 +178,15 @@ impl PlatformRuntime for Win32Runtime {
             // 全速空转，吃满一个核 → 输入延迟、拖拽卡顿。
             // 不能无限等：PTY 输出走 channel 而不是 Windows 消息，必须周期性醒来。
             if !had_work && tree.dirty().is_empty() {
-                let _ = window.wait_message(8);
+                // 默认 100ms 兜底：即使 Host 忘了接 `attach_waker`，
+                // PTY 输出最多延迟 100ms 也会被 Tick 拉上来（不会卡死）。
+                // `Y901_IDLE_WAIT_MS=0` → 真正无限阻塞（CPU 恒 0，但必须有 waker）。
+                let wait_ms = std::env::var("Y901_IDLE_WAIT_MS")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(100);
+                let ms = if wait_ms == 0 { u32::MAX } else { wait_ms };
+                let _ = window.wait_message(ms);
             }
         }
 

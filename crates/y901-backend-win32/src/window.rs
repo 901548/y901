@@ -16,14 +16,16 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
-    LoadCursorW, MsgWaitForMultipleObjectsEx, PeekMessageW, PostQuitMessage, QS_ALLINPUT,
+    LoadCursorW, MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW, PostQuitMessage,
+    QS_ALLINPUT,
     RegisterClassExW,
     SetCursor, SetWindowLongPtrW, ShowWindow, TranslateMessage,
     CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW,
     IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IDC_SIZEALL, MSG, PM_REMOVE, SW_SHOW,
     WM_CHAR, WM_DESTROY, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION,
     WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_NULL, WM_PAINT, WM_QUIT,
+    WM_RBUTTONDOWN,
     WM_RBUTTONUP, WM_SETCURSOR, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
 
@@ -32,6 +34,37 @@ use y901_ui::{Cursor, Key, Modifiers, MouseButton, Pos, Size, UiTree};
 
 use crate::backend::D3dBackend;
 use crate::ime::{handle_ime_message, ImeAction, ImeState};
+
+/// 跨线程唤醒句柄：后台线程（PTY 读、RPC）用它打断主循环的阻塞等待。
+///
+/// 为什么需要：主循环空闲时阻塞在 `MsgWaitForMultipleObjectsEx` 上（0% CPU），
+/// 此时"网络/管道里来了数据"不会产生 Windows 消息，必须有人显式唤醒。
+/// 该句柄是 `Send + Sync`，可以安全地clone到任意线程。
+#[derive(Clone)]
+pub struct WakeHandle {
+    hwnd: HWND,
+}
+
+// SAFETY: `PostMessageW` 是线程安全的；HWND 在窗口存活期间有效，
+// 调用方需保证不在窗口销毁后继续使用（与 `Window` 同一个生命周期约束）。
+unsafe impl Send for WakeHandle {}
+unsafe impl Sync for WakeHandle {}
+
+impl WakeHandle {
+    /// 唤醒主循环（可在任意线程调用）。
+    ///
+    /// 原理：往窗口投一条 `WM_NULL`，`MsgWaitForMultipleObjectsEx` 会立刻返回。
+    /// 副作用：主循环跑一帧（若无脏区则立刻回到等待）。
+    /// 失败：窗口已销毁时静默忽略。
+    pub fn wake(&self) {
+        if !self.hwnd.is_null() {
+            // SAFETY: 句柄来自 Window::create；wndproc 对 WM_NULL 走 DefWindowProc。
+            unsafe {
+                PostMessageW(self.hwnd, WM_NULL, 0, 0);
+            }
+        }
+    }
+}
 
 /// 平台事件队列：wndproc 写，宿主读。
 static QUEUE: Mutex<Vec<RawEvent>> = Mutex::new(Vec::new());
@@ -595,6 +628,15 @@ impl Window {
         unsafe {
             let _ = backend.present(self.hwnd, w, h);
         }
+    }
+
+    /// 取一个跨线程唤醒句柄（`Send + Sync`），交给后台线程在"有数据了"时调用。
+    ///
+    /// 返回：可 clone 的 [`WakeHandle`]。
+    /// 用途：主循环空闲时阻塞等待，只有 Windows 消息能唤醒它；
+    /// 网络/管道数据到达时必须显式 `wake()`，否则要等到下一次输入。
+    pub fn wake_handle(&self) -> WakeHandle {
+        WakeHandle { hwnd: self.hwnd }
     }
 
     /// 取走"系统要求重画"的请求（`WM_PAINT` 置位）。

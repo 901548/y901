@@ -23,9 +23,24 @@ pub mod gfx;
 /// 业务侧回调：App 与 Demo 实现它。
 ///
 /// 运行时不认识任何业务，只在合适的时机回调这些方法。
+/// 跨线程唤醒器：后台线程（PTY/RPC/网络）用它打断主循环的阻塞等待。
+///
+/// 为什么需要：主循环空闲时阻塞等待 Windows 消息（0% CPU），
+/// 此时"管道里来了数据"不产生消息，必须显式唤醒，否则要等下一次输入。
+pub trait Waker: Send + Sync + 'static {
+    /// 唤醒主循环跑一帧。
+    fn wake(&self);
+}
+
 pub trait Host {
     /// 每帧空闲：抽事件队列、驱动 Tick、推送订阅。
     fn idle(&mut self, tree: &mut UiTree);
+
+    /// 接收唤醒器（平台层在窗口创建后调用一次）。
+    ///
+    /// 默认实现：忽略——这样不关心异步唤醒的 Host 无需改动。
+    /// 需要它的 Host 应保存起来，交给后台线程在"有数据"时 `wake()`。
+    fn attach_waker(&mut self, _waker: std::sync::Arc<dyn Waker>) {}
 
     /// 处理一条应用级命令。返回 `true` 表示已处理。
     fn command(&mut self, tree: &mut UiTree, cmd: Command) -> bool;
