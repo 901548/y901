@@ -495,7 +495,8 @@ struct DeviceVtbl {
     reserved_4: [*const c_void; 4],
     create_blend_state:
         unsafe extern "system" fn(*mut c_void, *const BlendDesc, *mut *mut c_void) -> Hresult,
-    reserved_5: *const c_void,
+    /// 12：PSSetConstantBuffers（PS 也要读 cbuffer：padding.x 是 ClearType gamma）
+    psset_constant_buffers: unsafe extern "system" fn(*mut c_void, u32, u32, *const *mut c_void),
     create_rasterizer_state:
         unsafe extern "system" fn(*mut c_void, *const RasterizerDesc, *mut *mut c_void) -> Hresult,
     create_sampler_state:
@@ -523,7 +524,8 @@ struct ContextVtbl {
         *mut MappedSubresource,
     ) -> Hresult,
     unmap: unsafe extern "system" fn(*mut c_void, *mut c_void, u32),
-    reserved_5: *const c_void,
+    /// 12：PSSetConstantBuffers（PS 也要读 cbuffer：padding.x 是 ClearType gamma）
+    psset_constant_buffers: unsafe extern "system" fn(*mut c_void, u32, u32, *const *mut c_void),
     iaset_input_layout: unsafe extern "system" fn(*mut c_void, *mut c_void),
     iaset_vertex_buffers: unsafe extern "system" fn(
         *mut c_void,
@@ -899,6 +901,8 @@ impl Context {
 
         let constants = [pipeline.constant_buffer.as_ptr()];
         (table.vsset_constant_buffers)(self.as_ptr(), 0, 1, constants.as_ptr());
+        // PS 也要绑：`padding.x`（gamma）是在像素着色器里读的
+        (table.psset_constant_buffers)(self.as_ptr(), 0, 1, constants.as_ptr());
 
         let buffers = [pipeline.instance_buffer.as_ptr()];
         let strides = [INSTANCE_SIZE as u32];
@@ -1067,8 +1071,12 @@ float4 ps_main(VSOutput input) : SV_Target
         return input.color;
     }
     // 子像素（ClearType）：R/G/B 三个通道是各自的覆盖率，分别调制颜色通道。
-    float3 cov = atlas_texture.Sample(atlas_sampler, input.uv).rgb;
-    // 预乘：RGB 乘各自通道的覆盖率；alpha 用三通道平均（避免彩色边缘整体变淡/变浓）。
+    float3 cov = saturate(atlas_texture.Sample(atlas_sampler, input.uv).rgb);
+    // DWrite 的 ClearType 覆盖率在 gamma 空间，直接乘颜色会偏暗（发灰）。
+    // 用 padding.x 传 gamma 指数（默认 1/2.2），把它拉回感知线性。
+    float g = padding.x > 0.001 ? padding.x : 1.0;
+    cov = pow(cov, g);
+    // 预乘：RGB 乘各自通道的覆盖率；alpha 保持顶点 alpha。
     return float4(input.color.rgb * cov, input.color.a);
 }
 
@@ -1664,7 +1672,12 @@ impl Gfx {
         };
 
         let (w, h) = (self.width as f32, self.height as f32);
-        let globals = [w, h, 0.0, 0.0];
+        // padding.x 用作 ClearType gamma 指数（可用 Y901_GAMMA 覆盖，便于 A/B）
+        let gamma = std::env::var("Y901_GAMMA")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(1.0 / 2.2);
+        let globals = [w, h, gamma, 0.0];
         context
             .update_constant_buffer(&pipeline.constant_buffer, globals.as_ptr() as *const c_void);
 
@@ -1706,6 +1719,37 @@ impl Gfx {
         blit_cached(context, pipeline, cached, atlas, rtv, w, h);
 
         self.frames = self.frames.saturating_add(1);
+
+        // ---- gamma A/B 自检（`Y901_GAMMA_AB=1`） ----
+        //
+        // 同一批实例、同一帧，分别用 gamma=1.0（不校正）与 gamma=1/2.2 画一次，
+        // 打印平均亮度与亮像素占比 —— 用数据判断"发灰"是否修好，不依赖肉眼。
+        if std::env::var_os("Y901_GAMMA_AB").is_some() && self.frames >= 2 {
+            for g in [1.0f32, 1.0 / 2.2] {
+                let globals = [w, h, g, 0.0];
+                context.update_constant_buffer(
+                    &pipeline.constant_buffer,
+                    globals.as_ptr() as *const c_void,
+                );
+                draw_scene(
+                    context, pipeline, atlas, cached, instances, count, full, true, w, h,
+                );
+                blit_cached(context, pipeline, cached, atlas, rtv, w, h);
+                if let Some((mean, bright)) = self.read_back_stats() {
+                    eprintln!("[gamma] gamma={g:.4} mean_luma={mean:.4} bright={bright:.2}%");
+                }
+            }
+            // 恢复本帧使用的 gamma
+            let globals = [w, h, gamma, 0.0];
+            context.update_constant_buffer(
+                &pipeline.constant_buffer,
+                globals.as_ptr() as *const c_void,
+            );
+            draw_scene(
+                context, pipeline, atlas, cached, instances, count, full, true, w, h,
+            );
+            blit_cached(context, pipeline, cached, atlas, rtv, w, h);
+        }
 
         // ---- scissor 等价性自检（`Y901_SCISSOR_TEST=1`） ----
         //
@@ -1790,6 +1834,81 @@ impl Gfx {
         }
 
         swap_chain.present(sync_interval)
+    }
+
+    /// 把后备缓冲回读成紧凑的 BGRA 像素（快照/亮度统计用）。
+    ///
+    /// 返回：`(pixels, width, height)`；staging 或 Map 失败时 `None`。
+    unsafe fn read_back_frame(&self) -> Option<(Vec<u8>, u32, u32)> {
+        let (Some(device), Some(context), Some(swap_chain)) = (
+            self.device.as_ref(),
+            self.context.as_ref(),
+            self.swap_chain.as_ref(),
+        ) else {
+            return None;
+        };
+        let (w, h) = (self.width.max(1), self.height.max(1));
+        let backbuffer = swap_chain.back_buffer(0).ok()?;
+        let desc = Texture2DDesc {
+            width: w,
+            height: h,
+            mip_levels: 1,
+            array_size: 1,
+            format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            sample_desc: SampleDesc {
+                count: 1,
+                quality: 0,
+            },
+            usage: D3D11_USAGE_STAGING,
+            bind_flags: 0,
+            cpu_access_flags: D3D11_CPU_ACCESS_READ,
+            misc_flags: 0,
+        };
+        let staging = device.create_texture_2d_empty(&desc).ok()?;
+        context.copy_resource(staging.as_ptr(), backbuffer.as_ptr());
+        let mapped = context.map_read(&staging)?;
+        let pitch = mapped.row_pitch as usize;
+        let row_bytes = (w as usize) * 4;
+        let base = mapped.data as *const u8;
+        if base.is_null() {
+            return None;
+        }
+        let mut out = Vec::with_capacity(row_bytes * h as usize);
+        for y in 0..h as usize {
+            let row = std::slice::from_raw_parts(base.add(y * pitch), row_bytes);
+            out.extend_from_slice(row);
+        }
+        context.unmap_texture(&staging);
+        Some((out, w, h))
+    }
+
+    /// 画面统计：`(平均亮度 0..1, 亮像素占比 %)`。
+    ///
+    /// 用途：客观比较 gamma 校正前后的字形浓淡（不需要肉眼）。
+    ///
+    /// # Safety
+    ///
+    /// 必须在拥有窗口的线程上调用，且 `Gfx` 已初始化；
+    /// 内部会创建 staging 纹理并 `Map` 后备缓冲。
+    pub unsafe fn read_back_stats(&self) -> Option<(f64, f64)> {
+        let (px, w, h) = self.read_back_frame()?;
+        if px.is_empty() {
+            return None;
+        }
+        let mut sum = 0u64;
+        let mut bright = 0u64;
+        let mut n = 0u64;
+        for chunk in px.chunks_exact(4) {
+            let (b, g, r) = (chunk[0] as u64, chunk[1] as u64, chunk[2] as u64);
+            let luma = (r * 299 + g * 587 + b * 114) / 1000;
+            sum += luma;
+            if r + g + b > 300 {
+                bright += 1;
+            }
+            n += 1;
+        }
+        let _ = (w, h);
+        Some((sum as f64 / n as f64 / 255.0, bright as f64 / n as f64 * 100.0))
     }
 
     /// 把交换链后备缓冲回读到 CPU，算 FNV-1a 哈希（快照验证与回归对比用）。
