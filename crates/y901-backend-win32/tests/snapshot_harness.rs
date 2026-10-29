@@ -62,6 +62,14 @@ impl Widget for Scene {
             Color::rgba(0.95, 0.55, 0.15, 1.0),
             26.0,
         );
+        // 圆角 + 45° 渐变（验证 SDF 裁切 × 渐变插值）
+        ctx.fill_gradient_round_rect(
+            Rect::new(self.rect.x + 270.0, self.rect.y + 100.0, 80.0, 40.0),
+            Color::rgba(0.10, 0.90, 0.95, 1.0),
+            Color::rgba(0.95, 0.10, 0.60, 1.0),
+            (1.0, 1.0),
+            12.0,
+        );
         // 圆角描边（验证 SDF 轮廓带）：放在下方，与其他图元不重叠
         ctx.stroke_round_rect(
             Rect::new(self.rect.x + 360.0, self.rect.y + 160.0, 200.0, 64.0),
@@ -359,4 +367,93 @@ fn round_stroke_draws_ring_only() {
     // 所以"外部"像素很少；这里只要求不会误判。
     let _ = outside;
     eprintln!("[stroke] SDF 描边验证通过：轮廓带 {ring}、内部 {inner}、外部 {outside} 像素");
+}
+
+/// 圆角 + 45° 渐变：内部颜色必须符合插值，四角必须被 SDF 裁掉。
+#[test]
+#[ignore = "需要真实 GPU：cargo test -p y901-backend-win32 --release --test snapshot_harness -- --ignored --nocapture"]
+fn gradient_round_rect_matches_math() {
+    let options = Options {
+        title: "y901 gradient-round harness".to_string(),
+        width: 640,
+        height: 240,
+        theme: None,
+        font: None,
+    };
+    let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
+    let mut tree = UiTree::new(Box::new(Scene {
+        rect: Rect::ZERO,
+        text_rect: Rect::ZERO,
+    }));
+    window.resize(&mut tree);
+    window.request_snapshot();
+    tree.invalidate_all();
+    window.render(&mut tree);
+    let (px, w, h) = window.take_snapshot().expect("快照失败");
+
+    // 与场景保持一致；必须用**裁剪后**的几何（后端就是这么传的）
+    let (gx0, gy0, gw0, gh0, radius) = (270.0f32, 100.0f32, 80.0f32, 40.0f32, 12.0f32);
+    let gx = gx0;
+    let gy = gy0;
+    let gw = gw0.min(w as f32 - gx0);
+    let gh = gh0.min(h as f32 - gy0);
+    let from = [0.10f32, 0.90, 0.95];
+    let to = [0.95f32, 0.10, 0.60];
+    let (dx, dy) = (1.0f32, 1.0f32);
+    let len2 = dx * dx + dy * dy;
+    let mut t_min = f32::MAX;
+    let mut t_max = f32::MIN;
+    for (cx, cy) in [(0.0, 0.0), (gw, 0.0), (0.0, gh), (gw, gh)] {
+        let t = (cx * dx + cy * dy) / len2;
+        t_min = t_min.min(t);
+        t_max = t_max.max(t);
+    }
+    let span = t_max - t_min;
+    let half = [gw * 0.5, gh * 0.5];
+
+    let mut checked = 0;
+    let mut corner_cut = 0;
+    let mut worst = 0.0f32;
+    for y in (gy as u32)..((gy + gh) as u32).min(h) {
+        for x in (gx as u32)..((gx + gw) as u32).min(w) {
+            let p = [x as f32 - gx - half[0] + 0.5, y as f32 - gy - half[1] + 0.5];
+            let q = [p[0].abs() - half[0] + radius, p[1].abs() - half[1] + radius];
+            let ext = (q[0].max(0.0).powi(2) + q[1].max(0.0).powi(2)).sqrt();
+            let d = q[0].max(q[1]).min(0.0) + ext - radius;
+            let i = ((y * w + x) * 4) as usize;
+            let got = [
+                px[i + 2] as f32 / 255.0,
+                px[i + 1] as f32 / 255.0,
+                px[i] as f32 / 255.0,
+            ];
+            if d < -2.0 {
+                let t = ((((x as f32 - gx) * dx + (y as f32 - gy) * dy) / len2 - t_min) / span)
+                    .clamp(0.0, 1.0);
+                for c in 0..3 {
+                    let expect = from[c] + (to[c] - from[c]) * t;
+                    let diff = (got[c] - expect).abs();
+                    worst = worst.max(diff);
+                    assert!(
+                        diff <= 4.0 / 255.0,
+                        "({x},{y}) 通道{c} 期望 {expect:.3} 实际 {:.3}",
+                        got[c]
+                    );
+                }
+                checked += 1;
+            } else if d > 2.0 {
+                // 圆角外：必须不是渐变色（被 SDF 裁掉）
+                let looks_gradient = (got[0] - from[0]).abs() < 0.08 && (got[2] - from[2]).abs() < 0.15;
+                if !looks_gradient {
+                    corner_cut += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 1500, "内部采样点太少：{checked}");
+    // 四角被裁掉的面积本就很小（r=12 → 每角约 31px），
+    // 取 d>2 的核心区域后只剩几十个像素。
+    assert!(corner_cut > 20, "四角没被裁掉（可能没走 SDF）：{corner_cut}");
+    eprintln!(
+        "[grad+round] 验证通过：内部 {checked} 点最大误差 {worst:.4}，裁掉角 {corner_cut} 像素"
+    );
 }

@@ -544,6 +544,32 @@ impl RenderCtx for D3dBackend {
         ));
     }
 
+    /// 圆角 + 渐变：GPU 单实例（SDF 裁切 × 渐变插值）。
+    fn fill_gradient_round_rect(
+        &mut self,
+        rect: Rect,
+        from: Color,
+        to: Color,
+        dir: (f32, f32),
+        radius: f32,
+    ) {
+        let Some(r) = self.clip_of(rect) else {
+            return;
+        };
+        if radius <= 0.5 {
+            self.fill_gradient_rect_dir(r, from, to, dir);
+            return;
+        }
+        self.instances.push(Instance::gradient_round_rect(
+            [r.x, r.y],
+            [r.w, r.h],
+            [from.r, from.g, from.b, from.a],
+            [to.r, to.g, to.b, to.a],
+            [dir.0, dir.1],
+            radius,
+        ));
+    }
+
     /// 圆角描边：GPU SDF 单实例（`|d| <= width/2` 的轮廓带）。
     ///
     /// 与 CPU 兜底的差别：CPU 版用"直边四条 + 四个圆角逐行弦长" 拼接，

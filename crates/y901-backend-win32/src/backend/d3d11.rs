@@ -98,6 +98,23 @@ impl Instance {
         inst
     }
 
+    /// 圆角 + 线性渐变实例：先算 SDF 覆盖率，再乘渐变颜色。
+    ///
+    /// 输入：位置、尺寸、起点色、终点色、方向、圆角半径。
+    pub fn gradient_round_rect(
+        pos: [f32; 2],
+        size: [f32; 2],
+        from: [f32; 4],
+        to: [f32; 4],
+        dir: [f32; 2],
+        radius: f32,
+    ) -> Self {
+        let mut inst = Self::gradient_rect(pos, size, from, to, dir);
+        let r = radius.clamp(0.0, size[0].min(size[1]) * 0.5);
+        inst.params = [r, 1.0, 0.0, 0.0];
+        inst
+    }
+
     /// 圆角描边实例：只画"轮廓带"（`|d| <= width/2`），内部与外部都 discard。
     ///
     /// 输入：位置、尺寸、颜色、描边宽度（像素）、圆角半径。

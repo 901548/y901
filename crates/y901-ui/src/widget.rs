@@ -300,6 +300,31 @@ pub trait TextMetrics {
 /// 渲染上下文：框架唯一的出图接口。
 ///
 /// 后端实现它（D3D11 / 软件 / 测试用的记录器），组件只往里画。
+/// 计算一个点在渐变方向上的归一化投影 `t`（0..1）。
+///
+/// 与 GPU 着色器口径一致：四角投影求区间，再归一化。
+fn gradient_t(rect: Rect, dir: (f32, f32), x: f32, y: f32) -> f32 {
+    let (dx, dy) = dir;
+    let len2 = dx * dx + dy * dy;
+    if len2 <= f32::EPSILON {
+        return 0.0;
+    }
+    let proj = |px: f32, py: f32| ((px - rect.x) * dx + (py - rect.y) * dy) / len2;
+    let corners = [
+        proj(rect.x, rect.y),
+        proj(rect.right(), rect.y),
+        proj(rect.x, rect.bottom()),
+        proj(rect.right(), rect.bottom()),
+    ];
+    let t_min = corners.iter().cloned().fold(f32::MAX, f32::min);
+    let t_max = corners.iter().cloned().fold(f32::MIN, f32::max);
+    let span = t_max - t_min;
+    if span <= f32::EPSILON {
+        return 0.0;
+    }
+    ((proj(x, y) - t_min) / span).clamp(0.0, 1.0)
+}
+
 /// 渐变背景的条带数（默认实现用）。
 ///
 /// 为什么是常量而不是参数：条带数按像素切会让 draw 次数随控件高度线性增长，
@@ -361,6 +386,62 @@ pub trait RenderCtx: TextMetrics {
             let inset = inset_sum / AA_SAMPLES as f32;
             self.fill_round_row(rect, rect.y + i as f32, inset, color);
             self.fill_round_row(rect, rect.bottom() - 1.0 - i as f32, inset, color);
+        }
+    }
+
+    /// 圆角 + 线性渐变（"苹果风按钮"底座）。
+    ///
+    /// 输入：`rect`、`from`/`to`、`dir`（任意方向向量）、`radius`。
+    /// 默认实现（CPU 兜底）：按圆角逐行算左右内缩，
+    /// 在每一行里用水平条带近似渐变（对竖直渐变是精确的，对斜向是近似）。
+    /// GPU 后端应覆盖为 SDF + 渐变单实例。
+    fn fill_gradient_round_rect(
+        &mut self,
+        rect: Rect,
+        from: Color,
+        to: Color,
+        dir: (f32, f32),
+        radius: f32,
+    ) {
+        let r = radius.clamp(0.0, rect.w.min(rect.h) * 0.5);
+        if r <= 0.5 {
+            self.fill_gradient_rect_dir(rect, from, to, dir);
+            return;
+        }
+        // 中间整块（不受圆角影响）：直接用渐变
+        self.fill_gradient_rect_dir(
+            Rect::new(rect.x, rect.y + r, rect.w, rect.h - 2.0 * r),
+            from,
+            to,
+            dir,
+        );
+        // 上下圆角行：每行只画 [x0, x1] 范围内的渐变条带
+        let steps = (r.ceil() as i32).max(1);
+        for i in 0..steps {
+            let dy = r - (i as f32 + 0.5);
+            let inset = r - (r * r - dy * dy).max(0.0).sqrt();
+            let row = Rect::new(rect.x + inset, rect.y + i as f32, rect.w - 2.0 * inset, 1.0);
+            // 1px 高的行里按 x 切 8 条（CPU 兜底的精度折衷）
+            let n = 8;
+            for k in 0..n {
+                let t0 = k as f32 / n as f32;
+                let t1 = (k + 1) as f32 / n as f32;
+                let x0 = row.x + row.w * t0;
+                let x1 = row.x + row.w * t1;
+                // 用整个矩形的投影算 t（与 GPU 口径一致）
+                let t = gradient_t(rect, dir, (x0 + x1) * 0.5, row.y + 0.5);
+                self.fill_rect(Rect::new(x0, row.y, x1 - x0, 1.0), from.lerp(to, t));
+            }
+            let y = rect.bottom() - 1.0 - i as f32;
+            let row = Rect::new(rect.x + inset, y, rect.w - 2.0 * inset, 1.0);
+            for k in 0..n {
+                let t0 = k as f32 / n as f32;
+                let t1 = (k + 1) as f32 / n as f32;
+                let x0 = row.x + row.w * t0;
+                let x1 = row.x + row.w * t1;
+                let t = gradient_t(rect, dir, (x0 + x1) * 0.5, y + 0.5);
+                self.fill_rect(Rect::new(x0, y, x1 - x0, 1.0), from.lerp(to, t));
+            }
         }
     }
 
