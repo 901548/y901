@@ -768,6 +768,16 @@ pub trait Widget {
         false
     }
 
+    /// 布局缓存键（可选）。返回 `Some` 时框架直接用它，避免对 `id()` 做字符串哈希。
+    ///
+    /// 返回：`Some(key)` = 调用方保证在同一 widget 生命周期内稳定且全局唯一；
+    /// `None` = 框架退回 `id()` 的 FNV-1a 哈希。
+    /// 用途：容器（`Flex`/`Stack`）在构造时算一次，`measure`/`arrange` 就不再碰字符串。
+    /// 注意：不要用会随布局变化的值（尺寸、约束）做键，否则缓存会失效或串味。
+    fn cache_key(&self) -> Option<u64> {
+        None
+    }
+
     /// 是否订阅 `UiEvent::Tick`（每帧心跳）。
     ///
     /// 返回：`true` = 广播 `Tick` 时调用本组件的 `event`；默认 `false`。

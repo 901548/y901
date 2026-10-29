@@ -151,7 +151,8 @@ impl LayoutCache {
         metrics: &dyn TextMetrics,
         constraints: Constraints,
     ) -> Size {
-        let key = id_key(widget.id());
+        // 优先用 widget 自报的键（容器在构造时算好），避免字符串哈希
+        let key = widget.cache_key().unwrap_or_else(|| id_key(widget.id()));
         let version = widget.layout_version();
 
         if self.is_fresh_by_key(key, constraints, version) {
@@ -472,6 +473,8 @@ pub struct Flex {
     children: Vec<Box<dyn Widget>>,
     rect: Rect,
     item: FlexItem,
+    /// 自身 id 的缓存键（构造时算一次，`measure` 不再碰字符串）。
+    key: u64,
     /// `measure` 阶段算出的子节点尺寸与 flex 参数，`arrange` 直接复用。
     ///
     /// 为什么缓存：arrange 若回查 `LayoutCache`，每个子节点都要重算一次 id 哈希；
@@ -481,8 +484,11 @@ pub struct Flex {
 
 impl Flex {
     pub fn new(id: impl Into<String>, axis: Axis) -> Self {
+        let id = id.into();
+        let key = id_key(&id);
         Self {
-            id: id.into(),
+            id,
+            key,
             axis,
             padding: Edges::ZERO,
             gap: 0.0,
@@ -535,6 +541,10 @@ impl Flex {
 impl Widget for Flex {
     fn id(&self) -> &str {
         &self.id
+    }
+
+    fn cache_key(&self) -> Option<u64> {
+        Some(self.key)
     }
 
     fn role(&self) -> Role {
@@ -643,12 +653,17 @@ pub struct Stack {
     children: Vec<Box<dyn Widget>>,
     rect: Rect,
     item: FlexItem,
+    /// 自身 id 的缓存键（构造时算一次）。
+    key: u64,
 }
 
 impl Stack {
     pub fn new(id: impl Into<String>) -> Self {
+        let id: String = id.into();
+        let key = id_key(&id);
         Self {
-            id: id.into(),
+            id,
+            key,
             children: Vec::new(),
             rect: Rect::ZERO,
             item: FlexItem::default(),
@@ -669,6 +684,10 @@ impl Stack {
 impl Widget for Stack {
     fn id(&self) -> &str {
         &self.id
+    }
+
+    fn cache_key(&self) -> Option<u64> {
+        Some(self.key)
     }
     fn role(&self) -> Role {
         Role::PANEL
