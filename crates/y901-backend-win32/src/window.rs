@@ -574,6 +574,21 @@ impl Window {
         let Some(backend) = self.backend.as_mut() else {
             return;
         };
+        // 必须在 tree.render 之前取脏区（render 会清空它）
+        let dirty = tree.dirty();
+        let bounds = if dirty.is_full() {
+            None
+        } else {
+            dirty.bounds().map(|r| {
+                (
+                    r.x.floor() as i32,
+                    r.y.floor() as i32,
+                    (r.x + r.w).ceil() as i32,
+                    (r.y + r.h).ceil() as i32,
+                )
+            })
+        };
+        backend.set_dirty_bounds(bounds);
         backend.begin();
         tree.render(backend);
         let (w, h) = self.viewport;

@@ -1247,7 +1247,8 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
         depth_bias_clamp: 0.0,
         slope_scaled_depth_bias: 0.0,
         depth_clip_enable: 1,
-        scissor_enable: 0,
+        // 开启 scissor：局部重绘靠它把 draw 限制在脏区内
+        scissor_enable: 1,
         multisample_enable: 0,
         antialiased_line_enable: 0,
     })?;
@@ -1267,6 +1268,132 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
 
 // ============================ Gfx ============================
 
+/// 把一帧 UI 画进自持 RT，只更新 `rect` 指定区域。
+///
+/// 输入：上下文/管线/图集/目标、实例、脏矩形、是否整窗。
+/// 副作用：**只**在 `rect` 内清屏（整窗时用 `ClearRenderTargetView`，
+/// 局部时画一个同色背景 quad），并用 scissor 限制后续 draw。
+/// 失败：无返回值；scissor 必须提前开启（`scissor_enable = 1`）。
+#[allow(clippy::too_many_arguments)] // 纯内部函数，参数就是渲染所需的最小集合
+unsafe fn draw_scene(
+    context: &Context,
+    pipeline: &Pipeline,
+    atlas: &Atlas,
+    cached: &CachedTarget,
+    instances: &[Instance],
+    count: usize,
+    rect: RectI32,
+    is_full: bool,
+    w: f32,
+    h: f32,
+) {
+    context.set_render_target(Some(&cached.rtv));
+    context.set_viewport(w, h);
+    context.set_pipeline(pipeline);
+    context.set_ps_texture(&atlas.srv, &atlas.sampler);
+    // scissor 必须在 draw 之前设置；`scissor_enable = 1` 时未设置 = 0 面积 = 什么都不画
+    context.set_scissor(rect);
+
+    if is_full {
+        context.clear(&cached.rtv, [0.02, 0.02, 0.03, 1.0]);
+    } else {
+        // 局部清屏：画一个和清屏色相同的实心 quad，正好覆盖 scissor 区域。
+        // （ClearRenderTargetView 只能整张清，无法只清一块。）
+        let bg = Instance {
+            pos: [rect.left as f32, rect.top as f32],
+            size: [
+                (rect.right - rect.left) as f32,
+                (rect.bottom - rect.top) as f32,
+            ],
+            // uv 全等 ⇒ shader 里的 solid 分支：直接输出顶点色
+            uv_rect: [0.0, 0.0, 0.0, 0.0],
+            color: [0.02, 0.02, 0.03, 1.0],
+        };
+        if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
+            std::ptr::copy_nonoverlapping(
+                &bg as *const Instance as *const u8,
+                mapped.data as *mut u8,
+                INSTANCE_SIZE,
+            );
+            context.unmap(&pipeline.blit_buffer);
+        }
+        let buffers = [pipeline.blit_buffer.as_ptr()];
+        let strides = [INSTANCE_SIZE as u32];
+        let offsets = [0u32];
+        let table = vtbl::<ContextVtbl>(context.as_ptr());
+        (table.iaset_vertex_buffers)(
+            context.as_ptr(),
+            0,
+            1,
+            buffers.as_ptr(),
+            strides.as_ptr(),
+            offsets.as_ptr(),
+        );
+        context.draw_instances(1);
+        // 切回 UI 实例缓冲
+        let buffers = [pipeline.instance_buffer.as_ptr()];
+        (table.iaset_vertex_buffers)(
+            context.as_ptr(),
+            0,
+            1,
+            buffers.as_ptr(),
+            strides.as_ptr(),
+            offsets.as_ptr(),
+        );
+    }
+
+    context.draw_instances(count as u32);
+    let _ = instances;
+}
+
+/// 把自持 RT 整张 blit 到交换链后备缓冲。
+///
+/// 输入：上下文/管线/源/目标与尺寸。副作用：切换 PS 与顶点缓冲到 blit 专用资源。
+/// 说明：用**独立的** `blit_buffer`——复用 `instance_buffer` 会 `Map(DISCARD)`
+/// 掉 UI 实例，而 GPU 可能还没执行完 UI 那次 draw（实测表现为只剩背景色）。
+#[allow(clippy::too_many_arguments)]
+unsafe fn blit_cached(
+    context: &Context,
+    pipeline: &Pipeline,
+    cached: &CachedTarget,
+    atlas: &Atlas,
+    rtv: &RenderTarget,
+    w: f32,
+    h: f32,
+) {
+    context.set_render_target(Some(rtv));
+    context.set_viewport(w, h);
+    if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
+        let blit = Instance {
+            pos: [0.0, 0.0],
+            size: [w, h],
+            uv_rect: [0.0, 0.0, 1.0, 1.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+        };
+        std::ptr::copy_nonoverlapping(
+            &blit as *const Instance as *const u8,
+            mapped.data as *mut u8,
+            INSTANCE_SIZE,
+        );
+        context.unmap(&pipeline.blit_buffer);
+    }
+    let buffers = [pipeline.blit_buffer.as_ptr()];
+    let strides = [INSTANCE_SIZE as u32];
+    let offsets = [0u32];
+    let table = vtbl::<ContextVtbl>(context.as_ptr());
+    (table.iaset_vertex_buffers)(
+        context.as_ptr(),
+        0,
+        1,
+        buffers.as_ptr(),
+        strides.as_ptr(),
+        offsets.as_ptr(),
+    );
+    context.set_ps_texture(&cached.srv, &atlas.sampler);
+    context.set_ps_shader(&pipeline.blit_ps);
+    context.draw_instances(1);
+}
+
 pub struct Gfx {
     atlas: Option<Atlas>,
     atlas_data: Vec<u8>,
@@ -1280,6 +1407,10 @@ pub struct Gfx {
     height: u32,
     /// 自持渲染目标（尺寸随窗口，重建/改变尺寸时丢弃重建）。
     cached: Option<CachedTarget>,
+    /// 本帧需要更新的矩形（None = 整窗）。
+    dirty: Option<RectI32>,
+    /// 已渲染帧数（快照自检只在第二帧之后跑，避免拿未初始化内容比较）。
+    frames: u64,
 }
 
 impl Gfx {
@@ -1308,6 +1439,8 @@ impl Gfx {
             width,
             height,
             cached: None,
+            dirty: None,
+            frames: 0,
         };
         gfx.rebuild(hwnd, width, height)?;
         Ok(gfx)
@@ -1547,48 +1680,58 @@ impl Gfx {
             }
         }
 
-        // ---- 阶段 A：把 UI 画进自持 RT ----
-        context.set_render_target(Some(&cached.rtv));
-        context.set_viewport(w, h);
-        context.clear(&cached.rtv, [0.02, 0.02, 0.03, 1.0]);
-        context.set_pipeline(pipeline);
-        context.set_ps_texture(&atlas.srv, &atlas.sampler);
-        context.draw_instances(count as u32);
-
-        // ---- 阶段 B：自持 RT → 后备缓冲（全屏 quad，1:1 采样） ----
-        context.set_render_target(Some(rtv));
-        context.set_viewport(w, h);
-        // 用**独立的** blit 缓冲：复用 instance_buffer 会 Map(DISCARD) 掉 UI 实例，
-        // 而 GPU 可能还没执行完阶段 A 的 draw（实测表现为只剩背景色）。
-        if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
-            let blit = Instance {
-                pos: [0.0, 0.0],
-                size: [w, h],
-                uv_rect: [0.0, 0.0, 1.0, 1.0],
-                color: [1.0, 1.0, 1.0, 1.0],
-            };
-            std::ptr::copy_nonoverlapping(
-                &blit as *const Instance as *const u8,
-                mapped.data as *mut u8,
-                INSTANCE_SIZE,
-            );
-            context.unmap(&pipeline.blit_buffer);
-        }
-        let buffers = [pipeline.blit_buffer.as_ptr()];
-        let strides = [INSTANCE_SIZE as u32];
-        let offsets = [0u32];
-        let table = vtbl::<ContextVtbl>(context.as_ptr());
-        (table.iaset_vertex_buffers)(
-            context.as_ptr(),
-            0,
-            1,
-            buffers.as_ptr(),
-            strides.as_ptr(),
-            offsets.as_ptr(),
+        // ---- 阶段 A：把 UI 画进自持 RT（scissor 限制在脏区） ----
+        let full = RectI32 {
+            left: 0,
+            top: 0,
+            right: w as i32,
+            bottom: h as i32,
+        };
+        let rect = match self.dirty {
+            Some(d) if d.right > d.left && d.bottom > d.top => d,
+            _ => full,
+        };
+        let is_full = rect.left == 0
+            && rect.top == 0
+            && rect.right >= w as i32
+            && rect.bottom >= h as i32;
+        draw_scene(
+            context, pipeline, atlas, cached, instances, count, rect, is_full, w, h,
         );
-        context.set_ps_texture(&cached.srv, &atlas.sampler);
-        context.set_ps_shader(&pipeline.blit_ps);
-        context.draw_instances(1);
+
+        // ---- 阶段 B：自持 RT → 后备缓冲 ----
+        blit_cached(context, pipeline, cached, atlas, rtv, w, h);
+
+        self.frames = self.frames.saturating_add(1);
+
+        // ---- scissor 等价性自检（`Y901_SCISSOR_TEST=1`） ----
+        //
+        // 前提：上一帧已经是完整画面。此后用**同一批实例**只重画一个小矩形，
+        // 结果应当与整窗重绘逐像素一致 —— 这验证"局部清屏 + scissor"没有破坏画面。
+        if std::env::var_os("Y901_SCISSOR_TEST").is_some() && self.frames >= 2 && is_full {
+            let before = self.read_back_hash();
+            let small = RectI32 {
+                left: 0,
+                top: 0,
+                right: (w as i32 / 4).max(1),
+                bottom: (h as i32 / 4).max(1),
+            };
+            draw_scene(
+                context, pipeline, atlas, cached, instances, count, small, false, w, h,
+            );
+            blit_cached(context, pipeline, cached, atlas, rtv, w, h);
+            let after = self.read_back_hash();
+            match (before, after) {
+                (Some(a), Some(b)) => eprintln!(
+                    "[scissor] instances={count} full=0x{a:016x} partial=0x{b:016x} equal={}",
+                    a == b
+                ),
+                _ => eprintln!("[scissor] 回读失败"),
+            }
+            // 自检会破坏画面：立刻用整帧重画一次恢复
+            draw_scene(context, pipeline, atlas, cached, instances, count, full, true, w, h);
+            blit_cached(context, pipeline, cached, atlas, rtv, w, h);
+        }
 
         // ---- 快照验证（`Y901_SNAPSHOT=1` 时启用） ----
         //
@@ -1699,6 +1842,19 @@ impl Gfx {
         }
         context.unmap_texture(&staging);
         Some(hash)
+    }
+
+    /// 设置本帧需要更新的矩形（`None` = 整窗）。
+    ///
+    /// 输入：`rect = (left, top, right, bottom)`，像素坐标，右/下开区间。
+    /// 副作用：下一帧 `render` 会用它做 scissor + 局部清屏；`None` 时退化为整窗。
+    pub fn set_dirty_bounds(&mut self, rect: Option<(i32, i32, i32, i32)>) {
+        self.dirty = rect.map(|(l, t, r, b)| RectI32 {
+            left: l,
+            top: t,
+            right: r,
+            bottom: b,
+        });
     }
 
     /// 确保自持 RT 存在且尺寸与窗口一致。

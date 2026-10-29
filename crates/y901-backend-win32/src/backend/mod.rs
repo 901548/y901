@@ -169,6 +169,14 @@ impl D3dBackend {
             .update_atlas(&self.text.atlas, self.text.atlas_size, reset, &rects)
     }
 
+    /// 设置本帧脏区（`None` = 整窗）。由 `Window::render` 在 `tree.render` 之前算好。
+    ///
+    /// 输入：`rect = (left, top, right, bottom)` 像素坐标；`None` 表示整窗重绘。
+    /// 副作用：下一帧只清/画这块区域（scissor）。脏区为空时调用方应传 `None`。
+    pub fn set_dirty_bounds(&mut self, rect: Option<(i32, i32, i32, i32)>) {
+        self.gfx.set_dirty_bounds(rect);
+    }
+
     /// 提交一帧。返回是否需要继续重绘。
     ///
     /// # Safety
