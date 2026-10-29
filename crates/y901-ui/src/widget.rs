@@ -306,6 +306,9 @@ pub trait TextMetrics {
 /// 32 条在 200~1000px 高度上都足够平滑，且开销固定。
 pub const GRADIENT_STEPS: usize = 32;
 
+/// 圆角抗锯齿的竖直超采样数（每个像素行内部再切几份）。
+pub const AA_SAMPLES: usize = 4;
+
 pub trait RenderCtx: TextMetrics {
     /// 视口尺寸（逻辑像素）。
     fn size(&self) -> Size;
@@ -343,51 +346,122 @@ pub trait RenderCtx: TextMetrics {
             self.fill_rect(rect, color);
             return;
         }
-        // 中间整块（不需要圆角的部分）
         self.fill_rect(Rect::new(rect.x, rect.y + r, rect.w, rect.h - 2.0 * r), color);
-        // 上下各 r 行：按圆的方程算每行的左右内缩
+
+        // 上下各 r 行：逐扫描线画，并在左右边界做**覆盖率混合**（Coverage AA）。
+        // 把每个像素行在竖直方向再切 AA_SAMPLES 份，各自代入圆方程求
+        // 内缩量，取平均；平均内缩的小数部分就是边界像素被覆盖的比例。
         let rows = r.ceil() as i32;
         for i in 0..rows {
-            let dy = r - (i as f32 + 0.5);
-            let inset = r - (r * r - dy * dy).max(0.0).sqrt();
-            let y_top = rect.y + i as f32;
-            let y_bot = rect.bottom() - 1.0 - i as f32;
-            self.fill_rect(Rect::new(rect.x + inset, y_top, rect.w - 2.0 * inset, 1.0), color);
-            self.fill_rect(Rect::new(rect.x + inset, y_bot, rect.w - 2.0 * inset, 1.0), color);
+            let mut inset_sum = 0.0f32;
+            for k in 0..AA_SAMPLES {
+                let dy = r - (i as f32 + (k as f32 + 0.5) / AA_SAMPLES as f32);
+                inset_sum += r - (r * r - dy * dy).max(0.0).sqrt();
+            }
+            let inset = inset_sum / AA_SAMPLES as f32;
+            self.fill_round_row(rect, rect.y + i as f32, inset, color);
+            self.fill_round_row(rect, rect.bottom() - 1.0 - i as f32, inset, color);
         }
     }
 
-    /// 线性渐变矩形填充（前景到背景的垂直或水平过渡）。
+    /// 圆角单行：左/右边界像素按覆盖率给 alpha，中间实色。
+    fn fill_round_row(&mut self, rect: Rect, y: f32, inset: f32, color: Color) {
+        let x0 = rect.x + inset;
+        let x1 = rect.right() - inset;
+        if x1 <= x0 {
+            return;
+        }
+        let left_px = x0.floor();
+        let right_px = x1.ceil();
+        let left_frac = (x0 - left_px).clamp(0.0, 1.0);
+        let right_frac = (right_px - x1).clamp(0.0, 1.0);
+
+        if left_frac > 0.001 {
+            self.fill_rect(
+                Rect::new(left_px, y, 1.0, 1.0),
+                color.with_alpha(color.a * (1.0 - left_frac)),
+            );
+        }
+        if right_frac > 0.001 {
+            self.fill_rect(
+                Rect::new(right_px - 1.0, y, 1.0, 1.0),
+                color.with_alpha(color.a * (1.0 - right_frac)),
+            );
+        }
+        let body_x0 = left_px + if left_frac > 0.001 { 1.0 } else { 0.0 };
+        let body_x1 = right_px - if right_frac > 0.001 { 1.0 } else { 0.0 };
+        if body_x1 > body_x0 {
+            self.fill_rect(Rect::new(body_x0, y, body_x1 - body_x0, 1.0), color);
+        }
+    }
+
+    /// 全方向线性渐变：`dir = (dx, dy)`（任意向量，不需归一化）。
     ///
-    /// 输入：`rect`、`from`（起点色）、`to`（终点色）、`horizontal`（true = 左右，false = 上下）。
-    /// 副作用：在 `rect` 内（含裁剪）绘制。
-    /// 默认实现：切成 [`GRADIENT_STEPS`] 条带，用 [`RenderCtx::fill_rect`] 逐条画。
-    /// 说明：条带数固定，避免按像素切分导致 O(高度) 次 draw；视觉上足够平滑。
-    fn fill_gradient_rect(&mut self, rect: Rect, from: Color, to: Color, horizontal: bool) {
+    /// 默认实现：沿主导轴切 1px 条带，每条按其中心在 `dir` 上的投影取色。
+    /// 对轴向渐变是精确的；对斜向渐变是“沿主导轴逐行/逐列变色”的近似
+    /// （`fill_rect` 只能画轴对齐矩形，真正的任意角渐变需要 GPU 图元）。
+    fn fill_gradient_rect_dir(&mut self, rect: Rect, from: Color, to: Color, dir: (f32, f32)) {
         if rect.is_empty() || (from.a <= 0.0 && to.a <= 0.0) {
             return;
         }
-        let steps = GRADIENT_STEPS.max(1);
-        for i in 0..steps {
-            let t0 = i as f32 / steps as f32;
-            let t1 = (i + 1) as f32 / steps as f32;
-            let c = from.lerp(to, (t0 + t1) * 0.5);
-            // 边界取整：既不留缝（不足 1px 的条带直接跳过），也不重叠
-            // （重叠会让 alpha < 1 的渐变叠加变深）。
-            if horizontal {
-                let x0 = (rect.w * t0).round();
-                let x1 = (rect.w * t1).round();
+        let (dx, dy) = dir;
+        let len2 = dx * dx + dy * dy;
+        if len2 <= f32::EPSILON {
+            self.fill_rect(rect, from);
+            return;
+        }
+        let proj = |x: f32, y: f32| -> f32 { ((x - rect.x) * dx + (y - rect.y) * dy) / len2 };
+        let corners = [
+            proj(rect.x, rect.y),
+            proj(rect.right(), rect.y),
+            proj(rect.x, rect.bottom()),
+            proj(rect.right(), rect.bottom()),
+        ];
+        let t_min = corners.iter().cloned().fold(f32::MAX, f32::min);
+        let t_max = corners.iter().cloned().fold(f32::MIN, f32::max);
+        let span = t_max - t_min;
+        if span <= f32::EPSILON {
+            self.fill_rect(rect, from);
+            return;
+        }
+
+        let vertical = dx.abs() >= dy.abs();
+        let extent = if vertical { rect.w } else { rect.h };
+        let count = (extent.round() as i32).clamp(1, 512);
+        let steps = (GRADIENT_STEPS as i32).max(1);
+        // 颜色按 steps 档量化：既保证平滑，又避免每个 1px 条带都算一次 lerp
+        let _ = steps;
+        for i in 0..count {
+            let a0 = i as f32 / count as f32;
+            let a1 = (i + 1) as f32 / count as f32;
+            let t = if vertical {
+                let cx = rect.x + rect.w * (a0 + a1) * 0.5;
+                ((proj(cx, rect.y + rect.h * 0.5) - t_min) / span).clamp(0.0, 1.0)
+            } else {
+                let cy = rect.y + rect.h * (a0 + a1) * 0.5;
+                ((proj(rect.x + rect.w * 0.5, cy) - t_min) / span).clamp(0.0, 1.0)
+            };
+            let c = from.lerp(to, t);
+            if vertical {
+                let x0 = (rect.w * a0).round();
+                let x1 = (rect.w * a1).round();
                 if x1 > x0 {
                     self.fill_rect(Rect::new(rect.x + x0, rect.y, x1 - x0, rect.h), c);
                 }
             } else {
-                let y0 = (rect.h * t0).round();
-                let y1 = (rect.h * t1).round();
+                let y0 = (rect.h * a0).round();
+                let y1 = (rect.h * a1).round();
                 if y1 > y0 {
                     self.fill_rect(Rect::new(rect.x, rect.y + y0, rect.w, y1 - y0), c);
                 }
             }
         }
+    }
+
+    /// 一维渐变（兼容旧接口）：等价于 dir = (1,0) 或 (0,1)。
+    fn fill_gradient_rect(&mut self, rect: Rect, from: Color, to: Color, horizontal: bool) {
+        let dir = if horizontal { (1.0, 0.0) } else { (0.0, 1.0) };
+        self.fill_gradient_rect_dir(rect, from, to, dir);
     }
 
     /// 裁剪栈：滚动容器由框架自动压栈，组件不需要手动调用。
