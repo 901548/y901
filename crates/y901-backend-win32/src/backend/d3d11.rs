@@ -117,8 +117,8 @@ const D3D_FEATURE_LEVEL_10_0: u32 = 0xa000;
 
 const DXGI_FORMAT_R32G32_FLOAT: u32 = 16;
 const DXGI_FORMAT_R32G32B32A32_FLOAT: u32 = 2;
-const DXGI_FORMAT_R8_UNORM: u32 = 61;
 const DXGI_FORMAT_B8G8R8A8_UNORM: u32 = 87;
+const DXGI_FORMAT_R8G8B8A8_UNORM: u32 = 28;
 
 const DXGI_USAGE_RENDER_TARGET_OUTPUT: u32 = 0x20;
 const DXGI_SWAP_EFFECT_FLIP_DISCARD: u32 = 4;
@@ -1066,9 +1066,10 @@ float4 ps_main(VSOutput input) : SV_Target
     {
         return input.color;
     }
-    float coverage = atlas_texture.Sample(atlas_sampler, input.uv).r;
-    // 预乘：RGB 和 A 都乘覆盖率。漏掉 RGB 会变成加法混合 → 字形膨胀成实心块。
-    return input.color * coverage;
+    // 子像素（ClearType）：R/G/B 三个通道是各自的覆盖率，分别调制颜色通道。
+    float3 cov = atlas_texture.Sample(atlas_sampler, input.uv).rgb;
+    // 预乘：RGB 乘各自通道的覆盖率；alpha 用三通道平均（避免彩色边缘整体变淡/变浓）。
+    return float4(input.color.rgb * cov, input.color.a);
 }
 
 // 全屏 blit：把自持 RT 原样搬到交换链后备缓冲（1:1，线性采样精确）。
@@ -1496,7 +1497,8 @@ impl Gfx {
             height: self.atlas_size,
             mip_levels: 1,
             array_size: 1,
-            format: DXGI_FORMAT_R8_UNORM,
+            // RGBA：ClearType 3 通道覆盖率 + 1 字节对齐
+            format: DXGI_FORMAT_R8G8B8A8_UNORM,
             sample_desc: SampleDesc {
                 count: 1,
                 quality: 0,
@@ -1509,8 +1511,8 @@ impl Gfx {
         };
         let data = SubresourceData {
             data: self.atlas_data.as_ptr() as *const c_void,
-            row_pitch: self.atlas_size,
-            slice_pitch: self.atlas_size * self.atlas_size,
+            row_pitch: self.atlas_size * 4,
+            slice_pitch: self.atlas_size * self.atlas_size * 4,
         };
 
         let texture = device.create_texture_2d(&desc, &data)?;
@@ -1566,17 +1568,18 @@ impl Gfx {
         }
 
         for &(x, y, width, height) in dirty {
-            let row_pitch = width as usize;
+            // 图集是 RGBA：每像素 4 字节，行距与切片跨度都要 ×4
+            let row_pitch = width as usize * 4;
             let mut patch = vec![0u8; row_pitch * height as usize];
             for row in 0..height as usize {
-                let src = ((y as usize + row) * size as usize + x as usize)..;
+                let src = (((y as usize + row) * size as usize + x as usize) * 4)..;
                 patch[row * row_pitch..(row + 1) * row_pitch]
                     .copy_from_slice(&data[src.start..src.start + row_pitch]);
             }
             let subresource = SubresourceData {
                 data: patch.as_ptr() as *const c_void,
-                row_pitch: width,
-                slice_pitch: width * height,
+                row_pitch: row_pitch as u32,
+                slice_pitch: (row_pitch * height as usize) as u32,
             };
             context.update_subresource_region(&atlas.texture, &subresource, x, y, width, height);
         }

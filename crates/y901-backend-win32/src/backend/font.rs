@@ -408,13 +408,19 @@ impl GlyphRunAnalysis {
             raw.as_mut_ptr(),
             raw.len() as u32,
         );
-        if bpp == 1 {
-            raw
-        } else {
-            (0..(width * height) as usize)
-                .map(|i| raw[i * 3 + 1])
-                .collect()
+        // 统一输出 RGBA：ClearType(3x1) 保留 R/G/B 三个通道，灰度(1x1) 复制到三通道。
+        // 着色器按子像素采样时就要这三个值；只留绿通道会退化成灰度抗锯齿。
+        let px = (width * height) as usize;
+        let mut out = vec![0u8; px * 4];
+        for i in 0..px {
+            let (r, g, b) = if bpp == 3 {
+                (raw[i * 3], raw[i * 3 + 1], raw[i * 3 + 2])
+            } else {
+                (raw[i], raw[i], raw[i])
+            };
+            out[i * 4..i * 4 + 4].copy_from_slice(&[r, g, b, 255]);
         }
+        out
     }
 }
 
@@ -546,7 +552,8 @@ impl TextEngine {
                 face,
                 font_size,
                 units_per_em,
-                atlas: vec![0u8; (ATLAS_SIZE * ATLAS_SIZE) as usize],
+                // RGBA：ClearType 需要 RGB 三通道覆盖率（4 字节/像素）
+                atlas: vec![0u8; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize],
                 atlas_size: ATLAS_SIZE,
                 packer: SkylinePacker::new(ATLAS_SIZE),
                 ascent,
@@ -640,7 +647,8 @@ impl TextEngine {
         let mut chosen: Option<(GlyphRunAnalysis, RECT, u32)> = None;
         'outer: for mode in [DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC, 4, 1] {
             let analysis = self.factory.glyph_run_analysis(&run, mode)?;
-            for texture_type in [DWRITE_TEXTURE_ALIASED_1X1, DWRITE_TEXTURE_CLEARTYPE_3X1] {
+            // 先试 ClearType（子像素），实在拿不到再退化成 1x1 灰度
+            for texture_type in [DWRITE_TEXTURE_CLEARTYPE_3X1, DWRITE_TEXTURE_ALIASED_1X1] {
                 let bounds = analysis.alpha_bounds(texture_type);
                 if bounds.right > bounds.left && bounds.bottom > bounds.top {
                     chosen = Some((analysis, bounds, texture_type));
@@ -680,10 +688,11 @@ impl TextEngine {
         };
 
         let coverage = analysis.coverage(&bounds, texture_type);
+        let row_bytes = (width * 4) as usize;
         for row in 0..height {
-            let src = &coverage[(row * width) as usize..((row + 1) * width) as usize];
-            let dst = ((atlas_y + row) * self.atlas_size + atlas_x) as usize;
-            self.atlas[dst..dst + width as usize].copy_from_slice(src);
+            let src = &coverage[(row * width * 4) as usize..((row + 1) * width * 4) as usize];
+            let dst = (((atlas_y + row) * self.atlas_size + atlas_x) * 4) as usize;
+            self.atlas[dst..dst + row_bytes].copy_from_slice(src);
         }
 
         if std::env::var_os("Y901_DUMP_GLYPH").is_some() {
@@ -801,11 +810,11 @@ impl TextEngine {
             else {
                 continue;
             };
+            let bytes = (info.width * 4) as usize;
             for row in 0..info.height {
-                let src = ((info.atlas_y + row) * self.atlas_size + info.atlas_x) as usize;
-                let dst = ((y + row) * self.atlas_size + x) as usize;
-                self.atlas[dst..dst + info.width as usize]
-                    .copy_from_slice(&snapshot[src..src + info.width as usize]);
+                let src = (((info.atlas_y + row) * self.atlas_size + info.atlas_x) * 4) as usize;
+                let dst = (((y + row) * self.atlas_size + x) * 4) as usize;
+                self.atlas[dst..dst + bytes].copy_from_slice(&snapshot[src..src + bytes]);
             }
             info.atlas_x = x;
             info.atlas_y = y;
