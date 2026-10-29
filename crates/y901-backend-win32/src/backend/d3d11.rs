@@ -126,6 +126,7 @@ const DXGI_SWAP_EFFECT_FLIP_DISCARD: u32 = 4;
 const D3D11_USAGE_DYNAMIC: u32 = 2;
 const D3D11_USAGE_DEFAULT: u32 = 0;
 const D3D11_BIND_VERTEX_BUFFER: u32 = 0x8;
+const D3D11_BIND_RENDER_TARGET: u32 = 0x20;
 const D3D11_BIND_CONSTANT_BUFFER: u32 = 0x4;
 const D3D11_BIND_SHADER_RESOURCE: u32 = 0x8;
 const D3D11_CPU_ACCESS_WRITE: u32 = 0x10000;
@@ -708,6 +709,20 @@ impl Device {
         Texture::from_raw(raw).ok_or_else(|| "CreateTexture2D returned null".into())
     }
 
+    /// 创建一张**没有初始数据**的纹理（渲染目标用）。
+    ///
+    /// 与 [`Device::create_texture_2d`] 的唯一区别：`pInitialData = null`。
+    /// 自持 RT 每帧会被清屏覆盖，因此不需要初始内容。
+    unsafe fn create_texture_2d_empty(&self, desc: &Texture2DDesc) -> Result<Texture, String> {
+        let table = vtbl::<DeviceVtbl>(self.as_ptr());
+        let mut raw: *mut c_void = null_mut();
+        let hr = (table.create_texture_2d)(self.as_ptr(), desc, null(), &mut raw);
+        if hr < 0 {
+            return Err(format!("CreateTexture2D failed: 0x{:08X}", hr as u32));
+        }
+        Texture::from_raw(raw).ok_or_else(|| "CreateTexture2D returned null".into())
+    }
+
     unsafe fn create_shader_resource_view(
         &self,
         texture: &Texture,
@@ -889,6 +904,14 @@ impl Context {
         let samplers = [sampler.as_ptr()];
         (table.psset_samplers)(self.as_ptr(), 0, 1, samplers.as_ptr());
     }
+
+    /// 只换像素着色器（保留 VS / InputLayout / 混合 / 光栅化状态）。
+    ///
+    /// 用途：blit 阶段复用同一套顶点管线，只把 `ps_main` 换成 `ps_blit`。
+    unsafe fn set_ps_shader(&self, ps: &PixelShader) {
+        let table = vtbl::<ContextVtbl>(self.as_ptr());
+        (table.psset_shader)(self.as_ptr(), ps.as_ptr(), null(), 0);
+    }
 }
 
 impl SwapChain {
@@ -983,6 +1006,13 @@ float4 ps_main(VSOutput input) : SV_Target
     // 预乘：RGB 和 A 都乘覆盖率。漏掉 RGB 会变成加法混合 → 字形膨胀成实心块。
     return input.color * coverage;
 }
+
+// 全屏 blit：把自持 RT 原样搬到交换链后备缓冲（1:1，线性采样精确）。
+// 与 ps_main 分开，是因为后者把采样值当"覆盖率"乘到顶点色上。
+float4 ps_blit(VSOutput input) : SV_Target
+{
+    return atlas_texture.Sample(atlas_sampler, input.uv);
+}
 "#;
 
 unsafe fn compile_shader(entry: &str, target: &str) -> Result<Blob, String> {
@@ -1021,11 +1051,29 @@ unsafe fn compile_shader(entry: &str, target: &str) -> Result<Blob, String> {
 struct Pipeline {
     vertex_shader: VertexShader,
     pixel_shader: PixelShader,
+    /// 全屏 blit 用的像素着色器（把自持 RT 搬到后备缓冲）。
+    blit_ps: PixelShader,
     input_layout: InputLayout,
     blend: BlendState,
     rasterizer: RasterizerState,
     constant_buffer: Buffer,
     instance_buffer: Buffer,
+    /// blit 专用的小缓冲（1 个实例）。
+    ///
+    /// **不能复用 `instance_buffer`**：那会 `Map(DISCARD)` 掉 UI 实例，
+    /// 而 GPU 可能还没执行完上一次 draw —— 实测表现为"画面只剩背景色"。
+    blit_buffer: Buffer,
+}
+
+/// 自持渲染目标：UI 先画到它上面，再整张 blit 到交换链后备缓冲。
+///
+/// 为什么需要：交换链是 `FLIP_DISCARD`，后备缓冲内容在 Present 后失效。
+/// 有了自持 RT，才有可能做"只更新脏区"（后续用 scissor + 局部 clear）。
+struct CachedTarget {
+    /// 保留纹理本体，确保 RTV/SRV 背后的资源不被释放。
+    _texture: Texture,
+    rtv: RenderTarget,
+    srv: ShaderResourceView,
 }
 
 struct Atlas {
@@ -1042,9 +1090,11 @@ struct Atlas {
 unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
     let vs_blob = compile_shader("vs_main", "vs_5_0")?;
     let ps_blob = compile_shader("ps_main", "ps_5_0")?;
+    let blit_blob = compile_shader("ps_blit", "ps_5_0")?;
 
     let vertex_shader = device.create_vertex_shader(vs_blob.bytes())?;
     let pixel_shader = device.create_pixel_shader(ps_blob.bytes())?;
+    let blit_ps = device.create_pixel_shader(blit_blob.bytes())?;
 
     let elements = [
         InputElementDesc {
@@ -1104,6 +1154,15 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
         structure_byte_stride: 0,
     })?;
 
+    let blit_buffer = device.create_buffer(&BufferDesc {
+        byte_width: INSTANCE_SIZE as u32,
+        usage: D3D11_USAGE_DYNAMIC,
+        bind_flags: D3D11_BIND_VERTEX_BUFFER,
+        cpu_access_flags: D3D11_CPU_ACCESS_WRITE,
+        misc_flags: 0,
+        structure_byte_stride: 0,
+    })?;
+
     let mut blend_desc = BlendDesc::default();
     let target = &mut blend_desc.render_target[0];
     target.blend_enable = 1;
@@ -1132,11 +1191,13 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
     Ok(Pipeline {
         vertex_shader,
         pixel_shader,
+        blit_ps,
         input_layout,
         blend,
         rasterizer,
         constant_buffer,
         instance_buffer,
+        blit_buffer,
     })
 }
 
@@ -1153,6 +1214,8 @@ pub struct Gfx {
     device: Option<Device>,
     width: u32,
     height: u32,
+    /// 自持渲染目标（尺寸随窗口，重建/改变尺寸时丢弃重建）。
+    cached: Option<CachedTarget>,
 }
 
 impl Gfx {
@@ -1180,6 +1243,7 @@ impl Gfx {
             device: None,
             width,
             height,
+            cached: None,
         };
         gfx.rebuild(hwnd, width, height)?;
         Ok(gfx)
@@ -1198,6 +1262,7 @@ impl Gfx {
     pub unsafe fn rebuild(&mut self, hwnd: HWND, width: u32, height: u32) -> Result<(), String> {
         self.atlas = None;
         self.pipeline = None;
+        self.cached = None;
         self.rtv = None;
         self.swap_chain = None;
         self.context = None;
@@ -1353,6 +1418,8 @@ impl Gfx {
 
         self.width = width;
         self.height = height;
+        // 尺寸变了：自持 RT 必须重建（旧尺寸 blit 会错位/越界）。
+        self.cached = None;
         Ok(())
     }
 
@@ -1377,16 +1444,27 @@ impl Gfx {
             ),
             "render 前置条件不满足：图集未同步（有数据但无纹理）或尺寸为 0"
         );
-        let (Some(pipeline), Some(rtv), Some(context), Some(swap_chain)) = (
+        // 自持 RT：UI 先画到它上面。没有它就无法做"只更新脏区"
+        // （`FLIP_DISCARD` 的后备缓冲内容在 Present 后失效）。
+        if let Err(err) = self.ensure_cached() {
+            eprintln!("[y901] cached RT 创建失败: {err}");
+            return 0;
+        }
+        let (Some(pipeline), Some(rtv), Some(context), Some(swap_chain), Some(cached)) = (
             self.pipeline.as_ref(),
             self.rtv.as_ref(),
             self.context.as_ref(),
             self.swap_chain.as_ref(),
+            self.cached.as_ref(),
         ) else {
             return 0;
         };
+        let Some(atlas) = self.atlas.as_ref() else {
+            return 0;
+        };
 
-        let globals = [self.width as f32, self.height as f32, 0.0, 0.0];
+        let (w, h) = (self.width as f32, self.height as f32);
+        let globals = [w, h, 0.0, 0.0];
         context
             .update_constant_buffer(&pipeline.constant_buffer, globals.as_ptr() as *const c_void);
 
@@ -1405,16 +1483,91 @@ impl Gfx {
             }
         }
 
-        context.set_render_target(Some(rtv));
-        context.set_viewport(self.width as f32, self.height as f32);
-        context.clear(rtv, [0.02, 0.02, 0.03, 1.0]);
+        // ---- 阶段 A：把 UI 画进自持 RT ----
+        context.set_render_target(Some(&cached.rtv));
+        context.set_viewport(w, h);
+        context.clear(&cached.rtv, [0.02, 0.02, 0.03, 1.0]);
         context.set_pipeline(pipeline);
-        if let Some(atlas) = self.atlas.as_ref() {
-            context.set_ps_texture(&atlas.srv, &atlas.sampler);
-        }
+        context.set_ps_texture(&atlas.srv, &atlas.sampler);
         context.draw_instances(count as u32);
 
+        // ---- 阶段 B：自持 RT → 后备缓冲（全屏 quad，1:1 采样） ----
+        context.set_render_target(Some(rtv));
+        context.set_viewport(w, h);
+        // 用**独立的** blit 缓冲：复用 instance_buffer 会 Map(DISCARD) 掉 UI 实例，
+        // 而 GPU 可能还没执行完阶段 A 的 draw（实测表现为只剩背景色）。
+        if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
+            let blit = Instance {
+                pos: [0.0, 0.0],
+                size: [w, h],
+                uv_rect: [0.0, 0.0, 1.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
+            };
+            std::ptr::copy_nonoverlapping(
+                &blit as *const Instance as *const u8,
+                mapped.data as *mut u8,
+                INSTANCE_SIZE,
+            );
+            context.unmap(&pipeline.blit_buffer);
+        }
+        let buffers = [pipeline.blit_buffer.as_ptr()];
+        let strides = [INSTANCE_SIZE as u32];
+        let offsets = [0u32];
+        let table = vtbl::<ContextVtbl>(context.as_ptr());
+        (table.iaset_vertex_buffers)(
+            context.as_ptr(),
+            0,
+            1,
+            buffers.as_ptr(),
+            strides.as_ptr(),
+            offsets.as_ptr(),
+        );
+        context.set_ps_texture(&cached.srv, &atlas.sampler);
+        context.set_ps_shader(&pipeline.blit_ps);
+        context.draw_instances(1);
+
         swap_chain.present(sync_interval)
+    }
+
+    /// 确保自持 RT 存在且尺寸与窗口一致。
+    ///
+    /// 返回：`Ok(())` = 可用；`Err` = 设备未就绪或创建失败（调用方应放弃本帧）。
+    /// 副作用：首次调用创建纹理 + RTV + SRV；`rebuild`/`resize` 会把它置空，下次自动重建。
+    unsafe fn ensure_cached(&mut self) -> Result<(), String> {
+        if self.cached.is_some() {
+            return Ok(());
+        }
+        let (Some(device), Some(swap_chain)) = (self.device.as_ref(), self.swap_chain.as_ref())
+        else {
+            return Err("gfx is not initialized".to_string());
+        };
+        let (w, h) = (self.width.max(1), self.height.max(1));
+        // 格式必须与交换链一致（B8G8R8A8），否则 blit 会出现通道错位。
+        let desc = Texture2DDesc {
+            width: w,
+            height: h,
+            mip_levels: 1,
+            array_size: 1,
+            format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            sample_desc: SampleDesc {
+                count: 1,
+                quality: 0,
+            },
+            usage: D3D11_USAGE_DEFAULT,
+            bind_flags: D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
+            cpu_access_flags: 0,
+            misc_flags: 0,
+        };
+        let _ = swap_chain;
+        let texture = device.create_texture_2d_empty(&desc)?;
+        let rtv = device.create_render_target(&texture)?;
+        let srv = device.create_shader_resource_view(&texture)?;
+        self.cached = Some(CachedTarget {
+            _texture: texture,
+            rtv,
+            srv,
+        });
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
