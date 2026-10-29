@@ -44,13 +44,28 @@ struct Entry {
     size: Size,
 }
 
+/// 节点 id → 64 位缓存键（FNV-1a）。
+///
+/// 为什么不用 `String` 做键：每次 measure 都要 `id.to_string()`（堆分配）+
+/// SipHash（比 FNV 慢数倍），10k 节点的全量重排会因此多花毫秒级。
+/// FNV-1a 对短 ASCII id 足够分散，且零分配。
+fn id_key(id: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in id.as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 /// 布局缓存：记忆化 + 脏传播。
 pub struct LayoutCache {
-    entries: HashMap<String, Entry>,
-    dirty: HashSet<String>,
-    parents: HashMap<String, String>,
+    entries: HashMap<u64, Entry>,
+    dirty: HashSet<u64>,
+    /// 子 → 父（脏传播用）。键是 id_key 的结果。
+    parents: HashMap<u64, u64>,
     /// 当前正在测量的祖先链（用于填写 `parents`）。
-    stack: Vec<String>,
+    stack: Vec<u64>,
     stats: LayoutStats,
 }
 
@@ -77,13 +92,13 @@ impl LayoutCache {
 
     /// 标记某节点的尺寸可能变化：它自己和所有祖先都要重测。
     pub fn mark_dirty(&mut self, id: &str) {
-        let mut cursor = Some(id.to_string());
+        let mut cursor = Some(id_key(id));
         let mut guard = 0;
         while let Some(current) = cursor {
-            if !self.dirty.insert(current.clone()) {
+            if !self.dirty.insert(current) {
                 break; // 已在脏集合里，祖先必然也已标记
             }
-            cursor = self.parents.get(&current).cloned();
+            cursor = self.parents.get(&current).copied();
             guard += 1;
             if guard > 4096 {
                 break; // 防御错误数据形成环
@@ -105,18 +120,23 @@ impl LayoutCache {
 
     /// 某节点上次测得的尺寸（不管约束）。arrange 阶段复用。
     pub fn last_size(&self, id: &str) -> Option<Size> {
-        self.entries.get(id).map(|e| e.size)
+        self.entries.get(&id_key(id)).map(|e| e.size)
     }
 
     pub fn is_dirty(&self, id: &str) -> bool {
-        self.dirty.contains(id)
+        self.dirty.contains(&id_key(id))
     }
 
     fn is_fresh(&self, id: &str, constraints: Constraints, version: u64) -> bool {
-        if self.dirty.contains(id) {
+        self.is_fresh_by_key(id_key(id), constraints, version)
+    }
+
+    /// 同 [LayoutCache::is_fresh]，但直接收 u64 键（measure 路径少做一次哈希）。
+    fn is_fresh_by_key(&self, key: u64, constraints: Constraints, version: u64) -> bool {
+        if self.dirty.contains(&key) {
             return false;
         }
-        match self.entries.get(id) {
+        match self.entries.get(&key) {
             Some(entry) => entry.version == version && entry.constraints == constraints,
             None => false,
         }
@@ -131,31 +151,31 @@ impl LayoutCache {
         metrics: &dyn TextMetrics,
         constraints: Constraints,
     ) -> Size {
-        let id = widget.id().to_string();
+        let key = id_key(widget.id());
         let version = widget.layout_version();
 
-        if self.is_fresh(&id, constraints, version) {
-            return self.entries.get(&id).map(|e| e.size).unwrap_or(Size::ZERO);
+        if self.is_fresh_by_key(key, constraints, version) {
+            return self.entries.get(&key).map(|e| e.size).unwrap_or(Size::ZERO);
         }
 
-        if let Some(parent) = self.stack.last().cloned() {
-            self.parents.insert(id.clone(), parent);
+        if let Some(parent) = self.stack.last().copied() {
+            self.parents.insert(key, parent);
         }
 
         self.stats.measured += 1;
-        self.stack.push(id.clone());
+        self.stack.push(key);
         let size = widget.measure(metrics, constraints, self);
         self.stack.pop();
 
         self.entries.insert(
-            id.clone(),
+            key,
             Entry {
                 constraints,
                 version,
                 size,
             },
         );
-        self.dirty.remove(&id);
+        self.dirty.remove(&key);
         size
     }
 
