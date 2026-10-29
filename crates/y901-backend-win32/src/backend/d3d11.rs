@@ -131,6 +131,12 @@ const D3D11_BIND_CONSTANT_BUFFER: u32 = 0x4;
 const D3D11_BIND_SHADER_RESOURCE: u32 = 0x8;
 const D3D11_CPU_ACCESS_WRITE: u32 = 0x10000;
 const D3D11_MAP_WRITE_DISCARD: u32 = 4;
+/// `D3D11_MAP_READ`
+const D3D11_MAP_READ: u32 = 1;
+/// `D3D11_USAGE_STAGING`
+const D3D11_USAGE_STAGING: u32 = 3;
+/// `D3D11_CPU_ACCESS_READ`
+const D3D11_CPU_ACCESS_READ: u32 = 0x20000;
 
 const D3D11_FILTER_MIN_MAG_MIP_LINEAR: u32 = 0x15;
 const D3D11_TEXTURE_ADDRESS_CLAMP: u32 = 3;
@@ -542,8 +548,12 @@ struct ContextVtbl {
     reserved_11: [*const c_void; 7],
     rsset_state: unsafe extern "system" fn(*mut c_void, *mut c_void),
     rsset_viewports: unsafe extern "system" fn(*mut c_void, u32, *const Viewport),
-    // 45..=47
-    reserved_12: [*const c_void; 3],
+    /// 41：RSSetScissorRects（vtable 顺序见 winapi 0.3.9 的 ID3D11DeviceContextVtbl）
+    rsset_scissor_rects: unsafe extern "system" fn(*mut c_void, u32, *const RectI32),
+    /// 42：CopySubresourceRegion（暂未使用，占位保持后续偏移不变）
+    reserved_12: *const c_void,
+    /// 43：CopyResource（快照回读：把后备缓冲拷进 staging 纹理）
+    copy_resource: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut c_void),
     update_subresource: unsafe extern "system" fn(
         *mut c_void,
         *mut c_void,
@@ -555,6 +565,16 @@ struct ContextVtbl {
     ),
     reserved_13: *const c_void,
     clear_render_target_view: unsafe extern "system" fn(*mut c_void, *mut c_void, *const f32),
+}
+
+/// 裁剪矩形（`RSSetScissorRects` 用；D3D11_RECT = 4 个 LONG）。
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct RectI32 {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
 }
 
 #[repr(C)]
@@ -863,6 +883,12 @@ impl Context {
         (table.unmap)(self.as_ptr(), buffer.as_ptr(), 0);
     }
 
+    /// 解除对一个**纹理**资源的 Map（`Unmap` 接受任意 `ID3D11Resource`）。
+    unsafe fn unmap_texture(&self, texture: &Texture) {
+        let table = vtbl::<ContextVtbl>(self.as_ptr());
+        (table.unmap)(self.as_ptr(), texture.as_ptr(), 0);
+    }
+
     unsafe fn set_pipeline(&self, pipeline: &Pipeline) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
 
@@ -903,6 +929,44 @@ impl Context {
         (table.psset_shader_resources)(self.as_ptr(), 0, 1, views.as_ptr());
         let samplers = [sampler.as_ptr()];
         (table.psset_samplers)(self.as_ptr(), 0, 1, samplers.as_ptr());
+    }
+
+    /// 设置裁剪矩形（`RSSetScissorRects`，需要光栅化状态里 `scissor_enable = 1`）。
+    ///
+    /// 输入：`rect`（像素，右/下为**开区间**）。
+    /// 副作用：之后所有 draw 只影响该矩形内的像素。
+    /// TODO(§36)：scissor 已就绪但尚未接到 `render`（下一步局部重绘会用到）。
+    #[allow(dead_code)]
+    unsafe fn set_scissor(&self, rect: RectI32) {
+        let table = vtbl::<ContextVtbl>(self.as_ptr());
+        (table.rsset_scissor_rects)(self.as_ptr(), 1, &rect);
+    }
+
+    /// 整资源拷贝（`CopyResource`）：要求同格式、同尺寸、同 mip 数。
+    unsafe fn copy_resource(&self, dst: *mut c_void, src: *mut c_void) {
+        let table = vtbl::<ContextVtbl>(self.as_ptr());
+        (table.copy_resource)(self.as_ptr(), dst, src);
+    }
+
+    /// 以只读方式 Map 一个 staging 纹理。
+    ///
+    /// 返回：映射指针与行跨度（`row_pitch`）；失败返回 `None`。
+    unsafe fn map_read(&self, texture: &Texture) -> Option<MappedSubresource> {
+        let table = vtbl::<ContextVtbl>(self.as_ptr());
+        let mut mapped: MappedSubresource = std::mem::zeroed();
+        let hr = (table.map)(
+            self.as_ptr(),
+            texture.as_ptr(),
+            0,
+            D3D11_MAP_READ,
+            0,
+            &mut mapped,
+        );
+        if hr < 0 {
+            None
+        } else {
+            Some(mapped)
+        }
     }
 
     /// 只换像素着色器（保留 VS / InputLayout / 混合 / 光栅化状态）。
@@ -1526,7 +1590,115 @@ impl Gfx {
         context.set_ps_shader(&pipeline.blit_ps);
         context.draw_instances(1);
 
+        // ---- 快照验证（`Y901_SNAPSHOT=1` 时启用） ----
+        //
+        // 用**同一批实例**再画一遍，比较两次回读的像素哈希：
+        // 相等 ⇒ 渲染路径确定（没有未初始化内存、没有时间依赖）。
+        // 这是后续 scissor / ClearType 改动的回归探针。
+        if std::env::var_os("Y901_SNAPSHOT").is_some() {
+            let h1 = self.read_back_hash();
+            // 重画一遍（同一份实例数据）
+            context.set_render_target(Some(&cached.rtv));
+            context.clear(&cached.rtv, [0.02, 0.02, 0.03, 1.0]);
+            context.set_pipeline(pipeline);
+            context.set_ps_texture(&atlas.srv, &atlas.sampler);
+            context.draw_instances(count as u32);
+            context.set_render_target(Some(rtv));
+            if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
+                let blit = Instance {
+                    pos: [0.0, 0.0],
+                    size: [w, h],
+                    uv_rect: [0.0, 0.0, 1.0, 1.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
+                };
+                std::ptr::copy_nonoverlapping(
+                    &blit as *const Instance as *const u8,
+                    mapped.data as *mut u8,
+                    INSTANCE_SIZE,
+                );
+                context.unmap(&pipeline.blit_buffer);
+            }
+            let buffers = [pipeline.blit_buffer.as_ptr()];
+            let strides = [INSTANCE_SIZE as u32];
+            let offsets = [0u32];
+            let table = vtbl::<ContextVtbl>(context.as_ptr());
+            (table.iaset_vertex_buffers)(
+                context.as_ptr(),
+                0,
+                1,
+                buffers.as_ptr(),
+                strides.as_ptr(),
+                offsets.as_ptr(),
+            );
+            context.set_ps_texture(&cached.srv, &atlas.sampler);
+            context.set_ps_shader(&pipeline.blit_ps);
+            context.draw_instances(1);
+            let h2 = self.read_back_hash();
+            match (h1, h2) {
+                (Some(a), Some(b)) => eprintln!(
+                    "[snapshot] instances={count} hash1=0x{a:016x} hash2=0x{b:016x} equal={}",
+                    a == b
+                ),
+                _ => eprintln!("[snapshot] 回读失败（staging/Map 返回 None）"),
+            }
+        }
+
         swap_chain.present(sync_interval)
+    }
+
+    /// 把交换链后备缓冲回读到 CPU，算 FNV-1a 哈希（快照验证与回归对比用）。
+    ///
+    /// 返回：`Some(hash)`；设备/staging 创建或 Map 失败时 `None`。
+    /// 副作用：创建一个 staging 纹理并立即释放；只在开启快照时调用。
+    ///
+    /// # Safety
+    ///
+    /// 必须在拥有该窗口的线程上调用，且 `Gfx` 已初始化。
+    unsafe fn read_back_hash(&self) -> Option<u64> {
+        let (Some(device), Some(context), Some(swap_chain)) = (
+            self.device.as_ref(),
+            self.context.as_ref(),
+            self.swap_chain.as_ref(),
+        ) else {
+            return None;
+        };
+        let (w, h) = (self.width.max(1), self.height.max(1));
+        let backbuffer = swap_chain.back_buffer(0).ok()?;
+        let desc = Texture2DDesc {
+            width: w,
+            height: h,
+            mip_levels: 1,
+            array_size: 1,
+            format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            sample_desc: SampleDesc {
+                count: 1,
+                quality: 0,
+            },
+            usage: D3D11_USAGE_STAGING,
+            bind_flags: 0,
+            cpu_access_flags: D3D11_CPU_ACCESS_READ,
+            misc_flags: 0,
+        };
+        let staging = device.create_texture_2d_empty(&desc).ok()?;
+        context.copy_resource(staging.as_ptr(), backbuffer.as_ptr());
+
+        let mapped = context.map_read(&staging)?;
+        let pitch = mapped.row_pitch as usize;
+        let row_bytes = (w as usize) * 4;
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let base = mapped.data as *const u8;
+        if base.is_null() {
+            return None;
+        }
+        for y in 0..h as usize {
+            let row = std::slice::from_raw_parts(base.add(y * pitch), row_bytes);
+            for b in row {
+                hash ^= *b as u64;
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        context.unmap_texture(&staging);
+        Some(hash)
     }
 
     /// 确保自持 RT 存在且尺寸与窗口一致。

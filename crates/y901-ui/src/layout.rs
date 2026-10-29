@@ -214,6 +214,27 @@ pub fn flex_measure(
     constraints: Constraints,
     cache: &mut LayoutCache,
 ) -> Size {
+    let mut measured = Vec::new();
+    flex_measure_into(
+        axis, padding, gap, children, metrics, constraints, cache, &mut measured,
+    )
+}
+
+/// 同 [`flex_measure`]，额外把每个子节点的 `(实测尺寸, flex 参数)` 写进 `measured`。
+///
+/// 让 `arrange` 能直接复用（省掉每个子节点一次 id 哈希 + 一次 `flex()` 虚调用）。
+#[allow(clippy::too_many_arguments)] // 与 flex_measure 保持同一组参数 + 一个 out 参数
+pub fn flex_measure_into(
+    axis: Axis,
+    padding: Edges,
+    gap: f32,
+    children: &mut [Box<dyn Widget>],
+    metrics: &dyn TextMetrics,
+    constraints: Constraints,
+    cache: &mut LayoutCache,
+    measured: &mut Vec<(Size, FlexItem)>,
+) -> Size {
+    measured.clear();
     // 主轴无界时，子节点在主轴方向不设上限（ScrollView 场景）
     let inner_max = Size::new(
         if constraints.is_unbounded(Axis::Horizontal) {
@@ -235,6 +256,7 @@ pub fn flex_measure(
     for child in children.iter_mut() {
         let item = child.flex();
         let size = cache.measure(child.as_mut(), metrics, Constraints::loose(inner_max));
+        measured.push((size, item));
 
         let (main_dim, cross_dim) = match axis {
             Axis::Horizontal => (item.width, item.height),
@@ -306,6 +328,23 @@ pub fn flex_arrange(
     metrics: &dyn TextMetrics,
     cache: &mut LayoutCache,
 ) {
+    flex_arrange_with(axis, padding, gap, children, rect, metrics, cache, &[]);
+}
+
+/// 同 [`flex_arrange`]，但**优先复用** `measured`（来自 [`flex_measure_into`]）。
+///
+/// 命中复用条件：长度一致。此时不再查 `LayoutCache`、不再调 `child.flex()`。
+#[allow(clippy::too_many_arguments)] // 同 flex_arrange + 一个 measured 复用参数
+pub fn flex_arrange_with(
+    axis: Axis,
+    padding: Edges,
+    gap: f32,
+    children: &mut [Box<dyn Widget>],
+    rect: Rect,
+    metrics: &dyn TextMetrics,
+    cache: &mut LayoutCache,
+    measured: &[(Size, FlexItem)],
+) {
     if children.is_empty() {
         return;
     }
@@ -320,14 +359,21 @@ pub fn flex_arrange(
     let mut flex_total = 0.0f32;
     let mut sizes: Vec<Size> = Vec::with_capacity(children.len());
 
-    for child in children.iter_mut() {
-        let item = child.flex();
+    let reuse = measured.len() == children.len();
+    for (idx, child) in children.iter_mut().enumerate() {
+        // 复用 measure 阶段的成果：省掉一次 id 哈希 + 一次 flex() 虚调用
+        let (size, item) = if reuse {
+            measured[idx]
+        } else {
+            (
+                cache.size_for_arrange(child.as_mut(), metrics, Constraints::loose(inner.size())),
+                child.flex(),
+            )
+        };
         let main_dim = match axis {
             Axis::Horizontal => item.width,
             Axis::Vertical => item.height,
         };
-        let size =
-            cache.size_for_arrange(child.as_mut(), metrics, Constraints::loose(inner.size()));
         sizes.push(size);
 
         if let Some(factor) = main_dim.flex_factor() {
@@ -426,6 +472,11 @@ pub struct Flex {
     children: Vec<Box<dyn Widget>>,
     rect: Rect,
     item: FlexItem,
+    /// `measure` 阶段算出的子节点尺寸与 flex 参数，`arrange` 直接复用。
+    ///
+    /// 为什么缓存：arrange 若回查 `LayoutCache`，每个子节点都要重算一次 id 哈希；
+    /// 若重新调 `child.flex()`，又是一次虚调用。两者在 10k 节点上是主要开销。
+    measured: Vec<(Size, FlexItem)>,
 }
 
 impl Flex {
@@ -439,6 +490,7 @@ impl Flex {
             children: Vec::new(),
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            measured: Vec::new(),
         }
     }
 
@@ -507,7 +559,7 @@ impl Widget for Flex {
         constraints: Constraints,
         cache: &mut LayoutCache,
     ) -> Size {
-        flex_measure(
+        flex_measure_into(
             self.axis,
             self.padding,
             self.gap,
@@ -515,12 +567,13 @@ impl Widget for Flex {
             metrics,
             constraints,
             cache,
+            &mut self.measured,
         )
     }
 
     fn arrange(&mut self, rect: Rect, metrics: &dyn TextMetrics, cache: &mut LayoutCache) {
         self.rect = rect;
-        flex_arrange(
+        flex_arrange_with(
             self.axis,
             self.padding,
             self.gap,
@@ -528,6 +581,7 @@ impl Widget for Flex {
             rect,
             metrics,
             cache,
+            &self.measured,
         );
     }
 
