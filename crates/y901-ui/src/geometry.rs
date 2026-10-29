@@ -93,6 +93,25 @@ impl Rect {
     }
 
     /// 内缩（padding）。
+    /// 两个矩形的并集（包围盒）。空矩形按"不参与"处理。
+    ///
+    /// 返回：覆盖两者的最小矩形；两者都为空时返回空矩形。
+    /// 用途：控件收缩/滚动时，旧区域和新区域**都要重绘**，
+    /// 只重绘新区域会留下旧内容的残影。
+    pub fn union(&self, other: Rect) -> Rect {
+        if self.is_empty() {
+            return other;
+        }
+        if other.is_empty() {
+            return *self;
+        }
+        let x0 = self.x.min(other.x);
+        let y0 = self.y.min(other.y);
+        let x1 = self.right().max(other.right());
+        let y1 = self.bottom().max(other.bottom());
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    }
+
     pub fn inset(&self, edges: Edges) -> Rect {
         Rect::new(
             self.x + edges.left,

@@ -985,10 +985,56 @@ impl UiTree {
             self.dirty = DirtyRegion::full();
         }
         self.viewport = viewport;
+        // 布局前快照：控件收缩/内容变短时，**旧 rect 也要重绘**，
+        // 否则旧内容的残影会留在屏幕上（局部重绘下才暴露）。
+        // 视口变化时整窗已经是脏的，不需要快照。
+        let before = if viewport_changed {
+            Vec::new()
+        } else {
+            self.snapshot_rects()
+        };
         crate::layout::layout_tree(self.root.as_mut(), viewport, metrics, &mut self.cache);
         if !self.layout_stats().skipped {
             self.rebuild_indices();
+            if !before.is_empty() {
+                self.mark_moved(&before);
+            }
             self.enforce_modal_focus();
+        }
+    }
+
+    /// 快照当前每个节点的 rect（布局前调用）。
+    ///
+    /// 返回：`(id, rect)` 列表；顺序无所谓（后面按 id 查）。
+    /// 开销：O(n) 次 String clone——只在**非视口变化**的重排里做，
+    /// 视口变化（拉伸）走整窗脏区，不需要它。
+    fn snapshot_rects(&self) -> Vec<(String, Rect)> {
+        fn walk(node: &dyn Widget, out: &mut Vec<(String, Rect)>) {
+            out.push((node.id().to_string(), node.rect()));
+            if !node.is_open() {
+                return;
+            }
+            for child in node.children() {
+                walk(child.as_ref(), out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(self.root.as_ref(), &mut out);
+        out
+    }
+
+    /// 对比布局前后的 rect：变了就标记 `旧 ∪ 新`。
+    ///
+    /// 输入：布局前的快照。副作用：往 `dirty` 里加并集矩形。
+    /// 为什么是并集：只标新区域会把"原来那块"留在屏幕上（残影）。
+    fn mark_moved(&mut self, before: &[(String, Rect)]) {
+        for (id, old) in before {
+            let Some(new) = self.rects.get(id).copied() else {
+                continue;
+            };
+            if new != *old {
+                self.dirty.add(old.union(new));
+            }
         }
     }
 
