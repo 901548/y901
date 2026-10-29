@@ -46,13 +46,17 @@ pub struct GfxInstance {
     pub uv_rect: [f32; 4],
     /// RGBA（0..1）。
     pub color: [f32; 4],
+    /// 渐变终点色（纯色时等于 `color`）。
+    pub color_end: [f32; 4],
+    /// `(dir.x, dir.y, mode, offset)`；mode=1 表示线性渐变。
+    pub gradient: [f32; 4],
 }
 
 /// 编译期布局断言：4 个字段共 12 个 f32 = 48 字节，且与 `d3d11::Instance` 相同。
 ///
 /// 一旦有人加字段/改类型，这里会**编译失败**——这是唯一能在编译期发现的防线。
 /// 运行时还有 `debug_assert` + `gfx_instance_layout_matches_d3d_instance` 测试双保险。
-const _: () = assert!(core::mem::size_of::<GfxInstance>() == 48);
+const _: () = assert!(core::mem::size_of::<GfxInstance>() == 80);
 
 /// 图集脏矩形：本帧需要上传到 GPU 的区域。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -218,6 +222,8 @@ mod tests {
             size: [8.0, 16.0],
             uv_rect: [0.0, 0.0, 0.1, 0.1],
             color: [1.0, 1.0, 1.0, 1.0],
+            color_end: [1.0, 1.0, 1.0, 1.0],
+            gradient: [0.0, 0.0, 0.0, 0.0],
         }
     }
 

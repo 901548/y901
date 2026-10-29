@@ -42,9 +42,20 @@ use windows_sys::Win32::Foundation::HWND;
 
 pub type Hresult = i32;
 
-pub const INSTANCE_SIZE: usize = 48;
+pub const INSTANCE_SIZE: usize = 80;
 pub const INSTANCE_CAPACITY: usize = 10_000;
 
+/// 一个绘制实例（轴对齐四边形）。
+///
+/// 布局（与 GPU InputLayout 逐字节对应，改字段必须同步改 `create_pipeline`）：
+/// | 偏移 | 字段 | 语义 |
+/// |------|------|------|
+/// | 0  | pos        | 左上角像素坐标 |
+/// | 8  | size       | 像素尺寸 |
+/// | 16 | uv_rect    | 图集 UV（`xy == zw` 表示纯色，不采样） |
+/// | 32 | color      | 纯色 / 渐变起点色 |
+/// | 48 | color_end  | 渐变终点色（纯色时等于 `color`） |
+/// | 64 | gradient   | `(dir.x, dir.y, mode, offset)`；mode=1 表示线性渐变 |
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Instance {
@@ -52,6 +63,69 @@ pub struct Instance {
     pub size: [f32; 2],
     pub uv_rect: [f32; 4],
     pub color: [f32; 4],
+    pub color_end: [f32; 4],
+    pub gradient: [f32; 4],
+}
+
+impl Instance {
+    /// 纯色/字形实例：`color_end` 与 `color` 相同，渐变模式 0。
+    ///
+    /// 输入：位置、尺寸、UV（`xy == zw` → 纯色）、颜色。
+    /// 返回：可直接推入实例流的实例。
+    pub fn solid(pos: [f32; 2], size: [f32; 2], uv_rect: [f32; 4], color: [f32; 4]) -> Self {
+        Self {
+            pos,
+            size,
+            uv_rect,
+            color,
+            color_end: color,
+            gradient: [0.0, 0.0, 0.0, 0.0],
+        }
+    }
+
+    /// 线性渐变实例。
+    ///
+    /// 输入：矩形（像素）、起点色、终点色、`dir`（像素空间方向向量，无需归一化）。
+    /// 说明：CPU 侧把 `dir` 归一化成"每像素 t 增量"并算出 `offset`，
+    /// 着色器里 `t = saturate(dot(local_px, dir) + offset)`。
+    pub fn gradient_rect(
+        pos: [f32; 2],
+        size: [f32; 2],
+        from: [f32; 4],
+        to: [f32; 4],
+        dir: [f32; 2],
+    ) -> Self {
+        let len2 = dir[0] * dir[0] + dir[1] * dir[1];
+        if len2 <= f32::EPSILON || size[0] <= 0.0 || size[1] <= 0.0 {
+            return Self::solid(pos, size, [0.0, 0.0, 0.0, 0.0], from);
+        }
+        // 四角投影求 t 的区间，保证 t 恰好铺满 [0,1]
+        let mut t_min = f32::MAX;
+        let mut t_max = f32::MIN;
+        for (cx, cy) in [(0.0, 0.0), (size[0], 0.0), (0.0, size[1]), (size[0], size[1])] {
+            let t = (cx * dir[0] + cy * dir[1]) / len2;
+            t_min = t_min.min(t);
+            t_max = t_max.max(t);
+        }
+        let span = t_max - t_min;
+        if span <= f32::EPSILON {
+            return Self::solid(pos, size, [0.0, 0.0, 0.0, 0.0], from);
+        }
+        Self {
+            pos,
+            size,
+            // xy == zw → 纯色分支（不采样图集）
+            uv_rect: [0.0, 0.0, 0.0, 0.0],
+            color: from,
+            color_end: to,
+            gradient: [
+                dir[0] / (len2 * span),
+                dir[1] / (len2 * span),
+                1.0,
+                -t_min / span,
+            ],
+        }
+    }
 }
 
 const _: () = assert!(std::mem::size_of::<Instance>() == INSTANCE_SIZE);
@@ -72,6 +146,8 @@ pub fn verify_instance_layout() -> Result<(), String> {
         ("size", std::mem::offset_of!(Instance, size), 8),
         ("uv_rect", std::mem::offset_of!(Instance, uv_rect), 16),
         ("color", std::mem::offset_of!(Instance, color), 32),
+        ("color_end", std::mem::offset_of!(Instance, color_end), 48),
+        ("gradient", std::mem::offset_of!(Instance, gradient), 64),
     ];
     for (name, actual, expected) in offsets {
         if actual != expected {
@@ -82,11 +158,13 @@ pub fn verify_instance_layout() -> Result<(), String> {
     }
 
     println!(
-        "[y901] Instance layout ok: size={size} stride={INSTANCE_SIZE} offsets=pos:{} size:{} uv:{} color:{}",
+        "[y901] Instance layout ok: size={size} stride={INSTANCE_SIZE} offsets=pos:{} size:{} uv:{} color:{} end:{} grad:{}",
         std::mem::offset_of!(Instance, pos),
         std::mem::offset_of!(Instance, size),
         std::mem::offset_of!(Instance, uv_rect),
         std::mem::offset_of!(Instance, color),
+        std::mem::offset_of!(Instance, color_end),
+        std::mem::offset_of!(Instance, gradient),
     );
     Ok(())
 }
@@ -1020,10 +1098,12 @@ SamplerState atlas_sampler : register(s0);
 
 struct VSInput
 {
-    float2 pos   : TEXCOORD0;
-    float2 size  : TEXCOORD1;
-    float4 uv    : TEXCOORD2;
-    float4 color : TEXCOORD3;
+    float2 pos      : TEXCOORD0;
+    float2 size     : TEXCOORD1;
+    float4 uv       : TEXCOORD2;
+    float4 color    : TEXCOORD3;
+    float4 color_end: TEXCOORD4;
+    float4 gradient : TEXCOORD5;
 };
 
 struct VSOutput
@@ -1032,6 +1112,10 @@ struct VSOutput
     float2 uv       : TEXCOORD0;
     float4 color    : TEXCOORD1;
     float  solid    : TEXCOORD2;
+    float2 local    : TEXCOORD3;
+    float4 color_end: TEXCOORD4;
+    float4 gradient : TEXCOORD5;
+    float2 size     : TEXCOORD6;
 };
 
 VSOutput vs_main(uint vertex_id : SV_VertexID, VSInput input)
@@ -1058,6 +1142,10 @@ VSOutput vs_main(uint vertex_id : SV_VertexID, VSInput input)
     output.position = float4(ndc, 0.0, 1.0);
     output.uv = input.uv.xy + corner * (input.uv.zw - input.uv.xy);
     output.color = input.color;
+    output.color_end = input.color_end;
+    output.gradient = input.gradient;
+    output.size = input.size;
+    output.local = corner;
     // uv.zw == uv.xy 表示"纯色矩形"（背景、光标），不需要采样图集。
     output.solid = (input.uv.x == input.uv.z && input.uv.y == input.uv.w) ? 1.0 : 0.0;
     return output;
@@ -1066,6 +1154,17 @@ VSOutput vs_main(uint vertex_id : SV_VertexID, VSInput input)
 float4 ps_main(VSOutput input) : SV_Target
 {
     // 混合状态是 SrcBlend=ONE（预乘 Alpha），所以输出必须已经乘过 alpha。
+    //
+    // 三种图元：
+    //   1. 渐变（gradient.z > 0.5）：不采样图集，按局部坐标投影插值
+    //   2. 纯色（uv.xy == uv.zw）：直接输出顶点色
+    //   3. 字形：采样图集覆盖率
+    if (input.gradient.z > 0.5)
+    {
+        float2 px = input.local * input.size;
+        float t = saturate(dot(px, input.gradient.xy) + input.gradient.w);
+        return lerp(input.color, input.color_end, t);
+    }
     if (input.solid > 0.5)
     {
         return input.color;
@@ -1076,8 +1175,11 @@ float4 ps_main(VSOutput input) : SV_Target
     // 用 padding.x 传 gamma 指数（默认 1/2.2），把它拉回感知线性。
     float g = padding.x > 0.001 ? padding.x : 1.0;
     cov = pow(cov, g);
-    // 预乘：RGB 乘各自通道的覆盖率；alpha 保持顶点 alpha。
-    return float4(input.color.rgb * cov, input.color.a);
+    // 预乘 Alpha：RGB 和 **alpha 都**要乘覆盖率。
+    // 漏乘 alpha 会让覆盖率=0 的像素变成"不透明黑块"（字形命中框内的
+    // 空白区会被涂黑）——这是真实遇到过的 bug。
+    float a = input.color.a * dot(cov, float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
+    return float4(input.color.rgb * cov, a);
 }
 
 // 全屏 blit：把自持 RT 原样搬到交换链后备缓冲（1:1，线性采样精确）。
@@ -1206,6 +1308,26 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
             input_slot_class: D3D11_INPUT_PER_INSTANCE_DATA,
             instance_data_step_rate: 1,
         },
+        // 渐变终点色
+        InputElementDesc {
+            semantic_name: b"TEXCOORD\0".as_ptr(),
+            semantic_index: 4,
+            format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            input_slot: 0,
+            aligned_byte_offset: 48,
+            input_slot_class: D3D11_INPUT_PER_INSTANCE_DATA,
+            instance_data_step_rate: 1,
+        },
+        // (dir.x, dir.y, mode, offset)
+        InputElementDesc {
+            semantic_name: b"TEXCOORD\0".as_ptr(),
+            semantic_index: 5,
+            format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            input_slot: 0,
+            aligned_byte_offset: 64,
+            input_slot_class: D3D11_INPUT_PER_INSTANCE_DATA,
+            instance_data_step_rate: 1,
+        },
     ];
     let input_layout = device.create_input_layout(&elements, vs_blob.bytes())?;
 
@@ -1308,16 +1430,16 @@ unsafe fn draw_scene(
     } else {
         // 局部清屏：画一个和清屏色相同的实心 quad，正好覆盖 scissor 区域。
         // （ClearRenderTargetView 只能整张清，无法只清一块。）
-        let bg = Instance {
-            pos: [rect.left as f32, rect.top as f32],
-            size: [
+        let bg = Instance::solid(
+            [rect.left as f32, rect.top as f32],
+            [
                 (rect.right - rect.left) as f32,
                 (rect.bottom - rect.top) as f32,
             ],
             // uv 全等 ⇒ shader 里的 solid 分支：直接输出顶点色
-            uv_rect: [0.0, 0.0, 0.0, 0.0],
-            color: [0.02, 0.02, 0.03, 1.0],
-        };
+            [0.0, 0.0, 0.0, 0.0],
+            [0.02, 0.02, 0.03, 1.0],
+        );
         if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
             std::ptr::copy_nonoverlapping(
                 &bg as *const Instance as *const u8,
@@ -1373,12 +1495,12 @@ unsafe fn blit_cached(
     context.set_render_target(Some(rtv));
     context.set_viewport(w, h);
     if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
-        let blit = Instance {
-            pos: [0.0, 0.0],
-            size: [w, h],
-            uv_rect: [0.0, 0.0, 1.0, 1.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-        };
+        let blit = Instance::solid(
+            [0.0, 0.0],
+            [w, h],
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
+        );
         std::ptr::copy_nonoverlapping(
             &blit as *const Instance as *const u8,
             mapped.data as *mut u8,
@@ -1420,6 +1542,10 @@ pub struct Gfx {
     dirty: Option<RectI32>,
     /// 已渲染帧数（快照自检只在第二帧之后跑，避免拿未初始化内容比较）。
     frames: u64,
+    /// 下一帧是否需要回读像素（必须在 present 之前拿）。
+    snapshot_requested: bool,
+    /// 最近一次快照的像素（BGRA）与尺寸。
+    snapshot: Option<(Vec<u8>, u32, u32)>,
 }
 
 impl Gfx {
@@ -1450,6 +1576,8 @@ impl Gfx {
             cached: None,
             dirty: None,
             frames: 0,
+            snapshot_requested: false,
+            snapshot: None,
         };
         gfx.rebuild(hwnd, width, height)?;
         Ok(gfx)
@@ -1795,12 +1923,12 @@ impl Gfx {
             context.draw_instances(count as u32);
             context.set_render_target(Some(rtv));
             if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
-                let blit = Instance {
-                    pos: [0.0, 0.0],
-                    size: [w, h],
-                    uv_rect: [0.0, 0.0, 1.0, 1.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                };
+                let blit = Instance::solid(
+                    [0.0, 0.0],
+                    [w, h],
+                    [0.0, 0.0, 1.0, 1.0],
+                    [1.0, 1.0, 1.0, 1.0],
+                );
                 std::ptr::copy_nonoverlapping(
                     &blit as *const Instance as *const u8,
                     mapped.data as *mut u8,
@@ -1833,12 +1961,39 @@ impl Gfx {
             }
         }
 
+        // 快照：必须在 present 之前回读（FLIP_DISCARD 之后后备缓冲内容未定义）。
+        if self.snapshot_requested {
+            self.snapshot = self.read_back_frame();
+            self.snapshot_requested = false;
+        }
+
         swap_chain.present(sync_interval)
+    }
+
+    /// 请求在**下一帧 present 之前**回读像素。
+    pub fn request_snapshot(&mut self) {
+        self.snapshot_requested = true;
+    }
+
+    /// 取走上次快照的像素（BGRA）。
+    pub fn take_snapshot(&mut self) -> Option<(Vec<u8>, u32, u32)> {
+        self.snapshot.take()
     }
 
     /// 把后备缓冲回读成紧凑的 BGRA 像素（快照/亮度统计用）。
     ///
     /// 返回：`(pixels, width, height)`；staging 或 Map 失败时 `None`。
+    /// 把后备缓冲回读成紧凑的 BGRA 像素（快照/像素数学验证用）。
+    ///
+    /// 返回：`(pixels, width, height)`；staging 或 Map 失败时 `None`。
+    ///
+    /// # Safety
+    ///
+    /// 必须在拥有窗口的线程上调用，且 `Gfx` 已初始化。
+    pub unsafe fn read_back_pixels(&self) -> Option<(Vec<u8>, u32, u32)> {
+        self.read_back_frame()
+    }
+
     unsafe fn read_back_frame(&self) -> Option<(Vec<u8>, u32, u32)> {
         let (Some(device), Some(context), Some(swap_chain)) = (
             self.device.as_ref(),

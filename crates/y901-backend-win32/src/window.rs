@@ -630,6 +630,30 @@ impl Window {
         }
     }
 
+    /// 回读当前后备缓冲（BGRA），供像素数学验证使用。
+    ///
+    /// 返回：`(pixels, width, height)`；未初始化或回读失败时 `None`。
+    /// 说明：必须在 `render` 之后调用（且下一帧 `render` 之前）。
+    pub fn read_back_pixels(&self) -> Option<(Vec<u8>, u32, u32)> {
+        // SAFETY: 已在拥有窗口的线程上，backend 已初始化。
+        unsafe { self.backend.as_ref()?.read_back_pixels() }
+    }
+
+    /// 请求在下一帧 present 之前快照（回读像素）。
+    ///
+    /// 为什么不直接 `read_back_pixels`：`FLIP_DISCARD` 在 present 后内容未定义，
+    /// 帧后读会得到全 0。
+    pub fn request_snapshot(&mut self) {
+        if let Some(b) = self.backend.as_mut() {
+            b.request_snapshot();
+        }
+    }
+
+    /// 取走上次快照的像素（BGRA）。
+    pub fn take_snapshot(&mut self) -> Option<(Vec<u8>, u32, u32)> {
+        self.backend.as_mut()?.take_snapshot()
+    }
+
     /// 取一个跨线程唤醒句柄（`Send + Sync`），交给后台线程在"有数据了"时调用。
     ///
     /// 返回：可 clone 的 [`WakeHandle`]。

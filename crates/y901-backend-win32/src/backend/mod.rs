@@ -169,6 +169,25 @@ impl D3dBackend {
             .update_atlas(&self.text.atlas, self.text.atlas_size, reset, &rects)
     }
 
+    /// 回读后备缓冲（BGRA）：供快照 / 像素数学验证使用。
+    ///
+    /// # Safety
+    ///
+    /// 必须在拥有窗口的线程上调用，且已完成至少一次 present。
+    pub unsafe fn read_back_pixels(&self) -> Option<(Vec<u8>, u32, u32)> {
+        self.gfx.read_back_pixels()
+    }
+
+    /// 请求在下一帧 present 之前快照（回读像素）。
+    pub fn request_snapshot(&mut self) {
+        self.gfx.request_snapshot();
+    }
+
+    /// 取走上次快照。
+    pub fn take_snapshot(&mut self) -> Option<(Vec<u8>, u32, u32)> {
+        self.gfx.take_snapshot()
+    }
+
     /// 设置本帧脏区（`None` = 整窗）。由 `Window::render` 在 `tree.render` 之前算好。
     ///
     /// 输入：`rect = (left, top, right, bottom)` 像素坐标；`None` 表示整窗重绘。
@@ -316,7 +335,8 @@ impl D3dBackend {
             size: quad.size,
             uv_rect: quad.uv,
             color: rgba,
-        });
+                ..Default::default()
+            });
 
         // 假粗体：右移 1px 再画一遍（比加载粗体字形便宜，且等宽不变）
         if bold {
@@ -325,6 +345,7 @@ impl D3dBackend {
                 size,
                 uv_rect: uv,
                 color: rgba,
+                ..Default::default()
             });
         }
     }
@@ -349,6 +370,8 @@ fn to_gpu_instance(i: &y901_runtime::gfx::GfxInstance) -> Instance {
         size: i.size,
         uv_rect: i.uv_rect,
         color: i.color,
+        color_end: i.color_end,
+        gradient: i.gradient,
     }
 }
 
@@ -473,13 +496,30 @@ impl RenderCtx for D3dBackend {
         let Some(r) = self.clip_of(rect) else {
             return;
         };
-        self.instances.push(Instance {
-            pos: [r.x, r.y],
-            size: [r.w, r.h],
+        self.instances.push(Instance::solid(
+            [r.x, r.y],
+            [r.w, r.h],
             // 纯色哨兵：uv 两端相等，PS 直接输出 color
-            uv_rect: [0.0, 0.0, 0.0, 0.0],
-            color: [color.r, color.g, color.b, color.a],
-        });
+            [0.0, 0.0, 0.0, 0.0],
+            [color.r, color.g, color.b, color.a],
+        ));
+    }
+
+    /// GPU 渐变：只提交 **一个** 实例，由像素着色器逐像素插值。
+    ///
+    /// 为什么不用默认实现（CPU 切条带）：条带在斜向渐变下无法表达
+    /// "同一行内颜色也随 x 变化"，只能逐行变色；GPU 实例能做到逐像素精确。
+    fn fill_gradient_rect_dir(&mut self, rect: Rect, from: Color, to: Color, dir: (f32, f32)) {
+        let Some(r) = self.clip_of(rect) else {
+            return;
+        };
+        self.instances.push(Instance::gradient_rect(
+            [r.x, r.y],
+            [r.w, r.h],
+            [from.r, from.g, from.b, from.a],
+            [to.r, to.g, to.b, to.a],
+            [dir.0, dir.1],
+        ));
     }
 
     fn stroke_rect(&mut self, rect: Rect, color: Color, width: f32) {
@@ -643,19 +683,24 @@ mod gfx_layout_tests {
             std::mem::size_of::<super::Instance>(),
             "GfxInstance 与 d3d11::Instance 大小不一致"
         );
-        assert_eq!(std::mem::size_of::<GfxInstance>(), 48);
+        // 80 = pos(8) + size(8) + uv(16) + color(16) + color_end(16) + gradient(16)
+        assert_eq!(std::mem::size_of::<GfxInstance>(), 80);
         // 大小相同但字段错位同样会乱码：逐个字段喂不同值再比对
         let a = GfxInstance {
             pos: [1.0, 2.0],
             size: [3.0, 4.0],
             uv_rect: [5.0, 6.0, 7.0, 8.0],
             color: [9.0, 10.0, 11.0, 12.0],
+            color_end: [13.0, 14.0, 15.0, 16.0],
+            gradient: [17.0, 18.0, 1.0, 19.0],
         };
         let b = super::to_gpu_instance(&a);
         assert_eq!(b.pos, a.pos);
         assert_eq!(b.size, a.size);
         assert_eq!(b.uv_rect, a.uv_rect);
         assert_eq!(b.color, a.color);
+        assert_eq!(b.color_end, a.color_end, "渐变终点色必须逐字节传递");
+        assert_eq!(b.gradient, a.gradient, "渐变参数必须逐字节传递");
     }
 }
 
