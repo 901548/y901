@@ -176,6 +176,11 @@ pub struct UiTree {
     layout_requested: bool,
     /// 广播事件（`Tick` 等）中"要求重绘"节点的矩形（复用缓冲，避免每帧分配）。
     broadcast_rects: Vec<Rect>,
+    /// 本次事件里**真正返回 Relayout** 的节点 id。
+    ///
+    /// 为什么不是 `target`：滚动事件命中的是行/子控件，请求重排的是外层容器。
+    /// 只按命中目标标脏会把脏区标到错误的位置（实测：滚动只标了 20px 高的一行）。
+    relayout_from: Option<String>,
     /// 每个 id 的实例代号：`add_node` 时递增，用于识别 id 复用。
     generations: HashMap<String, u64>,
     /// 自增代号源。
@@ -222,6 +227,7 @@ impl UiTree {
             external: crate::invalidate::InvalidationHandle::new(),
             layout_requested: false,
             broadcast_rects: Vec::new(),
+            relayout_from: None,
             generations: HashMap::new(),
             next_generation: 1,
             last_semantic: HashMap::new(),
@@ -1498,10 +1504,22 @@ impl UiTree {
 
         // 脏粒度：Relayout 连尺寸都重算，Redraw 只重画目标
         if result.needs_relayout() {
-            if let Some(id) = target_id.as_deref() {
-                self.cache.mark_dirty(id);
+            let who = self.relayout_from.clone().or_else(|| target_id.clone());
+            match who.as_deref() {
+                Some(id) => {
+                    self.cache.mark_dirty(id);
+                    // 只标目标矩形（不是整窗）：布局后 `mark_moved` 会把所有
+                    // 位置变化的节点用"旧 ∪ 新"补进脏区。
+                    // 滚动这类"只有目标子树在动"的场景因此不再触发整窗重绘。
+                    // 目标还没有有效矩形（新节点/零尺寸）时退回整窗，避免漏画。
+                    if self.rect_of(id).is_none_or(|r| r.is_empty()) {
+                        self.dirty = DirtyRegion::full();
+                    } else {
+                        self.invalidate(id);
+                    }
+                }
+                None => self.dirty = DirtyRegion::full(),
             }
-            self.dirty = DirtyRegion::full();
         } else if result.needs_redraw() {
             match target_id.as_deref() {
                 Some(id) => self.invalidate(id),
@@ -1573,10 +1591,17 @@ impl UiTree {
     /// 否则 RPC 触发的 Relayout 会变成空操作，索引与布局永远停在旧状态。
     fn finish_dispatch(&mut self, mut ctx: EventCtx, result: EventResult) -> EventResult {
         let target = ctx.target.clone();
+        // 记录"谁请求了重排"：Relayout 的脏区要标在它身上（见 dispatch 分支）
+        self.relayout_from = ctx.relayout_from.take();
         let merged = ctx.finish(result);
         if merged.needs_relayout() && !target.is_empty() {
             self.cache.mark_dirty(&target);
-            self.dirty = DirtyRegion::full();
+            // 同上：只标目标矩形，其余交给布局后的 `mark_moved` 补并集。
+            if self.rect_of(&target).is_none_or(|r| r.is_empty()) {
+                self.dirty = DirtyRegion::full();
+            } else {
+                self.invalidate(&target);
+            }
         }
         // 目标节点的语义面可能在这次事件里变了：登记到待检查集合，
         // 下一次 refresh_semantics 会比对哈希并决定是否 bump。
@@ -1790,6 +1815,9 @@ fn dispatch_rec(
         ctx.phase = EventPhase::Target;
         let r = node.event(ctx, event);
         let stop = ctx.stop_propagation || (r.is_handled() && !ctx.propagate);
+        if r.needs_relayout() {
+            ctx.relayout_from = Some(node.id().to_string());
+        }
         return (r, stop);
     }
 
@@ -1811,6 +1839,10 @@ fn dispatch_rec(
         }
     }
     result = result.merge(child_result);
+    if result.needs_relayout() && ctx.relayout_from.is_none() {
+        // 子节点没记到（例如它只返回 Redraw，是当前节点自己要求重排）
+        ctx.relayout_from = Some(node.id().to_string());
+    }
     if child_stopped {
         return (result, true);
     }
@@ -1819,6 +1851,11 @@ fn dispatch_rec(
     ctx.phase = EventPhase::Bubble;
     let r = node.event(ctx, event);
     result = result.merge(r);
+    // 冒泡阶段的返回也可能要求重排（滚动容器就是在冒泡里处理滚轮的），
+    // 这里再记一次"请求者"，否则脏区会标到命中目标（某一行）身上。
+    if r.needs_relayout() && ctx.relayout_from.is_none() {
+        ctx.relayout_from = Some(node.id().to_string());
+    }
     let stop = ctx.stop_propagation || (r.is_handled() && !ctx.propagate);
     (result, stop)
 }

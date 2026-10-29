@@ -354,6 +354,11 @@ pub struct EventCtx {
     pub target: String,
     /// 置 true 后，框架立刻停止后续阶段（捕获拦截 / 冒泡截断）。
     pub stop_propagation: bool,
+    /// 本次分发里**真正要求重排**的节点 id（框架内部记账，组件不要读写）。
+    ///
+    /// 用途：`Relayout` 的脏区要标在"请求者"身上，而不是命中目标身上
+    /// （滚动时命中目标是行，请求者是外层滚动容器）。
+    pub relayout_from: Option<String>,
     /// 置 true 时，即使返回 `Handled` 也继续冒泡（罕见，需显式请求）。
     pub propagate: bool,
     /// 指针捕获请求，分发结束后由框架落实。
@@ -376,6 +381,7 @@ impl EventCtx {
             phase: crate::event::EventPhase::Target,
             target: String::new(),
             stop_propagation: false,
+            relayout_from: None,
             propagate: false,
             pointer_capture: None,
             focus_vetoed: false,
