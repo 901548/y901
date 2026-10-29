@@ -23,6 +23,8 @@ pub struct Button {
     pressed: bool,
     /// 持久选中态（按钮组单选用）。
     selected: bool,
+    /// 是否拥有键盘焦点（Tab 切过来时为 true）。
+    focused: bool,
 }
 
 impl Button {
@@ -42,6 +44,7 @@ impl Button {
             hovered: false,
             pressed: false,
             selected: false,
+            focused: false,
         }
     }
 
@@ -186,6 +189,14 @@ impl Widget for Button {
                 ctx.emit_app(self.command.clone(), self.args.clone());
                 EventResult::Redraw
             }
+            UiEvent::Focus(focused) => {
+                if self.focused == *focused {
+                    EventResult::Ignored
+                } else {
+                    self.focused = *focused;
+                    EventResult::Redraw
+                }
+            }
             _ => EventResult::Ignored,
         }
     }
@@ -203,6 +214,9 @@ impl Widget for Button {
             State::Pressed
         } else if self.hovered {
             State::Hovered
+        } else if self.focused {
+            // 键盘焦点：比 Normal 明显，但不盖按下/选中的语义
+            State::Focused
         } else {
             State::Normal
         };

@@ -300,6 +300,12 @@ pub trait TextMetrics {
 /// 渲染上下文：框架唯一的出图接口。
 ///
 /// 后端实现它（D3D11 / 软件 / 测试用的记录器），组件只往里画。
+/// 渐变背景的条带数（默认实现用）。
+///
+/// 为什么是常量而不是参数：条带数按像素切会让 draw 次数随控件高度线性增长，
+/// 32 条在 200~1000px 高度上都足够平滑，且开销固定。
+pub const GRADIENT_STEPS: usize = 32;
+
 pub trait RenderCtx: TextMetrics {
     /// 视口尺寸（逻辑像素）。
     fn size(&self) -> Size;
@@ -322,6 +328,66 @@ pub trait RenderCtx: TextMetrics {
         let mut buf = [0u8; 4];
         let s = ch.encode_utf8(&mut buf);
         self.draw_text(pos, s, style)
+    }
+
+    /// 圆角矩形填充。
+    ///
+    /// 输入：`rect`（外接矩形）、`color`（含 alpha）、`radius`（像素，自动夹到半宽/半高）。
+    /// 副作用：在 `rect` 内（含裁剪）绘制。
+    /// 默认实现：逐扫描线用 [`RenderCtx::fill_rect`] 拼出圆角——对任何后端都可用，
+    /// 不需要新增 GPU 图元；`radius <= 0` 时退化成普通矩形。
+    /// 性能：中间部分合并成一整块，只有上下各 `radius` 行逐行绘制。
+    fn fill_round_rect(&mut self, rect: Rect, color: Color, radius: f32) {
+        let r = radius.clamp(0.0, rect.w.min(rect.h) * 0.5);
+        if r <= 0.5 {
+            self.fill_rect(rect, color);
+            return;
+        }
+        // 中间整块（不需要圆角的部分）
+        self.fill_rect(Rect::new(rect.x, rect.y + r, rect.w, rect.h - 2.0 * r), color);
+        // 上下各 r 行：按圆的方程算每行的左右内缩
+        let rows = r.ceil() as i32;
+        for i in 0..rows {
+            let dy = r - (i as f32 + 0.5);
+            let inset = r - (r * r - dy * dy).max(0.0).sqrt();
+            let y_top = rect.y + i as f32;
+            let y_bot = rect.bottom() - 1.0 - i as f32;
+            self.fill_rect(Rect::new(rect.x + inset, y_top, rect.w - 2.0 * inset, 1.0), color);
+            self.fill_rect(Rect::new(rect.x + inset, y_bot, rect.w - 2.0 * inset, 1.0), color);
+        }
+    }
+
+    /// 线性渐变矩形填充（前景到背景的垂直或水平过渡）。
+    ///
+    /// 输入：`rect`、`from`（起点色）、`to`（终点色）、`horizontal`（true = 左右，false = 上下）。
+    /// 副作用：在 `rect` 内（含裁剪）绘制。
+    /// 默认实现：切成 [`GRADIENT_STEPS`] 条带，用 [`RenderCtx::fill_rect`] 逐条画。
+    /// 说明：条带数固定，避免按像素切分导致 O(高度) 次 draw；视觉上足够平滑。
+    fn fill_gradient_rect(&mut self, rect: Rect, from: Color, to: Color, horizontal: bool) {
+        if rect.is_empty() || (from.a <= 0.0 && to.a <= 0.0) {
+            return;
+        }
+        let steps = GRADIENT_STEPS.max(1);
+        for i in 0..steps {
+            let t0 = i as f32 / steps as f32;
+            let t1 = (i + 1) as f32 / steps as f32;
+            let c = from.lerp(to, (t0 + t1) * 0.5);
+            // 边界取整：既不留缝（不足 1px 的条带直接跳过），也不重叠
+            // （重叠会让 alpha < 1 的渐变叠加变深）。
+            if horizontal {
+                let x0 = (rect.w * t0).round();
+                let x1 = (rect.w * t1).round();
+                if x1 > x0 {
+                    self.fill_rect(Rect::new(rect.x + x0, rect.y, x1 - x0, rect.h), c);
+                }
+            } else {
+                let y0 = (rect.h * t0).round();
+                let y1 = (rect.h * t1).round();
+                if y1 > y0 {
+                    self.fill_rect(Rect::new(rect.x, rect.y + y0, rect.w, y1 - y0), c);
+                }
+            }
+        }
     }
 
     /// 裁剪栈：滚动容器由框架自动压栈，组件不需要手动调用。

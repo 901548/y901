@@ -26,6 +26,19 @@ impl Color {
         Self::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
     }
 
+    /// 线性插值：`t = 0` 返回自己，`t = 1` 返回 `other`（含 alpha）。
+    ///
+    /// 用途：渐变背景按条带取中间色。
+    pub fn lerp(self, other: Color, t: f32) -> Color {
+        let t = t.clamp(0.0, 1.0);
+        Color::rgba(
+            self.r + (other.r - self.r) * t,
+            self.g + (other.g - self.g) * t,
+            self.b + (other.b - self.b) * t,
+            self.a + (other.a - self.a) * t,
+        )
+    }
+
     /// 返回同一颜色的新副本，alpha 换成 `a`（0..=1）。
     pub fn with_alpha(self, a: f32) -> Self {
         Self { a, ..self }
