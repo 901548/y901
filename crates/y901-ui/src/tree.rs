@@ -5,9 +5,9 @@
 
 use std::collections::HashMap;
 
+use crate::event::{EventPhase, PointerCapture};
 use crate::event::{EventResult, UiEvent};
 use crate::geometry::{Pos, Rect, Size};
-use crate::event::{EventPhase, PointerCapture};
 use crate::widget::{EventCtx, Layer, RenderCtx, Role, Semantics, TextMetrics, Widget};
 
 /// 对外暴露的节点快照。RPC 的 `get_tree` 直接序列化它。
@@ -97,9 +97,7 @@ impl DirtyRegion {
         if self.full {
             return true;
         }
-        self.rects
-            .iter()
-            .any(|r| !r.intersect(rect).is_empty())
+        self.rects.iter().any(|r| !r.intersect(rect).is_empty())
     }
 
     pub fn clear(&mut self) {
@@ -285,6 +283,25 @@ impl UiTree {
         self.dirty = DirtyRegion::full();
     }
 
+    /// 按**像素矩形**标脏（不查树、不找节点）。
+    ///
+    /// 输入：`rect`（屏幕坐标，会被裁到视口内）。
+    /// 副作用：并入脏区；空矩形或完全在视口外时什么也不做。
+    /// 用在：AI 流式输出、光标闪烁、单行刷新——
+    /// 调用方已知那块区域需要重画，不必为了拿到矩形去遍历树。
+    /// 注意：它**不会**触发重排；尺寸变了请另外 `mark_layout_dirty(id)`。
+    pub fn invalidate_rect(&mut self, rect: Rect) {
+        if rect.is_empty() {
+            return;
+        }
+        let window = Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h);
+        let clamped = rect.intersect(window);
+        if clamped.is_empty() {
+            return;
+        }
+        self.dirty.add(clamped);
+    }
+
     /// 标记某节点的尺寸可能变化（等价于组件返回 `EventResult::Relayout` 的效果）。
     ///
     /// 输入：`id`。不存在的 id 会被忽略（`cache.mark_dirty` 内部处理）。
@@ -413,10 +430,7 @@ impl UiTree {
         }
 
         self.focus = id;
-        self.focus_path = self
-            .focus
-            .as_deref()
-            .and_then(|f| self.find_path(f));
+        self.focus_path = self.focus.as_deref().and_then(|f| self.find_path(f));
         true
     }
 
@@ -440,7 +454,6 @@ impl UiTree {
         let _ = self.finish_dispatch(ctx, EventResult::Ignored);
         !vetoed
     }
-
 
     // ---------- 动态挂载 / 卸载 ----------
 
@@ -552,11 +565,7 @@ impl UiTree {
             let Some(node) = self.find(parent) else {
                 return;
             };
-            let child = if last {
-                node.children().last()
-            } else {
-                None
-            };
+            let child = if last { node.children().last() } else { None };
             match child {
                 Some(c) => collect_ids(c.as_ref()),
                 None => return,
@@ -570,16 +579,12 @@ impl UiTree {
         }
     }
 
-
     /// 在指定位置插入子节点（越界自动 clamp 到末尾）。
     ///
     /// 与 `add_node` 的差别只有位置；生命周期与重建逻辑完全一致。
     pub fn insert_node(&mut self, parent: &str, index: usize, child: Box<dyn Widget>) -> bool {
         if self.subtree_has_duplicate(child.as_ref()) {
-            eprintln!(
-                "[y901] insert_node: duplicate id `{}` rejected",
-                child.id()
-            );
+            eprintln!("[y901] insert_node: duplicate id `{}` rejected", child.id());
             return false;
         }
         let Some(node) = self.find_mut(parent) else {
@@ -727,7 +732,11 @@ impl UiTree {
     ///
     /// 失败：无（空树返回空 map）。
     pub fn rev_snapshot(&self) -> HashMap<String, u64> {
-        fn walk(node: &dyn Widget, counters: &HashMap<String, u64>, out: &mut HashMap<String, u64>) {
+        fn walk(
+            node: &dyn Widget,
+            counters: &HashMap<String, u64>,
+            out: &mut HashMap<String, u64>,
+        ) {
             let effective = node.revision() + counters.get(node.id()).copied().unwrap_or(0);
             out.insert(node.id().to_string(), effective);
             for child in node.children() {
@@ -750,13 +759,13 @@ impl UiTree {
         let ids: Vec<String> = self.pending_semantic.drain().collect();
         for id in ids {
             // 先结束不可变借用，再写 map
-            let Some((hash, gen)) = self
-                .find(&id)
-                .map(|node| {
-                    let focused = self.focus.as_deref() == Some(id.as_str());
-                    (semantic_hash(node, focused), self.generations.get(&id).copied().unwrap_or(0))
-                })
-            else {
+            let Some((hash, gen)) = self.find(&id).map(|node| {
+                let focused = self.focus.as_deref() == Some(id.as_str());
+                (
+                    semantic_hash(node, focused),
+                    self.generations.get(&id).copied().unwrap_or(0),
+                )
+            }) else {
                 continue;
             };
             match self.last_semantic.get(&id).copied() {
@@ -898,11 +907,11 @@ impl UiTree {
                 continue;
             };
             let rev = self.fingerprint_of(&id).unwrap_or(0);
-            let (last_rev, last_sem, interval) = match self.subscriptions.iter().find(|s| s.id == id)
-            {
-                Some(sub) => (sub.rev, sub.last_sem.clone(), sub.interval),
-                None => continue,
-            };
+            let (last_rev, last_sem, interval) =
+                match self.subscriptions.iter().find(|s| s.id == id) {
+                    Some(sub) => (sub.rev, sub.last_sem.clone(), sub.interval),
+                    None => continue,
+                };
 
             // 语义面没变：只顺延下次检查时间
             if rev == last_rev {
@@ -973,7 +982,11 @@ impl UiTree {
         }
 
         let start = self.node_at_ref(scope)?;
-        let mut path = if use_scope { scope.to_vec() } else { Vec::new() };
+        let mut path = if use_scope {
+            scope.to_vec()
+        } else {
+            Vec::new()
+        };
         walk(start, &mut path)
     }
     /// 整树布局。
@@ -1114,7 +1127,13 @@ impl UiTree {
             layer_present: &mut self.layer_present,
             modal_root: &mut self.modal_root,
         };
-        walk(self.root.as_ref(), &mut path, Layer::Base, None, &mut outputs);
+        walk(
+            self.root.as_ref(),
+            &mut path,
+            Layer::Base,
+            None,
+            &mut outputs,
+        );
 
         // 稳定排序：同层内保持树序（即绘制先后）
         self.paint_order.sort_by_key(|e| e.layer.rank());
@@ -1292,15 +1311,13 @@ impl UiTree {
             }
         }
 
-        self.paint_order
-            .iter()
-            .rposition(|entry| {
-                let visible = match entry.clip {
-                    Some(c) => entry.rect.intersect(c),
-                    None => entry.rect,
-                };
-                visible.contains(pos)
-            })
+        self.paint_order.iter().rposition(|entry| {
+            let visible = match entry.clip {
+                Some(c) => entry.rect.intersect(c),
+                None => entry.rect,
+            };
+            visible.contains(pos)
+        })
     }
     /// 按路径取不可变节点引用（O(depth)，无字符串比较）。
     fn node_at_ref<'a>(&'a self, path: &[usize]) -> Option<&'a dyn Widget> {
@@ -1477,9 +1494,7 @@ impl UiTree {
         }
 
         if has_target {
-            target_id = self
-                .node_at_ref(&path)
-                .map(|n| n.id().to_string());
+            target_id = self.node_at_ref(&path).map(|n| n.id().to_string());
         }
 
         let result = if has_target {
@@ -1673,13 +1688,7 @@ impl UiTree {
                             action: action.clone(),
                             args: args.clone(),
                         });
-                        let _ = self.dispatch_to(
-                            &target,
-                            &UiEvent::Action {
-                                name: action,
-                                args,
-                            },
-                        );
+                        let _ = self.dispatch_to(&target, &UiEvent::Action { name: action, args });
                     }
                     other => app_commands.push(other),
                 }
@@ -1707,22 +1716,34 @@ impl UiTree {
             Json::obj()
                 .set("id", node.id())
                 .set("role", node.role().as_str())
-                .set("rect", Json::obj()
-                    .set("x", rect.x)
-                    .set("y", rect.y)
-                    .set("w", rect.w)
-                    .set("h", rect.h))
+                .set(
+                    "rect",
+                    Json::obj()
+                        .set("x", rect.x)
+                        .set("y", rect.y)
+                        .set("w", rect.w)
+                        .set("h", rect.h),
+                )
                 .set("focused", focus == Some(node.id()))
                 .set("label", sem.label.clone())
                 .set("value", sem.value.clone())
-                .set("actions", Json::Arr(sem.actions.iter().map(|a| a.to_json()).collect()))
+                .set(
+                    "actions",
+                    Json::Arr(sem.actions.iter().map(|a| a.to_json()).collect()),
+                )
                 .set("props", props)
                 .set("state", sem.state.clone())
                 .set("revision", node.revision())
                 .set("disabled", sem.disabled)
-                .set("children", Json::Arr(
-                    node.children().iter().map(|c| node_json(c.as_ref(), focus)).collect()
-                ))
+                .set(
+                    "children",
+                    Json::Arr(
+                        node.children()
+                            .iter()
+                            .map(|c| node_json(c.as_ref(), focus))
+                            .collect(),
+                    ),
+                )
         }
         node_json(self.root.as_ref(), self.focus.as_deref())
     }
@@ -1758,7 +1779,9 @@ fn find_in_mut<'a>(node: &'a mut dyn Widget, id: &str) -> Option<&'a mut dyn Wid
         return Some(node);
     }
     match node.children_mut() {
-        Some(children) => children.iter_mut().find_map(|c| find_in_mut(c.as_mut(), id)),
+        Some(children) => children
+            .iter_mut()
+            .find_map(|c| find_in_mut(c.as_mut(), id)),
         None => None,
     }
 }
@@ -1944,7 +1967,8 @@ struct Subscription {
 fn fingerprint(node: &dyn Widget, focused: bool) -> u64 {
     let mut sem = node.semantics();
     sem.focused = focused;
-    crate::tree::hash_semantics(node.role(), &sem) ^ node.revision().wrapping_mul(0x9e37_79b9_7f4a_7c15)
+    crate::tree::hash_semantics(node.role(), &sem)
+        ^ node.revision().wrapping_mul(0x9e37_79b9_7f4a_7c15)
 }
 
 /// 语义差分：只保留 Agent 关心的、且真的变了的字段。
@@ -1954,7 +1978,10 @@ fn fingerprint(node: &dyn Widget, focused: bool) -> u64 {
 ///
 /// 拍平是为了让订阅者拿到的形状与 `get_tree` 的 state 一致（`patch.text` 而不是
 /// `patch.state.text`），也保持既有消费者的兼容性。
-fn semantic_patch(old: &crate::widget::Semantics, new: &crate::widget::Semantics) -> crate::json::Json {
+fn semantic_patch(
+    old: &crate::widget::Semantics,
+    new: &crate::widget::Semantics,
+) -> crate::json::Json {
     let mut out = diff_state(&old.state, &new.state);
     if old.label != new.label {
         out = out.set("label", new.label.as_str());

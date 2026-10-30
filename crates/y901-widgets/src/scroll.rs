@@ -8,7 +8,7 @@
 
 use y901_ui::{
     Command, Constraints, Edges, EventCtx, EventResult, FlexItem, Json, Pos, Rect, RenderCtx, Role,
-    Semantics, Size, State, TextStyle, TextMetrics, UiEvent, Widget,
+    Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 滚动条宽度（逻辑像素）。
@@ -29,6 +29,10 @@ pub struct ScrollView {
     item: FlexItem,
     /// 是否显示滚动条（内容不足时自动隐藏）。
     show_bar: bool,
+    /// 粘底：内容变高时自动跟到最底（聊天/日志场景）。
+    stick_to_bottom: bool,
+    /// 粘底是否处于激活状态：用户上滚后失效，回到底部自动重新激活。
+    stick_armed: bool,
 }
 
 impl ScrollView {
@@ -49,7 +53,42 @@ impl ScrollView {
             inner: Rect::ZERO,
             item: FlexItem::default(),
             show_bar: true,
+            stick_to_bottom: false,
+            stick_armed: false,
         }
+    }
+
+    /// 开启/关闭粘底；开启时立即滚到最底并激活粘底。
+    pub fn set_stick_to_bottom(&mut self, on: bool) -> bool {
+        if self.stick_to_bottom == on {
+            return false;
+        }
+        self.stick_to_bottom = on;
+        self.stick_armed = on;
+        if on {
+            // 开启时直接贴到底（不管之前在哪）
+            self.offset = self.max_offset();
+        }
+        true
+    }
+
+    /// 构造期开启粘底。
+    pub fn stick_to_bottom(mut self, on: bool) -> Self {
+        self.stick_to_bottom = on;
+        self.stick_armed = on;
+        self
+    }
+
+    /// 是否已经在最底部（容差 0.5px）。
+    pub fn is_at_bottom(&self) -> bool {
+        self.offset >= self.max_offset() - 0.5
+    }
+
+    /// 滚到最底部（并重新激活粘底）。返回是否真的改变了偏移。
+    pub fn scroll_to_end(&mut self) -> bool {
+        self.stick_armed = true;
+        let end = self.max_offset();
+        self.set_offset(end)
     }
 
     /// 设置 flex 伸缩参数（滚动容器常用 `FlexItem::fill()`）。
@@ -84,6 +123,8 @@ impl ScrollView {
             return false;
         }
         self.offset = clamped;
+        // 用户（或代码）改了偏移：只有停在底部时才继续粘底。
+        self.stick_armed = self.is_at_bottom();
         true
     }
 
@@ -131,17 +172,36 @@ impl Widget for ScrollView {
         c.constrain(Size::new(content.w.min(c.max.w), c.max.h))
     }
 
-    fn arrange(&mut self, rect: Rect, metrics: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        rect: Rect,
+        metrics: &dyn TextMetrics,
+        cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.viewport = rect;
         self.show_bar = self.content_h > rect.h + 0.5;
         let bar_w = if self.show_bar { BAR_WIDTH } else { 0.0 };
         self.inner = Rect::new(rect.x, rect.y, (rect.w - bar_w).max(0.0), rect.h);
 
         // 内容坐标系：子节点按未滚动的绝对高度排，屏幕位置靠平移得到
-        let content_rect = Rect::new(self.inner.x, self.inner.y - self.offset, self.inner.w, self.content_h);
+        let content_rect = Rect::new(
+            self.inner.x,
+            self.inner.y - self.offset,
+            self.inner.w,
+            self.content_h,
+        );
         self.kids[0].arrange(content_rect, metrics, cache);
 
         self.offset = self.offset.clamp(0.0, self.max_offset());
+        // 粘底：内容变高后如果仍处于激活状态，跟到最底。
+        // 用户上滚 → `stick_armed = false`；回到底部 → 自动重新激活。
+        if self.stick_to_bottom {
+            if self.stick_armed {
+                self.offset = self.max_offset();
+            } else if self.is_at_bottom() {
+                self.stick_armed = true;
+            }
+        }
 
         // 同步滚动条几何
         self.bar.arrange_at(
@@ -162,6 +222,11 @@ impl Widget for ScrollView {
 
     fn rect(&self) -> Rect {
         self.viewport
+    }
+
+    /// 向下转型：运行时调 `scroll_to_end` / `set_stick_to_bottom` 的唯一路径。
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     fn clip(&self) -> Option<Rect> {
@@ -220,10 +285,7 @@ impl Widget for ScrollView {
                 }
             }
             UiEvent::Action { name, args } if name == "scroll_to_ratio" => {
-                let ratio = args
-                    .get("ratio")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0) as f32;
+                let ratio = args.get("ratio").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
                 if self.set_offset(ratio * self.max_offset()) {
                     EventResult::Relayout
                 } else {
@@ -249,7 +311,8 @@ impl Widget for ScrollView {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default().exposed(true)
+        Semantics::default()
+            .exposed(true)
             .label("scroll")
             .action_spec("scroll_to", y901_ui::InputKind::Number)
             .action_spec("scroll_to_ratio", y901_ui::InputKind::Number)
@@ -307,7 +370,13 @@ impl Scrollbar {
         }
     }
 
-    pub(crate) fn arrange_at(&mut self, rect: Rect, thumb_ratio: f32, start_ratio: f32, visible: bool) {
+    pub(crate) fn arrange_at(
+        &mut self,
+        rect: Rect,
+        thumb_ratio: f32,
+        start_ratio: f32,
+        visible: bool,
+    ) {
         self.rect = rect;
         self.visible = visible;
         self.thumb_ratio = thumb_ratio.clamp(0.05, 1.0);
@@ -460,7 +529,12 @@ impl Widget for Scrollbar {
         Role("scrollbar")
     }
 
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(Size::new(BAR_WIDTH, c.max.h))
     }
 
@@ -503,7 +577,8 @@ impl Widget for Scrollbar {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default().exposed(true)
+        Semantics::default()
+            .exposed(true)
             .label("scrollbar")
             .state("offset", self.offset)
             .state("total", self.total)
