@@ -459,3 +459,116 @@ fn gradient_round_rect_matches_math() {
         "[grad+round] 验证通过：内部 {checked} 点最大误差 {worst:.4}，裁掉角 {corner_cut} 像素"
     );
 }
+
+/// 流式追加 + `invalidate_rect` 局部重绘：必须与"全量重绘"逐像素一致。
+///
+/// 这是 `invalidate_rect` 上生产前的最后一道保险：
+///   A. 画一帧"短文本"（模拟已有一行）
+///   B. 文本变长（模拟 token 追加）→ 只 `invalidate_rect(那一行)` → 渲染 → 快照哈希 h1
+///   C. 用**全新窗口**直接渲染"长文本"整窗 → 快照哈希 h2
+///   断言 h1 == h2：局部刷新后的画面与从零画出来的画面完全相同。
+#[test]
+#[ignore = "需要真实 GPU：cargo test -p y901-backend-win32 --release --test snapshot_harness -- --ignored --nocapture"]
+fn invalidate_rect_partial_equals_full() {
+    // 流式文本：长度由外部 Cell 控制，渲染时按长度画字符
+    struct Stream {
+        n: std::rc::Rc<std::cell::Cell<usize>>,
+        rect: Rect,
+        line: Rect,
+    }
+    impl Widget for Stream {
+        fn id(&self) -> &str {
+            "stream"
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) -> Size {
+            c.constrain(Size::new(c.max.w, c.max.h))
+        }
+        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+            self.rect = r;
+            // 流式行固定在左上角一块小区域
+            self.line = Rect::new(r.x + 8.0, r.y + 8.0, 320.0, 20.0);
+        }
+        fn rect(&self) -> Rect {
+            self.rect
+        }
+        fn event(&mut self, _c: &mut EventCtx, _e: &y901_ui::UiEvent) -> EventResult {
+            EventResult::Ignored
+        }
+        fn render(&mut self, ctx: &mut dyn RenderCtx) {
+            ctx.fill_rect(self.line, Color::rgba(0.10, 0.11, 0.14, 1.0));
+            let text: String = "abcdefghijklmnopqrstuvwxyz"[..self.n.get().min(26)].to_string();
+            ctx.draw_text(
+                Pos::new(self.line.x + 2.0, self.line.y + 2.0),
+                &text,
+                &TextStyle::fg(Color::WHITE),
+            );
+        }
+        fn semantics(&self) -> Semantics {
+            Semantics::default()
+        }
+    }
+
+    let make = |n: usize| {
+        let cell = std::rc::Rc::new(std::cell::Cell::new(n));
+        let tree = UiTree::new(Box::new(Stream {
+            n: cell.clone(),
+            rect: Rect::ZERO,
+            line: Rect::ZERO,
+        }));
+        (tree, cell)
+    };
+
+    // ---- A/B：同一个窗口里先短后长，用 invalidate_rect 做局部刷新 ----
+    let options = Options {
+        title: "y901 invalidate_rect harness".to_string(),
+        width: 480,
+        height: 200,
+        theme: None,
+        font: None,
+    };
+    let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
+    let (mut tree, cell) = make(4);
+    window.resize(&mut tree);
+    tree.invalidate_all();
+    window.render(&mut tree); // A：短文本整窗
+
+    // B：追加 token（只改数据），精确标脏那一行
+    cell.set(26);
+    let line = tree.rect_of("stream").expect("stream");
+    tree.invalidate_rect(Rect::new(line.x + 8.0, line.y + 8.0, 320.0, 20.0));
+    window.request_snapshot();
+    window.render(&mut tree);
+    let (px1, w1, h1) = window.take_snapshot().expect("快照 A/B 失败");
+
+    // ---- C：全新窗口，直接渲染长文本 ----
+    let mut window2 = Window::create(&options).expect("需要可用的 D3D11 设备");
+    let (mut tree2, _cell2) = make(26);
+    window2.resize(&mut tree2);
+    window2.request_snapshot();
+    tree2.invalidate_all();
+    window2.render(&mut tree2);
+    let (px2, w2, h2) = window2.take_snapshot().expect("快照 C 失败");
+
+    assert_eq!((w1, h1), (w2, h2), "两次快照尺寸应一致");
+    let mut diff = 0usize;
+    let mut first = None;
+    for i in 0..(w1 * h1 * 4) as usize {
+        if px1[i] != px2[i] {
+            diff += 1;
+            if first.is_none() {
+                let p = i / 4;
+                first = Some((p as u32 % w1, p as u32 / w1));
+            }
+        }
+    }
+    assert_eq!(
+        diff, 0,
+        "局部重绘与全量重绘不一致：{diff} 字节不同，首个差异 {first:?}"
+    );
+    eprintln!("[invalidate_rect] 局部刷新 == 全量重绘（{w1}x{h1}，0 差异）");
+}

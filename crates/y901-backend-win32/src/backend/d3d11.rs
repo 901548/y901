@@ -1594,6 +1594,15 @@ unsafe fn blit_cached(
 ) {
     context.set_render_target(Some(rtv));
     context.set_viewport(w, h);
+    // **必须把 scissor 复位成整窗**：局部重绘时上一阶段把 scissor 限制在脏区内，
+    // 若不复位，blit 也只会覆盖脏区，后备缓冲其余部分保持未定义（FLIP_DISCARD 每帧失效）
+    // → 屏幕上出现大片黑/雪花。这个 bug 是 `invalidate_rect` 的逐像素对拍测试抓到的。
+    context.set_scissor(RectI32 {
+        left: 0,
+        top: 0,
+        right: w as i32,
+        bottom: h as i32,
+    });
     if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
         let blit = Instance::solid(
             [0.0, 0.0],
