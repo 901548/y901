@@ -1452,6 +1452,7 @@ impl UiTree {
                 | UiEvent::MouseDown { .. }
                 | UiEvent::MouseUp { .. }
                 | UiEvent::MouseMove { .. }
+                | UiEvent::FileDrop { .. }
         );
 
         // 把目标路径搬进复用缓冲：之后不再分配，也不与 &mut self 冲突
@@ -1462,7 +1463,8 @@ impl UiTree {
             UiEvent::Wheel { pos, .. }
             | UiEvent::MouseDown { pos, .. }
             | UiEvent::MouseUp { pos, .. }
-            | UiEvent::MouseMove { pos, .. } => self.hit_index(*pos),
+            | UiEvent::MouseMove { pos, .. }
+            | UiEvent::FileDrop { pos, .. } => self.hit_index(*pos),
             _ => None,
         };
 

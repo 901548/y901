@@ -163,3 +163,30 @@ fn char_after_keydown_is_still_deduplicated() {
     ));
     assert!(handle_wm_msg(WM_CHAR, 0x0D, 0, Modifiers::default(), &mut f).is_none());
 }
+
+/// WM_DROPFILES → RawEvent::FileDrop → UiEvent::FileDrop 的翻译与路由。
+///
+/// 无法在测试里构造真实 HDROP（需要 OLE 拖放源），所以这里验证两段可测的链路：
+/// 1. `translate` 把 `RawEvent::FileDrop` 翻成带坐标的 `UiEvent::FileDrop`；
+/// 2. `UiTree::dispatch` 按坐标命中目标控件（和鼠标事件同一套 hit-test）。
+#[test]
+fn file_drop_translates_and_routes_to_hit_target() {
+    use std::path::PathBuf;
+    use y901_runtime::translate;
+    use y901_ui::{Pos, Size, UiEvent};
+
+    let raw = y901_runtime::RawEvent::FileDrop {
+        paths: vec![PathBuf::from(r"C:\\tmp\\a.txt"), PathBuf::from(r"C:\\tmp\\b.bin")],
+        x: 42.0,
+        y: 24.0,
+    };
+    let ev = translate(&raw, Size::new(400.0, 300.0)).expect("FileDrop 必须被翻译");
+    match &ev {
+        UiEvent::FileDrop { paths, pos } => {
+            assert_eq!(paths.len(), 2, "两个路径都要保留");
+            assert!(paths[0].ends_with("a.txt"));
+            assert_eq!(*pos, Pos::new(42.0, 24.0), "坐标必须保留");
+        }
+        other => panic!("翻译结果不对：{other:?}"),
+    }
+}

@@ -13,12 +13,14 @@ use windows_sys::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
+use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, DragQueryPoint};
 use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, LoadCursorW,
     MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassExW,
     SetCursor, SetWindowLongPtrW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW,
     CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW, IDC_HAND, IDC_IBEAM,
+    WM_DROPFILES,
     IDC_SIZEALL, IDC_SIZENS, IDC_SIZEWE, MSG, PM_REMOVE, QS_ALLINPUT, SW_SHOW, WM_CHAR, WM_DESTROY,
     WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_LBUTTONDOWN,
     WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
@@ -338,6 +340,40 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             push(wheel_event(pos.x, pos.y, wparam as u64, modifiers()));
             0
         }
+        WM_DROPFILES => {
+            // OS 级文件拖放：取路径 + 松手点，再 DragFinish 释放
+            let mut paths = Vec::new();
+            let drop = wparam as *mut std::ffi::c_void;
+            let count = DragQueryFileW(drop, u32::MAX, std::ptr::null_mut(), 0);
+            for i in 0..count {
+                let len = DragQueryFileW(drop, i, std::ptr::null_mut(), 0);
+                if len == 0 {
+                    continue;
+                }
+                let mut buf = vec![0u16; len as usize + 1];
+                let written = DragQueryFileW(drop, i, buf.as_mut_ptr(), buf.len() as u32);
+                if written == 0 {
+                    continue;
+                }
+                buf.truncate(written as usize);
+                if let Ok(text) = String::from_utf16(&buf) {
+                    paths.push(std::path::PathBuf::from(text));
+                }
+            }
+            let mut pt = POINT { x: 0, y: 0 };
+            DragQueryPoint(drop, &mut pt);
+            DragFinish(drop);
+            if !paths.is_empty() {
+                push(RawEvent::FileDrop {
+                    paths,
+                    x: pt.x as f32,
+                    y: pt.y as f32,
+                });
+                // 拖放后要求重绘（高亮状态可能需要更新）
+                request_full_redraw();
+            }
+            0
+        }
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_CHAR => {
             // 键盘消息统一走纯函数 `handle_wm_msg`（可单测）：它负责去重，
             // wndproc 只做"取状态 + 投递"。
@@ -486,6 +522,8 @@ impl Window {
         if hwnd.is_null() {
             return Err("CreateWindowExW failed".into());
         }
+        // 接受 OS 级文件拖放：没这一步 WM_DROPFILES 永远不会来。
+        DragAcceptFiles(hwnd, 1);
 
         let mut rect = RECT {
             left: 0,

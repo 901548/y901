@@ -52,6 +52,14 @@ pub enum UiEvent {
     },
     /// 文本输入（IME 提交、粘贴、RPC 注入都走这里）。
     Text(String),
+    /// OS 级文件拖放（从资源管理器拖进来）。
+    ///
+    /// `paths` 是绝对路径；`pos` 是松手时的客户区坐标（用于命中目标控件）。
+    /// 框架只负责路由，不解释路径含义。
+    FileDrop {
+        paths: Vec<std::path::PathBuf>,
+        pos: Pos,
+    },
     /// 滚轮：正数向上。
     Wheel {
         delta: f32,

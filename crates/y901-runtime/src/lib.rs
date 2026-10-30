@@ -171,6 +171,12 @@ pub enum RawEvent {
         delta: f32,
         mods: Modifiers,
     },
+    /// 系统文件拖放（WM_DROPFILES）。
+    FileDrop {
+        paths: Vec<std::path::PathBuf>,
+        x: f32,
+        y: f32,
+    },
     KeyDown {
         key: Key,
         mods: Modifiers,
@@ -211,6 +217,10 @@ pub fn translate(raw: &RawEvent, viewport: Size) -> Option<UiEvent> {
         RawEvent::MouseUp { x, y, button } => Some(UiEvent::MouseUp {
             pos: y901_ui::Pos::new(*x, *y),
             button: *button,
+        }),
+        RawEvent::FileDrop { paths, x, y } => Some(UiEvent::FileDrop {
+            paths: paths.clone(),
+            pos: y901_ui::Pos::new(*x, *y),
         }),
         RawEvent::Wheel { x, y, delta, mods } => Some(UiEvent::Wheel {
             pos: y901_ui::Pos::new(*x, *y),
