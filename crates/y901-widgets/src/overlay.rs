@@ -285,6 +285,8 @@ pub struct Dialog {
     item: FlexItem,
     /// 面板尺寸（运行时可由 `set_size` 改；默认 420×220）。
     panel_size: Size,
+    /// 外部注入的面板样式（`None` = 走主题）。
+    panel_style: Option<crate::style::WidgetStyle>,
 }
 
 impl Dialog {
@@ -305,6 +307,7 @@ impl Dialog {
             button_rects: Vec::new(),
             item: FlexItem::default(),
             panel_size: Size::new(420.0, 220.0),
+            panel_style: None,
         }
     }
 
@@ -397,6 +400,18 @@ impl Dialog {
     /// `is_open` 变化影响全局 `paint_order` / `modal_root` / `focus_order`，
     /// 不只是该节点矩形。只标该节点会导致索引/焦点仍按旧状态（bug：焦点会跑进
     /// 已关闭的对话框）。同时需要 `tree.mark_layout_dirty(id)` 让索引重建。
+    /// 注入面板样式（背景渐变/圆角/描边）。
+    ///
+    /// 输入：`Some(style)` = 覆盖；`None` = 回到主题。
+    /// 注意：不会自动标脏（调用方需 `tree.invalidate(id)`）。
+    pub fn set_panel_style(&mut self, style: Option<crate::style::WidgetStyle>) -> bool {
+        if self.panel_style == style {
+            return false;
+        }
+        self.panel_style = style;
+        true
+    }
+
     pub fn set_open(&mut self, open: bool) {
         self.open = open;
     }
@@ -590,8 +605,16 @@ impl Widget for Dialog {
         }
         ctx.fill_rect(self.rect, y901_ui::Color::rgba(0.0, 0.0, 0.0, 0.55));
         let panel_style = ctx.theme().style(Role("panel"), State::Normal);
-        ctx.fill_rect(self.panel, panel_style.bg);
-        ctx.stroke_rect(self.panel, y901_ui::Color::rgba(0.40, 0.44, 0.52, 1.0), 1.0);
+        match self.panel_style {
+            Some(style) if style.has_bg() => {
+                style.paint_bg(ctx, self.panel);
+                style.paint_border(ctx, self.panel);
+            }
+            _ => {
+                ctx.fill_rect(self.panel, panel_style.bg);
+                ctx.stroke_rect(self.panel, y901_ui::Color::rgba(0.40, 0.44, 0.52, 1.0), 1.0);
+            }
+        }
         ctx.draw_text(
             Pos::new(self.panel.x + 16.0, self.panel.y + 10.0),
             &self.title,

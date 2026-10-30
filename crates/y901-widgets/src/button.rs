@@ -25,6 +25,8 @@ pub struct Button {
     selected: bool,
     /// 是否拥有键盘焦点（Tab 切过来时为 true）。
     focused: bool,
+    /// 外部注入的样式（`None` = 走主题）。按值持有，零分配。
+    style: Option<crate::style::WidgetStyle>,
 }
 
 impl Button {
@@ -45,6 +47,7 @@ impl Button {
             pressed: false,
             selected: false,
             focused: false,
+            style: None,
         }
     }
 
@@ -90,6 +93,24 @@ impl Button {
 
     fn inside(&self, pos: Pos) -> bool {
         self.rect.contains(pos)
+    }
+
+    /// 注入样式（覆盖背景/圆角/描边/焦点圈）。
+    ///
+    /// 输入：样式值（`Copy`）。返回：`self`（链式）。
+    /// 注意：不会自动标脏——调用方需 `tree.invalidate(id)`。
+    pub fn style(mut self, style: crate::style::WidgetStyle) -> Self {
+        self.style = Some(style);
+        self
+    }
+
+    /// 运行时更换样式（`None` = 恢复主题）。
+    pub fn set_style(&mut self, style: Option<crate::style::WidgetStyle>) -> bool {
+        if self.style == style {
+            return false;
+        }
+        self.style = style;
+        true
     }
 }
 
@@ -221,7 +242,21 @@ impl Widget for Button {
             State::Normal
         };
         let s = ctx.theme().style(Role::BUTTON, state);
-        ctx.fill_rect(self.rect, s.bg);
+        // 外部样式优先：有注入就用注入的，否则回到主题。
+        match self.style {
+            Some(style) if style.has_bg() => {
+                style.paint_bg(ctx, self.rect);
+                style.paint_border(ctx, self.rect);
+                style.paint_focus(ctx, self.rect, self.focused);
+            }
+            _ => {
+                ctx.fill_rect(self.rect, s.bg);
+                // 主题路径下的键盘焦点：用 fg 色画一圈（无样式注入时也能看出焦点）
+                if self.focused && state == State::Focused {
+                    ctx.stroke_round_rect(self.rect, s.fg, 2.0, 0.0);
+                }
+            }
+        }
 
         let style = TextStyle::fg(s.fg);
         let text_w = ctx.measure_text(&self.label, &style).w;

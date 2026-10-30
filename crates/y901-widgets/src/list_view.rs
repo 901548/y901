@@ -214,6 +214,11 @@ impl ListView {
         self.offset = clamped;
         true
     }
+
+    /// 转发到内部滚动条样式。
+    pub fn set_bar_style(&mut self, style: Option<crate::style::WidgetStyle>) -> bool {
+        self.bar.set_style(style)
+    }
 }
 
 impl Widget for ListView {

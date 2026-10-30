@@ -85,6 +85,9 @@ pub struct TextInput {
     inner_w: f32,
 
     focused: bool,
+    /// 外部注入的控件样式（`None` = 走主题）。
+    /// 注意：不能叫 `style`——本结构已有 `style: TextStyle`（文本样式）。
+    widget_style: Option<crate::style::WidgetStyle>,
     dragging: bool,
     caret_visible: bool,
     last_blink: Instant,
@@ -124,6 +127,7 @@ impl TextInput {
             scroll_x: 0.0,
             inner_w: 0.0,
             focused: false,
+            widget_style: None,
             dragging: false,
             caret_visible: true,
             last_blink: Instant::now(),
@@ -448,6 +452,16 @@ impl TextInput {
             _ => EventResult::Ignored,
         }
     }
+
+    /// 注入控件样式（背景/圆角/描边/焦点圈）。返回 `self` 便于链式构造。
+    ///
+    /// 与 [`TextInput::style`] 的区别：那个是**文本**样式（字色/字体），
+    /// 这个是**控件**样式（背景/圆角/描边）。
+    pub fn widget_style(mut self, style: crate::style::WidgetStyle) -> Self {
+        self.widget_style = Some(style);
+        self
+    }
+
 }
 
 impl Widget for TextInput {
@@ -690,7 +704,19 @@ impl Widget for TextInput {
             State::Normal
         };
         let themed = ctx.theme().style(Role::TEXT_INPUT, state);
-        ctx.fill_rect(rect, themed.bg);
+        match self.widget_style {
+            Some(style) if style.has_bg() => {
+                style.paint_bg(ctx, rect);
+                style.paint_border(ctx, rect);
+                style.paint_focus(ctx, rect, self.focused);
+            }
+            _ => {
+                ctx.fill_rect(rect, themed.bg);
+                if self.focused {
+                    ctx.stroke_round_rect(rect, themed.fg, 1.0, 0.0);
+                }
+            }
+        }
 
         ctx.push_clip(inner);
 

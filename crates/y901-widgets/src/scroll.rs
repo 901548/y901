@@ -86,6 +86,11 @@ impl ScrollView {
         self.offset = clamped;
         true
     }
+
+    /// 转发到内部滚动条（轨道/滑块颜色、宽度、圆角）。
+    pub fn set_bar_style(&mut self, style: Option<crate::style::WidgetStyle>) -> bool {
+        self.bar.set_style(style)
+    }
 }
 
 impl Widget for ScrollView {
@@ -273,6 +278,8 @@ pub struct Scrollbar {
     offset: f32,
     /// 拖拽回调：参数是换算后的新 offset。
     on_change: Option<Box<dyn FnMut(f32)>>,
+    /// 外部注入的滚动条样式（`None` = 走主题）。
+    style: Option<crate::style::WidgetStyle>,
 }
 
 impl Scrollbar {
@@ -296,6 +303,7 @@ impl Scrollbar {
             viewport: 0.0,
             offset: 0.0,
             on_change: None,
+            style: None,
         }
     }
 
@@ -321,6 +329,15 @@ impl Scrollbar {
 }
 
 impl Scrollbar {
+    /// 注入滚动条样式（轨道色/滑块色/宽度/圆角）。
+    pub fn set_style(&mut self, style: Option<crate::style::WidgetStyle>) -> bool {
+        if self.style == style {
+            return false;
+        }
+        self.style = style;
+        true
+    }
+
     pub(crate) fn render_bar(&self, ctx: &mut dyn RenderCtx) {
         if !self.visible {
             return;
@@ -333,9 +350,29 @@ impl Scrollbar {
             State::Normal
         };
         let track = ctx.theme().style(Role("scrollbar"), State::Disabled).bg;
-        ctx.fill_rect(self.rect, track);
         let thumb = ctx.theme().style(Role("scrollbar"), state).bg;
-        ctx.fill_rect(self.thumb(), thumb);
+        match self.style {
+            Some(s) => {
+                // 宽度：有注入就紧贴右侧画指定宽度（不改布局）
+                let w = if s.bar_width > 0.0 {
+                    s.bar_width.min(self.rect.w)
+                } else {
+                    self.rect.w
+                };
+                let x = self.rect.right() - w;
+                let track_rect = Rect::new(x, self.rect.y, w, self.rect.h);
+                let color = s.bar_track.unwrap_or(track);
+                ctx.fill_round_rect(track_rect, color, s.bar_radius);
+                let thumb_full = self.thumb();
+                let thumb_rect = Rect::new(x, thumb_full.y, w, thumb_full.h);
+                let color = s.bar_thumb.unwrap_or(thumb);
+                ctx.fill_round_rect(thumb_rect, color, s.bar_radius);
+            }
+            None => {
+                ctx.fill_rect(self.rect, track);
+                ctx.fill_rect(self.thumb(), thumb);
+            }
+        }
     }
 }
 /// 便捷：命令行式滚动（组件外部调用）。
