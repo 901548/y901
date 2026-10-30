@@ -806,7 +806,9 @@ impl TextEngine {
         self.packer.reset();
 
         for (ch, mut info) in entries {
-            let Some((x, y)) = self.packer.insert(info.width + PADDING, info.height + PADDING)
+            let Some((x, y)) = self
+                .packer
+                .insert(info.width + PADDING, info.height + PADDING)
             else {
                 continue;
             };
@@ -830,7 +832,6 @@ impl TextEngine {
         );
     }
 }
-
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
@@ -857,11 +858,11 @@ mod span_tests {
             ('M', 1),
             ('a', 1),
             (' ', 1),
-            ('\u{4e2d}', 2),   // 中
-            ('\u{65e5}', 2),   // 日
-            ('\u{ff21}', 2),   // Ａ（全角）
-            ('\u{1f600}', 2),  // 😀（emoji，宽）
-            ('\u{200b}', 0),   // 零宽空格
+            ('\u{4e2d}', 2),  // 中
+            ('\u{65e5}', 2),  // 日
+            ('\u{ff21}', 2),  // Ａ（全角）
+            ('\u{1f600}', 2), // 😀（emoji，宽）
+            ('\u{200b}', 0),  // 零宽空格
         ];
         for (ch, want) in cases {
             assert_eq!(

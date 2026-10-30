@@ -6,7 +6,7 @@ use std::rc::Rc;
 use y901_agent::{McpServer, Policy};
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Flex, FlexItem, Json, Pos, Rect, RenderCtx, Size,
-    TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 use y901_widgets::{Button, Menu, ScrollView, TextLabel};
 
@@ -38,7 +38,12 @@ impl Widget for Secret {
     fn flex(&self) -> FlexItem {
         FlexItem::fill()
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(Size::new(100.0, 40.0))
     }
     fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
@@ -66,7 +71,8 @@ fn unexposed_node_is_invisible_to_agent_by_default() {
     tree.layout(Size::new(400.0, 300.0), &Mono);
 
     let server = McpServer::new(Policy::default());
-    let view = y901_agent::handle_call(&mut tree, server.policy(), y901_agent::ApiCall::Tree).unwrap();
+    let view =
+        y901_agent::handle_call(&mut tree, server.policy(), y901_agent::ApiCall::Tree).unwrap();
     let text = view.to_string();
     assert!(!text.contains("secret"), "未暴露节点不得出现在树里：{text}");
 }
@@ -79,14 +85,13 @@ fn sensitive_label_is_redacted_too() {
     }))));
     tree.layout(Size::new(400.0, 300.0), &Mono);
 
-    let view = y901_agent::handle_call(
-        &mut tree,
-        &Policy::default(),
-        y901_agent::ApiCall::Tree,
-    )
-    .unwrap();
+    let view =
+        y901_agent::handle_call(&mut tree, &Policy::default(), y901_agent::ApiCall::Tree).unwrap();
     let text = view.to_string();
-    assert!(!text.contains("top-secret-label"), "label 也必须脱敏：{text}");
+    assert!(
+        !text.contains("top-secret-label"),
+        "label 也必须脱敏：{text}"
+    );
     assert!(!text.contains("top-secret-value"), "value 必须脱敏：{text}");
     assert!(text.contains("***"));
 }
@@ -98,7 +103,9 @@ fn standard_mcp_initialize_when_no_token_configured() {
     // P0-3 之后：配置了 token 才校验（token 由客户端通过 env 注入）；
     // 未配置时保持开放——stdio 就是进程边界。
     let mut server = McpServer::new(Policy::default());
-    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(Button::new("ok", "OK")))));
+    let mut tree = UiTree::new(Box::new(
+        Flex::column("root").push(Box::new(Button::new("ok", "OK"))),
+    ));
     tree.layout(Size::new(400.0, 300.0), &Mono);
 
     let out = server
@@ -114,7 +121,10 @@ fn standard_mcp_initialize_when_no_token_configured() {
 
     // 握手后 tools/list 正常
     let tools = server
-        .handle_line(&mut tree, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#)
+        .handle_line(
+            &mut tree,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        )
         .expect("response");
     assert!(tools.contains("ui_click"), "tools/list 应可用：{tools}");
 }
@@ -163,7 +173,12 @@ impl Widget for Painted {
     fn id(&self) -> &str {
         &self.id
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(Size::new(c.max.w, 30.0))
     }
     fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
@@ -233,10 +248,21 @@ fn button_is_exposed_by_default_but_plain_widgets_are_not() {
         fn id(&self) -> &str {
             "plain"
         }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) -> Size {
             c.constrain(Size::new(10.0, 10.0))
         }
-        fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {}
+        fn arrange(
+            &mut self,
+            _r: Rect,
+            _m: &dyn TextMetrics,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) {
+        }
         fn rect(&self) -> Rect {
             Rect::ZERO
         }
@@ -253,8 +279,8 @@ fn button_is_exposed_by_default_but_plain_widgets_are_not() {
     ));
     tree.layout(Size::new(300.0, 100.0), &Mono);
 
-    let view = y901_agent::handle_call(&mut tree, &Policy::default(), y901_agent::ApiCall::Tree)
-        .unwrap();
+    let view =
+        y901_agent::handle_call(&mut tree, &Policy::default(), y901_agent::ApiCall::Tree).unwrap();
     let text = view.to_string();
     assert!(text.contains("\"btn\""), "按钮默认对 AI 可见：{text}");
     assert!(!text.contains("\"plain\""), "普通组件默认封禁：{text}");

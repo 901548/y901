@@ -81,11 +81,7 @@ fn handle(tree: &mut UiTree, pending: Pending) {
                 Err(format!("node ignored event: {node}"))
             }
         }
-        RpcRequest::Invoke {
-            node,
-            action,
-            args,
-        } => {
+        RpcRequest::Invoke { node, action, args } => {
             let ev = UiEvent::Action {
                 name: action.clone(),
                 args: args.clone(),
@@ -168,12 +164,16 @@ fn agent_drives_text_input_over_rpc() {
         let r2 = call(&format!(
             r#"{{"id":2,"method":"dispatch","params":{{"id":"input","event":{{"type":"mouse_down","x":{cx},"y":{cy}}}}}}}"#
         ));
-        assert_eq!(r2.get("ok").and_then(|v| v.as_bool()), Some(true), "mouse_down 失败: {}", r2.to_string());
+        assert_eq!(
+            r2.get("ok").and_then(|v| v.as_bool()),
+            Some(true),
+            "mouse_down 失败: {}",
+            r2.to_string()
+        );
 
         // 3) 全选
-        let r3 = call(
-            r#"{"id":3,"method":"invoke","params":{"id":"input","action":"select_all"}}"#,
-        );
+        let r3 =
+            call(r#"{"id":3,"method":"invoke","params":{"id":"input","action":"select_all"}}"#);
         assert_eq!(r3.get("ok").and_then(|v| v.as_bool()), Some(true));
 
         // 4) 输入 "Agent"（替换选区）
@@ -232,7 +232,10 @@ fn dispatch_reports_unhandled_nodes() {
         Json::parse(&buf).expect("json")
     });
 
-    handle(&mut tree, rx.recv_timeout(Duration::from_secs(3)).expect("req"));
+    handle(
+        &mut tree,
+        rx.recv_timeout(Duration::from_secs(3)).expect("req"),
+    );
     let resp = client.join().unwrap();
     assert_eq!(resp.get("ok").and_then(|v| v.as_bool()), Some(false));
 
@@ -244,18 +247,18 @@ fn dispatch_reports_unhandled_nodes() {
 
 #[test]
 fn rpc_event_parsing_covers_mouse_and_wheel() {
-    let ev = RpcEvent::from_json(&Json::parse(
-        r#"{"type":"mouse_down","x":12,"y":34,"button":"left"}"#,
+    let ev = RpcEvent::from_json(
+        &Json::parse(r#"{"type":"mouse_down","x":12,"y":34,"button":"left"}"#).unwrap(),
     )
-    .unwrap())
     .unwrap();
     match ev.to_ui_event() {
         UiEvent::MouseDown { pos, .. } => assert_eq!(pos, Pos::new(12.0, 34.0)),
         other => panic!("unexpected {other:?}"),
     }
 
-    let wheel = RpcEvent::from_json(&Json::parse(r#"{"type":"wheel","x":1,"y":2,"delta":120}"#).unwrap())
-        .unwrap();
+    let wheel =
+        RpcEvent::from_json(&Json::parse(r#"{"type":"wheel","x":1,"y":2,"delta":120}"#).unwrap())
+            .unwrap();
     assert!(matches!(wheel.to_ui_event(), UiEvent::Wheel { delta, .. } if delta == 120.0));
 
     assert!(RpcEvent::from_json(&Json::parse(r#"{"type":"bogus"}"#).unwrap()).is_err());
@@ -329,7 +332,10 @@ fn agent_subscribes_and_gets_incremental_patch() {
 
     // 第一条：focus 与文本都变了
     let first = &pushes[0];
-    assert_eq!(first.get("event").and_then(|v| v.as_str()), Some("state_changed"));
+    assert_eq!(
+        first.get("event").and_then(|v| v.as_str()),
+        Some("state_changed")
+    );
     assert_eq!(first.get("id").and_then(|v| v.as_str()), Some("input"));
     let patch1 = first.get("patch").expect("patch");
     assert!(patch1.get("text").is_some());
@@ -370,9 +376,7 @@ fn subscription_throttle_coalesces_rapid_changes() {
     assert!(early.is_empty(), "节流窗口内不应推送");
 
     // 窗口到了：合并成一条，patch 里是最终状态
-    let late = tree.poll_subscriptions(
-        std::time::Instant::now() + Duration::from_millis(150),
-    );
+    let late = tree.poll_subscriptions(std::time::Instant::now() + Duration::from_millis(150));
     assert_eq!(late.len(), 1, "5 次输入应合并成 1 条推送");
     let patch = late[0].get("patch").expect("patch");
     assert_eq!(text_of(patch, "text"), "abcde");

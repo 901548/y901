@@ -1,6 +1,6 @@
 //! Tab 焦点遍历测试。
 
-use y901_ui::{Flex, FlexItem, Key, Modifiers, Size, TextStyle, TextMetrics, UiEvent, UiTree};
+use y901_ui::{Flex, FlexItem, Key, Modifiers, Size, TextMetrics, TextStyle, UiEvent, UiTree};
 use y901_widgets::TextInput;
 
 struct Mono;
@@ -23,9 +23,15 @@ impl TextMetrics for Mono {
 
 fn tree_with_three_inputs() -> UiTree {
     let root = Flex::column("root")
-        .push(Box::new(TextInput::new("a").flex_item(FlexItem::height(30.0))))
-        .push(Box::new(TextInput::new("b").flex_item(FlexItem::height(30.0))))
-        .push(Box::new(TextInput::new("c").flex_item(FlexItem::height(30.0))));
+        .push(Box::new(
+            TextInput::new("a").flex_item(FlexItem::height(30.0)),
+        ))
+        .push(Box::new(
+            TextInput::new("b").flex_item(FlexItem::height(30.0)),
+        ))
+        .push(Box::new(
+            TextInput::new("c").flex_item(FlexItem::height(30.0)),
+        ));
 
     let mut tree = UiTree::new(Box::new(root));
     tree.layout(Size::new(200.0, 200.0), &Mono);
@@ -106,13 +112,17 @@ fn tab_is_linear_in_number_of_nodes() {
 #[test]
 fn tab_skips_disabled_nodes() {
     let root = Flex::column("root")
-        .push(Box::new(TextInput::new("a").flex_item(FlexItem::height(30.0))))
+        .push(Box::new(
+            TextInput::new("a").flex_item(FlexItem::height(30.0)),
+        ))
         .push(Box::new(
             TextInput::new("b")
                 .disabled(true)
                 .flex_item(FlexItem::height(30.0)),
         ))
-        .push(Box::new(TextInput::new("c").flex_item(FlexItem::height(30.0))));
+        .push(Box::new(
+            TextInput::new("c").flex_item(FlexItem::height(30.0)),
+        ));
 
     let mut tree = UiTree::new(Box::new(root));
     tree.layout(Size::new(200.0, 200.0), &Mono);
@@ -140,7 +150,10 @@ fn disabled_node_ignores_events() {
 
     let r = tree.dispatch_to("a", &UiEvent::Text("x".to_string()));
     assert_eq!(r, y901_ui::EventResult::Ignored, "禁用节点不处理事件");
-    assert!(tree.snapshot_json().to_string().contains("\"disabled\":true"));
+    assert!(tree
+        .snapshot_json()
+        .to_string()
+        .contains("\"disabled\":true"));
 }
 
 #[test]
@@ -161,7 +174,11 @@ fn compose_reports_ime_candidate_position() {
 
     let pos = tree.take_pending_ime().expect("组合态应请求定位候选窗");
     // padding.left = 8，光标在 "ab" 之后 = 2 * 8 = 16
-    assert!((pos.x - 24.0).abs() < 0.01, "x 应等于 padding + caret_x，实际 {}", pos.x);
+    assert!(
+        (pos.x - 24.0).abs() < 0.01,
+        "x 应等于 padding + caret_x，实际 {}",
+        pos.x
+    );
     assert!(pos.y >= 0.0);
 
     // 取走后清空，避免每帧重复设置

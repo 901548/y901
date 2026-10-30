@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use y901_agent::{handle_call, ApiCall, McpServer, Policy};
 use y901_ui::{
     Command, Constraints, EventCtx, EventResult, Flex, FlexItem, Json, Pos, Rect, RenderCtx,
-    Semantics, Size, TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    Semantics, Size, TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 use y901_widgets::{Button, Dialog, TerminalWidget, TextInput};
 
@@ -97,11 +97,9 @@ fn top_level_focused_reflects_framework_focus() {
 
 #[test]
 fn focused_consistent_across_three_interfaces() {
-    let mut tree = UiTree::new(Box::new(
-        Flex::column("root").push(Box::new(
-            TextInput::new("field").flex_item(FlexItem::height(24.0)),
-        )),
-    ));
+    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(
+        TextInput::new("field").flex_item(FlexItem::height(24.0)),
+    ))));
     tree.layout(Size::new(300.0, 100.0), &Mono);
     assert!(tree.set_focus(Some("field".to_string())));
 
@@ -147,7 +145,11 @@ fn focused_consistent_across_three_interfaces() {
     .unwrap();
     let from_resource = get_field(&inner, "focused");
 
-    assert_eq!(from_tree, Some(Json::Bool(true)), "get_tree 应带顶层 focused");
+    assert_eq!(
+        from_tree,
+        Some(Json::Bool(true)),
+        "get_tree 应带顶层 focused"
+    );
     assert_eq!(
         from_tree, from_query,
         "get_tree 与 query 的 focused 必须一致"
@@ -202,13 +204,9 @@ fn text_input_click_only_sets_focused_after_focus_event() {
     ));
     dlg.open();
 
-    let mut tree = UiTree::new(Box::new(
-        Flex::column("root")
-            .push(Box::new(dlg))
-            .push(Box::new(
-                TextInput::new("field").flex_item(FlexItem::height(24.0)),
-            )),
-    ));
+    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(dlg)).push(
+        Box::new(TextInput::new("field").flex_item(FlexItem::height(24.0))),
+    )));
     tree.layout(Size::new(300.0, 200.0), &Mono);
 
     // Modal 自动聚焦到 inner
@@ -228,7 +226,11 @@ fn text_input_click_only_sets_focused_after_focus_event() {
     assert_eq!(tree.focus(), Some("inner"), "焦点不应被 Modal 外的节点抢走");
     let input = tree.find("field").expect("field");
     // TextInput 暴露内部状态用于断言
-    let focused = input.semantics().props.iter().any(|(k, v)| k == "focused" && v == "true");
+    let focused = input
+        .semantics()
+        .props
+        .iter()
+        .any(|(k, v)| k == "focused" && v == "true");
     assert!(
         !focused,
         "request_focus 被拒后，组件的内部 focused 必须仍是 false（不能与框架分叉）"
@@ -281,10 +283,7 @@ impl Widget for Probe {
                 EventResult::Redraw
             }
             UiEvent::Action { name, args } if name == "set_disabled" => {
-                self.disabled = args
-                    .get("flag")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
+                self.disabled = args.get("flag").and_then(|v| v.as_bool()).unwrap_or(true);
                 self.log.borrow_mut().push("disabled".into());
                 EventResult::Redraw
             }

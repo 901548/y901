@@ -310,12 +310,7 @@ impl TextBuffer {
     /// 从行首到 `offset` 的物理宽度（行内 X 坐标）。
     ///
     /// `offset` 会被吸附到 char 边界并限制在当前行内。
-    pub fn x_for_offset(
-        &self,
-        offset: usize,
-        metrics: &dyn TextMetrics,
-        style: &TextStyle,
-    ) -> f32 {
+    pub fn x_for_offset(&self, offset: usize, metrics: &dyn TextMetrics, style: &TextStyle) -> f32 {
         let start = self.line_start(offset);
         let end = self.line_end(offset);
         let offset = self.snap(offset).clamp(start, end);
@@ -356,7 +351,12 @@ impl TextBuffer {
     }
 
     /// 同上，但结果会同时把光标移过去（鼠标点击的完整动作）。
-    pub fn place_cursor_at_x(&mut self, x: f32, metrics: &dyn TextMetrics, style: &TextStyle) -> usize {
+    pub fn place_cursor_at_x(
+        &mut self,
+        x: f32,
+        metrics: &dyn TextMetrics,
+        style: &TextStyle,
+    ) -> usize {
         let offset = self.offset_for_x(x, metrics, style);
         self.set_cursor(offset);
         offset

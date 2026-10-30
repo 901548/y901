@@ -35,10 +35,8 @@ fn run_headless(policy: Policy) -> Result<(), String> {
 
     let mut server = McpServer::new(policy.clone());
     let mut host = Shell::new(policy);
-    let jobs = y901_mcp::bridge::spawn_io(
-        std::io::BufReader::new(std::io::stdin()),
-        std::io::stdout(),
-    );
+    let jobs =
+        y901_mcp::bridge::spawn_io(std::io::BufReader::new(std::io::stdin()), std::io::stdout());
 
     // 与 GUI 路径共用同一个 Host：命令必须经 host.command，不允许第二条执行路径
     loop {

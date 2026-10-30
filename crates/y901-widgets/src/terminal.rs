@@ -12,7 +12,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use y901_core::{CellKind, ColorSpec, Grid};
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, FlexItem, Key, Pos, Rect, RenderCtx, Role,
-    Semantics, Size, TextStyle, TextMetrics, UiEvent, Widget,
+    Semantics, Size, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 use crate::palette::{self, DEFAULT_BG, DEFAULT_FG};
@@ -165,7 +165,12 @@ impl TerminalWidget {
         let mut any = false;
         if let Some(pty) = self.pty.as_ref() {
             while let Ok(bytes) = pty.rx.try_recv() {
-                feed_bytes(&mut self.text, &mut self.pending_utf8, &mut self.grid, &bytes);
+                feed_bytes(
+                    &mut self.text,
+                    &mut self.pending_utf8,
+                    &mut self.grid,
+                    &bytes,
+                );
                 any = true;
             }
         }
@@ -244,7 +249,6 @@ impl Widget for TerminalWidget {
     fn role(&self) -> Role {
         crate::ROLE_TERMINAL
     }
-
 
     /// 向下转型：Host 驱动 PTY（`write` / `pump` / `attach_shell`）的唯一路径。
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
@@ -472,9 +476,16 @@ impl Widget for TerminalWidget {
     }
 
     fn semantics(&self) -> Semantics {
-        let mut sem = Semantics::default().exposed(true)
-            .label(format!("terminal {}", self.grid.cols as u32 * self.grid.rows as u32))
-            .value(self.grid.line_text(self.grid.cursor_row.min(self.grid.rows as usize - 1)))
+        let mut sem = Semantics::default()
+            .exposed(true)
+            .label(format!(
+                "terminal {}",
+                self.grid.cols as u32 * self.grid.rows as u32
+            ))
+            .value(
+                self.grid
+                    .line_text(self.grid.cursor_row.min(self.grid.rows as usize - 1)),
+            )
             .action_spec("inject_text", y901_ui::InputKind::Text)
             .action("clear")
             .prop("cols", self.grid.cols.to_string())
@@ -497,7 +508,6 @@ impl Widget for TerminalWidget {
         sem
     }
 }
-
 
 /// 调色板返回 `[f32; 4]`，框架用 `Color`：这里是唯一的转换点。
 pub fn to_color(c: [f32; 4]) -> Color {

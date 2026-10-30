@@ -37,7 +37,12 @@ impl SplitView {
     /// 输入：`id`、`axis`（水平=左右分栏，垂直=上下分栏）、两个子节点。
     /// 返回：默认 `ratio = 0.28`、最小宽 120 / 200 像素。
     /// 副作用：无。子节点顺序即"第一栏 / 第二栏"。
-    pub fn new(id: impl Into<String>, axis: Axis, first: Box<dyn Widget>, second: Box<dyn Widget>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        axis: Axis,
+        first: Box<dyn Widget>,
+        second: Box<dyn Widget>,
+    ) -> Self {
         Self {
             id: id.into(),
             kids: vec![first, second],
@@ -55,14 +60,22 @@ impl SplitView {
     /// `new(id, Axis::Horizontal, …)` 的快捷方式：左右分栏。
     ///
     /// 返回：未挂载的分栏容器。副作用：无。
-    pub fn horizontal(id: impl Into<String>, first: Box<dyn Widget>, second: Box<dyn Widget>) -> Self {
+    pub fn horizontal(
+        id: impl Into<String>,
+        first: Box<dyn Widget>,
+        second: Box<dyn Widget>,
+    ) -> Self {
         Self::new(id, Axis::Horizontal, first, second)
     }
 
     /// `new(id, Axis::Vertical, …)` 的快捷方式：上下分栏。
     ///
     /// 返回：未挂载的分栏容器。副作用：无。
-    pub fn vertical(id: impl Into<String>, first: Box<dyn Widget>, second: Box<dyn Widget>) -> Self {
+    pub fn vertical(
+        id: impl Into<String>,
+        first: Box<dyn Widget>,
+        second: Box<dyn Widget>,
+    ) -> Self {
         Self::new(id, Axis::Vertical, first, second)
     }
 
@@ -166,7 +179,12 @@ impl Widget for SplitView {
         Some(&mut self.kids)
     }
 
-    fn measure(&mut self, m: &dyn TextMetrics, c: Constraints, cache: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        m: &dyn TextMetrics,
+        c: Constraints,
+        cache: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         // 两栏都按"能占满"来测，实际尺寸在 arrange 里按比例分
         for k in self.kids.iter_mut() {
             let _ = cache.measure(k.as_mut(), m, c);
@@ -174,10 +192,17 @@ impl Widget for SplitView {
         c.constrain(c.max)
     }
 
-    fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        rect: Rect,
+        m: &dyn TextMetrics,
+        cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = rect;
         let total = self.along();
-        let first_len = (total * self.ratio).max(self.min_first.min(total)).min(total);
+        let first_len = (total * self.ratio)
+            .max(self.min_first.min(total))
+            .min(total);
         let second_len = (total - first_len - DIVIDER).max(0.0);
 
         let (a, b) = match self.axis {
@@ -271,7 +296,8 @@ impl Widget for SplitView {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default().exposed(true)
+        Semantics::default()
+            .exposed(true)
             .label("split")
             .state("ratio", self.ratio)
             .state("dragging", self.dragging)

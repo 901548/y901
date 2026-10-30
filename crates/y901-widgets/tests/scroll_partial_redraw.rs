@@ -8,7 +8,7 @@
 //! 局部重绘的结果仍与整窗重绘逐像素相同（也就是收窄是安全的）。
 
 use y901_ui::{
-    Color, Modifiers, Pos, Rect, RenderCtx, Size, TextStyle, TextMetrics, UiTree, UiEvent,
+    Color, Modifiers, Pos, Rect, RenderCtx, Size, TextMetrics, TextStyle, UiEvent, UiTree,
 };
 use y901_widgets::ListView;
 
@@ -145,7 +145,10 @@ fn scroll_partial_redraw_matches_full_redraw() {
 
     // B：滚动后用**局部**脏区在 A 的画布上继续画
     let r = tree_a.dispatch(&wheel);
-    assert!(r.needs_redraw() || r.needs_relayout(), "滚动必须触发重绘/重排");
+    assert!(
+        r.needs_redraw() || r.needs_relayout(),
+        "滚动必须触发重绘/重排"
+    );
     tree_a.layout(Size::new(320.0, 200.0), &Mono);
     eprintln!(
         "[diag] after scroll: full={} dirty={:?}",

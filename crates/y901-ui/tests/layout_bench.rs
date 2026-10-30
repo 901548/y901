@@ -7,11 +7,15 @@ use std::time::Instant;
 
 use y901_ui::{
     Constraints, EventCtx, EventResult, Flex, FlexItem, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiTree, Widget,
+    TextMetrics, TextStyle, UiTree, Widget,
 };
 
 fn count_nodes(n: &dyn Widget) -> usize {
-    1 + n.children().iter().map(|c| count_nodes(c.as_ref())).sum::<usize>()
+    1 + n
+        .children()
+        .iter()
+        .map(|c| count_nodes(c.as_ref()))
+        .sum::<usize>()
 }
 
 struct Mono;

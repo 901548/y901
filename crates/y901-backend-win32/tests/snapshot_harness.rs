@@ -14,8 +14,8 @@
 use y901_backend_win32::window::Window;
 use y901_runtime::Options;
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiTree, Widget,
+    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    TextStyle, UiTree, Widget,
 };
 
 /// 固定场景：背景块 + 两行文字 + 一个纯色块。
@@ -155,9 +155,7 @@ fn gradient_matches_math_at_45_degrees() {
     tree.invalidate_all();
     window.render(&mut tree);
 
-    let (px, w, h) = window
-        .take_snapshot()
-        .expect("快照失败（staging/Map）");
+    let (px, w, h) = window.take_snapshot().expect("快照失败（staging/Map）");
     assert_eq!(px.len(), (w * h * 4) as usize, "回读尺寸不对");
 
     // 与 Scene::render 里的渐变矩形保持一致
@@ -258,14 +256,8 @@ fn round_rect_sdf_matches_math() {
 
     for y in (ry as u32)..((ry + rh) as u32).min(h) {
         for x in (rx as u32)..((rx + rw) as u32).min(w) {
-            let p = [
-                x as f32 - rx - half[0] + 0.5,
-                y as f32 - ry - half[1] + 0.5,
-            ];
-            let q = [
-                p[0].abs() - half[0] + radius,
-                p[1].abs() - half[1] + radius,
-            ];
+            let p = [x as f32 - rx - half[0] + 0.5, y as f32 - ry - half[1] + 0.5];
+            let q = [p[0].abs() - half[0] + radius, p[1].abs() - half[1] + radius];
             let outside_part = (q[0].max(0.0).powi(2) + q[1].max(0.0).powi(2)).sqrt();
             let d = q[0].max(q[1]).min(0.0) + outside_part - radius;
             let i = ((y * w + x) * 4) as usize;
@@ -353,10 +345,16 @@ fn round_stroke_draws_ring_only() {
             } else if d < -(width_px * 0.5 + 2.0) {
                 // 内部：必须不是描边色（证明是轮廓而不是实心）
                 inner += 1;
-                assert!(!is_stroke, "({x},{y}) d={d:.2} 内部不应被描边填满，实际 {got:?}");
+                assert!(
+                    !is_stroke,
+                    "({x},{y}) d={d:.2} 内部不应被描边填满，实际 {got:?}"
+                );
             } else if d > width_px * 0.5 + 2.0 {
                 outside += 1;
-                assert!(!is_stroke, "({x},{y}) d={d:.2} 外部不应有描边，实际 {got:?}");
+                assert!(
+                    !is_stroke,
+                    "({x},{y}) d={d:.2} 外部不应有描边，实际 {got:?}"
+                );
             }
         }
     }
@@ -442,7 +440,8 @@ fn gradient_round_rect_matches_math() {
                 checked += 1;
             } else if d > 2.0 {
                 // 圆角外：必须不是渐变色（被 SDF 裁掉）
-                let looks_gradient = (got[0] - from[0]).abs() < 0.08 && (got[2] - from[2]).abs() < 0.15;
+                let looks_gradient =
+                    (got[0] - from[0]).abs() < 0.08 && (got[2] - from[2]).abs() < 0.15;
                 if !looks_gradient {
                     corner_cut += 1;
                 }
@@ -452,7 +451,10 @@ fn gradient_round_rect_matches_math() {
     assert!(checked > 1500, "内部采样点太少：{checked}");
     // 四角被裁掉的面积本就很小（r=12 → 每角约 31px），
     // 取 d>2 的核心区域后只剩几十个像素。
-    assert!(corner_cut > 20, "四角没被裁掉（可能没走 SDF）：{corner_cut}");
+    assert!(
+        corner_cut > 20,
+        "四角没被裁掉（可能没走 SDF）：{corner_cut}"
+    );
     eprintln!(
         "[grad+round] 验证通过：内部 {checked} 点最大误差 {worst:.4}，裁掉角 {corner_cut} 像素"
     );

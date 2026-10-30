@@ -4,9 +4,7 @@
 //! 若 `disabled` 不可见却被哈希，Agent 会收到"状态变了但看不出来"的 409。
 
 use y901_agent::{handle_call, ApiCall, McpServer, Policy};
-use y901_ui::{
-    Flex, FlexItem, Json, Size, TextStyle, TextMetrics, UiTree,
-};
+use y901_ui::{Flex, FlexItem, Json, Size, TextMetrics, TextStyle, UiTree};
 use y901_widgets::{Button, TextInput};
 
 struct Mono;
@@ -31,7 +29,9 @@ fn tree_with(disabled: bool) -> UiTree {
         .disabled(disabled)
         .flex_item(FlexItem::height(24.0));
     let mut tree = UiTree::new(Box::new(
-        Flex::column("root").push(Box::new(btn)).push(Box::new(input)),
+        Flex::column("root")
+            .push(Box::new(btn))
+            .push(Box::new(input)),
     ));
     tree.layout(Size::new(300.0, 120.0), &Mono);
     tree
@@ -78,9 +78,7 @@ fn query_result_reports_disabled() {
     let out = handle_call(
         &mut tree,
         &Policy::default(),
-        ApiCall::Query {
-            q: "id=ok".into(),
-        },
+        ApiCall::Query { q: "id=ok".into() },
     )
     .expect("query");
     let items = match out.get("items") {

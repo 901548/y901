@@ -3,11 +3,11 @@
 //! 这是"如何写一个容器"的样本：自己决定子节点怎么摆，
 //! 框架只负责把矩形传进来、把事件转过去。
 
+use y901_ui::layout::{flex_arrange, flex_measure};
 use y901_ui::{
     Axis, Constraints, Edges, EventCtx, EventResult, FlexItem, Rect, RenderCtx, Role, Semantics,
     Size, TextMetrics, UiEvent, Widget,
 };
-use y901_ui::layout::{flex_arrange, flex_measure};
 
 pub struct VerticalList {
     id: String,

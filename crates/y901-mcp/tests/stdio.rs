@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use y901_agent::{McpServer, Policy};
-use y901_ui::{Flex, FlexItem, Semantics, Size, TextStyle, TextMetrics, UiTree, Widget};
+use y901_ui::{Flex, FlexItem, Semantics, Size, TextMetrics, TextStyle, UiTree, Widget};
 
 struct Mono;
 impl TextMetrics for Mono {
@@ -34,10 +34,20 @@ impl Widget for Probe {
     fn flex(&self) -> FlexItem {
         FlexItem::fill()
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: y901_ui::Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: y901_ui::Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(Size::new(120.0, 32.0))
     }
-    fn arrange(&mut self, r: y901_ui::Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: y901_ui::Rect,
+        _m: &dyn TextMetrics,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> y901_ui::Rect {
@@ -168,7 +178,10 @@ fn node_resource_redacts_state_fields() {
     let body = out.join("\n");
     assert!(!body.is_empty(), "应有响应");
     assert!(!body.contains("s3cret"), "value 必须脱敏：{body}");
-    assert!(!body.contains("abc123"), "state 里的敏感值也必须脱敏：{body}");
+    assert!(
+        !body.contains("abc123"),
+        "state 里的敏感值也必须脱敏：{body}"
+    );
     assert!(body.contains("***"));
 }
 

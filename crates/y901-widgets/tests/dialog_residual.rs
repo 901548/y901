@@ -13,7 +13,7 @@
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, Stack,
-    TextStyle, TextMetrics, UiTree, Widget,
+    TextMetrics, TextStyle, UiTree, Widget,
 };
 use y901_widgets::Dialog;
 
@@ -47,7 +47,9 @@ impl Canvas {
         let a = c.a.clamp(0.0, 1.0);
         let dst = self.px[i];
         let mix = |s: f32, d: u8| -> u8 {
-            ((s * a + (d as f32 / 255.0) * (1.0 - a)) * 255.0).round().clamp(0.0, 255.0) as u8
+            ((s * a + (d as f32 / 255.0) * (1.0 - a)) * 255.0)
+                .round()
+                .clamp(0.0, 255.0) as u8
         };
         self.px[i] = [mix(c.r, dst[0]), mix(c.g, dst[1]), mix(c.b, dst[2]), 255];
     }
@@ -148,8 +150,16 @@ impl Widget for Backdrop {
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
         ctx.fill_rect(self.rect, self.color);
         let style = TextStyle::fg(Color::WHITE);
-        ctx.draw_text(Pos::new(self.rect.x + 8.0, self.rect.y + 8.0), "hello world", &style);
-        ctx.draw_text(Pos::new(self.rect.x + 8.0, self.rect.y + 32.0), "second line", &style);
+        ctx.draw_text(
+            Pos::new(self.rect.x + 8.0, self.rect.y + 8.0),
+            "hello world",
+            &style,
+        );
+        ctx.draw_text(
+            Pos::new(self.rect.x + 8.0, self.rect.y + 32.0),
+            "second line",
+            &style,
+        );
     }
     fn semantics(&self) -> Semantics {
         Semantics::default()

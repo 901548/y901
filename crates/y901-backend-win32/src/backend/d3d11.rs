@@ -150,7 +150,12 @@ impl Instance {
         // 四角投影求 t 的区间，保证 t 恰好铺满 [0,1]
         let mut t_min = f32::MAX;
         let mut t_max = f32::MIN;
-        for (cx, cy) in [(0.0, 0.0), (size[0], 0.0), (0.0, size[1]), (size[0], size[1])] {
+        for (cx, cy) in [
+            (0.0, 0.0),
+            (size[0], 0.0),
+            (0.0, size[1]),
+            (size[0], size[1]),
+        ] {
             let t = (cx * dir[0] + cy * dir[1]) / len2;
             t_min = t_min.min(t);
             t_max = t_max.max(t);
@@ -1930,10 +1935,8 @@ impl Gfx {
             Some(d) if d.right > d.left && d.bottom > d.top => d,
             _ => full,
         };
-        let is_full = rect.left == 0
-            && rect.top == 0
-            && rect.right >= w as i32
-            && rect.bottom >= h as i32;
+        let is_full =
+            rect.left == 0 && rect.top == 0 && rect.right >= w as i32 && rect.bottom >= h as i32;
         draw_scene(
             context, pipeline, atlas, cached, instances, count, rect, is_full, w, h,
         );
@@ -1999,7 +2002,9 @@ impl Gfx {
                 _ => eprintln!("[scissor] 回读失败"),
             }
             // 自检会破坏画面：立刻用整帧重画一次恢复
-            draw_scene(context, pipeline, atlas, cached, instances, count, full, true, w, h);
+            draw_scene(
+                context, pipeline, atlas, cached, instances, count, full, true, w, h,
+            );
             blit_cached(context, pipeline, cached, atlas, rtv, w, h);
         }
 
@@ -2158,7 +2163,10 @@ impl Gfx {
             n += 1;
         }
         let _ = (w, h);
-        Some((sum as f64 / n as f64 / 255.0, bright as f64 / n as f64 * 100.0))
+        Some((
+            sum as f64 / n as f64 / 255.0,
+            bright as f64 / n as f64 * 100.0,
+        ))
     }
 
     /// 把交换链后备缓冲回读到 CPU，算 FNV-1a 哈希（快照验证与回归对比用）。

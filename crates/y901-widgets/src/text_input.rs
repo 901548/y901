@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use y901_ui::text::TextBuffer;
 use y901_ui::{
-    Color, Constraints, Dimension, Edges, EventCtx, EventResult, FlexItem, Json, Key, Modifiers, Pos,
-    Rect, RenderCtx, Role, Semantics, Size, State, TextStyle, TextMetrics, UiEvent, Widget,
+    Color, Constraints, Dimension, Edges, EventCtx, EventResult, FlexItem, Json, Key, Modifiers,
+    Pos, Rect, RenderCtx, Role, Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 光标闪烁周期。
@@ -461,7 +461,6 @@ impl TextInput {
         self.widget_style = Some(style);
         self
     }
-
 }
 
 impl Widget for TextInput {
@@ -520,7 +519,10 @@ impl Widget for TextInput {
             Dimension::Px(v) => v,
             _ => self.layout_width + padding_h,
         };
-        constraints.constrain(Size::new(content_w.max(padding_h + 1.0), line_h + padding_v))
+        constraints.constrain(Size::new(
+            content_w.max(padding_h + 1.0),
+            line_h + padding_v,
+        ))
     }
 
     fn arrange(
@@ -616,8 +618,9 @@ impl Widget for TextInput {
                 }
                 self.preedit = text.clone();
                 // 让应用层把 IME 候选窗钉在光标处
-                let caret_x = self.rect.x + self.padding.left + self.x_of_byte(self.buffer.cursor())
-                    - self.scroll_x;
+                let caret_x =
+                    self.rect.x + self.padding.left + self.x_of_byte(self.buffer.cursor())
+                        - self.scroll_x;
                 let caret_y = self.rect.y + self.padding.top;
                 ctx.set_ime_candidate(Pos::new(caret_x, caret_y + 16.0));
                 EventResult::Redraw
@@ -807,10 +810,7 @@ impl Widget for TextInput {
         if self.focused && self.caret_visible {
             let cx = origin_x + self.x_of_byte(self.buffer.cursor());
             if cx >= inner.x - 1.0 && cx <= inner.right() {
-                ctx.fill_rect(
-                    Rect::new(cx, inner.y, CARET_W, inner.h),
-                    self.caret_color,
-                );
+                ctx.fill_rect(Rect::new(cx, inner.y, CARET_W, inner.h), self.caret_color);
             }
         }
 
@@ -830,7 +830,8 @@ impl Widget for TextInput {
         } else {
             self.buffer.text().to_string()
         };
-        let sem = Semantics::default().exposed(true)
+        let sem = Semantics::default()
+            .exposed(true)
             .label(label)
             .value(masked.clone())
             .action_spec("set_text", y901_ui::InputKind::Text)
@@ -1216,8 +1217,9 @@ mod tests {
 
     #[test]
     fn copy_paste_through_clipboard() {
-        let mut w =
-            TextInput::new("i").with_text("hello world").with_clipboard(Box::new(MemoryClipboard::default()));
+        let mut w = TextInput::new("i")
+            .with_text("hello world")
+            .with_clipboard(Box::new(MemoryClipboard::default()));
         mount_focused(&mut w);
         let mut c = ctx();
         w.event(
@@ -1300,8 +1302,16 @@ mod tests {
         let mut rec = Recorder::default();
         w.render(&mut rec);
 
-        assert!(rec.fills.iter().any(|r| *r == Rect::new(0.0, 0.0, 240.0, 24.0)), "应画背景");
-        assert!(rec.fills.iter().any(|r| r.x == 8.0 && r.w == 8.0), "应有 8px 宽的选区高亮");
+        assert!(
+            rec.fills
+                .iter()
+                .any(|r| *r == Rect::new(0.0, 0.0, 240.0, 24.0)),
+            "应画背景"
+        );
+        assert!(
+            rec.fills.iter().any(|r| r.x == 8.0 && r.w == 8.0),
+            "应有 8px 宽的选区高亮"
+        );
         assert!(rec.texts.iter().any(|(_, t)| t == "a"));
         assert!(rec.texts.iter().any(|(_, t)| t == "b"));
         // 光标线（1.5px 宽）
@@ -1378,7 +1388,8 @@ mod tests {
         assert!(!w.dragging);
     }
 
-    #[test]fn semantics_expose_editor_state() {
+    #[test]
+    fn semantics_expose_editor_state() {
         let mut w = TextInput::new("i").with_text("hi");
         mount_focused(&mut w);
         let mut c = ctx();

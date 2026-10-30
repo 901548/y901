@@ -110,13 +110,9 @@ impl WidgetStyle {
     pub fn paint_bg(&self, ctx: &mut dyn y901_ui::RenderCtx, rect: y901_ui::Rect) {
         if let Some(from) = self.bg {
             match self.bg_to {
-                Some(to) => ctx.fill_gradient_round_rect(
-                    rect,
-                    from,
-                    to,
-                    self.gradient_dir,
-                    self.radius,
-                ),
+                Some(to) => {
+                    ctx.fill_gradient_round_rect(rect, from, to, self.gradient_dir, self.radius)
+                }
                 None => ctx.fill_round_rect(rect, from, self.radius),
             }
         }
@@ -132,7 +128,12 @@ impl WidgetStyle {
     }
 
     /// 画焦点描边（如果有）。
-    pub fn paint_focus(&self, ctx: &mut dyn y901_ui::RenderCtx, rect: y901_ui::Rect, focused: bool) {
+    pub fn paint_focus(
+        &self,
+        ctx: &mut dyn y901_ui::RenderCtx,
+        rect: y901_ui::Rect,
+        focused: bool,
+    ) {
         if !focused {
             return;
         }

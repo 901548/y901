@@ -3,9 +3,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use y901_ui::{
-    Command, Flex, FlexItem, Key, Pos, Size, TextStyle, TextMetrics, UiEvent, UiTree,
-};
+use y901_ui::{Command, Flex, FlexItem, Key, Pos, Size, TextMetrics, TextStyle, UiEvent, UiTree};
 use y901_widgets::{Dialog, ListView, Menu};
 
 struct Mono;
@@ -34,9 +32,9 @@ fn listview_scrollbar_click_does_not_select_row() {
         .items(items)
         .on_row_selected(move |i| cb.set(i));
 
-    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(
-        list.flex_item(FlexItem::fill()),
-    ))));
+    let mut tree = UiTree::new(Box::new(
+        Flex::column("root").push(Box::new(list.flex_item(FlexItem::fill()))),
+    ));
     tree.layout(Size::new(300.0, 200.0), &Mono);
 
     // 滚动条在右侧 10px（BAR_WIDTH）
@@ -48,7 +46,12 @@ fn listview_scrollbar_click_does_not_select_row() {
             button: y901_ui::MouseButton::Left,
         },
     );
-    tree.dispatch_to("list", &UiEvent::MouseMove { pos: Pos::new(296.0, 150.0) });
+    tree.dispatch_to(
+        "list",
+        &UiEvent::MouseMove {
+            pos: Pos::new(296.0, 150.0),
+        },
+    );
     tree.dispatch_to(
         "list",
         &UiEvent::MouseUp {
@@ -137,7 +140,10 @@ fn menu_keyboard_navigation_moves_and_confirms() {
 #[test]
 fn dialog_buttons_emit_action_and_close() {
     let mut dialog = Dialog::new("dlg", "Confirm")
-        .push(Box::new(y901_widgets::TextLabel::new("body", "Are you sure?")))
+        .push(Box::new(y901_widgets::TextLabel::new(
+            "body",
+            "Are you sure?",
+        )))
         .buttons(vec![("Cancel", "cancel"), ("OK", "ok")]);
     dialog.open();
 
@@ -175,9 +181,8 @@ fn dialog_buttons_emit_action_and_close() {
 
 #[test]
 fn dialog_without_buttons_still_traps_clicks() {
-    let mut dialog = Dialog::new("dlg", "Info").push(Box::new(
-        y901_widgets::TextLabel::new("body", "hello"),
-    ));
+    let mut dialog =
+        Dialog::new("dlg", "Info").push(Box::new(y901_widgets::TextLabel::new("body", "hello")));
     dialog.open();
     let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(dialog))));
     tree.layout(Size::new(400.0, 300.0), &Mono);

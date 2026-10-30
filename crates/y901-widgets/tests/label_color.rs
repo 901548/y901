@@ -8,7 +8,7 @@ use std::rc::Rc;
 use y901_agent::api::{dispatch_request, ApiError, Policy};
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Flex, FlexItem, Json, Pos, Rect, RenderCtx,
-    Semantics, Size, TextStyle, TextMetrics, UiTree, Widget,
+    Semantics, Size, TextMetrics, TextStyle, UiTree, Widget,
 };
 use y901_widgets::{parse_color, TextLabel};
 
@@ -273,7 +273,10 @@ fn invoke_set_color_changes_label_color() {
     // 动作声明必须可见（Agent 能发现它）
     let node = tree.find("label").expect("label");
     assert!(
-        node.semantics().actions.iter().any(|a| a.name == "set_color"),
+        node.semantics()
+            .actions
+            .iter()
+            .any(|a| a.name == "set_color"),
         "semantics().actions 必须声明 set_color"
     );
 }

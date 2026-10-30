@@ -86,11 +86,7 @@ pub trait RenderBackend {
     /// 创建后端并绑定窗口。
     ///
     /// 失败：设备创建失败 / 窗口句柄无效（后端自行判定）。
-    fn create(
-        handle: PlatformWindowHandle,
-        width: u32,
-        height: u32,
-    ) -> Result<Self, String>
+    fn create(handle: PlatformWindowHandle, width: u32, height: u32) -> Result<Self, String>
     where
         Self: Sized;
 
@@ -169,11 +165,7 @@ impl RecordingBackend {
 }
 
 impl RenderBackend for RecordingBackend {
-    fn create(
-        _handle: PlatformWindowHandle,
-        width: u32,
-        height: u32,
-    ) -> Result<Self, String> {
+    fn create(_handle: PlatformWindowHandle, width: u32, height: u32) -> Result<Self, String> {
         let mut backend = Self::new();
         backend.calls.push(BackendCall::Create { width, height });
         Ok(backend)
@@ -236,7 +228,12 @@ mod tests {
         b.resize(1024, 768).unwrap();
         let frame = Frame {
             instances: vec![inst(0.0), inst(8.0)],
-            atlas_updates: vec![AtlasUpdate { x: 0, y: 0, w: 4, h: 4 }],
+            atlas_updates: vec![AtlasUpdate {
+                x: 0,
+                y: 0,
+                w: 4,
+                h: 4,
+            }],
             atlas_reset: false,
         };
         b.present(&frame).unwrap();
@@ -266,21 +263,26 @@ mod tests {
 
     #[test]
     fn recording_backend_can_simulate_device_loss() {
-        let mut b = RecordingBackend::create(PlatformWindowHandle::Win32(std::ptr::null_mut()), 1, 1)
-            .unwrap();
+        let mut b =
+            RecordingBackend::create(PlatformWindowHandle::Win32(std::ptr::null_mut()), 1, 1)
+                .unwrap();
         b.fail_present = true;
         let err = b.present(&Frame::default()).unwrap_err();
         assert!(err.contains("device lost"), "错误应表明设备丢失：{err}");
         // 失败也要重建成功（模拟恢复）
         b.fail_present = false;
         b.rebuild(1, 1).unwrap();
-        assert!(b.calls.contains(&BackendCall::Rebuild { width: 1, height: 1 }));
+        assert!(b.calls.contains(&BackendCall::Rebuild {
+            width: 1,
+            height: 1
+        }));
     }
 
     #[test]
     fn empty_frame_still_reports_present() {
-        let mut b = RecordingBackend::create(PlatformWindowHandle::Wayland(std::ptr::null_mut()), 10, 10)
-            .unwrap();
+        let mut b =
+            RecordingBackend::create(PlatformWindowHandle::Wayland(std::ptr::null_mut()), 10, 10)
+                .unwrap();
         b.present(&Frame::default()).unwrap();
         assert_eq!(b.presents().count(), 1, "空帧也必须提交（否则窗口不刷新）");
         assert_eq!(b.instance_count(), 0);

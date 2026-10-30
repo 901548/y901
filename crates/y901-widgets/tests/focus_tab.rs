@@ -75,8 +75,10 @@ fn focused_button_redraws_and_uses_focused_style() {
 
     // 按钮拿到 Focus 事件后内部状态变为 focused → 渲染时用 State::Focused
     let _ = tree.dispatch(&UiEvent::Focus(true));
-    let style_focused = y901_ui::theme::DARK_THEME.style(y901_ui::Role::BUTTON, y901_ui::State::Focused);
-    let style_normal = y901_ui::theme::DARK_THEME.style(y901_ui::Role::BUTTON, y901_ui::State::Normal);
+    let style_focused =
+        y901_ui::theme::DARK_THEME.style(y901_ui::Role::BUTTON, y901_ui::State::Focused);
+    let style_normal =
+        y901_ui::theme::DARK_THEME.style(y901_ui::Role::BUTTON, y901_ui::State::Normal);
     assert_ne!(
         style_focused.bg, style_normal.bg,
         "主题必须给 Focused 一个可见的区别（否则键盘用户看不出焦点在哪）"

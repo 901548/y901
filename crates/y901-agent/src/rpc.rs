@@ -8,8 +8,8 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::mpsc::{Receiver, Sender};
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -31,7 +31,10 @@ pub enum RpcRequest {
     /// 返回整棵语义树 + 每个节点的矩形。
     GetTree,
     /// 向目标节点投递一条事件（事件类型由协议描述，框架不理解语义）。
-    Dispatch { node: String, event: RpcEvent },
+    Dispatch {
+        node: String,
+        event: RpcEvent,
+    },
     /// 向目标节点投递一个动作（等价于一条 `UiEvent::Action`）。
     Invoke {
         node: String,
@@ -39,16 +42,27 @@ pub enum RpcRequest {
         args: Json,
     },
     /// 按查询语言筛选节点（与 MCP 的 ui_query 完全一致）。
-    Query { q: String },
+    Query {
+        q: String,
+    },
     /// 切换焦点。
-    Focus { node: String },
+    Focus {
+        node: String,
+    },
     /// 订阅某个节点的状态变化（服务端主动推送 `state_changed`）。
-    Subscribe { node: String, interval_ms: u64 },
+    Subscribe {
+        node: String,
+        interval_ms: u64,
+    },
     /// 取消订阅。
-    Unsubscribe { node: String },
+    Unsubscribe {
+        node: String,
+    },
     /// 健康检查。
     Ping,
-    Unknown { method: String },
+    Unknown {
+        method: String,
+    },
 }
 
 /// RPC 可以构造的事件。刻意保持极简：只覆盖"外部真的会发"的那几种。
@@ -57,10 +71,21 @@ pub enum RpcEvent {
     Text(String),
     Key(y901_ui::Key),
     Compose(String),
-    MouseDown { pos: y901_ui::Pos, button: y901_ui::MouseButton },
-    MouseUp { pos: y901_ui::Pos, button: y901_ui::MouseButton },
-    MouseMove { pos: y901_ui::Pos },
-    Wheel { pos: y901_ui::Pos, delta: f32 },
+    MouseDown {
+        pos: y901_ui::Pos,
+        button: y901_ui::MouseButton,
+    },
+    MouseUp {
+        pos: y901_ui::Pos,
+        button: y901_ui::MouseButton,
+    },
+    MouseMove {
+        pos: y901_ui::Pos,
+    },
+    Wheel {
+        pos: y901_ui::Pos,
+        delta: f32,
+    },
 }
 
 /// `Key` -> 线上字符串（与 `from_json` 的解析表一一对应）。
@@ -104,9 +129,7 @@ impl RpcEvent {
             RpcEvent::Key(k) => match k {
                 // 字符键用码点表示：`{"type":"char","code":20013}`。
                 // 与 `Text`（输入一串文本、走 IME）语义不同，故独立 type。
-                y901_ui::Key::Char(ch) => {
-                    Json::obj().set("type", "char").set("code", *ch as u32)
-                }
+                y901_ui::Key::Char(ch) => Json::obj().set("type", "char").set("code", *ch as u32),
                 other => Json::obj()
                     .set("type", "key")
                     // P0-4：必须与 from_json 的解析表一致（小写），
@@ -156,7 +179,7 @@ impl RpcEvent {
             },
             RpcEvent::MouseMove { pos } => UiEvent::MouseMove { pos: *pos },
             RpcEvent::Wheel { pos, delta } => UiEvent::Wheel {
-            mods: y901_ui::Modifiers::default(),
+                mods: y901_ui::Modifiers::default(),
                 delta: *delta,
                 pos: *pos,
             },
@@ -187,8 +210,14 @@ impl RpcEvent {
             )),
             "mouse_down" | "mouse_up" | "mouse_move" => {
                 let pos = y901_ui::Pos::new(
-                    value.get("x").and_then(|v| v.as_f64()).ok_or("mouse event requires x")? as f32,
-                    value.get("y").and_then(|v| v.as_f64()).ok_or("mouse event requires y")? as f32,
+                    value
+                        .get("x")
+                        .and_then(|v| v.as_f64())
+                        .ok_or("mouse event requires x")? as f32,
+                    value
+                        .get("y")
+                        .and_then(|v| v.as_f64())
+                        .ok_or("mouse event requires y")? as f32,
                 );
                 let button = match value.get("button").and_then(|v| v.as_str()) {
                     Some("right") => y901_ui::MouseButton::Right,
@@ -221,7 +250,9 @@ impl RpcEvent {
                 };
                 // 严格校验：有限、非负、整数、落在 u32 范围
                 if !v.is_finite() || v < 0.0 || v.fract() != 0.0 || v > u32::MAX as f64 {
-                    return Err(format!("code {v} 不是合法字符（代理区 0xD800-0xDFFF 或 > 0x10FFFF）"));
+                    return Err(format!(
+                        "code {v} 不是合法字符（代理区 0xD800-0xDFFF 或 > 0x10FFFF）"
+                    ));
                 }
                 let ch = char::from_u32(v as u32).ok_or_else(|| {
                     format!("code {v} 不是合法字符（代理区 0xD800-0xDFFF 或 > 0x10FFFF）")
@@ -323,23 +354,25 @@ impl Broadcaster {
             Ok(s) => s,
             Err(_) => return false,
         };
-        senders.retain(|(tx, dead)| match tx.try_send(WriteJob::Push(line.to_string())) {
-            Ok(()) => true,
-            Err(TrySendError::Full(_)) => {
-                // 推送可丢：**不**因此踢连接（丢推送是正常背压行为）
-                self.dropped
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                all = false;
-                true
-            }
-            Err(TrySendError::Disconnected(_)) => {
-                dead.store(true, std::sync::atomic::Ordering::Relaxed);
-                self.dropped
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                all = false;
-                false // 写线程已退出，注销该连接
-            }
-        });
+        senders.retain(
+            |(tx, dead)| match tx.try_send(WriteJob::Push(line.to_string())) {
+                Ok(()) => true,
+                Err(TrySendError::Full(_)) => {
+                    // 推送可丢：**不**因此踢连接（丢推送是正常背压行为）
+                    self.dropped
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    all = false;
+                    true
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    dead.store(true, std::sync::atomic::Ordering::Relaxed);
+                    self.dropped
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    all = false;
+                    false // 写线程已退出，注销该连接
+                }
+            },
+        );
         all
     }
 
@@ -400,7 +433,11 @@ pub fn configure_stream(stream: &TcpStream) -> std::io::Result<()> {
 /// 1. `recv` 返回 Err（所有 Sender 被 drop）；
 /// 2. 写失败（超时 / EPIPE）；
 /// 3. 读完一条后发现 `dead` 为真 → `shutdown` 并退出。
-fn writer_loop(mut stream: TcpStream, rx: std::sync::mpsc::Receiver<WriteJob>, dead: Arc<AtomicBool>) {
+fn writer_loop(
+    mut stream: TcpStream,
+    rx: std::sync::mpsc::Receiver<WriteJob>,
+    dead: Arc<AtomicBool>,
+) {
     loop {
         if dead.load(std::sync::atomic::Ordering::Relaxed) {
             let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -609,11 +646,7 @@ fn handle(
                 None => return sync_err(id, "invoke requires action"),
             };
             let args = params.get("args").cloned().unwrap_or_else(Json::obj);
-            RpcRequest::Invoke {
-                node,
-                action,
-                args,
-            }
+            RpcRequest::Invoke { node, action, args }
         }
         "query" => {
             let q = match params.get("q").and_then(|v| v.as_str()) {
@@ -691,7 +724,10 @@ pub fn reply_to(pending: Pending, result: Result<Json, String>) -> Result<(), St
             .set("result", result),
         Err(err) => error_response(pending.id.clone(), &err),
     };
-    match pending.writer_tx.try_send(WriteJob::Reply(body.to_string())) {
+    match pending
+        .writer_tx
+        .try_send(WriteJob::Reply(body.to_string()))
+    {
         Ok(()) => Ok(()),
         Err(_) => {
             // 第一次失败就判死：队列深度 1024，能填满说明写线程卡住或客户端不读，
@@ -715,7 +751,9 @@ mod connection_setup_tests {
     #[test]
     fn setup_connection_propagates_write_timeout_failure() {
         let src = include_str!("rpc.rs");
-        let start = src.find("fn setup_connection").expect("setup_connection 存在");
+        let start = src
+            .find("fn setup_connection")
+            .expect("setup_connection 存在");
         let rest = &src[start..];
         let end = rest[1..].find("\n}").map(|i| i + 1).unwrap_or(rest.len());
         let body = &rest[..end];
@@ -733,7 +771,9 @@ mod connection_setup_tests {
     #[test]
     fn setup_connection_propagates_spawn_failure() {
         let src = include_str!("rpc.rs");
-        let start = src.find("fn setup_connection").expect("setup_connection 存在");
+        let start = src
+            .find("fn setup_connection")
+            .expect("setup_connection 存在");
         let rest = &src[start..];
         let end = rest[1..].find("\n}").map(|i| i + 1).unwrap_or(rest.len());
         let body = &rest[..end];

@@ -1,9 +1,7 @@
 //! 统一 dispatcher：RPC 与 MCP 必须返回一致结果；role 由框架注入。
 
 use y901_agent::{dispatch_request, McpServer, Policy};
-use y901_ui::{
-    Flex, FlexItem, Json, Size, TextStyle, TextMetrics, UiTree,
-};
+use y901_ui::{Flex, FlexItem, Json, Size, TextMetrics, TextStyle, UiTree};
 use y901_widgets::Button;
 
 struct Mono;
@@ -21,7 +19,11 @@ impl TextMetrics for Mono {
 
 fn tree() -> UiTree {
     let mut root = Flex::column("root");
-    for (id, label) in [("action.save", "Save"), ("action.cancel", "Cancel"), ("action.quit", "Quit")] {
+    for (id, label) in [
+        ("action.save", "Save"),
+        ("action.cancel", "Cancel"),
+        ("action.quit", "Quit"),
+    ] {
         root = root.push(Box::new(
             Button::new(id, label).flex_item(FlexItem::height(24.0)),
         ));
@@ -38,13 +40,8 @@ fn rpc_and_mcp_query_return_the_same_payload() {
     let q = r#"role=button & label~="a" & limit=2"#;
 
     // 统一入口（RPC 走这条）
-    let via_rpc = dispatch_request(
-        &mut tree,
-        &policy,
-        "query",
-        &Json::obj().set("q", q),
-    )
-    .expect("rpc query");
+    let via_rpc =
+        dispatch_request(&mut tree, &policy, "query", &Json::obj().set("q", q)).expect("rpc query");
 
     // MCP 走 tools/call ui_query
     let mut server = McpServer::new(Policy::default());
@@ -59,7 +56,10 @@ fn rpc_and_mcp_query_return_the_same_payload() {
         Some(Json::Arr(a)) => a.clone(),
         _ => panic!("content"),
     };
-    let text = content[0].get("text").and_then(|v| v.as_str()).unwrap_or("");
+    let text = content[0]
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let via_mcp = Json::parse(text).expect("inner json");
 
     assert_eq!(

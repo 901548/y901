@@ -7,7 +7,7 @@
 //! 本测试不依赖 GPU：检查滚动后脏区是否覆盖 ListView 的视口矩形。
 
 use y901_ui::{
-    Flex, FlexItem, Modifiers, Pos, Rect, RenderCtx, Size, TextStyle, TextMetrics, UiEvent, UiTree,
+    Flex, FlexItem, Modifiers, Pos, Rect, RenderCtx, Size, TextMetrics, TextStyle, UiEvent, UiTree,
 };
 use y901_widgets::ListView;
 
@@ -63,7 +63,6 @@ fn build() -> UiTree {
     tree.layout(Size::new(400.0, 300.0), &Mono);
     tree
 }
-
 
 /// 脏区是否覆盖整个视口（整窗脏也算覆盖）。
 fn covers_viewport(tree: &UiTree, viewport: Rect) -> bool {

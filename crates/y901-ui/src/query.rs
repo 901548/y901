@@ -151,7 +151,10 @@ mod tests {
     use super::*;
 
     fn sem(role: &str, label: &str, disabled: bool) -> Semantics {
-        let mut s = Semantics::default().label(label).exposed(true).disabled(disabled);
+        let mut s = Semantics::default()
+            .label(label)
+            .exposed(true)
+            .disabled(disabled);
         s.role = crate::widget::Role(Box::leak(role.to_string().into_boxed_str()));
         s
     }

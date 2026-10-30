@@ -1,8 +1,8 @@
 //! TextInput 的密码模式 / 占位提示 + Dialog::set_size。
 
 use y901_ui::{
-    Color, Constraints, EventCtx, Json, Pos, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    Color, Constraints, EventCtx, Json, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    TextStyle, UiEvent, UiTree, Widget,
 };
 use y901_widgets::{Dialog, TextInput};
 
@@ -54,7 +54,11 @@ impl RenderCtx for Rec {
 
 fn arranged(ti: &mut TextInput) {
     let mut cache = y901_ui::layout::LayoutCache::new();
-    ti.measure(&Mono, Constraints::loose(Size::new(240.0, 24.0)), &mut cache);
+    ti.measure(
+        &Mono,
+        Constraints::loose(Size::new(240.0, 24.0)),
+        &mut cache,
+    );
     ti.arrange(Rect::new(0.0, 0.0, 240.0, 24.0), &Mono, &mut cache);
 }
 
@@ -81,7 +85,9 @@ fn password_masks_rendered_text() {
     let texts = render_texts(&mut ti);
     let joined = texts.join("");
     assert!(
-        !texts.iter().any(|t| t.contains("secret") || t.contains('s') && t.len() > 1),
+        !texts
+            .iter()
+            .any(|t| t.contains("secret") || t.contains('s') && t.len() > 1),
         "渲染不得出现原文：{texts:?}"
     );
     assert_eq!(joined, "******", "6 个字符应画 6 个 *，实际 {texts:?}");
@@ -94,7 +100,10 @@ fn password_masks_spaces_too() {
     arranged(&mut ti);
 
     let joined = render_texts(&mut ti).join("");
-    assert_eq!(joined, "***", "空格也必须画 *（否则长度不可见）：{joined:?}");
+    assert_eq!(
+        joined, "***",
+        "空格也必须画 *（否则长度不可见）：{joined:?}"
+    );
 }
 
 #[test]
@@ -150,10 +159,7 @@ fn password_masks_ime_preedit() {
     // 直接喂 IME 预编辑（不走 PTY）：Compose 事件（需要焦点才会进入 preedit）
     focus(&mut ti);
     let mut ctx = EventCtx::new(None, Size::new(240.0, 24.0));
-    let _ = ti.event(
-        &mut ctx,
-        &UiEvent::Compose("中文".to_string()),
-    );
+    let _ = ti.event(&mut ctx, &UiEvent::Compose("中文".to_string()));
 
     let texts = render_texts(&mut ti);
     assert!(
@@ -173,7 +179,10 @@ fn non_password_semantics_unchanged() {
     let sem = ti.semantics();
     assert_eq!(sem.label, "hello");
     assert_eq!(sem.value, "hello");
-    assert_eq!(sem.state.get("text").and_then(|v| v.as_str()), Some("hello"));
+    assert_eq!(
+        sem.state.get("text").and_then(|v| v.as_str()),
+        Some("hello")
+    );
     assert!(!sem.sensitive);
 }
 
@@ -210,10 +219,7 @@ fn placeholder_not_rendered_during_ime_composition() {
     arranged(&mut ti);
     focus(&mut ti);
     let mut ctx = EventCtx::new(None, Size::new(240.0, 24.0));
-    let _ = ti.event(
-        &mut ctx,
-        &UiEvent::Compose("中".to_string()),
-    );
+    let _ = ti.event(&mut ctx, &UiEvent::Compose("中".to_string()));
 
     let texts = render_texts(&mut ti);
     assert!(

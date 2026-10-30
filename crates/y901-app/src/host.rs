@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use y901_agent::{McpServer, Pending, Policy, RpcRequest};
 use y901_runtime::Host;
-use y901_ui::{Command, Json, Size, TextStyle, TextMetrics, UiEvent, UiTree};
+use y901_ui::{Command, Json, Size, TextMetrics, TextStyle, UiEvent, UiTree};
 
 /// MCP / RPC 的宿主。
 pub struct Shell {
@@ -136,4 +136,3 @@ impl TextMetrics for HeadlessMetrics {
         1.0
     }
 }
-

@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use y901_ui::{
-    Constraints, EventCtx, EventResult, Rect, RenderCtx, Semantics, Size, TextStyle, TextMetrics,
+    Constraints, EventCtx, EventResult, Rect, RenderCtx, Semantics, Size, TextMetrics, TextStyle,
     UiTree, Widget,
 };
 
@@ -149,7 +149,8 @@ fn background_invalidate_all_marks_full_dirty() {
         handle.invalidate_all();
         tx.send(()).expect("发送完成信号");
     });
-    rx.recv_timeout(Duration::from_secs(2)).expect("后台线程完成");
+    rx.recv_timeout(Duration::from_secs(2))
+        .expect("后台线程完成");
 
     let n = tree.drain_external_invalidations();
     assert_eq!(n, 1);

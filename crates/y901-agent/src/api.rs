@@ -253,13 +253,13 @@ pub fn handle_call(tree: &mut UiTree, policy: &Policy, call: ApiCall) -> Result<
             let pos = Pos::new(rect.x + rect.w * 0.5, rect.y + rect.h * 0.5);
             let handled = tree
                 .dispatch_to(
-            &id,
-            &UiEvent::Wheel {
-                pos,
-                delta,
-                mods: y901_ui::Modifiers::default(),
-            },
-        )
+                    &id,
+                    &UiEvent::Wheel {
+                        pos,
+                        delta,
+                        mods: y901_ui::Modifiers::default(),
+                    },
+                )
                 .is_handled();
             Ok(Json::obj()
                 .set("ok", true)
@@ -304,7 +304,13 @@ pub fn handle_call(tree: &mut UiTree, policy: &Policy, call: ApiCall) -> Result<
                 }
             }
             let handled = tree
-                .dispatch_to(&id, &UiEvent::Action { name: action.clone(), args })
+                .dispatch_to(
+                    &id,
+                    &UiEvent::Action {
+                        name: action.clone(),
+                        args,
+                    },
+                )
                 .is_handled();
             // 声明了却没处理 = 契约违约，不能返回成功让 Agent 以为生效了
             if !handled {
@@ -325,15 +331,11 @@ pub fn handle_call(tree: &mut UiTree, policy: &Policy, call: ApiCall) -> Result<
 /// 取节点可见区与 revision，并做能力作用域检查。
 fn locate(tree: &UiTree, id: &str) -> Result<(Rect, u64), ApiError> {
     let Some(node) = tree.find(id) else {
-        return Err(ApiError::NotFound {
-            id: id.to_string(),
-        });
+        return Err(ApiError::NotFound { id: id.to_string() });
     };
     let sem = node.semantics();
     if !sem.exposed_to_ai {
-        return Err(ApiError::Forbidden {
-            id: id.to_string(),
-        });
+        return Err(ApiError::Forbidden { id: id.to_string() });
     }
     let rect = tree.rect_of(id).unwrap_or_else(|| node.rect());
     if rect.is_empty() {
@@ -400,15 +402,25 @@ fn public_tree(tree: &UiTree, policy: &Policy) -> Json {
                 .set("revision", revs.get(node.id()).copied().unwrap_or(0))
                 // 顶层 focused：框架拥有（来自 focus_path），组件不得设置
                 .set("focused", tree.focus() == Some(node.id()))
-                .set("sensitive", merged.get("sensitive").cloned().unwrap_or(Json::Bool(false)))
+                .set(
+                    "sensitive",
+                    merged
+                        .get("sensitive")
+                        .cloned()
+                        .unwrap_or(Json::Bool(false)),
+                )
                 // disabled 是 Agent 的可见语义（"现在点不了"），必须输出；
                 // 后续 revision 的哈希范围与这里保持一一对应。
-                .set("disabled", merged.get("disabled").cloned().unwrap_or(Json::Bool(false)))
+                .set(
+                    "disabled",
+                    merged.get("disabled").cloned().unwrap_or(Json::Bool(false)),
+                )
                 .set("label", merged.get("label").cloned().unwrap_or(Json::Null))
                 .set("value", merged.get("value").cloned().unwrap_or(Json::Null))
-                .set("actions", Json::Arr(
-                    sem.actions.iter().map(|a| a.to_json()).collect()
-                ))
+                .set(
+                    "actions",
+                    Json::Arr(sem.actions.iter().map(|a| a.to_json()).collect()),
+                )
                 .set("state", merged.get("state").cloned().unwrap_or(Json::Null))
                 .set("children", Json::Arr(children)),
         )
@@ -475,10 +487,19 @@ fn query_result(tree: &UiTree, policy: &Policy, q: &y901_ui::Query) -> Json {
             Json::obj()
                 .set("id", id)
                 .set("role", node.role().as_str())
-                .set("label", redacted.get("label").cloned().unwrap_or(Json::Null))
+                .set(
+                    "label",
+                    redacted.get("label").cloned().unwrap_or(Json::Null),
+                )
                 .set("revision", revs.get(node.id()).copied().unwrap_or(0))
                 // 与 public_tree 对齐：disabled / focused 都属于 Agent 可操作性的输入
-                .set("disabled", redacted.get("disabled").cloned().unwrap_or(Json::Bool(false)))
+                .set(
+                    "disabled",
+                    redacted
+                        .get("disabled")
+                        .cloned()
+                        .unwrap_or(Json::Bool(false)),
+                )
                 .set("focused", tree.focus() == Some(node.id()))
                 .set(
                     "rect",
@@ -607,7 +628,10 @@ fn arg_u64(params: &Json, key: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use y901_ui::{Constraints, EventCtx, EventResult, FlexItem, RenderCtx, Semantics, Size, TextStyle, TextMetrics, Widget};
+    use y901_ui::{
+        Constraints, EventCtx, EventResult, FlexItem, RenderCtx, Semantics, Size, TextMetrics,
+        TextStyle, Widget,
+    };
 
     struct Mono;
     impl TextMetrics for Mono {
@@ -646,13 +670,23 @@ mod tests {
         fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
             Some(&mut self.children)
         }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) -> Size {
             for k in self.children.iter_mut() {
                 let _ = k;
             }
             c.constrain(Size::new(100.0, 40.0))
         }
-        fn arrange(&mut self, r: Rect, m: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
+        fn arrange(
+            &mut self,
+            r: Rect,
+            m: &dyn TextMetrics,
+            cache: &mut y901_ui::layout::LayoutCache,
+        ) {
             self.rect = r;
             for k in self.children.iter_mut() {
                 k.arrange(r, m, cache);
@@ -688,7 +722,11 @@ mod tests {
         }
     }
 
-    fn tree_with(exposed: bool, sensitive: bool, rev: u64) -> (UiTree, std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>) {
+    fn tree_with(
+        exposed: bool,
+        sensitive: bool,
+        rev: u64,
+    ) -> (UiTree, std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>) {
         let got = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let probe = Probe {
             id: "btn".into(),
@@ -709,10 +747,20 @@ mod tests {
     fn click_dispatches_mouse_down_and_up() {
         let (mut tree, got) = tree_with(true, false, 7);
         let policy = Policy::default();
-        let r = handle_call(&mut tree, &policy, ApiCall::Click { id: "btn".into(), if_rev: None });
+        let r = handle_call(
+            &mut tree,
+            &policy,
+            ApiCall::Click {
+                id: "btn".into(),
+                if_rev: None,
+            },
+        );
         assert!(r.is_ok());
         let events = got.borrow().clone();
-        assert!(events.contains(&"mouse_down"), "应伪造 MouseDown: {events:?}");
+        assert!(
+            events.contains(&"mouse_down"),
+            "应伪造 MouseDown: {events:?}"
+        );
         assert!(events.contains(&"mouse_up"), "应伪造 MouseUp: {events:?}");
     }
 
@@ -720,8 +768,26 @@ mod tests {
     fn type_and_scroll_are_translated() {
         let (mut tree, got) = tree_with(true, false, 7);
         let policy = Policy::default();
-        handle_call(&mut tree, &policy, ApiCall::Type { id: "btn".into(), text: "hi".into(), if_rev: None }).unwrap();
-        handle_call(&mut tree, &policy, ApiCall::Scroll { id: "btn".into(), delta: -120.0, if_rev: None }).unwrap();
+        handle_call(
+            &mut tree,
+            &policy,
+            ApiCall::Type {
+                id: "btn".into(),
+                text: "hi".into(),
+                if_rev: None,
+            },
+        )
+        .unwrap();
+        handle_call(
+            &mut tree,
+            &policy,
+            ApiCall::Scroll {
+                id: "btn".into(),
+                delta: -120.0,
+                if_rev: None,
+            },
+        )
+        .unwrap();
         let events = got.borrow().clone();
         assert!(events.contains(&"text"));
         assert!(events.contains(&"wheel"));
@@ -730,8 +796,15 @@ mod tests {
     #[test]
     fn unexposed_node_is_forbidden() {
         let (mut tree, got) = tree_with(false, false, 1);
-        let err = handle_call(&mut tree, &Policy::default(), ApiCall::Click { id: "btn".into(), if_rev: None })
-            .unwrap_err();
+        let err = handle_call(
+            &mut tree,
+            &Policy::default(),
+            ApiCall::Click {
+                id: "btn".into(),
+                if_rev: None,
+            },
+        )
+        .unwrap_err();
         assert_eq!(err, ApiError::Forbidden { id: "btn".into() });
         assert_eq!(err.status(), 403);
         assert!(got.borrow().is_empty(), "被拒绝时不得派发任何事件");
@@ -743,10 +816,19 @@ mod tests {
         let err = handle_call(
             &mut tree,
             &Policy::default(),
-            ApiCall::Click { id: "btn".into(), if_rev: Some(3) },
+            ApiCall::Click {
+                id: "btn".into(),
+                if_rev: Some(3),
+            },
         )
         .unwrap_err();
-        assert_eq!(err, ApiError::Conflict { expected: 3, actual: 9 });
+        assert_eq!(
+            err,
+            ApiError::Conflict {
+                expected: 3,
+                actual: 9
+            }
+        );
         assert_eq!(err.status(), 409);
         assert!(got.borrow().is_empty());
 
@@ -754,7 +836,10 @@ mod tests {
         assert!(handle_call(
             &mut tree,
             &Policy::default(),
-            ApiCall::Click { id: "btn".into(), if_rev: Some(9) }
+            ApiCall::Click {
+                id: "btn".into(),
+                if_rev: Some(9)
+            }
         )
         .is_ok());
     }
@@ -779,7 +864,13 @@ mod tests {
     #[test]
     fn sensitive_value_is_redacted_in_tree() {
         let (tree, _) = tree_with(true, true, 1);
-        let view = public_tree(&tree, &Policy { token: String::new(), redact: true });
+        let view = public_tree(
+            &tree,
+            &Policy {
+                token: String::new(),
+                redact: true,
+            },
+        );
         let text = view.to_string();
         assert!(text.contains("***"), "敏感值必须打码：{text}");
         assert!(!text.contains("secret-value"), "原始值不得泄漏");
@@ -789,7 +880,10 @@ mod tests {
     fn token_is_checked() {
         let policy = Policy::with_token("s3cret");
         assert_eq!(policy.authorize(None), Err(ApiError::Unauthorized));
-        assert_eq!(policy.authorize(Some("Bearer nope")), Err(ApiError::Unauthorized));
+        assert_eq!(
+            policy.authorize(Some("Bearer nope")),
+            Err(ApiError::Unauthorized)
+        );
         assert!(policy.authorize(Some("Bearer s3cret")).is_ok());
         // 未配置 token 时不校验
         assert!(Policy::default().authorize(None).is_ok());

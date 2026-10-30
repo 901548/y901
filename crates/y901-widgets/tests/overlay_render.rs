@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Flex, Pos, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiTree, Widget,
+    TextMetrics, TextStyle, UiTree, Widget,
 };
 use y901_widgets::Dialog;
 
@@ -224,9 +224,5 @@ fn closing_dialog_stops_painting_and_leaves_index() {
     assert!(tree.rect_of("dlg").is_none(), "关闭后必须退出索引");
 
     tree.render(&mut ctx);
-    assert_eq!(
-        paints.get(),
-        painted_while_open,
-        "关闭后不应再绘制子节点"
-    );
+    assert_eq!(paints.get(), painted_while_open, "关闭后不应再绘制子节点");
 }

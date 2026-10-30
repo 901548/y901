@@ -5,8 +5,8 @@ use std::sync::mpsc::channel;
 use std::time::Duration;
 
 use y901_ui::{
-    Constraints, EventCtx, EventResult, Flex, FlexItem, Pos, Rect, RenderCtx, Size, TextStyle,
-    TextMetrics, UiEvent, UiTree, Widget,
+    Constraints, EventCtx, EventResult, Flex, FlexItem, Pos, Rect, RenderCtx, Size, TextMetrics,
+    TextStyle, UiEvent, UiTree, Widget,
 };
 
 struct Mono;
@@ -29,8 +29,8 @@ impl TextMetrics for Mono {
 fn rpc_rejects_requests_without_token() {
     // 显式传 token，不依赖进程级 env（否则与另一个测试并行时互相干扰）
     let (tx, _rx) = channel();
-    let (addr, _hub) = y901_agent::rpc::spawn_with_token("127.0.0.1:0", tx, "t0ken".into())
-        .expect("bind");
+    let (addr, _hub) =
+        y901_agent::rpc::spawn_with_token("127.0.0.1:0", tx, "t0ken".into()).expect("bind");
 
     let stream = std::net::TcpStream::connect(addr).expect("connect");
     stream
@@ -56,14 +56,18 @@ fn rpc_rejects_requests_without_token() {
 #[test]
 fn rpc_accepts_requests_with_token() {
     let (tx, rx) = channel();
-    let (addr, _hub) = y901_agent::rpc::spawn_with_token("127.0.0.1:0", tx, "t0ken2".into())
-        .expect("bind");
+    let (addr, _hub) =
+        y901_agent::rpc::spawn_with_token("127.0.0.1:0", tx, "t0ken2".into()).expect("bind");
 
     let stream = std::net::TcpStream::connect(addr).expect("connect");
     let mut writer = stream.try_clone().unwrap();
     let mut reader = BufReader::new(stream);
 
-    writeln!(writer, r#"{{"id":1,"method":"ping","params":{{"token":"t0ken2"}}}}"#).unwrap();
+    writeln!(
+        writer,
+        r#"{{"id":1,"method":"ping","params":{{"token":"t0ken2"}}}}"#
+    )
+    .unwrap();
     writer.flush().unwrap();
 
     // UI 侧处理
@@ -89,7 +93,12 @@ impl Widget for Tracked {
     fn id(&self) -> &str {
         &self.id
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(Size::new(c.max.w, 40.0))
     }
     fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
@@ -137,8 +146,7 @@ fn scrollview_child_outside_viewport_is_not_clickable_until_scrolled() {
         clicks: clicks.clone(),
     }));
 
-    let sv = y901_widgets::ScrollView::new("sv", Box::new(column))
-        .flex_item(FlexItem::fill());
+    let sv = y901_widgets::ScrollView::new("sv", Box::new(column)).flex_item(FlexItem::fill());
     let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(sv))));
     // 视口 200 高，内容 200（4×40 + 40）
     tree.layout(Size::new(300.0, 200.0), &Mono);

@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use y901_ui::{
-    Constraints, Flex, FlexItem, Pos, Rect, Signal, Size, TextStyle, TextMetrics, UiEvent, UiTree,
+    Constraints, Flex, FlexItem, Pos, Rect, Signal, Size, TextMetrics, TextStyle, UiEvent, UiTree,
     Widget,
 };
 use y901_widgets::{ListView, Scrollbar, TextLabel};
@@ -73,7 +73,12 @@ impl Widget for Fixed {
     fn id(&self) -> &str {
         &self.id
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(Size::new(c.max.w.min(100.0), 20.0))
     }
     fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
@@ -109,7 +114,10 @@ fn insert_node_places_child_at_index() {
     let a = tree.rect_of("a").unwrap();
     let b = tree.rect_of("b").unwrap();
     let c = tree.rect_of("c").unwrap();
-    assert!(a.y < b.y && b.y < c.y, "顺序应为 a < b < c，实际 {a:?} {b:?} {c:?}");
+    assert!(
+        a.y < b.y && b.y < c.y,
+        "顺序应为 a < b < c，实际 {a:?} {b:?} {c:?}"
+    );
 }
 
 #[test]
@@ -139,7 +147,11 @@ fn standalone_scrollbar_reports_new_offset() {
 
     // 手动赋几何（独立使用时不进布局也可以）
     let mut cache = y901_ui::layout::LayoutCache::new();
-    bar.measure(&Mono, Constraints::loose(Size::new(10.0, 100.0)), &mut cache);
+    bar.measure(
+        &Mono,
+        Constraints::loose(Size::new(10.0, 100.0)),
+        &mut cache,
+    );
     bar.arrange(Rect::new(0.0, 0.0, 10.0, 100.0), &Mono, &mut cache);
 
     let mut ctx = y901_ui::EventCtx::new(None, Size::new(400.0, 300.0));
@@ -152,7 +164,12 @@ fn standalone_scrollbar_reports_new_offset() {
             button: y901_ui::MouseButton::Left,
         },
     );
-    bar.event(&mut ctx, &UiEvent::MouseMove { pos: Pos::new(5.0, 80.0) });
+    bar.event(
+        &mut ctx,
+        &UiEvent::MouseMove {
+            pos: Pos::new(5.0, 80.0),
+        },
+    );
 
     let got = seen.get();
     assert!(got > 0.0, "回调应收到新 offset，实际 {got}");
@@ -172,9 +189,9 @@ fn click_selects_row_and_fires_callback() {
         .items(items)
         .on_row_selected(move |i| cb.set(i));
 
-    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(
-        list.flex_item(FlexItem::fill()),
-    ))));
+    let mut tree = UiTree::new(Box::new(
+        Flex::column("root").push(Box::new(list.flex_item(FlexItem::fill()))),
+    ));
     tree.layout(Size::new(300.0, 200.0), &Mono);
 
     // 第 5 行：y = 5*20 + 10
@@ -189,5 +206,8 @@ fn click_selects_row_and_fires_callback() {
 
     assert_eq!(picked.get(), 5, "回调应收到第 5 行");
     let snap = tree.snapshot_json().to_string();
-    assert!(snap.contains("\"selected\":5"), "语义树应暴露选中行：{snap}");
+    assert!(
+        snap.contains("\"selected\":5"),
+        "语义树应暴露选中行：{snap}"
+    );
 }

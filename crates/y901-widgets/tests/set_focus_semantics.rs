@@ -5,8 +5,8 @@
 //! `rebuild_focus_order` 的 `is_open` 跳过保持一致。
 
 use y901_ui::{
-    Constraints, EventCtx, EventResult, Flex, FlexItem, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiTree, Widget,
+    Constraints, EventCtx, EventResult, Flex, FlexItem, Rect, RenderCtx, Semantics, Size,
+    TextMetrics, TextStyle, UiTree, Widget,
 };
 use y901_widgets::{Button, Dialog, TextInput};
 
@@ -64,11 +64,9 @@ fn tree_with_dialog(open: bool) -> UiTree {
     ));
     dlg.set_open(open);
 
-    let root = Flex::column("root")
-        .push(Box::new(dlg))
-        .push(Box::new(
-            Button::new("btn", "OK").flex_item(FlexItem::height(32.0)),
-        ));
+    let root = Flex::column("root").push(Box::new(dlg)).push(Box::new(
+        Button::new("btn", "OK").flex_item(FlexItem::height(32.0)),
+    ));
     let mut tree = UiTree::new(Box::new(root));
     tree.layout(Size::new(400.0, 300.0), &Mono);
     tree
@@ -111,7 +109,9 @@ fn set_focus_rejects_non_focusable() {
 #[test]
 fn set_focus_rejects_disabled() {
     let root = Flex::column("root").push(Box::new(
-        TextInput::new("i1").disabled(true).flex_item(FlexItem::height(24.0)),
+        TextInput::new("i1")
+            .disabled(true)
+            .flex_item(FlexItem::height(24.0)),
     ));
     let mut tree = UiTree::new(Box::new(root));
     tree.layout(Size::new(400.0, 300.0), &Mono);

@@ -38,30 +38,27 @@ pub mod geometry;
 pub mod invalidate;
 pub mod json;
 pub mod layout;
-pub mod text;
 pub mod query;
 pub mod signal;
+pub mod text;
 pub mod theme;
 pub mod tree;
 pub mod widget;
 
 pub use color::{Color, TextStyle};
 pub use command::Command;
-pub use event::{
-    EventPhase, EventResult, Key, Modifiers, MouseButton, PointerCapture, UiEvent,
-};
+pub use event::{EventPhase, EventResult, Key, Modifiers, MouseButton, PointerCapture, UiEvent};
 pub use geometry::{Edges, Pos, Rect, Size};
+pub use invalidate::{InvalidationHandle, PendingInvalidation};
 pub use json::Json;
 pub use layout::{flex_arrange, flex_measure, layout_tree, Flex, Stack};
-pub use text::TextBuffer;
 pub use query::{run as query_nodes, Query};
-pub use invalidate::{InvalidationHandle, PendingInvalidation};
 pub use signal::{Invalidation, Signal};
-pub use widget::MountCtx;
-pub use theme::{Style, Theme, State};
+pub use text::TextBuffer;
+pub use theme::{State, Style, Theme};
 pub use tree::{hash_semantics, NodeInfo, UiTree};
+pub use widget::MountCtx;
 pub use widget::{
-    ActionSpec, Axis2, Cursor, InputKind, Layer, AA_SAMPLES, GRADIENT_STEPS,
-    Axis, Constraints, Dimension, EventCtx, FlexItem, RenderCtx, Role, Semantics, TextMetrics,
-    Widget,
+    ActionSpec, Axis, Axis2, Constraints, Cursor, Dimension, EventCtx, FlexItem, InputKind, Layer,
+    RenderCtx, Role, Semantics, TextMetrics, Widget, AA_SAMPLES, GRADIENT_STEPS,
 };

@@ -11,10 +11,9 @@ pub mod atlas;
 pub mod d3d11;
 pub mod font;
 
-
 use windows_sys::Win32::Foundation::HWND;
 
-use y901_ui::{Color, Pos, Rect, RenderCtx, Size, TextStyle, TextMetrics};
+use y901_ui::{Color, Pos, Rect, RenderCtx, Size, TextMetrics, TextStyle};
 
 use d3d11::{Gfx, Instance};
 use font::TextEngine;
@@ -151,7 +150,8 @@ impl D3dBackend {
         // 少了这一层，组件只要把内容画到负坐标（例如终端多算了一行），
         // 就会画到窗口标题栏缝隙里。
         self.clips.clear();
-        self.clips.push(Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h));
+        self.clips
+            .push(Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h));
         self.text.begin_frame();
     }
 
@@ -231,9 +231,9 @@ impl D3dBackend {
                 return false;
             }
             // 设备重建后纹理是空的：全量重传
-            if let Err(err) = self
-                .gfx
-                .update_atlas(&self.text.atlas, self.text.atlas_size, true, &[])
+            if let Err(err) =
+                self.gfx
+                    .update_atlas(&self.text.atlas, self.text.atlas_size, true, &[])
             {
                 eprintln!("[y901] atlas re-upload failed: {err}");
             }
@@ -335,8 +335,8 @@ impl D3dBackend {
             size: quad.size,
             uv_rect: quad.uv,
             color: rgba,
-                ..Default::default()
-            });
+            ..Default::default()
+        });
 
         // 假粗体：右移 1px 再画一遍（比加载粗体字形便宜，且等宽不变）
         if bold {
@@ -413,8 +413,11 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
         self.viewport = Size::new(width as f32, height as f32);
         // 图集纹理随设备一起丢失：必须全量重传，否则后续 present 采样空纹理 → 整屏缺字。
         // SAFETY: 同上；reset=true 表示整张重传。
-        unsafe { self.gfx.update_atlas(&self.text.atlas, self.text.atlas_size, true, &[]) }
-            .map_err(|err| format!("rebuild 后图集重传失败: {err}"))?;
+        unsafe {
+            self.gfx
+                .update_atlas(&self.text.atlas, self.text.atlas_size, true, &[])
+        }
+        .map_err(|err| format!("rebuild 后图集重传失败: {err}"))?;
         Ok(())
     }
 
@@ -885,10 +888,22 @@ mod clip_quad_tests {
         )
         .expect("部分可见应保留");
         assert_eq!(q.pos.y, 0.0, "裁剪后应从 y=0 开始");
-        assert!((q.size[1] - 8.0).abs() < 1e-4, "高度应减半，实际 {}", q.size[1]);
+        assert!(
+            (q.size[1] - 8.0).abs() < 1e-4,
+            "高度应减半，实际 {}",
+            q.size[1]
+        );
         // 原来 v 从 0..1，被切掉上半 → 剩下的 v 是 0.5..1.0
-        assert!((q.uv[1] - 0.5).abs() < 1e-4, "v0 应为 0.5，实际 {}", q.uv[1]);
-        assert!((q.uv[3] - 1.0).abs() < 1e-4, "v1 应为 1.0，实际 {}", q.uv[3]);
+        assert!(
+            (q.uv[1] - 0.5).abs() < 1e-4,
+            "v0 应为 0.5，实际 {}",
+            q.uv[1]
+        );
+        assert!(
+            (q.uv[3] - 1.0).abs() < 1e-4,
+            "v1 应为 1.0，实际 {}",
+            q.uv[3]
+        );
     }
 
     /// 零尺寸不产生实例（避免除零 / 退化四边形）。

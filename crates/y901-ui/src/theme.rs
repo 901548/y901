@@ -153,42 +153,87 @@ impl Theme {
         table: [
             // panel
             [
-                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.05, 0.05, 0.07, 1.0)),
-                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.08, 0.08, 0.10, 1.0)),
-                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.10, 0.10, 0.13, 1.0)),
-                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.07, 0.07, 0.09, 1.0)),
-                Style::new(Color::rgba(0.50, 0.52, 0.58, 1.0), Color::rgba(0.05, 0.05, 0.07, 1.0)),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.08, 0.08, 0.10, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.10, 0.10, 0.13, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.07, 0.07, 0.09, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.50, 0.52, 0.58, 1.0),
+                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                ),
             ],
             // button
             [
-                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.16, 0.18, 0.24, 1.0))
-                    .with_padding(Edges::symmetric(12.0, 6.0))
-                    .with_radius(4.0),
-                Style::new(Color::rgba(0.95, 0.97, 1.0, 1.0), Color::rgba(0.22, 0.26, 0.34, 1.0))
-                    .with_padding(Edges::symmetric(12.0, 6.0))
-                    .with_radius(4.0),
-                Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.30, 0.42, 0.60, 1.0))
-                    .with_padding(Edges::symmetric(12.0, 6.0))
-                    .with_radius(4.0),
-                Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.20, 0.30, 0.45, 1.0))
-                    .with_padding(Edges::symmetric(12.0, 6.0))
-                    .with_radius(4.0),
-                Style::new(Color::rgba(0.55, 0.56, 0.60, 1.0), Color::rgba(0.12, 0.13, 0.16, 1.0))
-                    .with_padding(Edges::symmetric(12.0, 6.0))
-                    .with_radius(4.0),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.16, 0.18, 0.24, 1.0),
+                )
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
+                Style::new(
+                    Color::rgba(0.95, 0.97, 1.0, 1.0),
+                    Color::rgba(0.22, 0.26, 0.34, 1.0),
+                )
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
+                Style::new(
+                    Color::rgba(1.0, 1.0, 1.0, 1.0),
+                    Color::rgba(0.30, 0.42, 0.60, 1.0),
+                )
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
+                Style::new(
+                    Color::rgba(1.0, 1.0, 1.0, 1.0),
+                    Color::rgba(0.20, 0.30, 0.45, 1.0),
+                )
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
+                Style::new(
+                    Color::rgba(0.55, 0.56, 0.60, 1.0),
+                    Color::rgba(0.12, 0.13, 0.16, 1.0),
+                )
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
             ],
             // text_input
             [
-                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.10, 0.11, 0.14, 1.0))
-                    .with_padding(Edges::symmetric(8.0, 4.0)),
-                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.12, 0.13, 0.17, 1.0))
-                    .with_padding(Edges::symmetric(8.0, 4.0)),
-                Style::new(Color::rgba(0.90, 0.92, 0.96, 1.0), Color::rgba(0.13, 0.14, 0.18, 1.0))
-                    .with_padding(Edges::symmetric(8.0, 4.0)),
-                Style::new(Color::rgba(0.96, 0.98, 1.0, 1.0), Color::rgba(0.10, 0.11, 0.14, 1.0))
-                    .with_padding(Edges::symmetric(8.0, 4.0)),
-                Style::new(Color::rgba(0.55, 0.56, 0.60, 1.0), Color::rgba(0.08, 0.08, 0.10, 1.0))
-                    .with_padding(Edges::symmetric(8.0, 4.0)),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.10, 0.11, 0.14, 1.0),
+                )
+                .with_padding(Edges::symmetric(8.0, 4.0)),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.12, 0.13, 0.17, 1.0),
+                )
+                .with_padding(Edges::symmetric(8.0, 4.0)),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.13, 0.14, 0.18, 1.0),
+                )
+                .with_padding(Edges::symmetric(8.0, 4.0)),
+                Style::new(
+                    Color::rgba(0.96, 0.98, 1.0, 1.0),
+                    Color::rgba(0.10, 0.11, 0.14, 1.0),
+                )
+                .with_padding(Edges::symmetric(8.0, 4.0)),
+                Style::new(
+                    Color::rgba(0.55, 0.56, 0.60, 1.0),
+                    Color::rgba(0.08, 0.08, 0.10, 1.0),
+                )
+                .with_padding(Edges::symmetric(8.0, 4.0)),
             ],
             // text
             [
@@ -200,11 +245,26 @@ impl Theme {
             ],
             // list
             [
-                Style::new(Color::rgba(0.86, 0.88, 0.92, 1.0), Color::rgba(0.06, 0.06, 0.08, 1.0)),
-                Style::new(Color::rgba(0.90, 0.93, 0.98, 1.0), Color::rgba(0.12, 0.14, 0.18, 1.0)),
-                Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.16, 0.20, 0.28, 1.0)),
-                Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.10, 0.12, 0.16, 1.0)),
-                Style::new(Color::rgba(0.50, 0.52, 0.58, 1.0), Color::rgba(0.06, 0.06, 0.08, 1.0)),
+                Style::new(
+                    Color::rgba(0.86, 0.88, 0.92, 1.0),
+                    Color::rgba(0.06, 0.06, 0.08, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.90, 0.93, 0.98, 1.0),
+                    Color::rgba(0.12, 0.14, 0.18, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(1.0, 1.0, 1.0, 1.0),
+                    Color::rgba(0.16, 0.20, 0.28, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(1.0, 1.0, 1.0, 1.0),
+                    Color::rgba(0.10, 0.12, 0.16, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.50, 0.52, 0.58, 1.0),
+                    Color::rgba(0.06, 0.06, 0.08, 1.0),
+                ),
             ],
             // scrollbar
             [
@@ -223,40 +283,85 @@ pub const LIGHT: Theme = Theme {
     slots: ["panel", "button", "text_input", "text", "list", "scrollbar"],
     table: [
         [
-            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.96, 0.96, 0.97, 1.0)),
-            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.94, 0.94, 0.96, 1.0)),
-            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.92, 0.92, 0.94, 1.0)),
-            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.95, 0.95, 0.96, 1.0)),
-            Style::new(Color::rgba(0.45, 0.45, 0.48, 1.0), Color::rgba(0.96, 0.96, 0.97, 1.0)),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.96, 0.96, 0.97, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.94, 0.94, 0.96, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.92, 0.92, 0.94, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.95, 0.95, 0.96, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.45, 0.45, 0.48, 1.0),
+                Color::rgba(0.96, 0.96, 0.97, 1.0),
+            ),
         ],
         [
-            Style::new(Color::rgba(0.12, 0.12, 0.14, 1.0), Color::rgba(0.88, 0.89, 0.92, 1.0))
-                .with_padding(Edges::symmetric(12.0, 6.0))
-                .with_radius(4.0),
-            Style::new(Color::rgba(0.12, 0.12, 0.14, 1.0), Color::rgba(0.82, 0.85, 0.92, 1.0))
-                .with_padding(Edges::symmetric(12.0, 6.0))
-                .with_radius(4.0),
-            Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.30, 0.45, 0.75, 1.0))
-                .with_padding(Edges::symmetric(12.0, 6.0))
-                .with_radius(4.0),
-            Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.35, 0.50, 0.80, 1.0))
-                .with_padding(Edges::symmetric(12.0, 6.0))
-                .with_radius(4.0),
-            Style::new(Color::rgba(0.55, 0.55, 0.58, 1.0), Color::rgba(0.90, 0.90, 0.92, 1.0))
-                .with_padding(Edges::symmetric(12.0, 6.0))
-                .with_radius(4.0),
+            Style::new(
+                Color::rgba(0.12, 0.12, 0.14, 1.0),
+                Color::rgba(0.88, 0.89, 0.92, 1.0),
+            )
+            .with_padding(Edges::symmetric(12.0, 6.0))
+            .with_radius(4.0),
+            Style::new(
+                Color::rgba(0.12, 0.12, 0.14, 1.0),
+                Color::rgba(0.82, 0.85, 0.92, 1.0),
+            )
+            .with_padding(Edges::symmetric(12.0, 6.0))
+            .with_radius(4.0),
+            Style::new(
+                Color::rgba(1.0, 1.0, 1.0, 1.0),
+                Color::rgba(0.30, 0.45, 0.75, 1.0),
+            )
+            .with_padding(Edges::symmetric(12.0, 6.0))
+            .with_radius(4.0),
+            Style::new(
+                Color::rgba(1.0, 1.0, 1.0, 1.0),
+                Color::rgba(0.35, 0.50, 0.80, 1.0),
+            )
+            .with_padding(Edges::symmetric(12.0, 6.0))
+            .with_radius(4.0),
+            Style::new(
+                Color::rgba(0.55, 0.55, 0.58, 1.0),
+                Color::rgba(0.90, 0.90, 0.92, 1.0),
+            )
+            .with_padding(Edges::symmetric(12.0, 6.0))
+            .with_radius(4.0),
         ],
         [
-            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.99, 0.99, 1.0, 1.0))
-                .with_padding(Edges::symmetric(8.0, 4.0)),
-            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.97, 0.97, 0.99, 1.0))
-                .with_padding(Edges::symmetric(8.0, 4.0)),
-            Style::new(Color::rgba(0.10, 0.10, 0.12, 1.0), Color::rgba(0.95, 0.96, 0.99, 1.0))
-                .with_padding(Edges::symmetric(8.0, 4.0)),
-            Style::new(Color::rgba(0.05, 0.05, 0.08, 1.0), Color::rgba(0.99, 0.99, 1.0, 1.0))
-                .with_padding(Edges::symmetric(8.0, 4.0)),
-            Style::new(Color::rgba(0.60, 0.60, 0.62, 1.0), Color::rgba(0.94, 0.94, 0.95, 1.0))
-                .with_padding(Edges::symmetric(8.0, 4.0)),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.99, 0.99, 1.0, 1.0),
+            )
+            .with_padding(Edges::symmetric(8.0, 4.0)),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.97, 0.97, 0.99, 1.0),
+            )
+            .with_padding(Edges::symmetric(8.0, 4.0)),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.95, 0.96, 0.99, 1.0),
+            )
+            .with_padding(Edges::symmetric(8.0, 4.0)),
+            Style::new(
+                Color::rgba(0.05, 0.05, 0.08, 1.0),
+                Color::rgba(0.99, 0.99, 1.0, 1.0),
+            )
+            .with_padding(Edges::symmetric(8.0, 4.0)),
+            Style::new(
+                Color::rgba(0.60, 0.60, 0.62, 1.0),
+                Color::rgba(0.94, 0.94, 0.95, 1.0),
+            )
+            .with_padding(Edges::symmetric(8.0, 4.0)),
         ],
         [
             Style::new(Color::rgba(0.14, 0.14, 0.16, 1.0), Color::TRANSPARENT),
@@ -266,11 +371,26 @@ pub const LIGHT: Theme = Theme {
             Style::new(Color::rgba(0.60, 0.60, 0.62, 1.0), Color::TRANSPARENT),
         ],
         [
-            Style::new(Color::rgba(0.16, 0.16, 0.18, 1.0), Color::rgba(0.95, 0.95, 0.96, 1.0)),
-            Style::new(Color::rgba(0.16, 0.16, 0.18, 1.0), Color::rgba(0.88, 0.90, 0.95, 1.0)),
-            Style::new(Color::rgba(1.0, 1.0, 1.0, 1.0), Color::rgba(0.72, 0.80, 0.95, 1.0)),
-            Style::new(Color::rgba(0.05, 0.05, 0.08, 1.0), Color::rgba(0.97, 0.97, 0.99, 1.0)),
-            Style::new(Color::rgba(0.60, 0.60, 0.62, 1.0), Color::rgba(0.95, 0.95, 0.96, 1.0)),
+            Style::new(
+                Color::rgba(0.16, 0.16, 0.18, 1.0),
+                Color::rgba(0.95, 0.95, 0.96, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.16, 0.16, 0.18, 1.0),
+                Color::rgba(0.88, 0.90, 0.95, 1.0),
+            ),
+            Style::new(
+                Color::rgba(1.0, 1.0, 1.0, 1.0),
+                Color::rgba(0.72, 0.80, 0.95, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.05, 0.05, 0.08, 1.0),
+                Color::rgba(0.97, 0.97, 0.99, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.60, 0.60, 0.62, 1.0),
+                Color::rgba(0.95, 0.95, 0.96, 1.0),
+            ),
         ],
         [
             Style::new(Color::TRANSPARENT, Color::rgba(0.80, 0.81, 0.85, 1.0)),
@@ -329,4 +449,3 @@ mod tests {
         assert_ne!(hovered, pressed);
     }
 }
-

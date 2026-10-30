@@ -6,8 +6,8 @@
 //! 3. 换主题后组件颜色随之改变（组件不持有业务色）。
 
 use y901_ui::{
-    Axis, Color, Constraints, Cursor, Flex, FlexItem, Pos, Rect, RenderCtx, Size, State, TextStyle,
-    TextMetrics, Theme, UiEvent, UiTree, Widget,
+    Axis, Color, Constraints, Cursor, Flex, FlexItem, Pos, Rect, RenderCtx, Size, State,
+    TextMetrics, TextStyle, Theme, UiEvent, UiTree, Widget,
 };
 use y901_widgets::{ScrollView, SplitView, TextLabel};
 
@@ -35,7 +35,12 @@ impl Widget for Row {
     fn id(&self) -> &str {
         &self.id
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(Size::new(c.max.w, 20.0))
     }
     fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
@@ -153,10 +158,16 @@ fn splitter_drag_changes_pane_sizes() {
     tree.layout(Size::new(400.0, 200.0), &Mono);
 
     let after = tree.rect_of("left").expect("left pane").w;
-    assert!(after > before + 40.0, "拖拽后左栏应明显变宽：{before} → {after}");
+    assert!(
+        after > before + 40.0,
+        "拖拽后左栏应明显变宽：{before} → {after}"
+    );
 
     // 最小宽度约束：右栏不能小于 200 → 左栏最大 200
-    assert!(after <= 400.0 - 200.0 + 1.0, "受 min_second 约束，实际 {after}");
+    assert!(
+        after <= 400.0 - 200.0 + 1.0,
+        "受 min_second 约束，实际 {after}"
+    );
 }
 
 #[test]
@@ -171,7 +182,10 @@ fn splitter_reports_resize_cursor() {
     tree.layout(Size::new(400.0, 200.0), &Mono);
 
     // 分隔条在 x=100
-    assert_eq!(tree.cursor_at(Pos::new(100.5, 100.0)), Cursor::ResizeHorizontal);
+    assert_eq!(
+        tree.cursor_at(Pos::new(100.5, 100.0)),
+        Cursor::ResizeHorizontal
+    );
     assert_eq!(tree.cursor_at(Pos::new(300.0, 100.0)), Cursor::Default);
 }
 
@@ -184,7 +198,10 @@ fn theme_switch_changes_component_colors() {
         .bg;
     assert_ne!(dark, light);
     // 暗色主题下按钮比面板亮（可辨识）
-    assert_ne!(dark, Theme::DARK.style(y901_ui::Role::PANEL, State::Normal).bg);
+    assert_ne!(
+        dark,
+        Theme::DARK.style(y901_ui::Role::PANEL, State::Normal).bg
+    );
 }
 
 #[test]
@@ -232,7 +249,11 @@ fn text_label_still_renders_with_theme() {
 
     let mut label = TextLabel::new("l", "hello");
     let mut cache = y901_ui::layout::LayoutCache::new();
-    label.measure(&Mono, Constraints::loose(Size::new(100.0, 40.0)), &mut cache);
+    label.measure(
+        &Mono,
+        Constraints::loose(Size::new(100.0, 40.0)),
+        &mut cache,
+    );
     label.arrange(Rect::new(0.0, 0.0, 100.0, 20.0), &Mono, &mut cache);
 
     let mut rec = Rec::default();

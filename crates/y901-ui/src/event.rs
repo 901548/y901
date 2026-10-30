@@ -78,7 +78,10 @@ pub enum UiEvent {
     Tick,
     /// 动作：由命令路由或 RPC 投递给某个节点。
     /// `name` 的语义只有组件自己知道，框架不解释。
-    Action { name: String, args: crate::json::Json },
+    Action {
+        name: String,
+        args: crate::json::Json,
+    },
     /// IME 组合串变化（预编辑文字）。空串表示组合结束。
     ///
     /// 组合串**不是**已提交的输入：组件应把它画成临时覆盖层，

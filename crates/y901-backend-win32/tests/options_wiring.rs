@@ -20,7 +20,12 @@ fn body_of<'a>(src: &'a str, signature: &str) -> &'a str {
         .unwrap_or_else(|| panic!("源码里找不到 `{signature}`（函数被改名或删除）"));
     let rest = &src[start..];
     let mut end = rest.len();
-    for needle in ["\n    pub ", "\n    fn ", "\n    unsafe fn ", "\n    const "] {
+    for needle in [
+        "\n    pub ",
+        "\n    fn ",
+        "\n    unsafe fn ",
+        "\n    const ",
+    ] {
         if let Some(i) = rest[1..].find(needle) {
             // +1 因为检索从第 2 个字节开始
             let abs = i + 1;
@@ -69,10 +74,7 @@ fn options_font_reaches_text_engine() {
         body.contains("FontConfig"),
         "D3dBackend::new 必须接收 FontConfig 参数"
     );
-    assert!(
-        body.contains("TextEngine::new"),
-        "必须构造 TextEngine"
-    );
+    assert!(body.contains("TextEngine::new"), "必须构造 TextEngine");
     assert!(
         body.contains("font.family") && body.contains("font.size"),
         "TextEngine::new 必须拿到 family 与 size（不能退回硬编码常量）"

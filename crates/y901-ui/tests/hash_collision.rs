@@ -20,7 +20,10 @@ struct Rng(u64);
 impl Rng {
     fn next(&mut self) -> u64 {
         // Numerical Recipes 参数
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.0 >> 16
     }
     fn pick<T: Copy>(&mut self, items: &[T]) -> T {
@@ -70,8 +73,8 @@ fn random_semantics(rng: &mut Rng, i: usize) -> (Role, Semantics) {
 #[test]
 fn one_million_semantic_surfaces_have_no_collisions() {
     // 10 万次样本的碰撞期望是 2.7e-10，足够证明 FNV-64 在自然分布下可靠。
-// 如需更强保证，手动跑 release 版 100 万次（release 下 0.95us/次，约 1 秒）。
-const N: usize = 100_000;
+    // 如需更强保证，手动跑 release 版 100 万次（release 下 0.95us/次，约 1 秒）。
+    const N: usize = 100_000;
 
     let mut rng = Rng(0x5eed_1234_5678_9abc);
     let mut seen: HashSet<u64> = HashSet::with_capacity(N);

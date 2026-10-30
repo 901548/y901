@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use y901_ui::layout::{flex_measure, Flex, LayoutCache};
 use y901_ui::{
-    Axis, Color, Command, Constraints, EventPhase, EventResult, FlexItem, Json, Pos, Rect, RenderCtx,
-    Role, Size, TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    Axis, Color, Command, Constraints, EventPhase, EventResult, FlexItem, Json, Pos, Rect,
+    RenderCtx, Role, Size, TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 
 thread_local! {
@@ -355,18 +355,14 @@ fn dirty_region_prunes_untouched_subtrees() {
 #[test]
 fn hover_only_dirties_two_nodes() {
     let root = Flex::row("root")
-        .push(Box::new(
-            Leaf::new("a").flex_item(FlexItem {
-                width: y901_ui::Dimension::Px(100.0),
-                height: y901_ui::Dimension::Flex(1.0),
-            }),
-        ))
-        .push(Box::new(
-            Leaf::new("b").flex_item(FlexItem {
-                width: y901_ui::Dimension::Px(100.0),
-                height: y901_ui::Dimension::Flex(1.0),
-            }),
-        ));
+        .push(Box::new(Leaf::new("a").flex_item(FlexItem {
+            width: y901_ui::Dimension::Px(100.0),
+            height: y901_ui::Dimension::Flex(1.0),
+        })))
+        .push(Box::new(Leaf::new("b").flex_item(FlexItem {
+            width: y901_ui::Dimension::Px(100.0),
+            height: y901_ui::Dimension::Flex(1.0),
+        })));
 
     let mut tree = UiTree::new(Box::new(root));
     tree.layout(Size::new(200.0, 100.0), &MonoMetrics);
@@ -458,13 +454,13 @@ fn rpc_get_tree_and_dispatch() {
         let result = match &pending.request {
             y901_agent::RpcRequest::GetTree => Ok(tree.snapshot_json()),
             y901_agent::RpcRequest::Query { q } => y901_agent::dispatch_request(
-            &mut tree,
-            &y901_agent::Policy::default(),
-            "query",
-            &Json::obj().set("q", q.clone()),
-        )
-        .map_err(|e| e.code().to_string()),
-        y901_agent::RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
+                &mut tree,
+                &y901_agent::Policy::default(),
+                "query",
+                &Json::obj().set("q", q.clone()),
+            )
+            .map_err(|e| e.code().to_string()),
+            y901_agent::RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
             y901_agent::RpcRequest::Focus { node } => {
                 if tree.set_focus(Some(node.clone())) {
                     Ok(Json::obj())
@@ -488,7 +484,11 @@ fn rpc_get_tree_and_dispatch() {
             }
             y901_agent::RpcRequest::Subscribe { node, interval_ms } => {
                 let ok = tree.subscribe(node, Duration::from_millis(*interval_ms));
-                if ok { Ok(Json::obj()) } else { Err(format!("unknown node: {node}")) }
+                if ok {
+                    Ok(Json::obj())
+                } else {
+                    Err(format!("unknown node: {node}"))
+                }
             }
             y901_agent::RpcRequest::Unsubscribe { node } => {
                 tree.unsubscribe(node);
@@ -539,7 +539,8 @@ fn rpc_get_tree_and_dispatch() {
 #[test]
 fn flex_measure_is_cached_too() {
     let mut cache = LayoutCache::new();
-    let mut children: Vec<Box<dyn Widget>> = vec![Box::new(Leaf::new("x")), Box::new(Leaf::new("y"))];
+    let mut children: Vec<Box<dyn Widget>> =
+        vec![Box::new(Leaf::new("x")), Box::new(Leaf::new("y"))];
 
     reset_measures();
     let c = Constraints::loose(Size::new(100.0, 100.0));
@@ -729,7 +730,15 @@ fn click(x: f32, y: f32) -> UiEvent {
 fn capture_phase_can_stop_propagation() {
     let log: Log = Default::default();
 
-    let mut root = Frame::new("root", Box::new(Pass { id: "child".into(), rect: Rect::ZERO, log: log.clone() }), log.clone());
+    let mut root = Frame::new(
+        "root",
+        Box::new(Pass {
+            id: "child".into(),
+            rect: Rect::ZERO,
+            log: log.clone(),
+        }),
+        log.clone(),
+    );
     root.stop_in_capture = true;
 
     let mut tree = UiTree::new(Box::new(root));
@@ -738,7 +747,11 @@ fn capture_phase_can_stop_propagation() {
     tree.dispatch(&click(10.0, 10.0));
 
     let entries = log.borrow().clone();
-    assert_eq!(entries.len(), 1, "只应有根节点在 Capture 收到，实际 {entries:?}");
+    assert_eq!(
+        entries.len(),
+        1,
+        "只应有根节点在 Capture 收到，实际 {entries:?}"
+    );
     assert_eq!(entries[0], ("root".to_string(), EventPhase::Capture));
     assert!(
         !entries.iter().any(|(id, _)| id == "child"),
@@ -752,7 +765,11 @@ fn three_phases_in_order() {
 
     let mut root = Frame::new(
         "parent",
-        Box::new(Pass { id: "child".into(), rect: Rect::ZERO, log: log.clone() }),
+        Box::new(Pass {
+            id: "child".into(),
+            rect: Rect::ZERO,
+            log: log.clone(),
+        }),
         log.clone(),
     );
     root.handle_in_bubble = true;
@@ -783,8 +800,16 @@ fn pointer_capture_routes_moves_outside_the_node() {
     let b = Probe::new("b", log.clone()).flex_item(FlexItem::fill());
 
     let root = Flex::row("root")
-        .push(Box::new(Flex::column("left").flex_item(FlexItem::fill()).push(Box::new(a))))
-        .push(Box::new(Flex::column("right").flex_item(FlexItem::fill()).push(Box::new(b))));
+        .push(Box::new(
+            Flex::column("left")
+                .flex_item(FlexItem::fill())
+                .push(Box::new(a)),
+        ))
+        .push(Box::new(
+            Flex::column("right")
+                .flex_item(FlexItem::fill())
+                .push(Box::new(b)),
+        ));
 
     let mut tree = UiTree::new(Box::new(root));
     tree.layout(Size::new(200.0, 100.0), &MonoMetrics);
@@ -794,7 +819,9 @@ fn pointer_capture_routes_moves_outside_the_node() {
     log.borrow_mut().clear();
 
     // 移到右半边（几何上命中 b），但仍应派发给 a
-    tree.dispatch(&UiEvent::MouseMove { pos: Pos::new(180.0, 50.0) });
+    tree.dispatch(&UiEvent::MouseMove {
+        pos: Pos::new(180.0, 50.0),
+    });
 
     let entries = log.borrow().clone();
     assert!(
@@ -814,7 +841,9 @@ fn pointer_capture_routes_moves_outside_the_node() {
     log.borrow_mut().clear();
 
     // 之后的移动回到正常命中测试（b）
-    tree.dispatch(&UiEvent::MouseMove { pos: Pos::new(180.0, 50.0) });
+    tree.dispatch(&UiEvent::MouseMove {
+        pos: Pos::new(180.0, 50.0),
+    });
     let entries = log.borrow().clone();
     assert!(
         entries.iter().any(|(id, _)| id == "b"),
@@ -1086,16 +1115,27 @@ fn modal_blocks_clicks_outside_and_traps_focus() {
         button: y901_ui::MouseButton::Left,
     });
     assert_eq!(base_hits.get(), 0, "Modal 外部点击不能穿透到底层");
-    assert!(tree.hit_path(Pos::new(10.0, 10.0)).is_none(), "命中应被吞掉");
+    assert!(
+        tree.hit_path(Pos::new(10.0, 10.0)).is_none(),
+        "命中应被吞掉"
+    );
 
     // 点 Modal 内部：命中 Modol 子树
-    let hit = tree.hit_path(Pos::new(60.0, 60.0)).expect("应命中 Modal 内部");
+    let hit = tree
+        .hit_path(Pos::new(60.0, 60.0))
+        .expect("应命中 Modal 内部");
     let id = tree.hit_test(Pos::new(60.0, 60.0)).unwrap();
     assert!(id == "modal_btn" || id == "modal", "实际命中 {id}");
 
     // 焦点被限制在 Modal 内
-    assert!(!tree.set_focus(Some("base_btn".into())), "Modal 外节点不能获焦");
-    assert!(tree.set_focus(Some("modal_btn".into())), "Modal 内节点可以获焦");
+    assert!(
+        !tree.set_focus(Some("base_btn".into())),
+        "Modal 外节点不能获焦"
+    );
+    assert!(
+        tree.set_focus(Some("modal_btn".into())),
+        "Modal 内节点可以获焦"
+    );
     assert_eq!(tree.focus(), Some("modal_btn"));
     let _ = hit;
 }

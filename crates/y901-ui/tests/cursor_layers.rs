@@ -9,7 +9,7 @@
 
 use y901_ui::{
     Constraints, Cursor, EventCtx, EventResult, Flex, Layer, Pos, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiTree, Widget,
+    TextMetrics, TextStyle, UiTree, Widget,
 };
 
 struct Mono;
@@ -155,8 +155,12 @@ fn cursor_at_matches_hit_index_with_overlapping_layers() {
         id: "root",
         kids: vec![
             Box::new(
-                Probe::new("overlay", Rect::new(0.0, 0.0, 100.0, 100.0), Cursor::Pointer)
-                    .layer(Layer::Overlay),
+                Probe::new(
+                    "overlay",
+                    Rect::new(0.0, 0.0, 100.0, 100.0),
+                    Cursor::Pointer,
+                )
+                .layer(Layer::Overlay),
             ),
             Box::new(Probe::new(
                 "base",
@@ -169,7 +173,10 @@ fn cursor_at_matches_hit_index_with_overlapping_layers() {
     };
     let tree = layout(Box::new(root));
 
-    assert_eq!(tree.hit_test(Pos::new(10.0, 10.0)).as_deref(), Some("overlay"));
+    assert_eq!(
+        tree.hit_test(Pos::new(10.0, 10.0)).as_deref(),
+        Some("overlay")
+    );
     assert_eq!(
         tree.cursor_at(Pos::new(10.0, 10.0)),
         Cursor::Pointer,

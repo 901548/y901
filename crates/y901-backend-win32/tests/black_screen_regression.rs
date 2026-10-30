@@ -12,8 +12,8 @@ use std::rc::Rc;
 
 use y901_backend_win32::window::{request_full_redraw, take_full_redraw};
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiTree, Widget,
+    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    TextStyle, UiTree, Widget,
 };
 
 struct Mono;
@@ -169,10 +169,7 @@ fn window_render_has_dirty_guard() {
         body.find("tree.dirty().is_empty()").unwrap() < body.find("backend.begin()").unwrap(),
         "脏区检查必须在 begin() 之前（否则已经清屏了）"
     );
-    assert!(
-        body.contains("return;"),
-        "脏区为空时必须早退（不 Present）"
-    );
+    assert!(body.contains("return;"), "脏区为空时必须早退（不 Present）");
 }
 
 #[test]
@@ -193,8 +190,12 @@ fn wm_paint_requests_full_redraw() {
 fn runtime_consumes_repaint_request_before_render() {
     // 结构断言：runtime 必须在 window.render 之前消费请求并 invalidate_all。
     let src = include_str!("../src/runtime.rs");
-    let repaint = src.find("take_repaint_request()").expect("runtime 应消费重绘请求");
-    let render = src.find("window.render(&mut tree)").expect("runtime 应调用 render");
+    let repaint = src
+        .find("take_repaint_request()")
+        .expect("runtime 应消费重绘请求");
+    let render = src
+        .find("window.render(&mut tree)")
+        .expect("runtime 应调用 render");
     assert!(repaint < render, "必须在 render 之前处理重绘请求");
     assert!(
         src[repaint..render].contains("invalidate_all()"),

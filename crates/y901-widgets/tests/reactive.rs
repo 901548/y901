@@ -1,11 +1,11 @@
 //! 动态挂载/卸载 + 响应式状态管理的集成测试。
 
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Flex, FlexItem, Pos, Rect, RenderCtx, Signal, Size,
-    TextStyle, TextMetrics, UiTree, Widget,
+    TextMetrics, TextStyle, UiTree, Widget,
 };
 use y901_widgets::{Button, TextLabel};
 
@@ -45,7 +45,8 @@ fn add_then_remove_node_updates_tree_and_hit_test() {
     let rect = tree.rect_of("btn").expect("按钮应有几何");
     assert!(rect.w > 0.0 && rect.h > 0.0);
     assert_eq!(
-        tree.hit_test(Pos::new(rect.x + rect.w * 0.5, rect.y + rect.h * 0.5)).as_deref(),
+        tree.hit_test(Pos::new(rect.x + rect.w * 0.5, rect.y + rect.h * 0.5))
+            .as_deref(),
         Some("btn")
     );
 
@@ -55,7 +56,8 @@ fn add_then_remove_node_updates_tree_and_hit_test() {
 
     assert!(tree.find("btn").is_none(), "节点应已从树中移除");
     assert_ne!(
-        tree.hit_test(Pos::new(rect.x + rect.w * 0.5, rect.y + rect.h * 0.5)).as_deref(),
+        tree.hit_test(Pos::new(rect.x + rect.w * 0.5, rect.y + rect.h * 0.5))
+            .as_deref(),
         Some("btn"),
         "移除后不应再命中按钮"
     );
@@ -64,11 +66,9 @@ fn add_then_remove_node_updates_tree_and_hit_test() {
 
 #[test]
 fn removing_focused_node_clears_focus() {
-    let mut tree = UiTree::new(Box::new(
-        Flex::column("root").push(Box::new(
-            Button::new("btn", "Go").flex_item(FlexItem::default()),
-        )),
-    ));
+    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(
+        Button::new("btn", "Go").flex_item(FlexItem::default()),
+    ))));
     tree.layout(Size::new(400.0, 300.0), &Mono);
     assert!(tree.set_focus(Some("btn".to_string())));
     assert_eq!(tree.focus(), Some("btn"));
@@ -88,7 +88,12 @@ impl Widget for Lifecycle {
     fn id(&self) -> &str {
         &self.id
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(Size::new(50.0, 20.0))
     }
     fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {

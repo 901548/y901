@@ -2,8 +2,8 @@
 
 use y901_agent::{handle_call, ApiCall, ApiError, Policy};
 use y901_ui::{
-    Constraints, EventCtx, EventResult, Flex, FlexItem, InputKind, Json, Pos, Rect, RenderCtx, Size,
-    TextStyle, TextMetrics, UiTree, Widget,
+    Constraints, EventCtx, EventResult, Flex, FlexItem, InputKind, Json, Pos, Rect, RenderCtx,
+    Size, TextMetrics, TextStyle, UiTree, Widget,
 };
 use y901_widgets::{Button, TextInput};
 
@@ -25,7 +25,11 @@ impl TextMetrics for Mono {
 fn big_tree() -> UiTree {
     let mut root = Flex::column("root");
     for i in 0..10 {
-        let label = if i < 2 { format!("Save {i}") } else { format!("Btn {i}") };
+        let label = if i < 2 {
+            format!("Save {i}")
+        } else {
+            format!("Btn {i}")
+        };
         root = root.push(Box::new(
             Button::new(format!("b{i}"), label).flex_item(FlexItem::height(20.0)),
         ));
@@ -68,7 +72,10 @@ fn button_click_is_inputkind_none_and_textinput_set_text_is_text() {
 
     // 语义树里也应带类型
     let snap = tree.snapshot_json().to_string();
-    assert!(snap.contains("\"input\":\"text\""), "语义树应暴露参数类型：{snap}");
+    assert!(
+        snap.contains("\"input\":\"text\""),
+        "语义树应暴露参数类型：{snap}"
+    );
 }
 
 #[test]
@@ -88,7 +95,10 @@ fn invoke_with_wrong_argument_type_is_rejected() {
         },
     )
     .unwrap_err();
-    assert!(matches!(err, ApiError::BadRequest(_)), "类型不符应 400，实际 {err:?}");
+    assert!(
+        matches!(err, ApiError::BadRequest(_)),
+        "类型不符应 400，实际 {err:?}"
+    );
 
     // 传 string 应通过
     assert!(handle_call(
@@ -150,7 +160,10 @@ fn query_filters_by_role_and_label() {
     .unwrap();
 
     let text = out.to_string();
-    assert!(text.contains("\"count\":2"), "应命中 2 个 Save 按钮：{text}");
+    assert!(
+        text.contains("\"count\":2"),
+        "应命中 2 个 Save 按钮：{text}"
+    );
     assert!(text.contains("\"b0\"") && text.contains("\"b1\""));
     assert!(!text.contains("\"b2\""), "非 Save 按钮不应出现");
     assert!(!text.contains("\"t0\""), "输入框不应出现");
@@ -177,16 +190,17 @@ fn query_returns_compact_nodes_not_full_tree() {
     let out = handle_call(
         &mut tree,
         &Policy::default(),
-        ApiCall::Query {
-            q: "id=b3".into(),
-        },
+        ApiCall::Query { q: "id=b3".into() },
     )
     .unwrap();
     let text = out.to_string();
     assert!(text.contains("\"id\":\"b3\""));
     assert!(text.contains("\"revision\""));
     assert!(text.contains("\"rect\""));
-    assert!(!text.contains("\"children\""), "查询结果不应带整树 children：{text}");
+    assert!(
+        !text.contains("\"children\""),
+        "查询结果不应带整树 children：{text}"
+    );
 }
 
 #[test]
@@ -211,7 +225,12 @@ impl Widget for Hidden {
     fn id(&self) -> &str {
         "hidden"
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(Size::new(50.0, 20.0))
     }
     fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
@@ -244,6 +263,9 @@ fn query_skips_unexposed_nodes() {
         },
     )
     .unwrap();
-    assert!(out.to_string().contains("\"count\":0"), "未暴露节点不得出现在查询结果里");
+    assert!(
+        out.to_string().contains("\"count\":0"),
+        "未暴露节点不得出现在查询结果里"
+    );
     let _ = Pos::new(0.0, 0.0);
 }

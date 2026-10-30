@@ -3,7 +3,7 @@
 //! 为什么要它：终端每格一个字符，`draw_text(&ch.to_string())` 会为每格分配一个
 //! `String`（80×24 = 每帧 1920 次）。`draw_char` 用栈缓冲，零堆分配。
 
-use y901_ui::{Color, Pos, Rect, RenderCtx, Size, TextStyle, TextMetrics};
+use y901_ui::{Color, Pos, Rect, RenderCtx, Size, TextMetrics, TextStyle};
 
 /// 记录 `draw_text` 调用的后端。
 #[derive(Default)]
@@ -58,10 +58,7 @@ fn draw_char_matches_draw_text() {
             via_char.calls, via_text.calls,
             "{ch:?}：draw_char 与 draw_text 的绘制指令必须完全一致"
         );
-        assert_eq!(
-            w_char, w_text,
-            "{ch:?}：返回值（前进宽度）必须一致"
-        );
+        assert_eq!(w_char, w_text, "{ch:?}：返回值（前进宽度）必须一致");
     }
 }
 

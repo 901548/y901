@@ -10,8 +10,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use y901_ui::{
-    Constraints, EventCtx, EventResult, Flex, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiTree, Widget,
+    Constraints, EventCtx, EventResult, Flex, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    TextStyle, UiTree, Widget,
 };
 
 struct Mono;
@@ -192,5 +192,8 @@ fn grow_also_marks_union() {
     tree.layout(Size::new(400.0, 300.0), &Mono);
 
     let bounds = tree.dirty().bounds().expect("应有脏区");
-    assert!(bounds.right() >= 120.0 && bounds.bottom() >= 90.0, "变大也要覆盖新区域");
+    assert!(
+        bounds.right() >= 120.0 && bounds.bottom() >= 90.0,
+        "变大也要覆盖新区域"
+    );
 }

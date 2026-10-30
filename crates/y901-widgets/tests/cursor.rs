@@ -1,8 +1,6 @@
 //! 光标链路回归：组件必须真的声明光标，树必须按位置查询。
 
-use y901_ui::{
-    Cursor, Flex, FlexItem, Pos, Size, TextStyle, TextMetrics, UiTree,
-};
+use y901_ui::{Cursor, Flex, FlexItem, Pos, Size, TextMetrics, TextStyle, UiTree};
 use y901_widgets::{Button, SplitView, TextInput};
 
 struct Mono;
@@ -36,7 +34,10 @@ fn text_input_declares_ibeam_cursor() {
         "输入框上应该是 I 型光标"
     );
     // 输入框外应该是默认
-    assert_eq!(tree.cursor_at(Pos::new(r.x + r.w + 50.0, 5.0)), Cursor::Default);
+    assert_eq!(
+        tree.cursor_at(Pos::new(r.x + r.w + 50.0, 5.0)),
+        Cursor::Default
+    );
 }
 
 #[test]
@@ -79,8 +80,7 @@ fn splitter_cursor_comes_from_position_not_state() {
 fn cursor_respects_clip_of_scroll_container() {
     // 滚动容器外的位置不应返回容器内组件的光标
     let input = TextInput::new("in").flex_item(FlexItem::height(400.0));
-    let sv = y901_widgets::ScrollView::new("sv", Box::new(input))
-        .flex_item(FlexItem::fill());
+    let sv = y901_widgets::ScrollView::new("sv", Box::new(input)).flex_item(FlexItem::fill());
     let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(sv))));
     tree.layout(Size::new(300.0, 100.0), &Mono);
 

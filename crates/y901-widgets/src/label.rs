@@ -4,7 +4,7 @@
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, FlexItem, MountCtx, Pos, Rect, RenderCtx, Role,
-    Semantics, Size, TextStyle, TextMetrics, UiEvent, Widget,
+    Semantics, Size, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 pub struct TextLabel {
@@ -105,9 +105,11 @@ impl Widget for TextLabel {
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         let style = TextStyle::fg(self.color);
-        c.constrain(Size::new(metrics.measure_text(&self.current_text(), &style).w, metrics.line_height(&style)))
+        c.constrain(Size::new(
+            metrics.measure_text(&self.current_text(), &style).w,
+            metrics.line_height(&style),
+        ))
     }
-
 
     /// 向下转型：Host 运行时调 `set_text` 的唯一路径（UiTree 不暴露具体类型）。
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {

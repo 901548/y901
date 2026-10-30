@@ -61,7 +61,13 @@ where
                     continue;
                 }
                 let (reply_tx, reply_rx) = channel();
-                if job_tx.send(Job { line, reply: reply_tx }).is_err() {
+                if job_tx
+                    .send(Job {
+                        line,
+                        reply: reply_tx,
+                    })
+                    .is_err()
+                {
                     break;
                 }
                 // 这里阻塞是**设计**：一次只处理一条，保证响应顺序
@@ -82,7 +88,12 @@ where
 }
 
 /// UI 线程：非阻塞地处理一批请求。返回处理条数。
-pub fn pump(server: &mut McpServer, tree: &mut UiTree, jobs: &Receiver<Job>, budget: usize) -> usize {
+pub fn pump(
+    server: &mut McpServer,
+    tree: &mut UiTree,
+    jobs: &Receiver<Job>,
+    budget: usize,
+) -> usize {
     let mut done = 0;
     while done < budget {
         let Ok(job) = jobs.try_recv() else {

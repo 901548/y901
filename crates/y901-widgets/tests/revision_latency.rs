@@ -9,9 +9,7 @@
 //! ```
 
 use y901_agent::{handle_call, ApiCall, ApiError, Policy};
-use y901_ui::{
-    Flex, FlexItem, Json, Size, TextStyle, TextMetrics, UiTree,
-};
+use y901_ui::{Flex, FlexItem, Json, Size, TextMetrics, TextStyle, UiTree};
 use y901_widgets::TextInput;
 
 struct Mono;
@@ -73,10 +71,7 @@ fn action_rev_is_never_stale() {
             },
         )
         .expect("invoke");
-        let rev_from_action = resp
-            .get("rev")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(-1.0) as u64;
+        let rev_from_action = resp.get("rev").and_then(|v| v.as_f64()).unwrap_or(-1.0) as u64;
 
         // 2) 紧接着读树（模拟 Agent 的下一步观察），比较 rev
         let view = handle_call(&mut tree, &policy, ApiCall::Tree).expect("tree");

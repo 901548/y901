@@ -7,9 +7,8 @@
 //! 环境变量：
 //! - `Y901_TOKEN`：非空时校验 Token（与网关 Policy 共用）。
 
-
 use y901_agent::{McpServer, Policy};
-use y901_ui::{Flex, FlexItem, Signal, Size, TextStyle, TextMetrics, UiTree};
+use y901_ui::{Flex, FlexItem, Signal, Size, TextMetrics, TextStyle, UiTree};
 use y901_widgets::{Button, TextInput};
 
 /// 无窗口环境的等宽度量（仅用于把树排出一套合理的几何）。
@@ -64,7 +63,8 @@ fn main() {
     eprintln!("[y901-mcp] server started (protocol 2024-11-05)");
 
     // 注意：StdinLock 不是 Send，所以把 stdin 本体交给线程，在那边再 lock
-    let jobs = y901_mcp::bridge::spawn_io(std::io::BufReader::new(std::io::stdin()), std::io::stdout());
+    let jobs =
+        y901_mcp::bridge::spawn_io(std::io::BufReader::new(std::io::stdin()), std::io::stdout());
 
     let mut tree = demo_tree();
     let mut server = McpServer::new(policy);

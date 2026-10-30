@@ -83,7 +83,11 @@ impl McpServer {
         // JSON-RPC 2.0 版本字段必须存在且正确
         if msg.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") {
             let id = msg.get("id").cloned().unwrap_or(Json::Null);
-            return Some(error_response(id, -32600, "invalid request: jsonrpc must be \"2.0\""));
+            return Some(error_response(
+                id,
+                -32600,
+                "invalid request: jsonrpc must be \"2.0\"",
+            ));
         }
 
         let id = msg.get("id").cloned();
@@ -193,7 +197,12 @@ fn initialize_result() -> Json {
             "capabilities",
             Json::obj()
                 .set("tools", Json::obj().set("listChanged", false))
-                .set("resources", Json::obj().set("subscribe", false).set("listChanged", false)),
+                .set(
+                    "resources",
+                    Json::obj()
+                        .set("subscribe", false)
+                        .set("listChanged", false),
+                ),
         )
         .set(
             "serverInfo",
@@ -288,12 +297,7 @@ fn schema(
 ) -> Json {
     let mut props = Json::obj();
     for (name, ty, desc) in required.iter().chain(optional.iter()) {
-        props = props.set(
-            name,
-            Json::obj()
-                .set("type", *ty)
-                .set("description", *desc),
-        );
+        props = props.set(name, Json::obj().set("type", *ty).set("description", *desc));
     }
     let mut obj = Json::obj()
         .set("type", "object")
@@ -320,17 +324,14 @@ fn template_defs() -> Vec<Json> {
 }
 
 fn resource_defs() -> Vec<Json> {
-    vec![
-        Json::obj()
-            .set("uri", "ui://tree")
-            .set("name", "ui_tree")
-            .set(
-                "description",
-                "Full semantic tree (already filtered by exposed_to_ai and redacted).",
-            )
-            .set("mimeType", "application/json"),
-
-    ]
+    vec![Json::obj()
+        .set("uri", "ui://tree")
+        .set("name", "ui_tree")
+        .set(
+            "description",
+            "Full semantic tree (already filtered by exposed_to_ai and redacted).",
+        )
+        .set("mimeType", "application/json")]
 }
 
 /// 单个节点：只在 `exposed_to_ai` 时返回，否则一律 None。
@@ -361,9 +362,15 @@ fn node_resource(tree: &UiTree, policy: &Policy, id: &str) -> Option<Json> {
             .set("value", merged.get("value").cloned().unwrap_or(Json::Null))
             .set("state", merged.get("state").cloned().unwrap_or(Json::Null))
             // 与 public_tree / query_result 对齐：disabled / focused 都是可见语义
-            .set("disabled", merged.get("disabled").cloned().unwrap_or(Json::Bool(false)))
+            .set(
+                "disabled",
+                merged.get("disabled").cloned().unwrap_or(Json::Bool(false)),
+            )
             .set("focused", tree.focus() == Some(id))
-            .set("actions", merged.get("actions").cloned().unwrap_or(Json::Null)),
+            .set(
+                "actions",
+                merged.get("actions").cloned().unwrap_or(Json::Null),
+            ),
     )
 }
 // ---------- 编解码 ----------
@@ -455,7 +462,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use y901_ui::{Flex, FlexItem, Semantics, Size, TextStyle, TextMetrics, UiTree, Widget};
+    use y901_ui::{Flex, FlexItem, Semantics, Size, TextMetrics, TextStyle, UiTree, Widget};
 
     struct Mono;
     impl TextMetrics for Mono {
@@ -480,10 +487,20 @@ mod tests {
         fn id(&self) -> &str {
             &self.id
         }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: y901_ui::Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: y901_ui::Constraints,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) -> Size {
             c.constrain(Size::new(100.0, 40.0))
         }
-        fn arrange(&mut self, r: y901_ui::Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+        fn arrange(
+            &mut self,
+            r: y901_ui::Rect,
+            _m: &dyn TextMetrics,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) {
             self.rect = r;
         }
         fn rect(&self) -> y901_ui::Rect {
@@ -493,7 +510,11 @@ mod tests {
             FlexItem::fill()
         }
         fn render(&mut self, _c: &mut dyn y901_ui::RenderCtx) {}
-        fn event(&mut self, _c: &mut y901_ui::EventCtx, _e: &y901_ui::UiEvent) -> y901_ui::EventResult {
+        fn event(
+            &mut self,
+            _c: &mut y901_ui::EventCtx,
+            _e: &y901_ui::UiEvent,
+        ) -> y901_ui::EventResult {
             y901_ui::EventResult::Handled
         }
         fn semantics(&self) -> Semantics {
@@ -545,7 +566,11 @@ mod tests {
     fn initialize_returns_capabilities() {
         let mut s = ready();
         let mut t = tree();
-        let r = call(&mut s, &mut t, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+        let r = call(
+            &mut s,
+            &mut t,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+        );
         assert_eq!(r.get("jsonrpc").and_then(|v| v.as_str()), Some("2.0"));
         let result = r.get("result").expect("result");
         assert_eq!(
@@ -567,7 +592,10 @@ mod tests {
     fn initialized_notification_has_no_response() {
         let mut s = ready();
         let mut t = tree();
-        let out = s.handle_line(&mut t, r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+        let out = s.handle_line(
+            &mut t,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        );
         assert!(out.is_none(), "通知不应有响应");
         assert_eq!(s.state, State::Initialized);
     }
@@ -576,7 +604,11 @@ mod tests {
     fn tools_list_exposes_four_tools_with_schema() {
         let mut s = ready();
         let mut t = tree();
-        let r = call(&mut s, &mut t, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
+        let r = call(
+            &mut s,
+            &mut t,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        );
         let tools = match r.get("result").unwrap().get("tools") {
             Some(Json::Arr(a)) => a.clone(),
             _ => panic!("tools 应为数组"),
@@ -586,7 +618,16 @@ mod tests {
             .iter()
             .filter_map(|t| t.get("name").and_then(|v| v.as_str()))
             .collect();
-        assert_eq!(names, vec!["ui_click", "ui_type_text", "ui_scroll", "ui_query", "ui_invoke"]);
+        assert_eq!(
+            names,
+            vec![
+                "ui_click",
+                "ui_type_text",
+                "ui_scroll",
+                "ui_query",
+                "ui_invoke"
+            ]
+        );
 
         let click = &tools[0].get("inputSchema").unwrap();
         assert_eq!(click.get("type").and_then(|v| v.as_str()), Some("object"));
@@ -608,7 +649,10 @@ mod tests {
             Some(Json::Arr(a)) => a.clone(),
             _ => panic!("content 应为数组"),
         };
-        assert_eq!(content[0].get("type").and_then(|v| v.as_str()), Some("text"));
+        assert_eq!(
+            content[0].get("type").and_then(|v| v.as_str()),
+            Some("text")
+        );
     }
 
     #[test]
@@ -655,7 +699,11 @@ mod tests {
     fn unknown_method_returns_jsonrpc_error() {
         let mut s = ready();
         let mut t = tree();
-        let r = call(&mut s, &mut t, r#"{"jsonrpc":"2.0","id":9,"method":"nope"}"#);
+        let r = call(
+            &mut s,
+            &mut t,
+            r#"{"jsonrpc":"2.0","id":9,"method":"nope"}"#,
+        );
         let err = r.get("error").expect("error");
         assert_eq!(err.get("code").and_then(|v| v.as_f64()), Some(-32601.0));
         assert_eq!(r.get("id").and_then(|v| v.as_f64()), Some(9.0));

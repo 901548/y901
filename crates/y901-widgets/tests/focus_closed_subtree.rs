@@ -3,7 +3,7 @@
 //! 放在 widgets 测试里是因为要用真实的 `Dialog` / `TextInput`；
 //! `y901-ui` 不能反向依赖 `y901-widgets`。
 
-use y901_ui::{Flex, FlexItem, Key, Modifiers, Size, TextStyle, TextMetrics, UiEvent, UiTree};
+use y901_ui::{Flex, FlexItem, Key, Modifiers, Size, TextMetrics, TextStyle, UiEvent, UiTree};
 use y901_widgets::{Button, Dialog, TextInput};
 
 struct Mono;
@@ -38,11 +38,9 @@ fn tree_with_dialog(open: bool) -> UiTree {
     dlg.set_open(open);
 
     // Dialog 自己的 `flex_item` 是构建器（消费 self），这里先设好再装箱
-    let root = Flex::column("root")
-        .push(Box::new(dlg))
-        .push(Box::new(
-            Button::new("btn", "OK").flex_item(FlexItem::height(32.0)),
-        ));
+    let root = Flex::column("root").push(Box::new(dlg)).push(Box::new(
+        Button::new("btn", "OK").flex_item(FlexItem::height(32.0)),
+    ));
     let mut tree = UiTree::new(Box::new(root));
     tree.layout(Size::new(400.0, 300.0), &Mono);
     tree

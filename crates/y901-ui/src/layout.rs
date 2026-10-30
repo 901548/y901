@@ -217,7 +217,14 @@ pub fn flex_measure(
 ) -> Size {
     let mut measured = Vec::new();
     flex_measure_into(
-        axis, padding, gap, children, metrics, constraints, cache, &mut measured,
+        axis,
+        padding,
+        gap,
+        children,
+        metrics,
+        constraints,
+        cache,
+        &mut measured,
     )
 }
 
@@ -309,8 +316,14 @@ pub fn flex_measure_into(
     }
 
     let (w, h) = match axis {
-        Axis::Horizontal => (main_total + padding.horizontal(), cross_max + padding.vertical()),
-        Axis::Vertical => (cross_max + padding.horizontal(), main_total + padding.vertical()),
+        Axis::Horizontal => (
+            main_total + padding.horizontal(),
+            cross_max + padding.vertical(),
+        ),
+        Axis::Vertical => (
+            cross_max + padding.horizontal(),
+            main_total + padding.vertical(),
+        ),
     };
 
     // 关键：返回的永远是有限的内容尺寸

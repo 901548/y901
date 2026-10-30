@@ -263,7 +263,10 @@ impl<'a> Parser<'a> {
 
     fn number(&mut self) -> Result<Json, String> {
         let start = self.pos;
-        while matches!(self.peek(), Some(b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9')) {
+        while matches!(
+            self.peek(),
+            Some(b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9')
+        ) {
             self.pos += 1;
         }
         let text = std::str::from_utf8(&self.bytes[start..self.pos]).map_err(|e| e.to_string())?;
@@ -300,8 +303,8 @@ impl<'a> Parser<'a> {
                 Some(_) => {
                     // 多字节 UTF-8：回退并把整段交给 str
                     self.pos -= 1;
-                    let rest = std::str::from_utf8(&self.bytes[self.pos..])
-                        .map_err(|e| e.to_string())?;
+                    let rest =
+                        std::str::from_utf8(&self.bytes[self.pos..]).map_err(|e| e.to_string())?;
                     let ch = rest.chars().next().ok_or("bad utf8")?;
                     out.push(ch);
                     self.pos += ch.len_utf8();
@@ -374,10 +377,7 @@ mod tests {
         let v = Json::parse(text).unwrap();
         assert_eq!(v.get("method").and_then(|m| m.as_str()), Some("invoke"));
         let params = v.get("params").unwrap();
-        assert_eq!(
-            params.get("text").and_then(|t| t.as_str()),
-            Some("你好\n")
-        );
+        assert_eq!(params.get("text").and_then(|t| t.as_str()), Some("你好\n"));
         // 序列化后还能解析回来
         let again = Json::parse(&v.to_string()).unwrap();
         assert_eq!(again, v);

@@ -2,9 +2,7 @@
 //!
 //! 全部走真实路径 `tree.find_mut(id) → as_any_mut → downcast_mut::<T>()`。
 
-use y901_ui::{
-    Constraints, Flex, FlexItem, Rect, Size, TextStyle, TextMetrics, UiTree,
-};
+use y901_ui::{Constraints, Flex, FlexItem, Rect, Size, TextMetrics, TextStyle, UiTree};
 use y901_widgets::{ListView, Menu, TerminalWidget, TextLabel};
 
 struct Mono;
@@ -59,7 +57,6 @@ fn list_view_runtime_set_items_via_downcast() {
         ListView::new("list", 20.0).flex_item(FlexItem::fill()),
     ));
 
-
     if let Some(lv) = tree
         .find_mut("list")
         .and_then(|w| w.as_any_mut())
@@ -109,7 +106,10 @@ fn terminal_downcast_reaches_pty_driver() {
     // 只读驱动接口可达即可（write 在没有 PTY 时是 no-op，不 panic）
     term.write(b"echo hi\r");
     // 注意：cols 由 arrange 按矩形宽度重算（600px / 8px ≈ 75），不是构造时的 80
-    assert!(term.grid().cols > 0 && term.grid().rows > 0, "网格必须已布局");
+    assert!(
+        term.grid().cols > 0 && term.grid().rows > 0,
+        "网格必须已布局"
+    );
 }
 
 #[test]

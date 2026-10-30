@@ -74,7 +74,6 @@ impl MountCtx {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Role(pub &'static str);
 
-
 impl Role {
     pub const PANEL: Role = Role("panel");
     pub const WINDOW: Role = Role("window");
@@ -164,8 +163,16 @@ impl FlexItem {
     /// 固定尺寸。任一轴传 0.0 表示"该轴不强制"，交给内容或父容器决定。
     pub const fn fixed(w: f32, h: f32) -> Self {
         Self {
-            width: if w > 0.0 { Dimension::Px(w) } else { Dimension::Auto },
-            height: if h > 0.0 { Dimension::Px(h) } else { Dimension::Auto },
+            width: if w > 0.0 {
+                Dimension::Px(w)
+            } else {
+                Dimension::Auto
+            },
+            height: if h > 0.0 {
+                Dimension::Px(h)
+            } else {
+                Dimension::Auto
+            },
         }
     }
 
@@ -281,8 +288,16 @@ impl Constraints {
         );
         let clamped = safe.max(self.min).min(self.max);
         Size::new(
-            if clamped.w.is_finite() { clamped.w } else { 0.0 },
-            if clamped.h.is_finite() { clamped.h } else { 0.0 },
+            if clamped.w.is_finite() {
+                clamped.w
+            } else {
+                0.0
+            },
+            if clamped.h.is_finite() {
+                clamped.h
+            } else {
+                0.0
+            },
         )
     }
 }
@@ -371,7 +386,10 @@ pub trait RenderCtx: TextMetrics {
             self.fill_rect(rect, color);
             return;
         }
-        self.fill_rect(Rect::new(rect.x, rect.y + r, rect.w, rect.h - 2.0 * r), color);
+        self.fill_rect(
+            Rect::new(rect.x, rect.y + r, rect.w, rect.h - 2.0 * r),
+            color,
+        );
 
         // 上下各 r 行：逐扫描线画，并在左右边界做**覆盖率混合**（Coverage AA）。
         // 把每个像素行在竖直方向再切 AA_SAMPLES 份，各自代入圆方程求
@@ -498,14 +516,8 @@ pub trait RenderCtx: TextMetrics {
             );
             // 左下 / 右下
             let y = rect.bottom() - 1.0 - i as f32;
-            self.fill_rect(
-                Rect::new(rect.x + r - outer, y, band, 1.0),
-                color,
-            );
-            self.fill_rect(
-                Rect::new(rect.right() - r + inner, y, band, 1.0),
-                color,
-            );
+            self.fill_rect(Rect::new(rect.x + r - outer, y, band, 1.0), color);
+            self.fill_rect(Rect::new(rect.right() - r + inner, y, band, 1.0), color);
         }
     }
 
@@ -712,8 +724,7 @@ impl EventCtx {
 
     /// 请应用层做一件事。框架不理解 `name` 的含义。
     pub fn emit_app(&mut self, name: impl Into<String>, args: crate::json::Json) {
-        self.commands
-            .push(crate::command::Command::app(name, args));
+        self.commands.push(crate::command::Command::app(name, args));
     }
 
     /// 请某个节点执行一个动作（组件不需要认识对方）。
@@ -760,7 +771,6 @@ impl EventCtx {
         out
     }
 }
-
 
 /// 动作参数的形态。网关据此做类型校验，Agent 据此知道该传什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -836,17 +846,15 @@ impl ActionSpec {
     /// `arg_name` 为 `Some` 时额外输出 `"arg"` 字段（Agent 据此知道参数名）；
     /// 默认参数名的动作**不输出**该字段——保持既有 JSON 形状不变。
     pub fn to_json(&self) -> crate::json::Json {
-        let obj = crate::json::Json::obj()
-            .set("name", self.name.clone())
-            .set(
-                "input",
-                match self.input {
-                    InputKind::None => "none",
-                    InputKind::Text => "text",
-                    InputKind::Number => "number",
-                    InputKind::Bool => "bool",
-                },
-            );
+        let obj = crate::json::Json::obj().set("name", self.name.clone()).set(
+            "input",
+            match self.input {
+                InputKind::None => "none",
+                InputKind::Text => "text",
+                InputKind::Number => "number",
+                InputKind::Bool => "bool",
+            },
+        );
         match self.arg_name {
             Some(name) => obj.set("arg", name),
             None => obj,
@@ -955,8 +963,7 @@ impl Semantics {
         input: InputKind,
         arg_name: &'static str,
     ) -> Self {
-        self.actions
-            .push(ActionSpec::named(name, input, arg_name));
+        self.actions.push(ActionSpec::named(name, input, arg_name));
         self
     }
 
@@ -1159,7 +1166,12 @@ pub trait Widget {
     /// 副作用：允许缓存内部测量结果（通常由 `cache` 代劳），**不得**修改树结构。
     /// 约束：容器必须用 `cache.measure(child, …)` 而不是 `child.measure(…)`，
     /// 否则会绕过缓存与去重，大树上退化成指数级重复测量。
-    fn measure(&mut self, metrics: &dyn TextMetrics, constraints: Constraints, cache: &mut crate::layout::LayoutCache) -> Size;
+    fn measure(
+        &mut self,
+        metrics: &dyn TextMetrics,
+        constraints: Constraints,
+        cache: &mut crate::layout::LayoutCache,
+    ) -> Size;
 
     /// 父容器算好绝对矩形后回传。
     ///
@@ -1167,7 +1179,12 @@ pub trait Widget {
     /// 返回：无。
     /// 副作用：**应当**把 `rect` 存下来（`rect()` 后续要靠它），容器还要给子节点排布。
     /// 约束：递归由容器驱动（`layout::flex_arrange`），框架不预设子节点怎么摆。
-    fn arrange(&mut self, rect: Rect, metrics: &dyn TextMetrics, cache: &mut crate::layout::LayoutCache);
+    fn arrange(
+        &mut self,
+        rect: Rect,
+        metrics: &dyn TextMetrics,
+        cache: &mut crate::layout::LayoutCache,
+    );
 
     /// 自己当前的矩形（`arrange` 之后有效）。
     ///

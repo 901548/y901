@@ -2,7 +2,7 @@
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Json, Pos, Rect, RenderCtx, Semantics, Size, State,
-    TextStyle, TextMetrics, Theme, UiEvent, Widget,
+    TextMetrics, TextStyle, Theme, UiEvent, Widget,
 };
 use y901_widgets::Button;
 
@@ -58,7 +58,11 @@ impl RenderCtx for Rec {
 
 fn render(b: &mut Button) -> Vec<Color> {
     let mut cache = y901_ui::layout::LayoutCache::new();
-    b.measure(&Mono, Constraints::loose(Size::new(200.0, 40.0)), &mut cache);
+    b.measure(
+        &Mono,
+        Constraints::loose(Size::new(200.0, 40.0)),
+        &mut cache,
+    );
     b.arrange(Rect::new(0.0, 0.0, 120.0, 32.0), &Mono, &mut cache);
     let mut rec = Rec {
         theme: Theme::DARK,

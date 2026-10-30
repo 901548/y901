@@ -3,8 +3,8 @@
 use y901_agent::{McpServer, Policy};
 use y901_runtime::{translate, Host, RawEvent};
 use y901_ui::{
-    Command, EventResult, Flex, FlexItem, Json, Key, Modifiers, Size, TextStyle,
-    TextMetrics, UiEvent, UiTree,
+    Command, EventResult, Flex, FlexItem, Json, Key, Modifiers, Size, TextMetrics, TextStyle,
+    UiEvent, UiTree,
 };
 use y901_widgets::Button;
 
@@ -60,7 +60,10 @@ fn standard_mcp_handshake_when_no_token_configured() {
     assert!(!out.contains("-32001"), "不应要求 token：{out}");
 
     let tools = server
-        .handle_line(&mut tree, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#)
+        .handle_line(
+            &mut tree,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        )
         .expect("response");
     assert!(tools.contains("ui_click"), "tools/list 应可用");
 }
@@ -143,11 +146,13 @@ fn rpc_get_tree_matches_mcp_ui_tree() {
 fn mcp_click_emits_command_that_host_receives() {
     let mut server = McpServer::new(Policy::default());
     // 按钮点击会发 Command::App，headless 路径必须把它交给 host.command
-    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(
-        Button::new("ok", "OK")
-            .on_click("demo.click", Json::obj())
-            .flex_item(FlexItem::height(24.0)),
-    ))));
+    let mut tree = UiTree::new(Box::new(
+        Flex::column("root").push(Box::new(
+            Button::new("ok", "OK")
+                .on_click("demo.click", Json::obj())
+                .flex_item(FlexItem::height(24.0)),
+        )),
+    ));
     tree.layout(Size::new(300.0, 100.0), &Mono);
 
     let _ = server.handle_line(

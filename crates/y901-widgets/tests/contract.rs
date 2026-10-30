@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use y901_agent::{handle_call, ApiCall, ApiError, Policy};
 use y901_ui::{
-    Command, Flex, FlexItem, Json, Rect, Size, Signal, TextStyle, TextMetrics, UiEvent, UiTree,
+    Command, Flex, FlexItem, Json, Rect, Signal, Size, TextMetrics, TextStyle, UiEvent, UiTree,
 };
 use y901_widgets::{Button, Dialog, Menu, TextLabel};
 
@@ -49,7 +49,11 @@ fn menu_select_action_triggers_command_and_closes() {
     match &cmds[0] {
         Command::App { name, args } => {
             assert_eq!(name, "menu.select");
-            assert!(args.to_string().contains("\"index\":1"), "{}", args.to_string());
+            assert!(
+                args.to_string().contains("\"index\":1"),
+                "{}",
+                args.to_string()
+            );
         }
         other => panic!("应为 App 命令：{other:?}"),
     }
@@ -179,11 +183,9 @@ fn add_node_mounts_whole_subtree() {
 
 #[test]
 fn add_node_rejects_duplicate_id() {
-    let mut tree = UiTree::new(Box::new(
-        Flex::column("root").push(Box::new(
-            Button::new("dup", "A").flex_item(FlexItem::height(24.0)),
-        )),
-    ));
+    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(
+        Button::new("dup", "A").flex_item(FlexItem::height(24.0)),
+    ))));
     tree.layout(Size::new(300.0, 100.0), &Mono);
 
     let before = tree.snapshot_json().to_string();

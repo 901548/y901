@@ -67,7 +67,10 @@ fn app_mcp_mode_dispatches_click_into_real_tree() {
 
     // 1) 真实树里能看到终端节点
     let tree = &out[1];
-    assert!(tree.contains("title"), "最小启动树应包含 title 标签：{tree}");
+    assert!(
+        tree.contains("title"),
+        "最小启动树应包含 title 标签：{tree}"
+    );
 
     // 2) 点击被真实 UiTree 处理
     let click = &out[2];

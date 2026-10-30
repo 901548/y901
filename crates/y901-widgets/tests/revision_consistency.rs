@@ -5,9 +5,7 @@
 //! 「框架有效值」，都会让 Agent 在不同接口看到不同 revision —— 乐观锁直接失效。
 
 use y901_agent::{handle_call, ApiCall, McpServer, Policy};
-use y901_ui::{
-    Flex, FlexItem, Json, Size, TextStyle, TextMetrics, UiTree,
-};
+use y901_ui::{Flex, FlexItem, Json, Size, TextMetrics, TextStyle, UiTree};
 use y901_widgets::{Button, TextInput};
 
 struct Mono;
@@ -106,7 +104,10 @@ fn all_three_interfaces_report_the_same_revision() {
     let mut tree = tree();
     let (a, b, c) = revisions_of(&mut tree, "btn");
     assert_eq!(a, b, "get_tree 与 query 的 revision 必须一致：{a} vs {b}");
-    assert_eq!(b, c, "query 与 node_resource 的 revision 必须一致：{b} vs {c}");
+    assert_eq!(
+        b, c,
+        "query 与 node_resource 的 revision 必须一致：{b} vs {c}"
+    );
 
     let (a2, b2, c2) = revisions_of(&mut tree, "field");
     assert_eq!(a2, b2);

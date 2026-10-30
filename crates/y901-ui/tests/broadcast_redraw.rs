@@ -1,8 +1,8 @@
 //! 广播事件（`Tick`）的重绘粒度：只标"真的要求重绘"的节点矩形，不整窗重绘。
 
 use y901_ui::{
-    Constraints, EventCtx, EventResult, Flex, FlexItem, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiEvent, UiTree, Widget,
+    Constraints, EventCtx, EventResult, Flex, FlexItem, Rect, RenderCtx, Semantics, Size,
+    TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 
 struct Mono;

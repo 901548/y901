@@ -8,25 +8,22 @@ use std::sync::{Mutex, OnceLock};
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
-use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
+use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
-    LoadCursorW, MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW, PostQuitMessage,
-    QS_ALLINPUT,
-    RegisterClassExW,
-    SetCursor, SetWindowLongPtrW, ShowWindow, TranslateMessage,
-    CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW,
-    IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IDC_SIZEALL, MSG, PM_REMOVE, SW_SHOW,
-    WM_CHAR, WM_DESTROY, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION,
-    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_NULL, WM_PAINT, WM_QUIT,
-    WM_RBUTTONDOWN,
-    WM_RBUTTONUP, WM_SETCURSOR, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, LoadCursorW,
+    MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassExW,
+    SetCursor, SetWindowLongPtrW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW,
+    CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW, IDC_HAND, IDC_IBEAM,
+    IDC_SIZEALL, IDC_SIZENS, IDC_SIZEWE, MSG, PM_REMOVE, QS_ALLINPUT, SW_SHOW, WM_CHAR, WM_DESTROY,
+    WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
+    WM_NCDESTROY, WM_NULL, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SIZE,
+    WM_SYSCHAR, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
 
 use y901_runtime::{Options, RawEvent};
@@ -118,9 +115,9 @@ fn vk_to_key(vk: u32) -> Key {
         0x21 => Key::PageUp,
         0x22 => Key::PageDown,
         0x70..=0x87 => Key::Function((vk - 0x70 + 1) as u8),
-        0x41..=0x5A if unsafe { GetKeyState(0x11) < 0 } => {
-            char::from_u32(vk + 0x20).map(Key::Char).unwrap_or(Key::Unknown)
-        }
+        0x41..=0x5A if unsafe { GetKeyState(0x11) < 0 } => char::from_u32(vk + 0x20)
+            .map(Key::Char)
+            .unwrap_or(Key::Unknown),
         _ => Key::Unknown,
     }
 }
@@ -135,7 +132,9 @@ fn vk_to_key(vk: u32) -> Key {
 /// 若这里也返回 `Key::Char`，组件（`TextInput` 的 Ctrl+A/C 分支）会处理两次。
 fn vk_to_key_for_system(vk: u32) -> Key {
     match vk {
-        0x41..=0x5A => char::from_u32(vk + 0x20).map(Key::Char).unwrap_or(Key::Unknown),
+        0x41..=0x5A => char::from_u32(vk + 0x20)
+            .map(Key::Char)
+            .unwrap_or(Key::Unknown),
         0x30..=0x39 => char::from_u32(vk).map(Key::Char).unwrap_or(Key::Unknown),
         _ => vk_to_key(vk),
     }
@@ -241,7 +240,6 @@ pub fn handle_wm_msg(
             })
         }
         // Alt+键：系统键单独成事件，避免与普通按键混淆
-
         WM_SYSKEYDOWN => Some(RawEvent::SystemKeyDown {
             key: vk_to_key_for_system(wparam as u32),
             mods,
@@ -279,12 +277,7 @@ fn button_of(msg: u32) -> MouseButton {
 #[doc(hidden)]
 pub fn wheel_event(x: f32, y: f32, wparam: u64, mods: Modifiers) -> RawEvent {
     let delta = ((wparam >> 16) as u16 as i16) as f32;
-    RawEvent::Wheel {
-        x,
-        y,
-        delta,
-        mods,
-    }
+    RawEvent::Wheel { x, y, delta, mods }
 }
 impl CharFilter {
     /// 记录一次 `WM_KEYDOWN`。
@@ -306,7 +299,6 @@ impl CharFilter {
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-
     match msg {
         WM_NCCREATE => {
             let create = lparam as *const CREATESTRUCTW;
@@ -333,7 +325,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         | WM_MBUTTONUP => {
             if let Ok(mut slot) = CHAR_FILTER.lock() {
                 let filter = slot.get_or_insert_with(CharFilter::default);
-                if let Some(ev) = handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter) {
+                if let Some(ev) =
+                    handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter)
+                {
                     push(ev);
                 }
             }
@@ -349,7 +343,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             // wndproc 只做"取状态 + 投递"。
             if let Ok(mut slot) = CHAR_FILTER.lock() {
                 let filter = slot.get_or_insert_with(CharFilter::default);
-                if let Some(ev) = handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter) {
+                if let Some(ev) =
+                    handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter)
+                {
                     push(ev);
                 }
             }
@@ -577,13 +573,7 @@ impl Window {
     pub fn wait_message(&self, timeout_ms: u32) -> bool {
         unsafe {
             // 第 1 个参数 0 表示不等待任何句柄，只看消息队列。
-            let r = MsgWaitForMultipleObjectsEx(
-                0,
-                std::ptr::null(),
-                timeout_ms,
-                QS_ALLINPUT,
-                0,
-            );
+            let r = MsgWaitForMultipleObjectsEx(0, std::ptr::null(), timeout_ms, QS_ALLINPUT, 0);
             // WAIT_OBJECT_0..WAIT_OBJECT_0+1 都可能出现；超时是 WAIT_TIMEOUT(258)
             r != 258
         }
@@ -887,7 +877,8 @@ mod wndproc_sequence_tests {
     #[test]
     fn unrelated_message_yields_nothing() {
         let mut f = CharFilter::default();
-        assert!(handle_wm_msg(0x000F, 0, 0, Modifiers::default(), &mut f).is_none()); // WM_PAINT
+        assert!(handle_wm_msg(0x000F, 0, 0, Modifiers::default(), &mut f).is_none());
+        // WM_PAINT
     }
 
     /// 非法码点（代理区）不产出事件、也不 panic。

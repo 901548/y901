@@ -425,10 +425,7 @@ mod tests {
         let sky = packer.used_height();
         let shelf = shelf_height(&sizes, 256);
 
-        assert!(
-            sky <= shelf,
-            "skyline 高度 {sky} 应不大于货架 {shelf}"
-        );
+        assert!(sky <= shelf, "skyline 高度 {sky} 应不大于货架 {shelf}");
         // 混合尺寸下通常能省 20% 以上
         assert!(
             sky * 100 < shelf * 85,

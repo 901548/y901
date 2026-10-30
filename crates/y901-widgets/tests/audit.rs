@@ -6,8 +6,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, Flex, FlexItem, Pos, Rect, RenderCtx, Size, TextStyle,
-    TextMetrics, UiTree, Widget,
+    Color, Constraints, EventCtx, EventResult, Flex, FlexItem, Pos, Rect, RenderCtx, Size,
+    TextMetrics, TextStyle, UiTree, Widget,
 };
 
 struct Mono;
@@ -77,7 +77,12 @@ impl Widget for Box3 {
     fn id(&self) -> &str {
         &self.id
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(Size::new(c.max.w, 40.0))
     }
     fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
@@ -123,9 +128,19 @@ fn render_pushes_clip_for_scrolling_container() {
         "渲染必须为滚动容器压裁剪栈（否则子节点会画到视口外）"
     );
     let inner = rec.clips[0];
-    assert!((inner.w - 290.0).abs() < 1.0, "裁剪宽度应扣除滚动条：{inner:?}");
-    assert!((inner.h - 120.0).abs() < 1.0, "裁剪高度应等于视口：{inner:?}");
-    assert_eq!(rec.max_depth, 1, "ScrollView 只应压一层裁剪，实际 {}", rec.max_depth);
+    assert!(
+        (inner.w - 290.0).abs() < 1.0,
+        "裁剪宽度应扣除滚动条：{inner:?}"
+    );
+    assert!(
+        (inner.h - 120.0).abs() < 1.0,
+        "裁剪高度应等于视口：{inner:?}"
+    );
+    assert_eq!(
+        rec.max_depth, 1,
+        "ScrollView 只应压一层裁剪，实际 {}",
+        rec.max_depth
+    );
     assert_eq!(rec.depth, 0, "push/pop 必须配平，实际残留 {}", rec.depth);
 }
 
@@ -170,10 +185,21 @@ fn initial_tree_triggers_on_mount_recursively() {
         fn id(&self) -> &str {
             &self.id
         }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) -> Size {
             c.constrain(Size::new(10.0, 10.0))
         }
-        fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {}
+        fn arrange(
+            &mut self,
+            _r: Rect,
+            _m: &dyn TextMetrics,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) {
+        }
         fn rect(&self) -> Rect {
             Rect::ZERO
         }

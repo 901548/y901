@@ -9,7 +9,7 @@ use y901_agent::api::{dispatch_request, ApiError, Policy};
 use y901_agent::mcp::McpServer;
 use y901_ui::{
     Constraints, EventCtx, EventResult, Flex, FlexItem, Json, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiTree, Widget,
+    TextMetrics, TextStyle, UiTree, Widget,
 };
 use y901_widgets::{Button, TextInput};
 
@@ -207,9 +207,7 @@ fn mcp_requires_token_when_configured() {
     // 注入正确 Token 后应通过
     std::env::set_var("Y901_TOKEN", "s3cret");
     let mut server = McpServer::new(policy);
-    let resp = server
-        .handle_line(&mut tree, init)
-        .expect("response");
+    let resp = server.handle_line(&mut tree, init).expect("response");
     assert!(
         resp.contains("result"),
         "注入正确 Token 后应握手成功，实际 {resp}"
@@ -245,12 +243,10 @@ fn key_event_roundtrips_through_json() {
 // ---------- P0-2 统一入口：focus / subscribe / unsubscribe ----------
 
 fn tree_with_hidden() -> UiTree {
-    let mut tree = UiTree::new(Box::new(
-        Flex::column("root").push(Box::new(Hidden {
-            id: "secret".into(),
-            rect: Rect::ZERO,
-        })),
-    ));
+    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(Hidden {
+        id: "secret".into(),
+        rect: Rect::ZERO,
+    }))));
     tree.layout(Size::new(300.0, 100.0), &Mono);
     tree
 }

@@ -3,9 +3,7 @@
 //! 渲染上下文决定颜色：`ctx.theme()` 返回哪个主题，组件就用哪套配色。
 //! 生产路径由 `Options.theme` → `D3dBackend.theme` 注入；这里验证"注入即变色"。
 
-use y901_ui::{
-    Color, Pos, Rect, RenderCtx, Size, TextStyle, TextMetrics, Theme, UiTree, Widget,
-};
+use y901_ui::{Color, Pos, Rect, RenderCtx, Size, TextMetrics, TextStyle, Theme, UiTree, Widget};
 use y901_widgets::Button;
 
 /// 记录所有 `fill_rect` 颜色的上下文；主题可注入。
@@ -46,10 +44,14 @@ impl RenderCtx for Recorder {
 
 fn render_button(theme: Theme) -> Vec<Color> {
     let mut btn = Button::new("btn", "OK");
-    btn.arrange(Rect::new(0.0, 0.0, 100.0, 40.0), &Recorder {
-        theme,
-        fills: Vec::new(),
-    }, &mut y901_ui::layout::LayoutCache::new());
+    btn.arrange(
+        Rect::new(0.0, 0.0, 100.0, 40.0),
+        &Recorder {
+            theme,
+            fills: Vec::new(),
+        },
+        &mut y901_ui::layout::LayoutCache::new(),
+    );
     let mut ctx = Recorder {
         theme,
         fills: Vec::new(),
@@ -64,10 +66,7 @@ fn theme_injection_changes_button_color() {
     let light = render_button(y901_ui::theme::LIGHT);
 
     assert!(!dark.is_empty(), "按钮必须至少画一个矩形");
-    assert_ne!(
-        dark, light,
-        "注入 LIGHT 主题后，按钮的颜色必须与 DARK 不同"
-    );
+    assert_ne!(dark, light, "注入 LIGHT 主题后，按钮的颜色必须与 DARK 不同");
 }
 
 #[test]
@@ -110,10 +109,13 @@ fn default_theme_is_dark() {
 fn rendering_a_tree_does_not_require_a_theme() {
     // 回归：不做任何主题注入时，整棵树仍能渲染（用默认主题）。
     let mut tree = UiTree::new(Box::new(Button::new("btn", "OK")));
-    tree.layout(Size::new(100.0, 40.0), &Recorder {
-        theme: Theme::DARK,
-        fills: Vec::new(),
-    });
+    tree.layout(
+        Size::new(100.0, 40.0),
+        &Recorder {
+            theme: Theme::DARK,
+            fills: Vec::new(),
+        },
+    );
     let mut ctx = Recorder {
         theme: Theme::DARK,
         fills: Vec::new(),

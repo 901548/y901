@@ -4,7 +4,7 @@
 //! 否则由框架用来切换焦点。
 
 use y901_ui::{
-    EventResult, Flex, FlexItem, Key, Modifiers, Size, TextStyle, TextMetrics, UiEvent, UiTree,
+    EventResult, Flex, FlexItem, Key, Modifiers, Size, TextMetrics, TextStyle, UiEvent, UiTree,
 };
 use y901_widgets::{Button, TerminalWidget};
 
@@ -28,7 +28,9 @@ fn tree() -> UiTree {
             .push(Box::new(
                 TerminalWidget::new("term", 80, 24).flex_item(FlexItem::height(200.0)),
             ))
-            .push(Box::new(Button::new("btn", "OK").flex_item(FlexItem::height(40.0)))),
+            .push(Box::new(
+                Button::new("btn", "OK").flex_item(FlexItem::height(40.0)),
+            )),
     ));
     tree.layout(Size::new(400.0, 400.0), &Mono);
     tree

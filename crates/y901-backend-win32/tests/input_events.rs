@@ -43,7 +43,13 @@ fn right_click_produces_mouse_down_right() {
         })
     );
 
-    let up = handle_wm_msg(WM_RBUTTONUP, 0, lparam(30, 40), Modifiers::default(), &mut f);
+    let up = handle_wm_msg(
+        WM_RBUTTONUP,
+        0,
+        lparam(30, 40),
+        Modifiers::default(),
+        &mut f,
+    );
     assert_eq!(
         up,
         Some(RawEvent::MouseUp {

@@ -5,7 +5,7 @@
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Json, Pos, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiTree, Widget,
+    TextMetrics, TextStyle, UiTree, Widget,
 };
 use y901_widgets::{Dialog, TextInput};
 
@@ -91,7 +91,11 @@ impl RenderCtx for Rec {
 
 fn arranged_dialog(d: &mut Dialog) {
     let mut cache = y901_ui::layout::LayoutCache::new();
-    d.measure(&Mono, Constraints::loose(Size::new(800.0, 600.0)), &mut cache);
+    d.measure(
+        &Mono,
+        Constraints::loose(Size::new(800.0, 600.0)),
+        &mut cache,
+    );
     d.arrange(Rect::new(0.0, 0.0, 800.0, 600.0), &Mono, &mut cache);
 }
 
@@ -115,7 +119,10 @@ fn dialog_arranges_all_children() {
 
     let a = d.children()[0].rect();
     let b = d.children()[1].rect();
-    assert!(a.h > 0.0 && b.h > 0.0, "两个子节点都必须拿到高度：{a:?} {b:?}");
+    assert!(
+        a.h > 0.0 && b.h > 0.0,
+        "两个子节点都必须拿到高度：{a:?} {b:?}"
+    );
     assert!(a.y < b.y, "b 必须排在 a 下面：a.y={} b.y={}", a.y, b.y);
     // 不能越过面板底部（按钮条之上）
     assert!(b.bottom() <= 600.0, "子节点不得溢出屏幕：b={b:?}");
@@ -247,7 +254,9 @@ fn text_input_supports_downcast() {
     let mut ti = TextInput::new("input");
     ti.set_text("abc");
     let any = ti.as_any_mut().expect("TextInput 必须实现 as_any_mut");
-    let back = any.downcast_mut::<TextInput>().expect("必须能 downcast 回 TextInput");
+    let back = any
+        .downcast_mut::<TextInput>()
+        .expect("必须能 downcast 回 TextInput");
     assert_eq!(back.text(), "abc");
     // downcast 到错误类型必须失败（不是 panic）
     assert!(any.downcast_mut::<Dialog>().is_none());
@@ -261,10 +270,7 @@ fn add_node_requests_layout() {
     let mut tree = UiTree::new(Box::new(y901_ui::layout::Flex::column("root")));
     tree.layout(Size::new(400.0, 300.0), &Mono);
     // 布局后不应该有挂起的请求
-    assert!(
-        !tree.take_layout_request(),
-        "初次 layout 后不应有挂起请求"
-    );
+    assert!(!tree.take_layout_request(), "初次 layout 后不应有挂起请求");
 
     let ok = tree.add_node(
         "root",

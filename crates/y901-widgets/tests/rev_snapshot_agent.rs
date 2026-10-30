@@ -1,11 +1,11 @@
-﻿//! `public_tree` 在 10k 节点上的性能（防 O(n²) 回归）。
+//! `public_tree` 在 10k 节点上的性能（防 O(n²) 回归）。
 
 use std::time::Instant;
 
 use y901_agent::api::{dispatch_request, Policy};
 use y901_ui::{
-    Constraints, EventCtx, EventResult, Flex, Json, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiTree, Widget,
+    Constraints, EventCtx, EventResult, Flex, Json, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    TextStyle, UiTree, Widget,
 };
 
 struct Mono;
