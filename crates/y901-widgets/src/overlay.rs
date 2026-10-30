@@ -4,8 +4,8 @@
 //! 于是它们的 rect 就是整个视口 —— 这样"点外部关闭/吞掉"才有几何依据。
 
 use y901_ui::{
-    Command, Constraints, Edges, EventCtx, EventResult, FlexItem, Json, Layer, Pos, Rect, RenderCtx,
-    Role, Semantics, Size, State, TextStyle, TextMetrics, UiEvent, Widget,
+    Command, Constraints, Edges, EventCtx, EventResult, FlexItem, Json, Layer, Pos, Rect,
+    RenderCtx, Role, Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 菜单项高度。
@@ -132,7 +132,12 @@ impl Widget for Menu {
         self.item
     }
 
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(c.max)
     }
 
@@ -184,7 +189,9 @@ impl Widget for Menu {
             }
             UiEvent::MouseDown { pos, .. } => {
                 if self.panel.contains(*pos) {
-                    if let Some(i) = (0..self.items.len()).find(|i| self.item_rect(*i).contains(*pos)) {
+                    if let Some(i) =
+                        (0..self.items.len()).find(|i| self.item_rect(*i).contains(*pos))
+                    {
                         ctx.emit_app(
                             self.action.clone(),
                             Json::obj()
@@ -253,16 +260,13 @@ impl Widget for Menu {
                 ctx.fill_rect(r, hover.bg);
             }
             let fg = ctx.theme().style(Role::LIST_ITEM, State::Normal).fg;
-            ctx.draw_text(
-                Pos::new(r.x + 10.0, r.y + 4.0),
-                label,
-                &TextStyle::fg(fg),
-            );
+            ctx.draw_text(Pos::new(r.x + 10.0, r.y + 4.0), label, &TextStyle::fg(fg));
         }
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default().exposed(true)
+        Semantics::default()
+            .exposed(true)
             .label("menu")
             .action_spec("select", y901_ui::InputKind::Number)
             .state("open", self.open)
@@ -287,6 +291,8 @@ pub struct Dialog {
     panel_size: Size,
     /// 外部注入的面板样式（`None` = 走主题）。
     panel_style: Option<crate::style::WidgetStyle>,
+    /// 底部按钮样式（`None` = 走主题）。
+    button_style: Option<crate::style::WidgetStyle>,
 }
 
 impl Dialog {
@@ -308,6 +314,7 @@ impl Dialog {
             item: FlexItem::default(),
             panel_size: Size::new(420.0, 220.0),
             panel_style: None,
+            button_style: None,
         }
     }
 
@@ -412,6 +419,24 @@ impl Dialog {
         true
     }
 
+    /// 注入 Dialog 内部确认/取消按钮的样式。
+    ///
+    /// 与 [`Dialog::set_panel_style`] 一样不自动标脏；调用方随后必须
+    /// `tree.invalidate(id)`。返回 `false` 表示样式未变化。
+    pub fn set_button_style(&mut self, style: Option<crate::style::WidgetStyle>) -> bool {
+        if self.button_style == style {
+            return false;
+        }
+        self.button_style = style;
+        true
+    }
+
+    /// 构建期直接设置按钮样式，等价于 `set_button_style(Some(style))`。
+    pub fn button_style(mut self, style: crate::style::WidgetStyle) -> Self {
+        self.button_style = Some(style);
+        self
+    }
+
     pub fn set_open(&mut self, open: bool) {
         self.open = open;
     }
@@ -481,11 +506,21 @@ impl Widget for Dialog {
         Some(self)
     }
 
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut y901_ui::layout::LayoutCache) -> Size {
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
         c.constrain(c.max)
     }
 
-    fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        rect: Rect,
+        m: &dyn TextMetrics,
+        cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = rect;
         let w = self.panel_size.w.min(rect.w - 40.0);
         let h = self.panel_size.h.min(rect.h - 40.0);
@@ -516,7 +551,8 @@ impl Widget for Dialog {
             let mut y = body.y;
             for child in self.children.iter_mut() {
                 let remaining = (body.bottom() - y).max(0.0);
-                let size = child.measure(m, Constraints::loose(Size::new(body.w, remaining)), cache);
+                let size =
+                    child.measure(m, Constraints::loose(Size::new(body.w, remaining)), cache);
                 let h = size.h.min(remaining);
                 child.arrange(Rect::new(body.x, y, body.w, h), m, cache);
                 y += h + GAP;
@@ -627,7 +663,16 @@ impl Widget for Dialog {
                 break;
             };
             let style = ctx.theme().style(Role::BUTTON, State::Normal);
-            ctx.fill_rect(*r, style.bg);
+            if let Some(button_style) = self.button_style {
+                if button_style.has_bg() {
+                    button_style.paint_bg(ctx, *r);
+                    button_style.paint_border(ctx, *r);
+                } else {
+                    ctx.fill_rect(*r, style.bg);
+                }
+            } else {
+                ctx.fill_rect(*r, style.bg);
+            }
             let w = ctx.measure_text(label, &TextStyle::fg(style.fg)).w;
             ctx.draw_text(
                 Pos::new(r.x + (r.w - w) * 0.5, r.y + 4.0),
@@ -638,7 +683,8 @@ impl Widget for Dialog {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default().exposed(true)
+        Semantics::default()
+            .exposed(true)
             .label(self.title.clone())
             .action("close")
             .state("open", self.open)

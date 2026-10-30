@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Flex, Modifiers, Pos, Rect, RenderCtx, Size,
-    TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 use y901_widgets::{Button, TextInput, WidgetStyle};
 
@@ -189,7 +189,9 @@ fn style_injection_keeps_dirty_region_local() {
         if let Some(any) = w.as_any_mut() {
             if let Some(b) = any.downcast_mut::<Button>() {
                 changed = b.set_style(Some(
-                    WidgetStyle::default().bg(Color::rgba(1.0, 0.0, 0.0, 1.0)).radius(12.0),
+                    WidgetStyle::default()
+                        .bg(Color::rgba(1.0, 0.0, 0.0, 1.0))
+                        .radius(12.0),
                 ));
             }
         }
@@ -235,6 +237,32 @@ fn dialog_panel_style_is_applied() {
 }
 
 #[test]
+fn dialog_button_style_is_applied() {
+    let button = WidgetStyle::default()
+        .gradient(Color::BLACK, Color::WHITE, (0.0, 1.0))
+        .radius(9.0)
+        .border(Color::WHITE, 1.0);
+    let mut dlg =
+        y901_widgets::Dialog::new("dlg", "Title").buttons(vec![("Cancel", "cancel"), ("OK", "ok")]);
+    dlg.set_open(true);
+    assert!(dlg.set_button_style(Some(button)));
+
+    let calls = Calls::new();
+    let mut tree = tree_with(Box::new(dlg));
+    tree.invalidate_all();
+    tree.render(&mut rec(&calls));
+    assert_eq!(
+        calls.gradients.borrow().len(),
+        2,
+        "Dialog 内部两个按钮都应使用注入的渐变"
+    );
+    assert!(
+        calls.strokes.borrow().len() >= 2,
+        "Dialog 按钮应画出注入的描边"
+    );
+}
+
+#[test]
 fn scrollbar_style_is_applied() {
     use y901_widgets::ScrollView;
     // ScrollView::new(id, child)：内容用一列 40 行文字撑高，触发滚动条
@@ -246,19 +274,19 @@ fn scrollbar_style_is_applied() {
         )));
     }
     let mut sv = ScrollView::new("sv", Box::new(column));
-    assert!(sv.set_bar_style(Some(
-        WidgetStyle::default().scrollbar(Color::BLACK, Color::WHITE, 6.0, 3.0)
-    )));
+    assert!(sv.set_bar_style(Some(WidgetStyle::default().scrollbar(
+        Color::BLACK,
+        Color::WHITE,
+        6.0,
+        3.0
+    ))));
 
     let calls = Calls::new();
     let mut tree = tree_with(Box::new(sv));
     tree.invalidate_all();
     tree.render(&mut rec(&calls));
     // 轨道 + 滑块都用圆角画（fill_round_rect）
-    assert!(
-        !calls.fills.borrow().is_empty(),
-        "滚动条应画出轨道/滑块"
-    );
+    assert!(!calls.fills.borrow().is_empty(), "滚动条应画出轨道/滑块");
 }
 
 /// 让 `EventCtx`/`EventResult` 等导入被使用（否则 clippy 报 unused）。

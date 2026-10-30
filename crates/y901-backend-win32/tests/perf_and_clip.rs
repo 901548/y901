@@ -29,14 +29,12 @@ fn backend_seeds_client_area_clip() {
         .map(|i| i + 1)
         .unwrap_or(body.len());
     let body = &body[..end];
+    let compact: String = body.split_whitespace().collect();
     assert!(
-        body.contains("self.clips.push(Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h))"),
+        compact.contains("self.clips.push(Rect::new(0.0,0.0,self.viewport.w,self.viewport.h))"),
         "begin() 必须压入客户区裁剪（否则内容会画到窗口外）：\n{body}"
     );
-    assert!(
-        body.contains("self.clips.clear()"),
-        "每帧必须重置裁剪栈"
-    );
+    assert!(body.contains("self.clips.clear()"), "每帧必须重置裁剪栈");
 }
 
 /// 字形必须走 `clip_quad` 裁剪（`clip_of` 只覆盖 fill_rect）。

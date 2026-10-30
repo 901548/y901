@@ -133,9 +133,22 @@ impl PlatformRuntime for Win32Runtime {
                 window.set_cursor(tree.cursor_at(pos));
             }
 
+            // Host 请求真实 backbuffer 快照：先强制一帧全量重绘，再在 present
+            // 之前 request；render 结束后回传给 Host（BGRA）。
+            let snapshot_requested = host.take_snapshot_request();
+            if snapshot_requested {
+                tree.invalidate_all();
+                window.request_snapshot();
+            }
+
             let dirty_full = tree.dirty().is_full();
             let dirty_any = !tree.dirty().is_empty();
             window.render(&mut tree);
+            if snapshot_requested {
+                if let Some((pixels, w, h)) = window.take_snapshot() {
+                    host.on_snapshot(&pixels, w, h);
+                }
+            }
 
             if profile {
                 let us = frame_start.elapsed().as_micros();

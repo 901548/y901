@@ -13,9 +13,7 @@
 //! ```
 
 use y901_agent::Policy;
-use y901_ui::{
-    Command, EventResult, Key, Modifiers, MouseButton, Size, UiEvent, UiTree,
-};
+use y901_ui::{Command, EventResult, Key, Modifiers, MouseButton, Size, UiEvent, UiTree};
 
 /// 渲染后端抽象（跨平台 v3 阶段 1）。
 pub mod gfx;
@@ -71,6 +69,20 @@ pub trait Host {
     fn take_font_request(&mut self) -> Option<FontConfig> {
         None
     }
+
+    /// 应用请求一帧真实 backbuffer 快照。
+    ///
+    /// 返回 `true` 时，平台层会在本帧 present 前 request，并在 render 后
+    /// 通过 [`Host::on_snapshot`] 回传 BGRA 像素。应用通常由快捷键（F12）
+    /// 或菜单置位，再把 PNG 落盘。
+    fn take_snapshot_request(&mut self) -> bool {
+        false
+    }
+
+    /// 收到真实 backbuffer 像素：`pixels` 为 BGRA，长度 = width*height*4。
+    ///
+    /// 在 UI 线程、present 之后调用；实现方负责编码 PNG，不要做长耗时操作。
+    fn on_snapshot(&mut self, _pixels: &[u8], _width: u32, _height: u32) {}
 
     /// 组件请求把 IME 候选窗钉到某处时调用。
     fn ime_position(&mut self, _tree: &mut UiTree) -> Option<(f32, f32)> {
@@ -139,22 +151,50 @@ impl Default for Options {
 /// 平台原始事件：wndproc 只产出它，不认识 `UiTree`。
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawEvent {
-    MouseMove { x: f32, y: f32 },
-    MouseDown { x: f32, y: f32, button: MouseButton },
-    MouseUp { x: f32, y: f32, button: MouseButton },
+    MouseMove {
+        x: f32,
+        y: f32,
+    },
+    MouseDown {
+        x: f32,
+        y: f32,
+        button: MouseButton,
+    },
+    MouseUp {
+        x: f32,
+        y: f32,
+        button: MouseButton,
+    },
     Wheel {
         x: f32,
         y: f32,
         delta: f32,
         mods: Modifiers,
     },
-    KeyDown { key: Key, mods: Modifiers },
+    KeyDown {
+        key: Key,
+        mods: Modifiers,
+    },
     /// Alt+键（WM_SYSKEYDOWN）：系统键，不与普通 KeyDown 混用。
-    SystemKeyDown { key: Key, mods: Modifiers },
-    Char { c: char },
-    Ime { text: String, composition: bool },
-    Resize { w: u32, h: u32 },
-    SetCursor { x: f32, y: f32 },
+    SystemKeyDown {
+        key: Key,
+        mods: Modifiers,
+    },
+    Char {
+        c: char,
+    },
+    Ime {
+        text: String,
+        composition: bool,
+    },
+    Resize {
+        w: u32,
+        h: u32,
+    },
+    SetCursor {
+        x: f32,
+        y: f32,
+    },
     Close,
 }
 
@@ -241,5 +281,39 @@ mod tests {
     fn set_cursor_and_close_emit_nothing() {
         assert!(translate(&RawEvent::SetCursor { x: 1.0, y: 2.0 }, Size::new(1.0, 1.0)).is_none());
         assert!(translate(&RawEvent::Close, Size::new(1.0, 1.0)).is_none());
+    }
+
+    struct SnapshotHost {
+        requested: bool,
+        pixels: usize,
+        size: (u32, u32),
+    }
+
+    impl Host for SnapshotHost {
+        fn idle(&mut self, _tree: &mut UiTree) {}
+        fn command(&mut self, _tree: &mut UiTree, _cmd: Command) -> bool {
+            true
+        }
+        fn take_snapshot_request(&mut self) -> bool {
+            std::mem::take(&mut self.requested)
+        }
+        fn on_snapshot(&mut self, pixels: &[u8], width: u32, height: u32) {
+            self.pixels = pixels.len();
+            self.size = (width, height);
+        }
+    }
+
+    #[test]
+    fn snapshot_hooks_are_host_contract() {
+        let mut host = SnapshotHost {
+            requested: true,
+            pixels: 0,
+            size: (0, 0),
+        };
+        assert!(host.take_snapshot_request());
+        assert!(!host.take_snapshot_request(), "请求应只消费一次");
+        host.on_snapshot(&[1, 2, 3, 4], 1, 1);
+        assert_eq!(host.pixels, 4);
+        assert_eq!(host.size, (1, 1));
     }
 }
