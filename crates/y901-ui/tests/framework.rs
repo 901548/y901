@@ -851,7 +851,7 @@ fn pointer_capture_routes_moves_outside_the_node() {
     );
 }
 
-// ---------- 8. 路径查找 O(d) + Layer 路由 ----------
+// ---------- 8. 路径查找 O(d) + 模态作用域 ----------
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -1000,13 +1000,13 @@ impl Widget for Stack {
     fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
 }
 
-/// 可以指定 Layer 的叶子。
+/// 可以指定是否模态的叶子。
 struct Layered {
     id: String,
     rect: Rect,
     hits: Rc<Cell<u32>>,
     kids: Vec<Box<dyn Widget>>,
-    /// 模态语义（与 `layer` 解耦：画在哪层 ≠ 是否阻塞底层）。
+    /// 模态语义（画在哪层 ≠ 是否阻塞底层）。
     modal: bool,
 }
 
