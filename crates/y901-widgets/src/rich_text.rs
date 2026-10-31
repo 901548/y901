@@ -4,7 +4,7 @@
 //! - **不做通用排版引擎**：按字符等宽换行（框架的文本度量本身就是格契约），
 //!   够渲染 Markdown 段落与代码块，且可预测、可测。
 //! - **只提供机制**：核心 API 是 `update(Vec<Block>)`。“流式追加”由调用方自己
-//!   修改最后一个 `Block` 后再 `update`；配合 [`RichText::last_block_rect`] 可将脏区
+//!   修改最后一个 `Block` 后再 `update`；配合 [`StyledText::last_block_rect`] 可将脏区
 //!   限制在最后一块。
 
 use y901_ui::{
@@ -90,8 +90,11 @@ pub enum Block {
     },
 }
 
-/// 富文本控件。
-pub struct RichText {
+/// 富文本控件（通用名：`StyledText`）。
+/// 通用富文本控件：接收 `Vec<Block>`，负责排版与绘制。
+///
+/// 它**不知道**什么叫 Markdown、什么叫"流式输出"——那些是调用方的事。
+pub struct StyledText {
     id: String,
     blocks: Vec<Block>,
     rect: Rect,
@@ -105,7 +108,7 @@ pub struct RichText {
     code_pad: f32,
 }
 
-impl RichText {
+impl StyledText {
     /// 新建空富文本。
     pub fn new(id: impl Into<String>) -> Self {
         Self {
@@ -165,7 +168,7 @@ impl RichText {
     ///
     /// 为什么不提供“追加 token”这种业务 API：框架只负责“把数据排好版”。
     /// 流式追加在调用方那边就是“改最后一个 Block 的文本”，然后 `update` 一次即可；
-    /// 配合 [`RichText::last_block_rect`] 还能把脏区限制在最后一块。
+    /// 配合 [`StyledText::last_block_rect`] 还能把脏区限制在最后一块。
     pub fn update(&mut self, blocks: Vec<Block>) {
         self.blocks = blocks;
         self.layout.clear();
@@ -291,7 +294,7 @@ impl RichText {
     }
 }
 
-impl Widget for RichText {
+impl Widget for StyledText {
     fn id(&self) -> &str {
         &self.id
     }
@@ -398,3 +401,9 @@ impl Widget for RichText {
         Semantics::default().exposed(true).label(plain)
     }
 }
+
+/// 兼容别名：旧代码用 `RichText`，新代码请用 [`StyledText`]。
+///
+/// 为什么留着：它只是一个 `pub type`，不会带来任何行为差异；
+/// 删掉它会让使用方的代码在升级时突然断裂，而改个名字并不值得那个代价。
+pub type RichText = StyledText;

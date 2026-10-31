@@ -5,6 +5,7 @@ members = [
     "crates/y901-core",
     "crates/y901-ui",
     "crates/y901-widgets",
+    "crates/y901-extras",
     "crates/y901-agent",
     "crates/y901-runtime",
     "crates/y901-mcp",

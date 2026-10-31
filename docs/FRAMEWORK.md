@@ -9,7 +9,8 @@ Y901 是一个**零依赖、Agent 原生**的桌面 UI 框架。UI 框架本身�
 |---|---|---|
 | `y901-core` | 纯逻辑：终端 Grid / reflow / scrollback / 格宽（`width_of_char`） | `unicode-width` |
 | `y901-ui` | 框架：Widget / UiTree / 布局 / 事件 / Signal / 语义树 / revision | **无** |
-| `y901-widgets` | 官方组件：Terminal / TextInput / Button / Label / List / ScrollView / SplitView / Menu / Dialog | `core`, `ui` |
+| `y901-widgets` | **通用**组件：Button / TextLabel / TextInput / ScrollView / ListView / SplitView / Menu / Dialog / StyledText | `core`, `ui` |
+| `y901-extras` | **扩展**组件：TerminalWidget（Grid + VT + PTY） | `core`, `ui`, `crossbeam-channel`, `portable-pty` |
 | `y901-agent` | 安全网关：语义 API（`dispatch_request`）、Token、作用域、版本锁、脱敏；RPC 与 MCP 协议 | `ui` |
 | `y901-runtime` | 平台无关契约：`Host` / `PlatformRuntime` / `RawEvent` / `translate` / `RenderBackend` | `ui`, `agent` |
 | `y901-mcp` | MCP 桥：stdio + JSON-RPC 2.0，把网关暴露给 Claude Desktop / Cursor | `agent`, `ui`, `widgets` |
@@ -371,3 +372,27 @@ impl RichText {
 
 流式追加由**调用方**完成：改最后一个 `Block` 的文本 → `update(blocks)` →
 `last_block_rect()` → `tree.invalidate_rect(rect)`。框架负责重排与只重绘那一块。
+
+## 14. 通用化边界：什么进框架，什么不进
+
+判据标准只有一条：**它是机制，还是某个业务的策略？**
+
+| 能力 | 归属 | 理由 |
+|---|---|---|
+| 布局（Flex/Stack）、事件路由、焦点、能力集 | `y901-ui` | 任何 GUI 都需要 |
+| 滚动、按钮、文本输入、列表、菜单、对话框 | `y901-widgets` | 通用控件，不依赖子系统 |
+| 终端（Grid + VT 序列 + PTY） | **`y901-extras`** | 依赖进程/伪终端，是子系统策略 |
+| 文件拖放事件 `UiEvent::FileDrop` | `y901-ui` | OS 级能力，不属于任何业务 |
+| Markdown 解析 | 应用层 | 语法是业务 |
+| 流式追加文本 | 应用层 | 框架只需 `StyledText::update(Vec<Block>)` |
+
+### 14.1 响应式更新：三种途径，一个结果
+
+| 你在哪里 | 用什么 | 脏区 |
+|---|---|---|
+| 组件的 `event()` | `ctx.request_redraw()` / `ctx.request_relayout()` | 自动（命中节点矩形） |
+| 非事件途径（后台/定时器/回调） | `tree.use_state(id, v)` → `state.set(v)` | 自动（订阅者所在节点） |
+| 跨线程 | `InvalidationHandle::invalidate(id)` | 自动下一帧 |
+
+三条路最后都汇到 `drain_invalidation()`：它只把**相关节点的矩形**加进脏区，
+拿不到矩形才退化整窗。（早期实现无条件 `dirty = full()`，把响应式变成了整窗重绘。）

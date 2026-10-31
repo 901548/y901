@@ -407,6 +407,29 @@ impl UiTree {
         self.set_focus(Some(target))
     }
 
+    /// 创建一个绑定到 `owner` 的状态：**改值就自动标脏那个控件**。
+    ///
+    /// 输入：`owner`（控件 id）、`initial`（初值）。
+    /// 返回：[`State<T>`]（拿着它的人负责读/写）。
+    /// 副作用：向树的失效队列注册订阅（`owner` 变更→ 下一帧标脏）。
+    ///
+    /// 与 `EventCtx::request_redraw()` 的分工：事件里用 `ctx`；
+    /// 非事件途径（后台循环/定时器/回调）用 `State`。
+    /// 拿一份失效队列句柄（给 `State::also_invalidate` 用）。
+    ///
+    /// 轻量 `Clone` 句柄（底层 `Arc<Mutex<..>>`），不持有树。
+    pub fn invalidation_queue_clone(&self) -> crate::signal::Invalidation {
+        self.invalidation_queue.clone()
+    }
+
+    pub fn use_state<T: Clone + PartialEq + 'static>(
+        &mut self,
+        owner: impl Into<String>,
+        initial: T,
+    ) -> crate::state::State<T> {
+        crate::state::State::new(owner, initial, self.invalidation_queue.clone())
+    }
+
     /// 把一个控件挂到 Overlay 层（屏幕最上层，不受父级裁切）。
     ///
     /// 输入：`widget`（id 必须树内唯一）、`anchor`（触发控件的屏幕矩形，
@@ -950,13 +973,24 @@ impl UiTree {
         if ids.is_empty() {
             return 0;
         }
+        let mut need_full = false;
         for id in &ids {
             self.cache.mark_dirty(id);
-            self.invalidate(id);
+            match self.rects.get(id).copied() {
+                // 局部标脏：只加该节点的矩形。
+                // 之前这里无条件 `dirty = full()`，把"响应式更新"变成了"整窗重绘"——
+                // 那是为了兼容"变值可能带来重排"的保守做法。
+                // 重排场景不需要它：布局阶段的 `mark_moved` 会把新旧矩形都并进脏区。
+                Some(r) if !r.is_empty() => self.dirty.add(r),
+                // 拿不到矩形（尚未布局 / 已删除）：只能整窗
+                _ => need_full = true,
+            }
             // Signal 驱动的变化不经 dispatch，必须在这里登记语义检查
             self.pending_semantic.insert(id.clone());
         }
-        self.dirty = DirtyRegion::full();
+        if need_full {
+            self.dirty = DirtyRegion::full();
+        }
         ids.len()
     }
 

@@ -1,0 +1,14 @@
+[package]
+name = "y901-extras"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+y901-core = { path = "../y901-core" }
+y901-ui = { path = "../y901-ui" }
+crossbeam-channel = "0.5"
+portable-pty = "0.8"
+
+[dev-dependencies]
+y901-agent = { path = "../y901-agent" }
+y901-widgets = { path = "../y901-widgets" }

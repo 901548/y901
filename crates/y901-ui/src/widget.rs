@@ -635,10 +635,13 @@ pub struct EventCtx {
     pub focus: Option<String>,
     /// 组件请求把焦点移交给谁（分发结束后由框架统一执行）。
     pub focus_request: Option<String>,
+    #[doc(hidden)]
     pub redraw: bool,
+    #[doc(hidden)]
     pub relayout: bool,
     pub viewport: Size,
     /// 本次分发中组件产生的意图。框架只负责搬运，不解释。
+    #[doc(hidden)]
     pub commands: Vec<crate::command::Command>,
 
     /// 当前处于哪个路由阶段。
@@ -651,16 +654,21 @@ pub struct EventCtx {
     ///
     /// 用途：`Relayout` 的脏区要标在"请求者"身上，而不是命中目标身上
     /// （滚动时命中目标是行，请求者是外层滚动容器）。
+    #[doc(hidden)]
     pub relayout_from: Option<String>,
     /// 置 true 时，即使返回 `Handled` 也继续冒泡（罕见，需显式请求）。
+    #[doc(hidden)]
     pub propagate: bool,
     /// 指针捕获请求，分发结束后由框架落实。
     pub pointer_capture: Option<crate::event::PointerCapture>,
     /// 焦点守卫：在处理 `Focus` 事件时置 true 可以拒绝这次焦点变更。
+    #[doc(hidden)]
     pub focus_vetoed: bool,
     /// 请求把 IME 候选窗钉在某个屏幕坐标（组件算好光标位置后填）。
+    #[doc(hidden)]
     pub ime_candidate: Option<Pos>,
     /// 本次分发中组件提交的浮层请求（分发结束后由 `UiTree` 统一挂载）。
+    #[doc(hidden)]
     pub popup_requests: Vec<PopupRequest>,
 }
 

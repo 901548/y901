@@ -14,7 +14,7 @@ use y901_ui::{
     Command, Constraints, EventCtx, EventResult, Flex, FlexItem, Json, Pos, Rect, RenderCtx,
     Semantics, Size, TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
-use y901_widgets::{Button, Dialog, TerminalWidget, TextInput};
+use y901_widgets::{Button, Dialog, TextInput};
 
 struct Mono;
 
@@ -178,8 +178,10 @@ fn state_focused_is_removed() {
 // ---------- 4. Terminal 也有顶层 focused ----------
 
 #[test]
-fn terminal_also_has_top_level_focused() {
-    let term = TerminalWidget::new("term", 40, 10).flex_item(FlexItem::height(60.0));
+fn any_widget_also_has_top_level_focused() {
+    // 原本用 TerminalWidget；终端已搬到 `y901-extras`，
+    // 这里验证的是框架行为，任何可聚焦控件都行。
+    let term = TextInput::new("term").flex_item(FlexItem::height(60.0));
     let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(term))));
     tree.layout(Size::new(400.0, 200.0), &Mono);
     assert!(tree.set_focus(Some("term".to_string())));
@@ -189,7 +191,7 @@ fn terminal_also_has_top_level_focused() {
     assert_eq!(
         get_field(node, "focused"),
         Some(Json::Bool(true)),
-        "Terminal 也应获得顶层 focused：{}",
+        "任何可聚焦控件都应获得顶层 focused：{}",
         node.to_string()
     );
 }

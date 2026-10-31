@@ -3,7 +3,7 @@
 //! 全部走真实路径 `tree.find_mut(id) → as_any_mut → downcast_mut::<T>()`。
 
 use y901_ui::{Constraints, Flex, FlexItem, Rect, Size, TextMetrics, TextStyle, UiTree};
-use y901_widgets::{ListView, Menu, TerminalWidget, TextLabel};
+use y901_widgets::{ListView, Menu, TextInput, TextLabel};
 
 struct Mono;
 
@@ -90,26 +90,21 @@ fn menu_open_close_via_downcast() {
 }
 
 #[test]
-fn terminal_downcast_reaches_pty_driver() {
+fn downcast_reaches_concrete_widget() {
+    // 终端已搬到 `y901-extras`（它依赖 PTY）。这里验证的是**机制**：
+    // 框架只通过 `as_any_mut` 把控件交给应用层，不需要认识具体类型。
     let mut tree = tree_with(Box::new(
-        TerminalWidget::new("term", 80, 24).flex_item(FlexItem::fill()),
+        TextInput::new("field").flex_item(FlexItem::fill()),
     ));
 
-    let term = tree
-        .find_mut("term")
+    let w = tree
+        .find_mut("field")
         .and_then(|w| w.as_any_mut())
-        .and_then(|a| a.downcast_mut::<TerminalWidget>())
-        .expect("TerminalWidget 必须支持 as_any_mut");
-
-    // 不真的 attach_shell（那会 spawn 进程，CI 环境不适合）
-    assert!(!term.has_shell(), "未 attach 时不应有 shell");
-    // 只读驱动接口可达即可（write 在没有 PTY 时是 no-op，不 panic）
-    term.write(b"echo hi\r");
-    // 注意：cols 由 arrange 按矩形宽度重算（600px / 8px ≈ 75），不是构造时的 80
-    assert!(
-        term.grid().cols > 0 && term.grid().rows > 0,
-        "网格必须已布局"
-    );
+        .and_then(|a| a.downcast_mut::<TextInput>())
+        .expect("TextInput 必须支持 as_any_mut");
+    // 拿到具体类型后可以调它的专用 API（这里是设文本）
+    w.set_text("hello");
+    assert_eq!(w.text(), "hello");
 }
 
 #[test]
