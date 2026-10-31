@@ -55,8 +55,7 @@ impl RenderCtx for Sink {
 
 fn build() -> UiTree {
     let items: Vec<String> = (0..100).map(|i| format!("row {i}")).collect();
-    let list = ListView::new("list", 20.0)
-        .items(items)
+    let list = ListView::from_strings("list", items)
         .flex_item(FlexItem::height(200.0));
     let root = Flex::column("root").push(Box::new(list));
     let mut tree = UiTree::new(Box::new(root));

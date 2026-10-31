@@ -1,142 +1,37 @@
-//! 虚拟化列表：只实例化/排布可见行。
+//! 通用虚拟列表：**只管滚动、可见区间、虚拟化裁剪**，不规定行长什么样。
 //!
-//! - `measure` 不测量任何子节点，内容高度 = `行数 × 行高`（解析式，O(1)）；
-//! - `arrange` 只把可见区间内的行放进池子（池子大小 = 视口行数 + 1）；
-//! - 行池是 `Vec<Box<dyn Widget>>`，通过 `as_any_mut` 就地改内容，实现行复用。
-
-use std::any::Any;
+//! ```ignore
+//! let list = ListView::new("log", 20.0)
+//!     .len(entries.len())
+//!     .painter(move |index, rect, ctx| {
+//!         ctx.draw_text(Pos::new(rect.x + 8.0, rect.y + 2.0), &entries[index], &style);
+//!     });
+//! ```
+//!
+//! 为什么不存数据：早期的 `ListView` 存 `RowData { cells, icon }`，
+//! 那是"文件表格"这一个业务的形状。聊天气泡、图片流、日志行
+//! 都装不进去。现在框架只提供"**第 i 行在这个矩形里，你自己画**"。
 
 use y901_ui::{
-    Color,
-    Constraints, EventCtx, EventResult, FlexItem, Pos, Rect, RenderCtx, Role, Semantics, Size,
-    State, TextMetrics, TextStyle, UiEvent, Widget,
+    Constraints, EventCtx, EventPhase, EventResult, FlexItem, InputKind, Pos, Rect, RenderCtx,
+    Role, Semantics, Size, State, TextMetrics, UiEvent, Widget,
 };
 
-use crate::scroll::{Scrollbar, BAR_WIDTH};
+use crate::scroll::Scrollbar;
 
-/// 一行数据：多列文本 + 可选图标（色块占位）。
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct RowData {
-    /// 各列文本（第 0 列通常是名字）。
-    pub cells: Vec<String>,
-    /// 前置图标色（`None` = 不画）。框架不认识图标语义，只画一个色块。
-    pub icon: Option<Color>,
-}
+/// 行绘制回调：`(index, rect, ctx)`。
+///
+/// 框架已经把 `ctx` 裁剪到可见区，回调里只需直接画。
+pub type RowPainter = Box<dyn FnMut(usize, Rect, &mut dyn RenderCtx)>;
 
-impl RowData {
-    /// 用若干列文本构造一行。
-    pub fn new(cells: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        Self {
-            cells: cells.into_iter().map(Into::into).collect(),
-            icon: None,
-        }
-    }
+const BAR_WIDTH: f32 = 6.0;
 
-    /// 设置前置图标色。
-    pub fn with_icon(mut self, color: Color) -> Self {
-        self.icon = Some(color);
-        self
-    }
-
-    /// 取第 `i` 列文本（越界返回空串）。
-    pub fn cell(&self, i: usize) -> &str {
-        self.cells.get(i).map(|s| s.as_str()).unwrap_or("")
-    }
-}
-
-/// 一行。
-struct Row {
-    id: String,
-    cells: Vec<String>,
-    icon: Option<Color>,
-    /// 各列的起始 x（相对行左边），由 `ListView` 预算好。
-    col_x: Vec<f32>,
-    rect: Rect,
-    visual: State,
-}
-
-impl Row {
-    fn set(&mut self, parent: &str, index: usize, data: &RowData, rect: Rect, visual: State, col_x: &[f32]) {
-        self.id.clear();
-        self.id.push_str(parent);
-        self.id.push_str(".row");
-        self.id.push_str(&index.to_string());
-        self.cells.clear();
-        self.cells.extend(data.cells.iter().cloned());
-        self.icon = data.icon;
-        self.col_x.clear();
-        self.col_x.extend_from_slice(col_x);
-        self.rect = rect;
-        self.visual = visual;
-    }
-}
-
-impl Widget for Row {
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn role(&self) -> Role {
-        Role::LIST_ITEM
-    }
-    fn as_any_mut(&mut self) -> Option<&mut dyn Any> {
-        Some(self)
-    }
-    fn measure(
-        &mut self,
-        m: &dyn TextMetrics,
-        c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
-    ) -> Size {
-        let h = m.line_height(&TextStyle::default());
-        c.constrain(Size::new(c.max.w, h))
-    }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
-        self.rect = r;
-    }
-    fn rect(&self) -> Rect {
-        self.rect
-    }
-    fn render(&mut self, ctx: &mut dyn RenderCtx) {
-        let style = ctx.theme().style(Role::LIST_ITEM, self.visual);
-        ctx.fill_rect(self.rect, style.bg);
-        let mut left = self.rect.x + 8.0;
-        // 图标（框架不认识图标语义，只画一个 8x8 色块）
-        if let Some(color) = self.icon {
-            let size = 8.0f32.min(self.rect.h - 4.0).max(0.0);
-            if size > 0.0 {
-                ctx.fill_rect(
-                    Rect::new(left, self.rect.y + (self.rect.h - size) * 0.5, size, size),
-                    color,
-                );
-                left += size + 6.0;
-            }
-        }
-        // 多列：每列的 x 由 ListView 预算（第 0 列跟随图标后面）
-        for (i, text) in self.cells.iter().enumerate() {
-            let x = match self.col_x.get(i) {
-                Some(off) => self.rect.x + *off + if i == 0 && self.icon.is_some() { left - self.rect.x - 8.0 } else { 0.0 },
-                None => left,
-            };
-            ctx.draw_text(
-                Pos::new(x, self.rect.y + 2.0),
-                text,
-                &TextStyle::fg(style.fg),
-            );
-        }
-    }
-    fn semantics(&self) -> Semantics {
-        Semantics::default()
-            .exposed(true)
-            .label(self.cells.first().cloned().unwrap_or_default())
-    }
-}
-
+/// 虚拟化列表（数据由回调提供）。
 pub struct ListView {
     id: String,
-    items: Vec<RowData>,
     row_height: f32,
-    /// 行池：长度 = 可见行数，随滚动复用。
-    pool: Vec<Box<dyn Widget>>,
+    /// 总行数（由调用方告知，框架不存数据）。
+    len: usize,
     offset: f32,
     viewport: Rect,
     inner: Rect,
@@ -144,34 +39,26 @@ pub struct ListView {
     show_bar: bool,
     bar: Scrollbar,
     arranged_rows: usize,
-    /// 当前选中行（数据索引，不是池索引）。
     selected: Option<usize>,
-    /// 悬停行。
     hovered: Option<usize>,
-    /// 选中回调。
     on_select: Option<Box<dyn FnMut(usize)>>,
-    /// 各列宽度（像素）；空 = 所有列均分剩余宽度。
-    column_widths: Vec<f32>,
-    /// 粘底（聊天/日志）。
     stick_to_bottom: bool,
-    /// 粘底是否处于激活状态。
     stick_armed: bool,
+    painter: Option<RowPainter>,
 }
 
 impl ListView {
-    /// 新建虚拟化列表：只排布可见行（10k 行也只有几十个 `Row` 实例）。
+    /// 新建空列表。
     ///
-    /// 输入：`id`（树内唯一，滚动条 id 为 `{id}.bar`）、`row_height`（像素，最小 1）。
-    /// 返回：空列表（`items` 为空、无选中、无回调）。
-    /// 副作用：无。
+    /// 输入：`id`（树内唯一；滚动条 id 为 `{id}.bar`）、`row_height`（像素，最小 1）。
+    /// 返回：未设行数/回调的实例。副作用：无。
     pub fn new(id: impl Into<String>, row_height: f32) -> Self {
         let id = id.into();
         Self {
             bar: Scrollbar::new(format!("{id}.bar"), id.clone()),
             id,
-            items: Vec::new(),
             row_height: row_height.max(1.0),
-            pool: Vec::new(),
+            len: 0,
             offset: 0.0,
             viewport: Rect::ZERO,
             inner: Rect::ZERO,
@@ -181,39 +68,63 @@ impl ListView {
             selected: None,
             hovered: None,
             on_select: None,
-            column_widths: Vec::new(),
             stick_to_bottom: false,
             stick_armed: false,
+            painter: None,
         }
     }
 
-    /// 设置数据行（构建器版）。
+    /// 设置总行数（构建器版）。
+    pub fn len(mut self, n: usize) -> Self {
+        self.len = n;
+        self
+    }
+
+    /// 设置总行数（运行时版）。
+    pub fn set_len(&mut self, n: usize) -> bool {
+        if self.len == n {
+            return false;
+        }
+        self.len = n;
+        self.offset = self.offset.clamp(0.0, self.max_offset());
+        if self.stick_armed {
+            self.offset = self.max_offset();
+        }
+        true
+    }
+
+    /// 设置行绘制回调（构建器版）。
+    pub fn painter(mut self, f: impl FnMut(usize, Rect, &mut dyn RenderCtx) + 'static) -> Self {
+        self.painter = Some(Box::new(f));
+        self
+    }
+
+    /// 设置行绘制回调（运行时版）。
+    pub fn set_painter(
+        &mut self,
+        f: impl FnMut(usize, Rect, &mut dyn RenderCtx) + 'static,
+    ) -> bool {
+        self.painter = Some(Box::new(f));
+        true
+    }
+
+    /// 便利构造：纯文本行（每行居左画一行字）。
     ///
-    /// 返回：自身。副作用：无（不重置 offset，也不清理选中——挂载前用最安全）。
-    pub fn items(mut self, items: Vec<String>) -> Self {
-        self.items = items
-            .into_iter()
-            .map(|t| RowData {
-                cells: vec![t],
-                icon: None,
+    /// 数据被捕获在回调里，**不进** `ListView` 的字段——
+    /// 所以它依然是通用的虚拟列表。
+    pub fn from_strings(id: impl Into<String>, items: Vec<String>) -> Self {
+        Self::new(id, 20.0)
+            .len(items.len())
+            .painter(move |i, rect, ctx| {
+                if let Some(text) = items.get(i) {
+                    let fg = ctx.theme().style(Role::TEXT, State::Normal).fg;
+                    let style = y901_ui::TextStyle::fg(fg);
+                    ctx.draw_text(Pos::new(rect.x + 8.0, rect.y + 2.0), text, &style);
+                }
             })
-            .collect();
-        self
     }
 
-    /// 多列行数据（文件树：名称/大小/日期）。
-    pub fn rows(mut self, rows: Vec<RowData>) -> Self {
-        self.items = rows;
-        self
-    }
-
-    /// 设置各列宽度（像素）；空 = 均分。
-    pub fn column_widths(mut self, widths: Vec<f32>) -> Self {
-        self.column_widths = widths;
-        self
-    }
-
-    /// 开启/关闭粘底。
+    /// 开启/关闭粘底（日志/聊天场景）。
     pub fn set_stick_to_bottom(&mut self, on: bool) -> bool {
         self.stick_to_bottom = on;
         self.stick_armed = on;
@@ -223,14 +134,14 @@ impl ListView {
         true
     }
 
-    /// 构造期开启粘底。
+    /// 构建期开启粘底。
     pub fn stick_to_bottom(mut self, on: bool) -> Self {
         self.stick_to_bottom = on;
         self.stick_armed = on;
         self
     }
 
-    /// 是否已在底部。
+    /// 是否已在底部（容差 0.5px）。
     pub fn is_at_bottom(&self) -> bool {
         self.offset >= self.max_offset() - 0.5
     }
@@ -241,16 +152,27 @@ impl ListView {
         self.offset = self.max_offset();
     }
 
-    /// 某一行当前的屏幕矩形（不可见返回 `None`）。
+    /// 滚到指定行（尽量让它在可见区顶部）。
+    pub fn scroll_to_row(&mut self, index: usize) -> bool {
+        let target = (index as f32 * self.row_height)
+            .min(self.max_offset())
+            .max(0.0);
+        if (self.offset - target).abs() < 0.01 {
+            return false;
+        }
+        self.set_offset(target);
+        true
+    }
+
+    /// 某行当前的屏幕矩形（不可见返回 `None`）。
     ///
     /// 用于配合 `UiTree::invalidate_rect()` 做**单行**标脏。
     pub fn row_rect(&self, index: usize) -> Option<Rect> {
-        if index >= self.items.len() {
+        if index >= self.len {
             return None;
         }
         let y = self.inner.y + index as f32 * self.row_height - self.offset;
         let r = Rect::new(self.inner.x, y, self.inner.w, self.row_height);
-        // 裁到视口：不可见就不用标脏
         let visible = r.intersect(self.inner);
         if visible.is_empty() {
             None
@@ -259,125 +181,68 @@ impl ListView {
         }
     }
 
-    /// 单行失效：返回该行屏幕矩形，调用方拿它去 `tree.invalidate_rect(rect)`。
-    ///
-    /// 为什么不直接改树：组件不持有 `UiTree`（框架边界），
-    /// 这里只交付一个射程，保证调用方不用遍历树就能精确标脏。
-    /// 计算各列的起始 x（相对行左边，含 8px 内边距）。
-    ///
-    /// `column_widths` 为空时按列数均分剩余宽度。
-    fn column_x(&self, row_w: f32, cols: usize) -> Vec<f32> {
-        let mut out = Vec::with_capacity(cols);
-        let mut x = 8.0f32;
-        if self.column_widths.is_empty() || self.column_widths.len() < cols {
-            let avail = (row_w - 16.0).max(0.0);
-            let each = if cols > 0 { avail / cols as f32 } else { avail };
-            for i in 0..cols {
-                out.push(8.0 + each * i as f32);
-            }
-            return out;
-        }
-        for i in 0..cols {
-            out.push(x);
-            x += self.column_widths[i];
-        }
-        out
-    }
-
+    /// 单行标脏矩形（已裁到可见区）。
     pub fn invalidate_row(&self, index: usize) -> Option<Rect> {
         self.row_rect(index)
     }
 
-    /// 替换数据行（运行时版），**同时把滚动位置重置到顶部**。
-    ///
-    /// 输入：新的行文本。返回：无。
-    /// 副作用：`offset = 0`；**不清理 `selected`**（若旧索引超出新长度，
-    /// `selected_index()` 仍会返回越界值——调用方需自行重置）。
-    pub fn set_items(&mut self, items: Vec<String>) {
-        self.items = items
-            .into_iter()
-            .map(|t| RowData {
-                cells: vec![t],
-                icon: None,
-            })
-            .collect();
-        self.offset = 0.0;
+    /// 当前可见的行区间 `[start, end)`。
+    pub fn visible_range(&self) -> std::ops::Range<usize> {
+        if self.len == 0 || self.inner.h <= 0.0 {
+            return 0..0;
+        }
+        let first = (self.offset / self.row_height).floor().max(0.0) as usize;
+        let count = ((self.inner.h / self.row_height).ceil() as usize + 1)
+            .min(self.len.saturating_sub(first));
+        first..first + count
     }
 
-    /// 等价于 `set_items`，但接受多列行数据。
-    pub fn set_rows(&mut self, rows: Vec<RowData>) {
-        self.items = rows;
-        self.offset = 0.0;
-        self.stick_armed = self.stick_to_bottom;
-    }
-
-    /// 设置 flex 伸缩参数（虚拟化列表通常用 `FlexItem::fill()`）。
-    ///
-    /// 返回：自身。副作用：无。
+    /// 设置迪归属的 flex 参数。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
     }
 
-    /// 初始选中行。
+    /// 设置选中行。
     pub fn selected(mut self, index: Option<usize>) -> Self {
         self.selected = index;
         self
     }
 
-    /// 行被点击时回调（参数是数据索引）。
+    /// 选中回调（应用层自己决定含义）。
     pub fn on_row_selected(mut self, f: impl FnMut(usize) + 'static) -> Self {
         self.on_select = Some(Box::new(f));
         self
     }
 
-    /// 当前选中行的**数据索引**（不是屏幕行号）。
-    ///
-    /// 返回：`None` = 未选中；`Some(i)` = 第 i 行（滚动后不变）。
-    /// 副作用：无。注意它不校验 `< row_count()`——`set_items` 之后可能越界。
+    /// 当前选中行。
     pub fn selected_index(&self) -> Option<usize> {
         self.selected
     }
 
-    /// 屏幕坐标 → 数据索引。
-    fn row_at(&self, pos: Pos) -> Option<usize> {
-        if !self.inner.contains(pos) {
-            return None;
-        }
-        let rel = pos.y - self.inner.y + self.offset;
-        let index = (rel / self.row_height).floor();
-        if index < 0.0 {
-            return None;
-        }
-        let index = index as usize;
-        (index < self.items.len()).then_some(index)
-    }
-
     /// 当前滚动偏移（像素）。
-    ///
-    /// 返回：`0..=max(0, content_height - 视口高)`。副作用：无。
     pub fn offset(&self) -> f32 {
         self.offset
     }
 
-    /// 诊断：上次 arrange 排布的行数（虚拟化的直接证据）。
+    /// 本次布局中参与绘制的可见行数。
     pub fn arranged_rows(&self) -> usize {
         self.arranged_rows
     }
 
-    /// 全部行的总高（`row_count * row_height`，像素）。
-    ///
-    /// 返回：虚拟滚动的依据，**不是**实际排布高度（实际只排可见的几十行）。
-    /// 副作用：无。
+    /// 内容总高度（解析值）。
     pub fn content_height(&self) -> f32 {
-        self.items.len() as f32 * self.row_height
+        self.len as f32 * self.row_height
     }
 
-    /// 数据行数（`items.len()`）。
-    ///
-    /// 返回：行数。副作用：无。与 `arranged_rows()`（实际排布的行数）不同。
+    /// 总行数。
     pub fn row_count(&self) -> usize {
-        self.items.len()
+        self.len
+    }
+
+    /// 设置滚动条样式。
+    pub fn set_bar_style(&mut self, style: Option<crate::style::WidgetStyle>) -> bool {
+        self.bar.set_style(style)
     }
 
     fn max_offset(&self) -> f32 {
@@ -385,22 +250,30 @@ impl ListView {
     }
 
     fn set_offset(&mut self, v: f32) -> bool {
-        let clamped = v.clamp(0.0, self.max_offset());
-        if (clamped - self.offset).abs() < 0.01 {
+        let v = v.clamp(0.0, self.max_offset());
+        if (self.offset - v).abs() < 0.01 {
             return false;
         }
-        self.offset = clamped;
+        self.offset = v;
+        self.stick_armed = self.stick_to_bottom && self.is_at_bottom();
         true
     }
 
-    /// 转发到内部滚动条样式。
-    pub fn set_bar_style(&mut self, style: Option<crate::style::WidgetStyle>) -> bool {
-        self.bar.set_style(style)
+    fn row_at(&self, pos: Pos) -> Option<usize> {
+        if !self.inner.contains(pos) {
+            return None;
+        }
+        let y = pos.y - self.inner.y + self.offset;
+        let index = (y / self.row_height).floor() as usize;
+        if index < self.len {
+            Some(index)
+        } else {
+            None
+        }
     }
 }
 
 impl Widget for ListView {
-    /// 向下转型：Host 运行时调 `set_items` 的唯一路径。
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
     }
@@ -417,85 +290,25 @@ impl Widget for ListView {
         self.item
     }
 
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.pool
-    }
-
-    fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
-        Some(&mut self.pool)
-    }
-
     fn measure(
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
-        // 不测子节点：内容高度解析可得
         c.constrain(Size::new(c.max.w, c.max.h))
     }
 
-    fn arrange(
-        &mut self,
-        rect: Rect,
-        m: &dyn TextMetrics,
-        cache: &mut y901_ui::layout::LayoutCache,
-    ) {
+    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
         self.viewport = rect;
-
         self.show_bar = self.content_height() > rect.h;
         let bar_w = if self.show_bar { BAR_WIDTH } else { 0.0 };
         self.inner = Rect::new(rect.x, rect.y, (rect.w - bar_w).max(0.0), rect.h);
         self.offset = self.offset.clamp(0.0, self.max_offset());
-
-        // ---- 虚拟化：只处理可见区间 ----
-        let first = (self.offset / self.row_height).floor().max(0.0) as usize;
-        let visible = ((self.inner.h / self.row_height).ceil() as usize + 1)
-            .min(self.items.len().saturating_sub(first));
-        let count = visible.max(1).min(self.items.len().saturating_sub(first));
-
-        self.pool.truncate(count);
-        while self.pool.len() < count {
-            self.pool.push(Box::new(Row {
-                id: String::new(),
-                cells: Vec::new(),
-                icon: None,
-                col_x: Vec::new(),
-                rect: Rect::ZERO,
-                visual: State::Normal,
-            }));
+        if self.stick_armed {
+            self.offset = self.max_offset();
         }
-
-        self.arranged_rows = 0;
-        // 先算好列偏移（避免在 `pool.iter_mut()` 里借 `self`）
-        let row_w = self.inner.w;
-        let cols = self
-            .items
-            .iter()
-            .map(|r| r.cells.len())
-            .max()
-            .unwrap_or(1)
-            .max(1);
-        let col_x = self.column_x(row_w, cols);
-        for (k, cell) in self.pool.iter_mut().enumerate() {
-            let index = first + k;
-            let y = self.inner.y + index as f32 * self.row_height - self.offset;
-            let r = Rect::new(self.inner.x, y, self.inner.w, self.row_height);
-            if let Some(row) = cell.as_any_mut().and_then(|a| a.downcast_mut::<Row>()) {
-                let empty = RowData::default();
-                let data = self.items.get(index).unwrap_or(&empty);
-                let visual = if Some(index) == self.selected {
-                    State::Focused
-                } else if Some(index) == self.hovered {
-                    State::Hovered
-                } else {
-                    State::Normal
-                };
-                row.set(&self.id, index, data, r, visual, &col_x);
-            }
-            cell.arrange(r, m, cache);
-            self.arranged_rows += 1;
-        }
+        self.arranged_rows = self.visible_range().len();
 
         self.bar.arrange_at(
             Rect::new(rect.right() - BAR_WIDTH, rect.y, BAR_WIDTH, rect.h),
@@ -522,10 +335,10 @@ impl Widget for ListView {
     }
 
     fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
-        if ctx.phase == y901_ui::EventPhase::Capture {
+        if ctx.phase == EventPhase::Capture {
             return EventResult::Ignored;
         }
-        // 顺序即优先级：滚动条必须抢在行点击之前，否则点滑块会被当成选中行
+        // 顺序即优先级：滚动条必须抢在行点击之前
         match event {
             UiEvent::MouseDown { pos, .. } if self.show_bar && self.bar.rect.contains(*pos) => {
                 ctx.set_pointer_capture(self.id.clone());
@@ -538,7 +351,6 @@ impl Widget for ListView {
                 }
             }
             UiEvent::MouseMove { pos } if self.bar.dragging => {
-                // 拖拽滑块期间绝不触发行选中
                 let ratio = self.bar.ratio_at(pos.y) - self.bar.thumb_ratio * 0.5;
                 if self.set_offset(ratio * self.max_offset()) {
                     EventResult::Relayout
@@ -592,20 +404,44 @@ impl Widget for ListView {
             _ => EventResult::Ignored,
         }
     }
+
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
-        let style = ctx.theme().style(Role::LIST, State::Normal);
-        ctx.fill_rect(self.viewport, style.bg);
+        let bg = ctx.theme().style(Role::LIST, State::Normal).bg;
+        ctx.fill_rect(self.viewport, bg);
+
+        // 可见行：框架画选中/悬停底色，内容交给回调。
+        let range = self.visible_range();
+        let sel_bg = ctx.theme().style(Role::LIST, State::Focused).bg;
+        let hov_bg = ctx.theme().style(Role::LIST, State::Hovered).bg;
+        let mut painter = self.painter.take();
+        for index in range {
+            let Some(rect) = self.row_rect(index) else {
+                continue;
+            };
+            if Some(index) == self.selected {
+                ctx.fill_rect(rect, sel_bg);
+            } else if Some(index) == self.hovered {
+                ctx.fill_rect(rect, hov_bg);
+            }
+            if let Some(f) = painter.as_mut() {
+                f(index, rect, ctx);
+            }
+        }
+        self.painter = painter;
+
         self.bar.render_bar(ctx);
     }
 
     fn semantics(&self) -> Semantics {
+        let visible = self.visible_range();
         Semantics::default()
             .exposed(true)
-            .label(format!("list({} rows)", self.items.len()))
-            .action_spec("scroll_to_ratio", y901_ui::InputKind::Number)
-            .state("rows", self.items.len() as u32)
+            .label(format!("list({} rows)", self.len))
+            .action_spec("scroll_to_ratio", InputKind::Number)
+            .state("rows", self.len as u32)
             .state("offset", self.offset)
             .state("arranged", self.arranged_rows as u32)
+            .state("first_visible", visible.start as u32)
             .state(
                 "selected",
                 self.selected.map(|i| i as u32).unwrap_or(u32::MAX),
@@ -616,12 +452,14 @@ impl Widget for ListView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use y901_ui::{UiTree, Widget};
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use y901_ui::{layout::LayoutCache, TextStyle, UiTree};
 
     struct Mono;
     impl TextMetrics for Mono {
         fn measure_text(&self, t: &str, _s: &TextStyle) -> Size {
-            Size::new(t.len() as f32 * 8.0, 16.0)
+            Size::new(t.chars().count() as f32 * 8.0, 16.0)
         }
         fn line_height(&self, _s: &TextStyle) -> f32 {
             20.0
@@ -631,17 +469,19 @@ mod tests {
         }
     }
 
-    fn ten_thousand() -> ListView {
-        let items: Vec<String> = (0..10_000).map(|i| format!("row {i}")).collect();
+    fn big_list(painted: Rc<Cell<usize>>) -> ListView {
+        let n = 10_000;
         ListView::new("list", 20.0)
-            .items(items)
+            .len(n)
+            .painter(move |_i, _r, _ctx| painted.set(painted.get() + 1))
             .flex_item(FlexItem::fill())
     }
 
     #[test]
-    fn virtualized_list_only_arranges_visible_rows() {
-        let mut list = ten_thousand();
-        let mut cache = y901_ui::layout::LayoutCache::new();
+    fn only_visible_rows_are_painted() {
+        let painted = Rc::new(Cell::new(0));
+        let mut list = big_list(painted.clone());
+        let mut cache = LayoutCache::new();
         list.measure(
             &Mono,
             Constraints::loose(Size::new(300.0, 100.0)),
@@ -653,16 +493,17 @@ mod tests {
         assert_eq!(list.row_count(), 10_000);
         assert!(
             list.arranged_rows() <= 7,
-            "10k 行只应排布可见的几行，实际 {}",
+            "10k 行只应算可见的几行，实际 {}",
             list.arranged_rows()
         );
-        assert_eq!(list.children().len(), list.arranged_rows());
+        assert_eq!(list.children().len(), 0, "行不再是子节点（由回调画）");
     }
 
     #[test]
-    fn scrolling_recycles_pool_and_keeps_count_small() {
-        let mut list = ten_thousand();
-        let mut cache = y901_ui::layout::LayoutCache::new();
+    fn scroll_keeps_visible_window_small() {
+        let painted = Rc::new(Cell::new(0));
+        let mut list = big_list(painted);
+        let mut cache = LayoutCache::new();
         list.measure(
             &Mono,
             Constraints::loose(Size::new(300.0, 100.0)),
@@ -670,7 +511,7 @@ mod tests {
         );
         list.arrange(Rect::new(0.0, 0.0, 300.0, 100.0), &Mono, &mut cache);
 
-        let mut ctx = y901_ui::EventCtx::new(None, Size::new(300.0, 100.0));
+        let mut ctx = EventCtx::new(None, Size::new(300.0, 100.0));
         for _ in 0..20 {
             list.event(
                 &mut ctx,
@@ -686,28 +527,63 @@ mod tests {
         assert!(list.offset() > 0.0, "应真的滚动了");
         assert!(
             list.arranged_rows() <= 7,
-            "滚动后仍只排布可见行，实际 {}",
+            "滚动后仍只算可见行：{}",
             list.arranged_rows()
         );
     }
 
     #[test]
-    fn list_ids_reflect_data_index() {
-        let list = ten_thousand();
-        let mut tree = UiTree::new(Box::new(list).flex_item_helper());
-        tree.layout(Size::new(300.0, 100.0), &Mono);
-        // 第一行可见
-        assert!(tree.find("list.row0").is_some(), "可见行应有稳定 id");
+    fn visible_range_follows_offset() {
+        let mut list = big_list(Rc::new(Cell::new(0)));
+        let mut cache = LayoutCache::new();
+        list.measure(
+            &Mono,
+            Constraints::loose(Size::new(300.0, 100.0)),
+            &mut cache,
+        );
+        list.arrange(Rect::new(0.0, 0.0, 300.0, 100.0), &Mono, &mut cache);
+        assert_eq!(list.visible_range().start, 0);
+
+        // 滚到第 50 行（=1000px）
+        list.scroll_to_row(50);
+        list.arrange(Rect::new(0.0, 0.0, 300.0, 100.0), &Mono, &mut cache);
+        assert_eq!(list.visible_range().start, 50, "可见区应从第 50 行开始");
+        assert!(
+            list.row_rect(50).is_some() && list.row_rect(49).is_none(),
+            "第 50 行可见、第 49 行不可见"
+        );
     }
 
-    /// 便于把 ListView 塞进 UiTree 的小工具。
-    trait FlexHelper {
-        fn flex_item_helper(self) -> Box<dyn Widget>;
+    #[test]
+    fn sticky_bottom_follows_len_growth() {
+        let mut list = ListView::new("log", 20.0)
+            .len(5)
+            .stick_to_bottom(true)
+            .flex_item(FlexItem::fill());
+        let mut cache = LayoutCache::new();
+        list.measure(
+            &Mono,
+            Constraints::loose(Size::new(300.0, 100.0)),
+            &mut cache,
+        );
+        list.arrange(Rect::new(0.0, 0.0, 300.0, 100.0), &Mono, &mut cache);
+        assert!(list.is_at_bottom());
+
+        // 新行进来：应自动跟到底
+        list.set_len(50);
+        list.arrange(Rect::new(0.0, 0.0, 300.0, 100.0), &Mono, &mut cache);
+        assert!(list.is_at_bottom(), "粘底应跟着新内容");
+        assert!(
+            list.visible_range().end == 50,
+            "可见区应到最后一行：{:?}",
+            list.visible_range()
+        );
     }
-    impl FlexHelper for ListView {
-        fn flex_item_helper(mut self) -> Box<dyn Widget> {
-            self = self.flex_item(FlexItem::fill());
-            Box::new(self)
-        }
+
+    #[test]
+    fn tree_owns_list_and_hit_tests_rows() {
+        let mut tree = UiTree::new(Box::new(big_list(Rc::new(Cell::new(0)))));
+        tree.layout(Size::new(300.0, 100.0), &Mono);
+        assert_eq!(tree.hit_test(Pos::new(10.0, 10.0)).as_deref(), Some("list"));
     }
 }

@@ -123,7 +123,7 @@ impl RenderCtx for Canvas {
 fn build() -> UiTree {
     // ListView 自己维护行控件池（虚拟化），所以用 items 接口
     let items: Vec<String> = (0..100).map(|i| format!("row-{i}-xyz")).collect();
-    let lv = ListView::new("list", 20.0).items(items);
+    let lv = ListView::from_strings("list", items);
     let mut tree = UiTree::new(Box::new(lv));
     tree.layout(Size::new(320.0, 200.0), &Mono);
     tree

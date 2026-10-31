@@ -13,7 +13,7 @@
 //! - [`TextLabel`]：只显示文字
 //! - [`TextInput`]：单行输入（含 IME / 选区 / 剪贴板抽象）
 //! - [`ScrollView`]：滚动容器（局部重绘友好）
-//! - [`ListView`]：多列行模型
+//! - [`ListView`]：通用虚拟列表（行内容由回调提供）
 //! - [`StyledText`]：富文本（段落 + 代码块）
 //! - [`Flex`]/[`Stack`]：布局（在 `y901_ui` 里）
 //! - [`Menu`]/[`Dialog`]：浮层内容（挂载交 `UiTree::popups`）
@@ -35,7 +35,7 @@ pub mod text_input;
 pub use button::Button;
 pub use label::{parse_color, TextLabel};
 pub use list::VerticalList;
-pub use list_view::{ListView, RowData};
+pub use list_view::{ListView, RowPainter};
 pub use overlay::{Dialog, Menu};
 pub use rich_text::{Block, InlineStyle, RichText, Span, StyledText};
 pub use scroll::{Scrollbar, ScrollView};

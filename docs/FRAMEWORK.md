@@ -396,3 +396,34 @@ impl RichText {
 
 三条路最后都汇到 `drain_invalidation()`：它只把**相关节点的矩形**加进脏区，
 拿不到矩形才退化整窗。（早期实现无条件 `dirty = full()`，把响应式变成了整窗重绘。）
+
+## 15. ListView：通用虚拟列表（无数据）
+
+早期的 `ListView` 存 `RowData { cells, icon }`——那是"文件表格"一个业务的形状。
+聊天气泡、图片流、日志行都装不进去。
+
+现在它只管三件事：**总行数、当前偏移、可见区裁剪**；行长什么样由回调决定。
+
+```rust
+let list = ListView::new("chat", 24.0)
+    .len(messages.len())
+    .stick_to_bottom(true)
+    .painter(move |i, rect, ctx| {
+        // 自己画：气泡、头像、图片…都行
+        ctx.draw_text(Pos::new(rect.x + 8.0, rect.y + 4.0), &messages[i].text, &style);
+    });
+```
+
+| API | 作用 |
+|---|---|
+| `len(n)` / `set_len(n)` | 总行数（\`set_len\` 返回是否变化） |
+| `painter(f)` / `set_painter(f)` | 行绘制回调 `FnMut(usize, Rect, &mut dyn RenderCtx)` |
+| `visible_range()` | 当前可见区间 |
+| `row_rect(i)` / `invalidate_row(i)` | 单行屏幕矩形（已裁到可见区） |
+| `stick_to_bottom` / `scroll_to_end` / `is_at_bottom` | 粘底（日志/聊天） |
+| `scroll_to_row(i)` | 滚到指定行 |
+| `from_strings(id, items)` | 便利构造：纯文本行（数据被捕获在回调里，**不进**字段） |
+
+行**不再是子节点**：`children()` 为空，命中/标脏用 `row_rect`。
+代价是每行没有独立的语义节点；因此 `semantics()` 只报
+`rows/offset/first_visible/selected` 四个属性。若需逐行语义，用普通容器 + 子控件。

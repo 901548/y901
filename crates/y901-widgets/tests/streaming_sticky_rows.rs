@@ -11,7 +11,7 @@ use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Flex, FlexItem, Modifiers, Pos, Rect, RenderCtx,
     Semantics, Size, TextStyle, TextMetrics, UiEvent, UiTree,
 };
-use y901_widgets::{ListView, RowData, ScrollView};
+use y901_widgets::{ListView, ScrollView};
 
 struct Mono;
 
@@ -244,12 +244,22 @@ fn user_scroll_up_disarms_stick_until_back_at_bottom() {
 
 #[test]
 fn listview_renders_multiple_columns_and_icon() {
-    let rows = vec![
-        RowData::new(["src", "4 KiB", "10:20"]).with_icon(Color::rgba(0.9, 0.6, 0.2, 1.0)),
-        RowData::new(["main.rs", "2 KiB", "10:21"]),
-    ];
-    let mut lv = ListView::new("list", 20.0);
-    lv.set_rows(rows);
+    // 通用列表不存数据：行内容由回调自己画。
+    // 这里模拟 Demo 的三列文件行（图标 + 名称 + 大小 + 时间）。
+    let rows: Vec<(&str, &str, &str)> = vec![("src", "4 KiB", "10:20"), ("main.rs", "2 KiB", "10:21")];
+    let lv = ListView::new("list", 20.0).len(rows.len()).painter(move |i, rect, ctx| {
+        let Some((name, size, at)) = rows.get(i) else { return };
+        let fg = ctx.theme().style(y901_ui::Role::TEXT, y901_ui::State::Normal).fg;
+        let st = TextStyle::fg(fg);
+        ctx.fill_round_rect(
+            Rect::new(rect.x + 4.0, rect.y + 4.0, 12.0, 12.0),
+            Color::rgba(0.9, 0.6, 0.2, 1.0),
+            3.0,
+        );
+        ctx.draw_text(Pos::new(rect.x + 24.0, rect.y + 2.0), name, &st);
+        ctx.draw_text(Pos::new(rect.x + 200.0, rect.y + 2.0), size, &st);
+        ctx.draw_text(Pos::new(rect.x + 300.0, rect.y + 2.0), at, &st);
+    });
     let mut tree = UiTree::new(Box::new(lv.flex_item(FlexItem::height(120.0))));
     tree.layout(Size::new(400.0, 200.0), &Mono);
 
@@ -272,9 +282,7 @@ fn listview_renders_multiple_columns_and_icon() {
 
 #[test]
 fn invalidate_row_returns_row_rect_and_stays_local() {
-    let rows: Vec<RowData> = (0..50).map(|i| RowData::new([format!("row{i}")])).collect();
-    let mut lv = ListView::new("list", 20.0);
-    lv.set_rows(rows);
+    let lv = ListView::from_strings("list", (0..50).map(|i| format!("row{i}")).collect());
     let mut tree = UiTree::new(Box::new(lv.flex_item(FlexItem::height(200.0))));
     tree.layout(Size::new(400.0, 200.0), &Mono);
     tree.render(&mut Sink);
@@ -302,8 +310,7 @@ fn invalidate_row_returns_row_rect_and_stays_local() {
 
 #[test]
 fn invalidate_row_out_of_range_returns_none() {
-    let mut lv = ListView::new("list", 20.0);
-    lv.set_rows(vec![RowData::new(["only"])]);
+    let lv = ListView::from_strings("list", vec!["only".to_string()]);
     let mut tree = UiTree::new(Box::new(lv.flex_item(FlexItem::height(100.0))));
     tree.layout(Size::new(400.0, 200.0), &Mono);
 

@@ -234,8 +234,7 @@ fn listview_bar_branch_precedes_row_click() {
     let picked = Rc::new(RefCell::new(None));
     let p = picked.clone();
     let items: Vec<String> = (0..100).map(|i| format!("r{i}")).collect();
-    let list = ListView::new("list", 20.0)
-        .items(items)
+    let list = ListView::from_strings("list", items)
         .on_row_selected(move |i| *p.borrow_mut() = Some(i));
 
     let mut tree = UiTree::new(Box::new(

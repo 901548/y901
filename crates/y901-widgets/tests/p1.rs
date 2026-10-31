@@ -28,8 +28,7 @@ fn listview_scrollbar_click_does_not_select_row() {
     let cb = picked.clone();
 
     let items: Vec<String> = (0..100).map(|i| format!("row {i}")).collect();
-    let list = ListView::new("list", 20.0)
-        .items(items)
+    let list = ListView::from_strings("list", items)
         .on_row_selected(move |i| cb.set(i));
 
     let mut tree = UiTree::new(Box::new(

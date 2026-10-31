@@ -63,7 +63,7 @@ fn list_view_runtime_set_items_via_downcast() {
         .and_then(|a| a.downcast_mut::<ListView>())
     {
         assert_eq!(lv.row_count(), 0, "初始没有行");
-        lv.set_items(vec!["a".into(), "b".into(), "c".into()]);
+        lv.set_len(3);
         assert_eq!(lv.row_count(), 3, "set_items 之后行数必须变化");
     } else {
         panic!("ListView 必须支持 as_any_mut");
