@@ -45,6 +45,12 @@ pub struct ListView {
     stick_to_bottom: bool,
     stick_armed: bool,
     painter: Option<RowPainter>,
+    /// 动态行高（可选）；未设置时用 `row_height`。
+    row_height_provider: Option<Box<dyn Fn(usize) -> f32>>,
+    /// 行顶部累加高度（长度 `len + 1`）；用于 O(log n) 查行。
+    prefix: Vec<f32>,
+    /// `prefix` 是否已失效（len/提供者变了）。
+    prefix_dirty: bool,
 }
 
 impl ListView {
@@ -71,7 +77,87 @@ impl ListView {
             stick_to_bottom: false,
             stick_armed: false,
             painter: None,
+            row_height_provider: None,
+            prefix: vec![0.0],
+            prefix_dirty: true,
         }
+    }
+
+    /// 设置动态行高提供者（例：聊天气泡高低不一）。
+    ///
+    /// 输入：`provider(index) -> 像素高度`。传入 `None` 或不调用就用固定 `row_height`。
+    /// 副作用：作废高度缓存（下次 `measure`/`arrange` 重算前缀和）。
+    pub fn set_row_height_provider(&mut self, provider: impl Fn(usize) -> f32 + 'static) {
+        self.row_height_provider = Some(Box::new(provider));
+        self.prefix_dirty = true;
+    }
+
+    /// 清除动态行高，回到固定行高。
+    pub fn clear_row_height_provider(&mut self) {
+        self.row_height_provider = None;
+        self.prefix_dirty = true;
+    }
+
+    /// 第 `index` 行的高度（动态提供者优先，否则固定值）。
+    ///
+    /// 返回：至少 1。
+    pub fn row_height_at(&self, index: usize) -> f32 {
+        match &self.row_height_provider {
+            Some(p) => p(index).max(1.0),
+            None => self.row_height,
+        }
+    }
+
+    /// 重算前缀和（长度 `len + 1`）。
+    fn ensure_prefix(&mut self) {
+        if !self.prefix_dirty && self.prefix.len() == self.len + 1 {
+            return;
+        }
+        self.prefix.clear();
+        self.prefix.reserve(self.len + 1);
+        let mut acc = 0.0;
+        self.prefix.push(0.0);
+        for i in 0..self.len {
+            acc += self.row_height_at(i);
+            self.prefix.push(acc);
+        }
+        self.prefix_dirty = false;
+    }
+
+    /// 第 `index` 行顶部相对于内容顶部的偏移。
+    fn row_top(&self, index: usize) -> f32 {
+        self.prefix.get(index).copied().unwrap_or_else(|| {
+            if index >= self.len {
+                self.prefix.last().copied().unwrap_or(0.0)
+            } else {
+                0.0
+            }
+        })
+    }
+
+    /// 用二分搜索把"内容坐标 y"换成行下标。
+    ///
+    /// 返回：`None` = 超出内容范围。
+    fn index_at_content_y(&self, y: f32) -> Option<usize> {
+        if y < 0.0 || self.len == 0 {
+            return None;
+        }
+        let total = self.prefix.last().copied().unwrap_or(0.0);
+        if y >= total {
+            return None;
+        }
+        // 找第一个 prefix[i+1] > y 的 i
+        let mut lo = 0usize;
+        let mut hi = self.len;
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if self.prefix[mid + 1] <= y {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        Some(lo)
     }
 
     /// 设置总行数（构建器版）。
@@ -86,6 +172,8 @@ impl ListView {
             return false;
         }
         self.len = n;
+        self.prefix_dirty = true;
+        self.ensure_prefix();
         self.offset = self.offset.clamp(0.0, self.max_offset());
         if self.stick_armed {
             self.offset = self.max_offset();
@@ -154,9 +242,7 @@ impl ListView {
 
     /// 滚到指定行（尽量让它在可见区顶部）。
     pub fn scroll_to_row(&mut self, index: usize) -> bool {
-        let target = (index as f32 * self.row_height)
-            .min(self.max_offset())
-            .max(0.0);
+        let target = self.row_top(index).min(self.max_offset()).max(0.0);
         if (self.offset - target).abs() < 0.01 {
             return false;
         }
@@ -171,8 +257,9 @@ impl ListView {
         if index >= self.len {
             return None;
         }
-        let y = self.inner.y + index as f32 * self.row_height - self.offset;
-        let r = Rect::new(self.inner.x, y, self.inner.w, self.row_height);
+        let y = self.inner.y + self.row_top(index) - self.offset;
+        let h = self.row_height_at(index);
+        let r = Rect::new(self.inner.x, y, self.inner.w, h);
         let visible = r.intersect(self.inner);
         if visible.is_empty() {
             None
@@ -188,13 +275,19 @@ impl ListView {
 
     /// 当前可见的行区间 `[start, end)`。
     pub fn visible_range(&self) -> std::ops::Range<usize> {
-        if self.len == 0 || self.inner.h <= 0.0 {
+        if self.len == 0 || self.inner.h <= 0.0 || self.prefix.len() != self.len + 1 {
             return 0..0;
         }
-        let first = (self.offset / self.row_height).floor().max(0.0) as usize;
-        let count = ((self.inner.h / self.row_height).ceil() as usize + 1)
-            .min(self.len.saturating_sub(first));
-        first..first + count
+        let Some(first) = self.index_at_content_y(self.offset.max(0.0)) else {
+            // 偏移落在内容之外（空列表/越界）
+            return 0..0;
+        };
+        let bottom = self.offset + self.inner.h;
+        let mut end = first;
+        while end < self.len && self.prefix[end] < bottom {
+            end += 1;
+        }
+        first..end
     }
 
     /// 设置迪归属的 flex 参数。
@@ -232,7 +325,13 @@ impl ListView {
 
     /// 内容总高度（解析值）。
     pub fn content_height(&self) -> f32 {
-        self.len as f32 * self.row_height
+        if self.prefix.len() == self.len + 1 {
+            self.prefix.last().copied().unwrap_or(0.0)
+        } else if let Some(p) = &self.row_height_provider {
+            (0..self.len).map(|i| p(i).max(1.0)).sum()
+        } else {
+            self.len as f32 * self.row_height
+        }
     }
 
     /// 总行数。
@@ -259,17 +358,16 @@ impl ListView {
         true
     }
 
-    fn row_at(&self, pos: Pos) -> Option<usize> {
+    /// 屏幕坐标命中的行下标（已考虚滚动偏移）。
+    ///
+    /// 输入：`pos`（客户区坐标）。
+    /// 返回：`Some(i)` = 命中第 i 行；`None` = 在可见区外或超出行数。
+    pub fn row_at(&self, pos: Pos) -> Option<usize> {
         if !self.inner.contains(pos) {
             return None;
         }
         let y = pos.y - self.inner.y + self.offset;
-        let index = (y / self.row_height).floor() as usize;
-        if index < self.len {
-            Some(index)
-        } else {
-            None
-        }
+        self.index_at_content_y(y)
     }
 }
 
@@ -296,10 +394,13 @@ impl Widget for ListView {
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
+        // 动态行高需要在布局前就知道内容高度
+        self.ensure_prefix();
         c.constrain(Size::new(c.max.w, c.max.h))
     }
 
     fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+        self.ensure_prefix();
         self.viewport = rect;
         self.show_bar = self.content_height() > rect.h;
         let bar_w = if self.show_bar { BAR_WIDTH } else { 0.0 };
@@ -578,6 +679,120 @@ mod tests {
             "可见区应到最后一行：{:?}",
             list.visible_range()
         );
+    }
+
+    #[test]
+    fn dynamic_row_heights_shape_total_and_rects() {
+        // 三行，高度 10/30/50
+        let mut list = ListView::new("chat", 20.0)
+            .len(3)
+            .flex_item(FlexItem::fill());
+        let heights = [10.0f32, 30.0, 50.0];
+        list.set_row_height_provider(move |i| heights.get(i).copied().unwrap_or(20.0));
+
+        let mut cache = LayoutCache::new();
+        list.measure(
+            &Mono,
+            Constraints::loose(Size::new(300.0, 400.0)),
+            &mut cache,
+        );
+        list.arrange(Rect::new(0.0, 0.0, 300.0, 400.0), &Mono, &mut cache);
+
+        assert_eq!(list.content_height(), 90.0, "总高度 = 10+30+50");
+        assert_eq!(list.row_height_at(1), 30.0);
+        assert_eq!(list.row_rect(0).unwrap().h, 10.0);
+        assert_eq!(list.row_rect(1).unwrap().y, 10.0, "第二行顶部 = 10");
+        assert_eq!(list.row_rect(2).unwrap().y, 40.0);
+        assert_eq!(list.row_rect(2).unwrap().h, 50.0);
+    }
+
+    #[test]
+    fn row_at_matches_row_rect_with_variable_heights() {
+        let mut list = ListView::new("chat", 20.0)
+            .len(3)
+            .flex_item(FlexItem::fill());
+        let heights = [10.0f32, 30.0, 50.0];
+        list.set_row_height_provider(move |i| heights.get(i).copied().unwrap_or(20.0));
+        let mut cache = LayoutCache::new();
+        list.measure(
+            &Mono,
+            Constraints::loose(Size::new(300.0, 400.0)),
+            &mut cache,
+        );
+        list.arrange(Rect::new(0.0, 0.0, 300.0, 400.0), &Mono, &mut cache);
+
+        for i in 0..3 {
+            let r = list.row_rect(i).unwrap();
+            // 行中心和上沿都应命中该行
+            assert_eq!(list.row_at(Pos::new(r.x + 1.0, r.y + r.h * 0.5)), Some(i));
+            assert_eq!(list.row_at(Pos::new(r.x + 1.0, r.y + 0.5)), Some(i));
+            // 下沿（y + h - 0.5）仍属于该行
+            assert_eq!(list.row_at(Pos::new(r.x + 1.0, r.y + r.h - 0.5)), Some(i));
+        }
+        // 内容之外（> 90px）不命中
+        assert_eq!(list.row_at(Pos::new(1.0, 95.0)), None);
+    }
+
+    #[test]
+    fn visible_range_with_variable_heights() {
+        // 100 行，每行 10px；视口 95px → 可见约 10 行
+        let mut list = ListView::new("chat", 20.0)
+            .len(100)
+            .flex_item(FlexItem::fill());
+        list.set_row_height_provider(|_| 10.0);
+        let mut cache = LayoutCache::new();
+        list.measure(
+            &Mono,
+            Constraints::loose(Size::new(300.0, 95.0)),
+            &mut cache,
+        );
+        list.arrange(Rect::new(0.0, 0.0, 300.0, 95.0), &Mono, &mut cache);
+
+        let r = list.visible_range();
+        assert_eq!(r.start, 0);
+        assert!(
+            (9..=11).contains(&r.len()),
+            "95px 视口、每行 10px 应约 10 行，实际 {:?}",
+            r
+        );
+
+        // 滚到第 50 行：起点应是 50
+        list.scroll_to_row(50);
+        list.arrange(Rect::new(0.0, 0.0, 300.0, 95.0), &Mono, &mut cache);
+        assert_eq!(list.visible_range().start, 50);
+    }
+
+    #[test]
+    fn height_provider_change_recomputes_layout() {
+        let mut list = ListView::new("chat", 20.0)
+            .len(4)
+            .flex_item(FlexItem::fill());
+        list.set_row_height_provider(|_| 10.0);
+        let mut cache = LayoutCache::new();
+        list.measure(
+            &Mono,
+            Constraints::loose(Size::new(300.0, 200.0)),
+            &mut cache,
+        );
+        assert_eq!(list.content_height(), 40.0);
+
+        // 换一个提供者：内容高度必须变
+        list.set_row_height_provider(|_| 25.0);
+        list.measure(
+            &Mono,
+            Constraints::loose(Size::new(300.0, 200.0)),
+            &mut cache,
+        );
+        assert_eq!(list.content_height(), 100.0, "新提供者应生效");
+
+        // 清掉提供者：回到固定 20px
+        list.clear_row_height_provider();
+        list.measure(
+            &Mono,
+            Constraints::loose(Size::new(300.0, 200.0)),
+            &mut cache,
+        );
+        assert_eq!(list.content_height(), 80.0);
     }
 
     #[test]

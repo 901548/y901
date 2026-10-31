@@ -423,6 +423,15 @@ let list = ListView::new("chat", 24.0)
 | `stick_to_bottom` / `scroll_to_end` / `is_at_bottom` | 粘底（日志/聊天） |
 | `scroll_to_row(i)` | 滚到指定行 |
 | `from_strings(id, items)` | 便利构造：纯文本行（数据被捕获在回调里，**不进**字段） |
+| `row_at(pos)` | 屏幕坐标命中的行下标（已考虚滚动） |
+| `set_row_height_provider(f)` | 动态行高（聊天气泡/折叠行）；不设则用固定值 |
+| `row_height_at(i)` | 某行高度（至少 1px） |
+| `clear_row_height_provider()` | 回到固定行高 |
+
+动态行高的实现：内部维护 `prefix[i] = 前 i 行高度和`，
+`row_rect`/`row_at`/`visible_range`/`scroll_to_row` 全部走二分查找
+（O(log n)）。提供者变更（`set_row_height_provider`）会作废前缀和，
+下一次 `measure`/`arrange` 重算。
 
 行**不再是子节点**：`children()` 为空，命中/标脏用 `row_rect`。
 代价是每行没有独立的语义节点；因此 `semantics()` 只报
