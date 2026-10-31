@@ -59,6 +59,6 @@ pub use theme::{State, Style, Theme};
 pub use tree::{hash_semantics, DirtyRegion, NodeInfo, UiTree};
 pub use widget::MountCtx;
 pub use widget::{
-    ActionSpec, Axis, Axis2, Constraints, Cursor, Dimension, EventCtx, FlexItem, InputKind, Layer,
+    ActionSpec, Axis, Axis2, Constraints, Cursor, Dimension, EventCtx, FlexItem, InputKind,
     RenderCtx, Role, Semantics, TextMetrics, Widget, AA_SAMPLES, GRADIENT_STEPS,
 };

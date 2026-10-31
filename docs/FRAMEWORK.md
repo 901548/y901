@@ -101,7 +101,6 @@ pub trait RenderBackend {
 pub trait Widget {
     fn id(&self) -> &str;
     fn role(&self) -> Role;
-    fn layer(&self) -> Layer;          // Base / Overlay / Modal
     fn is_open(&self) -> bool;         // 关闭的浮层不进索引
     fn focusable(&self) -> bool;
     fn is_disabled(&self) -> bool;
@@ -302,16 +301,21 @@ impl Widget for FileTable {
 
 ### 12.2 唯一机制的架构决定
 
-> **新代码只走 `UiTree::popups`；`Layer` 列举仅为兼容旧组件保留。**
+> **所有浮层（Popup / Dialog / Menu）统一走 `request_popup` / `request_modal_popup`。**
+> `Layer` 枚举与 `deferred` 回放已彻底删除。
 
-| 能力 | `UiTree::popups`（推荐） | `Layer::Overlay/Modal`（legacy） |
-|---|---|---|
-| 挂载时机 | 运行时任意时刻 | 树内声明（构造时） |
-| 裁切 | 只到视口（天然不受父级影响） | 需 `layer()` 声明，否则被父级裁切 |
-| 点外部关闭 | 自动 | 需组件自己判断 |
-| 命中/绘制一致性 | 同一个 `rect` | 靠 `item_rect()` 与 `render` 自行保持一致 |
-| 语义树 | 已合并进 `snapshot()` | 已在树内 |
-| 焦点作用域 | 暂未限制（跑全树 Tab） | `modal_root` 已实现 |
+| 能力 | 现在的唯一机制 |
+|---|---|
+| 挂载 | `tree.open_popup` / `open_modal_popup`，或组件在事件里 `ctx.request_popup` |
+| 裁切 | 只到视口（天然不受父级影响） |
+| 点外部关闭 | 非模态自动；模态只吃事件不关闭 |
+| 内容自关 | 浯层内容 `is_open() == false` → 浯层层自动撞掉 |
+| 命中/绘制一致 | 同一个 `rect`（`place_popup` 结果） |
+| 语义树 | 已合并进 `snapshot()` |
+| 焦点作用域 | 模态时 Tab 只在浯层内循环，关闭后恢复原焦点 |
+
+`Layer` 与 `deferred` 回放已删除：绘制顺序就是**树序**（父先子后、兄弟按序），
+“画在所有东西之上”由 `UiTree::popups`（树外、最后画）提供。
 
 ### 12.3 模态浮层的焦点作用域（已实现）
 
@@ -328,43 +332,23 @@ impl Widget for FileTable {
 实现要点：`set_focus` 对浯层内的 id 走独立路径（它们不在树里，
 没有 `find_path`），且不受 `modal_root` 限制。
 
-### 12.4 层与模态解耦（已完成）
+### 12.4 层与模态彻底解耦（已完成）
 
-`modal_root`（焦点/点击的模态作用域）**不再由 `Layer::Modal` 驱动**，
-改由 `Widget::is_modal()`：
+- **`Layer` 枚举、`Widget::layer()`、`layer_present`、`deferred` 回放全部删除**；
+- 模态作用域由 `Widget::is_modal()` 宣言（`Dialog` 返回 `self.open`）；
+- 绘制顺序 = **树序**；“画在所有东西之上”交给 `UiTree::popups`（树外、最后画）。
 
-```rust
-// Widget trait（默认 false）
-fn is_modal(&self) -> bool { false }
+这是一次语义分离：之前“画在哪层”顺带决定了“是否阻塞底层”，
+导致想要“画在上层但不阻塞”（Tooltip、右键菜单）无法表达。
 
-// Dialog：开着就阻塞底层
-fn is_modal(&self) -> bool { self.open }
-```
+### 12.5 迁移后的心智模型
 
-- `Layer` 描述"**画在哪一层**"（绘制顺序）；
-- `is_modal` 描述"**是否阻塞底层**"（交互语义）。
-
-两者本来被混为一谈，导致"画在上层但不阻塞"的浯层无法表达。
-
-`Menu` 已删除 `layer()` 覆盖；作为浯层挂载时，它的"选完/点任意处就关"
-靠 `is_open()` 驱动：**浯层内容自己关了，浯层层就跟着撞掉**。
-
-### 12.5 剩余工作（评估结果）
-
-删除 `Layer` 枚举本身剩下：
-
-| 位置 | 引用数 | 内容 |
-|---|---|---|
-| `y901-ui/src/tree.rs` | `Layer::Modal` ×2、`layer_present` / `deferred` 回放 | 核心渲染路径 |
-| `y901-ui/tests/cursor_layers.rs` | 2 | 测试夹具声明层 |
-| `y901-ui/tests/framework.rs` | 2 | 已改为 `.modal()` 显式声明模态 |
-| `y901-widgets/src/overlay.rs` | 2 | Dialog 的 `layer()` 覆盖 |
-| `y901-widgets/tests/style_injection.rs` | 1 | 引用 `Layer` 类型 |
-
-结论：**`Layer` 已不再驱动任何交互语义**（焦点/点击都看 `is_modal`），
-只剩下绘制顺序的职责。彻底删除它需要：把 `deferred` 回放改成
-"按插入顺序标记三段"或直接让 `Stack` 按子节点顺序绘制（当前 `Stack` 已是后画的在上）。
-工作量约 卐小时 + 一轮全量测试回归。
+| 你想要 | 用什么 |
+|---|---|
+| 一个普通面板/列表 | 直接当子节点（树内） |
+| 一个点外部就关的菜单/Tooltip | `ctx.request_popup(...)` |
+| 一个阻塞底层的对话框 | `ctx.request_modal_popup(...)`（`Dialog` 记得 `set_scrim(false)`） |
+| “画在最上层但不阻塞” | 非模态 popup |
 
 ## 13. RichText（富文本）接口
 

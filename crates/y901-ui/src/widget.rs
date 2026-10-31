@@ -23,27 +23,6 @@ pub struct PopupRequest {
     pub modal: bool,
 }
 
-
-/// 绘制/命中层级。
-///
-/// 子节点继承父节点的层级，`Modal` 会盖住整个 `Base`。
-/// 绘制顺序固定为 `Base → Overlay → Modal`；命中顺序相反。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Layer {
-    /// 普通界面。
-    #[default]
-    Base = 0,
-    /// 浮层（下拉菜单、提示）：视觉在上，但点外部可以穿透。
-    Overlay = 1,
-    /// 模态（对话框）：点外部会被吞掉，焦点被限制在子树内。
-    Modal = 2,
-}
-
-impl Layer {
-    pub fn rank(self) -> u8 {
-        self as u8
-    }
-}
 /// 鼠标光标形状。框架只声明"想要什么"，具体映射到平台由应用层负责。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Cursor {
@@ -1055,14 +1034,6 @@ pub trait Widget {
         FlexItem::default()
     }
 
-    /// 绘制/命中层级。子节点继承父节点的层级（取最大值）。
-    ///
-    /// 返回：`Base`（普通）/ `Overlay`（浮层，可穿透点击）/ `Modal`（模态，吞外部点击）。
-    /// 副作用：无。层级影响**绘制顺序**（Base → Overlay → Modal）与命中顺序（反向），
-    /// 但不改变布局。
-    fn layer(&self) -> Layer {
-        Layer::Base
-    }
 
     /// 是否可以获得键盘焦点（Tab 遍历、Modal 自动聚焦都用它）。
     ///

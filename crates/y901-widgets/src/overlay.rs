@@ -4,7 +4,7 @@
 //! 于是它们的 rect 就是整个视口 —— 这样"点外部关闭/吞掉"才有几何依据。
 
 use y901_ui::{
-    Command, Constraints, Edges, EventCtx, EventResult, FlexItem, Json, Layer, Pos, Rect,
+    Command, Constraints, Edges, EventCtx, EventResult, FlexItem, Json, Pos, Rect,
     RenderCtx, Role, Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
@@ -504,9 +504,6 @@ impl Widget for Dialog {
         self.open
     }
 
-    fn layer(&self) -> Layer {
-        Layer::Modal
-    }
 
     fn is_open(&self) -> bool {
         self.open

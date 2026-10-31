@@ -357,3 +357,94 @@ fn menu_works_as_popup_without_layer() {
     // Menu 自己 `close()` 了（`is_open() == false`）→ 浮层层自动撞掉
     assert!(!tree.has_popup(), "菜单选完自己关了，浮层也应消失");
 }
+
+#[test]
+fn dialog_runs_as_modal_popup() {
+    use y901_ui::{Key, Modifiers, MouseButton};
+    use y901_widgets::Dialog;
+
+    // 触发器：点一下就通过 `ctx.request_modal_popup` 弹 Dialog
+    struct Trigger {
+        rect: Rect,
+    }
+    impl y901_ui::Widget for Trigger {
+        fn id(&self) -> &str {
+            "open"
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) -> Size {
+            c.constrain(Size::new(120.0, 40.0))
+        }
+        fn arrange(
+            &mut self,
+            r: Rect,
+            _m: &dyn TextMetrics,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) {
+            self.rect = r;
+        }
+        fn rect(&self) -> Rect {
+            self.rect
+        }
+        fn event(&mut self, ctx: &mut EventCtx, e: &y901_ui::UiEvent) -> EventResult {
+            if matches!(e, y901_ui::UiEvent::MouseDown { .. }) {
+                let mut dlg = Dialog::new("confirm", "删除？");
+                dlg.set_open(true);
+                dlg.set_scrim(false); // 遮罩由浮层层画
+                dlg.set_buttons(vec![
+                    ("ok".into(), "OK".into()),
+                    ("cancel".into(), "Cancel".into()),
+                ]);
+                ctx.request_modal_popup(Box::new(move || Box::new(dlg)), self.rect);
+                return EventResult::Handled;
+            }
+            EventResult::Ignored
+        }
+        fn render(&mut self, _c: &mut dyn RenderCtx) {}
+        fn semantics(&self) -> y901_ui::Semantics {
+            y901_ui::Semantics::default()
+        }
+    }
+
+    let mut tree = UiTree::new(Box::new(Trigger { rect: Rect::ZERO }));
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+    let r = tree.rect_of("open").expect("trigger");
+
+    // 点开
+    let _ = tree.dispatch(&y901_ui::UiEvent::MouseDown {
+        pos: Pos::new(r.x + 5.0, r.y + 5.0),
+        button: MouseButton::Left,
+    });
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+    assert!(tree.has_popup(), "Dialog 应已作为浯层挂载");
+    assert!(tree.popups()[0].is_modal(), "Dialog 应是模态浯层");
+
+    // Tab 循环在 Dialog 内部（不逃到底层 trigger）
+    for _ in 0..4 {
+        let _ = tree.dispatch(&y901_ui::UiEvent::Key {
+            key: Key::Tab,
+            modifiers: Modifiers::default(),
+        });
+        if let Some(f) = tree.focus() {
+            assert_ne!(f, "open", "焦点不应逃回底层触发器");
+        }
+    }
+
+    // 点外部：模态不关闭
+    let _ = tree.dispatch(&y901_ui::UiEvent::MouseDown {
+        pos: Pos::new(390.0, 290.0),
+        button: MouseButton::Left,
+    });
+    assert!(tree.has_popup(), "模态 Dialog 不应被点外部关闭");
+
+    // Escape 关闭
+    let _ = tree.dispatch(&y901_ui::UiEvent::Key {
+        key: Key::Escape,
+        modifiers: Modifiers::default(),
+    });
+    assert!(!tree.has_popup(), "Escape 应关闭 Dialog");
+}

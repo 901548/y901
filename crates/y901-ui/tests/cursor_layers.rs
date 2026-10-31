@@ -8,7 +8,7 @@
 //! `cursor_at` 必须与之一致，否则"光标形状"会指向一个点不到的元素。
 
 use y901_ui::{
-    Constraints, Cursor, EventCtx, EventResult, Flex, Layer, Pos, Rect, RenderCtx, Semantics, Size,
+    Constraints, Cursor, EventCtx, EventResult, Flex, Pos, Rect, RenderCtx, Semantics, Size,
     TextMetrics, TextStyle, UiTree, Widget,
 };
 
@@ -30,7 +30,6 @@ impl TextMetrics for Mono {
 struct Probe {
     id: &'static str,
     rect: Rect,
-    layer: Layer,
     cursor: Cursor,
     open: bool,
     clip: Option<Rect>,
@@ -41,15 +40,10 @@ impl Probe {
         Self {
             id,
             rect,
-            layer: Layer::Base,
             cursor,
             open: true,
             clip: None,
         }
-    }
-    fn layer(mut self, l: Layer) -> Self {
-        self.layer = l;
-        self
     }
     fn closed(mut self) -> Self {
         self.open = false;
@@ -60,9 +54,6 @@ impl Probe {
 impl Widget for Probe {
     fn id(&self) -> &str {
         self.id
-    }
-    fn layer(&self) -> Layer {
-        self.layer
     }
     fn cursor(&self) -> Cursor {
         self.cursor
@@ -153,19 +144,18 @@ fn cursor_at_matches_hit_index_with_overlapping_layers() {
     // Overlay 在前、Base 在后（树序），两者都覆盖 (10,10)
     let root = Col {
         id: "root",
+        // 没有 Layer 了："在上层"用**树序**表达——后访问的在上，
+        // 所以 base 放前面、overlay 放后面。
         kids: vec![
-            Box::new(
-                Probe::new(
-                    "overlay",
-                    Rect::new(0.0, 0.0, 100.0, 100.0),
-                    Cursor::Pointer,
-                )
-                .layer(Layer::Overlay),
-            ),
             Box::new(Probe::new(
                 "base",
                 Rect::new(0.0, 0.0, 100.0, 100.0),
                 Cursor::Text,
+            )),
+            Box::new(Probe::new(
+                "overlay",
+                Rect::new(0.0, 0.0, 100.0, 100.0),
+                Cursor::Pointer,
             )),
         ],
         rect: Rect::ZERO,
@@ -191,9 +181,7 @@ fn cursor_at_skips_closed_overlay() {
     let root = Col {
         id: "root",
         kids: vec![Box::new(
-            Probe::new("menu", Rect::new(0.0, 0.0, 100.0, 100.0), Cursor::Pointer)
-                .layer(Layer::Overlay)
-                .closed(),
+            Probe::new("menu", Rect::new(0.0, 0.0, 100.0, 100.0), Cursor::Pointer).closed(),
         )],
         rect: Rect::ZERO,
         clip: None,

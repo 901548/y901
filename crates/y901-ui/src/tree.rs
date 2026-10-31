@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::event::{EventPhase, PointerCapture};
 use crate::event::{EventResult, UiEvent};
 use crate::geometry::{Pos, Rect, Size};
-use crate::widget::{EventCtx, Layer, RenderCtx, Role, Semantics, TextMetrics, Widget};
+use crate::widget::{EventCtx, RenderCtx, Role, Semantics, TextMetrics, Widget};
 
 /// 对外暴露的节点快照。RPC 的 `get_tree` 直接序列化它。
 #[derive(Clone, Debug)]
@@ -209,8 +209,6 @@ pub struct UiTree {
     captured_pointer: Option<String>,
     /// 绘制/命中顺序（按层稳定排序）。
     paint_order: Vec<PaintEntry>,
-    /// 各层是否出现过。
-    layer_present: [bool; 3],
     /// 最上层 Modal 的路径（焦点作用域 + 点击吞噬判定）。
     modal_root: Option<Vec<usize>>,
     /// 焦点节点路径缓存（键盘事件零分配）。
@@ -274,7 +272,6 @@ impl UiTree {
             hovered: None,
             captured_pointer: None,
             paint_order: Vec::new(),
-            layer_present: [false; 3],
             modal_root: None,
             focus_path: None,
             captured_path: None,
@@ -1329,14 +1326,12 @@ impl UiTree {
     fn rebuild_indices(&mut self) {
         self.rects.clear();
         self.paint_order.clear();
-        self.layer_present = [false; 3];
         self.modal_root = None;
 
         // 把四个可变的输出目标打包：既避免 8 参数，也明确"它们是一起写的"
         struct Outputs<'a> {
             rects: &'a mut HashMap<String, Rect>,
             order: &'a mut Vec<PaintEntry>,
-            layer_present: &'a mut [bool; 3],
             modal_root: &'a mut Option<Vec<usize>>,
         }
 
@@ -1344,7 +1339,6 @@ impl UiTree {
         fn walk(
             node: &dyn Widget,
             path: &mut Vec<usize>,
-            inherited: Layer,
             inherited_clip: Option<Rect>,
             out: &mut Outputs<'_>,
         ) {
@@ -1352,8 +1346,6 @@ impl UiTree {
             if !node.is_open() {
                 return;
             }
-            let own = node.layer();
-            let effective = inherited.max(own);
             let rect = node.rect();
             // 可见区 = 自身 rect ∩ 所有祖先 clip（滚动容器靠它约束命中与绘制）
             let clip = match (inherited_clip, node.clip()) {
@@ -1364,10 +1356,9 @@ impl UiTree {
             };
 
             out.rects.insert(node.id().to_string(), rect);
-            out.layer_present[effective.rank() as usize] = true;
 
-            // 模态作用域的来源从 `Layer::Modal` 改为 `Widget::is_modal()`：
-            // 层（画在哪）与模态（是否阻塞底层）是两件事。
+            // 模态作用域由 `Widget::is_modal()` 宣言：
+            // "画在哪层"与"是否阻塞底层"是两件事，不再混为一谈。
             if node.is_modal() {
                 *out.modal_root = Some(path.clone());
             }
@@ -1376,12 +1367,11 @@ impl UiTree {
                 path: path.clone(),
                 rect,
                 clip,
-                layer: effective,
             });
 
             for (i, child) in node.children().iter().enumerate() {
                 path.push(i);
-                walk(child.as_ref(), path, effective, clip, out);
+                walk(child.as_ref(), path, clip, out);
                 path.pop();
             }
         }
@@ -1390,19 +1380,16 @@ impl UiTree {
         let mut outputs = Outputs {
             rects: &mut self.rects,
             order: &mut self.paint_order,
-            layer_present: &mut self.layer_present,
             modal_root: &mut self.modal_root,
         };
         walk(
             self.root.as_ref(),
             &mut path,
-            Layer::Base,
             None,
             &mut outputs,
         );
 
         // 稳定排序：同层内保持树序（即绘制先后）
-        self.paint_order.sort_by_key(|e| e.layer.rank());
 
         self.rebuild_focus_order();
     }
@@ -1449,28 +1436,16 @@ impl UiTree {
         }
         let dirty = self.dirty.clone();
 
-        let mut deferred: Vec<(Layer, Vec<usize>)> = Vec::new();
+        // 单遍绘制：**树序就是绘制顺序**（后访问的后画，后画的在上）。
+        //
+        // 之前有 `Layer::{Base,Overlay,Modal}` + `deferred` 回放：子树先记路径、遍历完
+        // 再按层回放。那是"画在上层"的局部手段；现在浯层统一走
+        // `UiTree::popups`（树外、最后画），树内只需"父先子后、兄弟按序"。
         {
             let mut path: Vec<usize> = Vec::new();
-            render_pass(
-                self.root.as_mut(),
-                ctx,
-                &dirty,
-                Layer::Base,
-                &mut path,
-                &mut deferred,
-            );
+            render_pass(self.root.as_mut(), ctx, &dirty, &mut path);
         }
 
-        // 稳定排序：Base(0) → Overlay(1) → Modal(2)，同层保持树序
-        deferred.sort_by_key(|(layer, _)| layer.rank());
-        for (_, path) in deferred {
-            if let Some(node) = self.node_at_mut(&path) {
-                render_subtree(node, ctx, &dirty);
-            }
-        }
-
-        // Overlay 层：浮层在最后画，裁切**只到视口**（不继承任何父级 clip）。
         if !self.popups.is_empty() {
             let viewport = Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h);
             ctx.push_clip(viewport);
@@ -1493,10 +1468,6 @@ impl UiTree {
         self.dirty.clear();
     }
 
-    /// 某层是否出现过。
-    pub fn has_layer(&self, layer: Layer) -> bool {
-        self.layer_present[layer.rank() as usize]
-    }
 
     /// 当前 Modal 作用域（根到 Modal 节点的路径）。
     pub fn modal_scope(&self) -> Option<&[usize]> {
@@ -1513,20 +1484,20 @@ impl UiTree {
     /// 语义必须与 `hit_index` 一致，否则光标会指向一个**点不到**的元素：
     /// 1. 关闭节点（`is_open() == false`）整棵子树跳过（与 `rebuild_indices` 同构）；
     /// 2. 祖先 `clip()` 逐层累加，可见区 = `rect ∩ 累计clip`（同上）；
-    /// 3. 优先级：`layer` 高者 > `depth` 深者 > 树序靠后者（`>=` 让后访问者胜出）。
+    /// 3. 优先级：`depth` 深者 > 树序靠后者（`>=` 让后访问者胜出）。
     ///
     /// 返回：优先级最高的非 `Default` 光标；没有候选时返回 `Default`。
     /// 副作用：无。复杂度 O(n)（每次 MouseMove 调用一次）。
     pub fn cursor_at(&self, pos: Pos) -> crate::widget::Cursor {
         use crate::widget::Cursor;
 
-        /// 递归收集候选，`best` 保存当前优先级最高的 `(layer, depth, cursor)`。
+        /// 递归收集候选，`best` 保存当前优先级最高的 `(depth, cursor)`。
         fn walk(
             node: &dyn Widget,
             pos: Pos,
             inherited_clip: Option<Rect>,
             depth: usize,
-            best: &mut Option<(Layer, usize, Cursor)>,
+            best: &mut Option<(usize, Cursor)>,
         ) {
             // 1) 关闭节点整棵跳过（与 rebuild_indices 一致）
             if !node.is_open() {
@@ -1550,13 +1521,12 @@ impl UiTree {
             // 4) 自己的光标进候选
             let c = node.cursor_at(pos);
             if c != Cursor::Default {
-                let layer = node.layer();
-                // `>=` 让同 layer 同 depth 的**后访问者**胜出（树序靠后者在上）
+                // `>=` 让同 depth 的**后访问者**胜出（树序靠后者在上）
                 let better = best
-                    .map(|(bl, bd, _)| layer > bl || (layer == bl && depth >= bd))
+                .map(|(bd, _)| depth >= bd)
                     .unwrap_or(true);
                 if better {
-                    *best = Some((layer, depth, c));
+                    *best = Some((depth, c));
                 }
             }
             // 5) 递归子节点
@@ -1565,9 +1535,9 @@ impl UiTree {
             }
         }
 
-        let mut best: Option<(Layer, usize, Cursor)> = None;
+        let mut best: Option<(usize, Cursor)> = None;
         walk(self.root.as_ref(), pos, None, 0, &mut best);
-        best.map(|(_, _, c)| c).unwrap_or(Cursor::Default)
+        best.map(|(_, c)| c).unwrap_or(Cursor::Default)
     }
     /// 命中测试：返回最深的、包含该点的节点 id。
     pub fn hit_test(&self, pos: Pos) -> Option<String> {
@@ -2226,7 +2196,6 @@ struct PaintEntry {
     rect: Rect,
     /// 屏幕可见区 = rect ∩ 祖先 clip；命中与裁剪共用。
     clip: Option<Rect>,
-    layer: Layer,
 }
 
 /// 沿路径递归派发：进入时 Capture、末端 Target、���回时 Bubble。
@@ -2289,62 +2258,24 @@ fn dispatch_rec(
 }
 
 /// 单遍渲染：Base 就地画，Overlay/Modal 记路径延后画。
-fn render_pass(
-    node: &mut dyn Widget,
-    ctx: &mut dyn RenderCtx,
-    dirty: &DirtyRegion,
-    inherited: Layer,
-    path: &mut Vec<usize>,
-    deferred: &mut Vec<(Layer, Vec<usize>)>,
-) {
-    // 关闭的浮层：整棵子树都不绘制。
-    // 与 rebuild_indices 的跳过共享同一不变量，否则会出现"看不见但仍占 GPU"的怪状。
-    if !node.is_open() {
-        return;
-    }
-    let effective = inherited.max(node.layer());
-
-    if effective == Layer::Base {
-        if node.needs_paint(dirty) {
-            node.render(ctx);
-        }
-        // 滚动容器：子节点只能画在视口内
-        let clip = node.clip();
-        if let Some(c) = clip {
-            ctx.push_clip(c);
-        }
-        if let Some(children) = node.children_mut() {
-            for (i, child) in children.iter_mut().enumerate() {
-                path.push(i);
-                render_pass(child.as_mut(), ctx, dirty, effective, path, deferred);
-                path.pop();
-            }
-        }
-        if clip.is_some() {
-            ctx.pop_clip();
-        }
-    } else {
-        // 整个子树延后：只记路径，稍后按层统一回放
-        deferred.push((effective, path.clone()));
-    }
-}
-
-/// 回放一个延后的子树（层内顺序 = 树序）。
-fn render_subtree(node: &mut dyn Widget, ctx: &mut dyn RenderCtx, dirty: &DirtyRegion) {
-    // 延后回放同样要遵守 is_open 不变量（否则关闭的 Modal 会被补画出来）
+fn render_pass(node: &mut dyn Widget, ctx: &mut dyn RenderCtx, dirty: &DirtyRegion, path: &mut Vec<usize>) {
+    // 关闭的浮层：整棵子树都不绘制（与 rebuild_indices 共享同一不变量）。
     if !node.is_open() {
         return;
     }
     if node.needs_paint(dirty) {
         node.render(ctx);
     }
+    // 滚动容器：子节点只能画在视口内
     let clip = node.clip();
     if let Some(c) = clip {
         ctx.push_clip(c);
     }
     if let Some(children) = node.children_mut() {
-        for child in children.iter_mut() {
-            render_subtree(child.as_mut(), ctx, dirty);
+        for (i, child) in children.iter_mut().enumerate() {
+            path.push(i);
+            render_pass(child.as_mut(), ctx, dirty, path);
+            path.pop();
         }
     }
     if clip.is_some() {

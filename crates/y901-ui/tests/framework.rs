@@ -855,7 +855,6 @@ fn pointer_capture_routes_moves_outside_the_node() {
 
 use std::cell::Cell;
 use std::rc::Rc;
-use y901_ui::Layer;
 
 /// 每收到一次事件就 +1 的链式容器。
 struct Counted {
@@ -1004,7 +1003,6 @@ impl Widget for Stack {
 /// 可以指定 Layer 的叶子。
 struct Layered {
     id: String,
-    layer: Layer,
     rect: Rect,
     hits: Rc<Cell<u32>>,
     kids: Vec<Box<dyn Widget>>,
@@ -1013,10 +1011,9 @@ struct Layered {
 }
 
 impl Layered {
-    fn new(id: &str, layer: Layer, hits: Rc<Cell<u32>>) -> Self {
+    fn new(id: &str, hits: Rc<Cell<u32>>) -> Self {
         Self {
             id: id.to_string(),
-            layer,
             rect: Rect::ZERO,
             hits,
             kids: Vec::new(),
@@ -1039,9 +1036,6 @@ impl Widget for Layered {
     /// 测试夹具：Modal 内的 `modal_btn` 需要能被 set_focus。
     fn focusable(&self) -> bool {
         true
-    }
-    fn layer(&self) -> Layer {
-        self.layer
     }
     fn is_modal(&self) -> bool {
         self.modal
@@ -1079,28 +1073,19 @@ fn layered_tree(modal: bool, overlay: bool) -> (UiTree, Rc<Cell<u32>>) {
     let modal_hits = Rc::new(Cell::new(0));
     let overlay_hits = Rc::new(Cell::new(0));
 
-    let mut kids: Vec<Box<dyn Widget>> = vec![Box::new(Layered::new(
-        "base_btn",
-        Layer::Base,
-        base_hits.clone(),
-    ))];
+    let mut kids: Vec<Box<dyn Widget>> =
+        vec![Box::new(Layered::new("base_btn", base_hits.clone()))];
     let mut slots = vec![Rect::new(0.0, 0.0, 200.0, 200.0)];
 
     if overlay {
-        kids.push(Box::new(Layered::new(
-            "overlay",
-            Layer::Overlay,
-            overlay_hits.clone(),
-        )));
+        kids.push(Box::new(Layered::new("overlay", overlay_hits.clone())));
         slots.push(Rect::new(150.0, 0.0, 50.0, 50.0));
     }
     if modal {
-        let mut modal_node = Layered::new("modal", Layer::Modal, modal_hits.clone()).modal();
-        modal_node.kids.push(Box::new(Layered::new(
-            "modal_btn",
-            Layer::Base, // 继承父节点的 Modal
-            modal_hits.clone(),
-        )));
+        let mut modal_node = Layered::new("modal", modal_hits.clone()).modal();
+        modal_node
+            .kids
+            .push(Box::new(Layered::new("modal_btn", modal_hits.clone())));
         kids.push(Box::new(modal_node));
         slots.push(Rect::new(50.0, 50.0, 100.0, 100.0));
     }
@@ -1172,12 +1157,28 @@ fn overlay_is_on_top_but_lets_clicks_through() {
 }
 
 #[test]
-fn layers_paint_in_order() {
-    let (tree, _) = layered_tree(true, true);
-    assert!(tree.has_layer(Layer::Overlay));
-    assert!(tree.has_layer(Layer::Modal));
-    // Modal 根路径必须存在，且是作用域
-    assert!(tree.modal_scope().is_some());
+fn paint_order_follows_tree_order() {
+    // 没有 `Layer` 了：**绘制顺序 = 树序**（后访问的在上）。
+    // 命中与绘制共用同一份排序，所以用 hit_test 验证。
+    let (tree, _) = layered_tree(false, true);
+    // base 盖整窗；overlay 只盖 (150,0)-(200,50)，且树序更后
+    assert_eq!(
+        tree.hit_test(Pos::new(160.0, 10.0)).as_deref(),
+        Some("overlay"),
+        "重叠处应命中树序靠后的 overlay（后画的在上）"
+    );
+    assert_eq!(
+        tree.hit_test(Pos::new(10.0, 10.0)).as_deref(),
+        Some("base_btn"),
+        "未被覆盖处应命中 base"
+    );
+
+    // 模态作用域焱由 `Widget::is_modal()` 驱动（不再看 Layer）
+    let (modal_tree, _) = layered_tree(true, false);
+    assert!(
+        modal_tree.modal_scope().is_some(),
+        "模态节点应提供焦点/点击作用域"
+    );
 }
 
 // ---------- 9. 广播不阻塞 UI ----------
