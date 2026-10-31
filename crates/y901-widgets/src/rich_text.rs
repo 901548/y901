@@ -204,6 +204,51 @@ impl RichText {
         self.block_rect(self.blocks.len().checked_sub(1)?)
     }
 
+    /// 流式追加到最后一个 Code Block；没有 Code 时新建一个。
+    pub fn append_code_text(&mut self, text: &str) -> usize {
+        self.version += 1;
+        if let Some(Block::Code { lines, .. }) = self.blocks.last_mut() {
+            let mut parts = text.split('\n');
+            if let Some(first) = parts.next() {
+                if let Some(last) = lines.last_mut() {
+                    last.push_str(first);
+                } else {
+                    lines.push(first.to_string());
+                }
+            }
+            for line in parts {
+                lines.push(line.to_string());
+            }
+            self.blocks.len() - 1
+        } else {
+            self.push_code("text", text);
+            self.blocks.len() - 1
+        }
+    }
+
+    /// 只重测最后一块；layout 未建立时返回 false，调用方退回全量 measure。
+    pub fn measure_last(&mut self, metrics: &dyn TextMetrics, c: Constraints) -> bool {
+        if self.layout.len() != self.blocks.len() || self.blocks.is_empty() {
+            return false;
+        }
+        let width = c.max.w;
+        let line_h = metrics.line_height(&TextStyle::default());
+        let per_line = self.chars_per_line(metrics, width);
+        let index = self.blocks.len() - 1;
+        let (y, _) = self.layout[index];
+        let h = match &self.blocks[index] {
+            Block::Paragraph(spans) => {
+                self.wrap(spans, per_line).len().max(1) as f32 * line_h
+            }
+            Block::Code { lines, .. } => {
+                lines.len().max(1) as f32 * line_h + self.code_pad * 2.0
+            }
+        };
+        self.layout[index] = (y, h);
+        self.content_h = y + h + self.pad;
+        true
+    }
+
     /// 每行最多放多少个字符（等宽近似）。
     fn chars_per_line(&self, metrics: &dyn TextMetrics, w: f32) -> usize {
         let cw = metrics.measure_text("M", &TextStyle::default()).w.max(1.0);
