@@ -328,14 +328,43 @@ impl Widget for FileTable {
 实现要点：`set_focus` 对浯层内的 id 走独立路径（它们不在树里，
 没有 `find_path`），且不受 `modal_root` 限制。
 
-**剩余迁移（未完成）**：
-1. `Menu`/`Dialog` 改成 `ctx.request_popup` 弹出，删除 `layer()` 覆盖；
-2. 删除 `Layer` 枚举与 `layer_present` / `deferred` 回放路径。
+### 12.4 层与模态解耦（已完成）
 
-阻碍：仓内有 **20 个文件 / 158 处** 引用 `Dialog` / `Menu::` / `Layer::`，
-删除 `Layer` 属于破坏性改动（需逐个重写测试与 `modal_root` 路径）。
-已提供桥：`Dialog::set_scrim(false)` 可让 Dialog 作为 `open_modal_popup` 的内容时
-不叠两层遮罩；弹层层已提供焦点作用域。
+`modal_root`（焦点/点击的模态作用域）**不再由 `Layer::Modal` 驱动**，
+改由 `Widget::is_modal()`：
+
+```rust
+// Widget trait（默认 false）
+fn is_modal(&self) -> bool { false }
+
+// Dialog：开着就阻塞底层
+fn is_modal(&self) -> bool { self.open }
+```
+
+- `Layer` 描述"**画在哪一层**"（绘制顺序）；
+- `is_modal` 描述"**是否阻塞底层**"（交互语义）。
+
+两者本来被混为一谈，导致"画在上层但不阻塞"的浯层无法表达。
+
+`Menu` 已删除 `layer()` 覆盖；作为浯层挂载时，它的"选完/点任意处就关"
+靠 `is_open()` 驱动：**浯层内容自己关了，浯层层就跟着撞掉**。
+
+### 12.5 剩余工作（评估结果）
+
+删除 `Layer` 枚举本身剩下：
+
+| 位置 | 引用数 | 内容 |
+|---|---|---|
+| `y901-ui/src/tree.rs` | `Layer::Modal` ×2、`layer_present` / `deferred` 回放 | 核心渲染路径 |
+| `y901-ui/tests/cursor_layers.rs` | 2 | 测试夹具声明层 |
+| `y901-ui/tests/framework.rs` | 2 | 已改为 `.modal()` 显式声明模态 |
+| `y901-widgets/src/overlay.rs` | 2 | Dialog 的 `layer()` 覆盖 |
+| `y901-widgets/tests/style_injection.rs` | 1 | 引用 `Layer` 类型 |
+
+结论：**`Layer` 已不再驱动任何交互语义**（焦点/点击都看 `is_modal`），
+只剩下绘制顺序的职责。彻底删除它需要：把 `deferred` 回放改成
+"按插入顺序标记三段"或直接让 `Stack` 按子节点顺序绘制（当前 `Stack` 已是后画的在上）。
+工作量约 卐小时 + 一轮全量测试回归。
 
 ## 13. RichText（富文本）接口
 

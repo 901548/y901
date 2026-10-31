@@ -313,3 +313,47 @@ fn dialog_can_be_used_as_a_popup_without_double_scrim() {
         .any(|r| r.w >= 300.0 && r.h >= 200.0);
     assert!(!big, "关闭遮罩后不应再有满屏填充：{:?}", calls.fills.borrow());
 }
+
+#[test]
+fn menu_works_as_popup_without_layer() {
+    use y901_widgets::Menu;
+    // Menu 不再声明 `layer()`：作为浮层挂载时，
+    // 裁切 / 命中 / 命令派发 / "选完就关"全部由浮层层提供。
+    let mut menu = Menu::new("m").items(vec!["a".into(), "b".into()]);
+    menu.open();
+
+    let mut tree = UiTree::new(Box::new(y901_ui::Flex::column("root")));
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+    assert!(tree.open_popup(Box::new(menu), Rect::new(10.0, 10.0, 100.0, 24.0)));
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+    assert!(tree.has_popup(), "应已挂载");
+
+    // 拿到面板矩形（命中就看它）
+    let panel = {
+        let mut p = Rect::ZERO;
+        tree.with_popup_mut("m", &mut |w| {
+            if let Some(any) = w.as_any_mut() {
+                if let Some(menu) = any.downcast_mut::<Menu>() {
+                    p = menu.panel_rect();
+                }
+            }
+        });
+        p
+    };
+    assert!(panel.w > 0.0, "面板应有矩形：{panel:?}");
+
+    // 点第一项：应派发 App 命令（index/label），且菜单自己关闭
+    // 面板内部布局：PAD=6，项高 26 → 第一项在 panel.y + 6..32
+    let _ = tree.dispatch(&UiEvent::MouseDown {
+        pos: Pos::new(panel.x + 10.0, panel.y + 6.0 + 13.0),
+        button: y901_ui::MouseButton::Left,
+    });
+    let cmds = tree.drain_commands();
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, y901_ui::Command::App { name, .. } if name == "menu.select")),
+        "点菜单项应派发 menu.select，实际 {cmds:?}"
+    );
+    // Menu 自己 `close()` 了（`is_open() == false`）→ 浮层层自动撞掉
+    assert!(!tree.has_popup(), "菜单选完自己关了，浮层也应消失");
+}

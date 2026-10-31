@@ -1366,8 +1366,9 @@ impl UiTree {
             out.rects.insert(node.id().to_string(), rect);
             out.layer_present[effective.rank() as usize] = true;
 
-            if own == Layer::Modal {
-                // 后出现的 Modal 在更上层
+            // 模态作用域的来源从 `Layer::Modal` 改为 `Widget::is_modal()`：
+            // 层（画在哪）与模态（是否阻塞底层）是两件事。
+            if node.is_modal() {
                 *out.modal_root = Some(path.clone());
             }
 
@@ -1756,6 +1757,18 @@ impl UiTree {
                         };
                         let merged = ctx.finish(result);
                         self.pending.append(&mut ctx.commands);
+                        // 浯层内容自己"关闭"了（`is_open() == false`）就跟着撞掉：
+                        // 这是通用机制——Menu 处理"点外部"时会自己 close，
+                        // 浯层层不需要认识 Menu，只需要看 `is_open`。
+                        if !self
+                            .popups
+                            .iter()
+                            .find(|p| p.id == id)
+                            .map(|p| p.widget.is_open())
+                            .unwrap_or(false)
+                        {
+                            self.close_popup(&id);
+                        }
 
                         return merged;
                     }

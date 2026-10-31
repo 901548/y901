@@ -1008,6 +1008,8 @@ struct Layered {
     rect: Rect,
     hits: Rc<Cell<u32>>,
     kids: Vec<Box<dyn Widget>>,
+    /// 模态语义（与 `layer` 解耦：画在哪层 ≠ 是否阻塞底层）。
+    modal: bool,
 }
 
 impl Layered {
@@ -1018,7 +1020,14 @@ impl Layered {
             rect: Rect::ZERO,
             hits,
             kids: Vec::new(),
+            modal: false,
         }
+    }
+
+    /// 把它标记为模态（影响焦点与点击嗝掉）。
+    fn modal(mut self) -> Self {
+        self.modal = true;
+        self
     }
 }
 
@@ -1033,6 +1042,9 @@ impl Widget for Layered {
     }
     fn layer(&self) -> Layer {
         self.layer
+    }
+    fn is_modal(&self) -> bool {
+        self.modal
     }
     fn measure(&mut self, m: &dyn TextMetrics, c: Constraints, cache: &mut LayoutCache) -> Size {
         for k in self.kids.iter_mut() {
@@ -1083,7 +1095,7 @@ fn layered_tree(modal: bool, overlay: bool) -> (UiTree, Rc<Cell<u32>>) {
         slots.push(Rect::new(150.0, 0.0, 50.0, 50.0));
     }
     if modal {
-        let mut modal_node = Layered::new("modal", Layer::Modal, modal_hits.clone());
+        let mut modal_node = Layered::new("modal", Layer::Modal, modal_hits.clone()).modal();
         modal_node.kids.push(Box::new(Layered::new(
             "modal_btn",
             Layer::Base, // 继承父节点的 Modal

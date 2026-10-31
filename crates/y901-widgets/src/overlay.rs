@@ -96,6 +96,11 @@ impl Menu {
         self.open
     }
 
+    /// 菜单面板的屏幕矩形（点击命中就看它）。
+    pub fn panel_rect(&self) -> Rect {
+        self.panel
+    }
+
     fn item_rect(&self, index: usize) -> Rect {
         Rect::new(
             self.panel.x,
@@ -118,10 +123,6 @@ impl Widget for Menu {
 
     fn role(&self) -> Role {
         Role("menu")
-    }
-
-    fn layer(&self) -> Layer {
-        Layer::Overlay
     }
 
     fn is_open(&self) -> bool {
@@ -494,6 +495,13 @@ impl Widget for Dialog {
 
     fn role(&self) -> Role {
         Role("dialog")
+    }
+
+    /// 模态语义由 `is_modal` 表达（开着就阻塞底层）。
+    ///
+    /// `layer()` 保留 `Modal` 仅为可见性（画在最上层），不再驱动焦点限制。
+    fn is_modal(&self) -> bool {
+        self.open
     }
 
     fn layer(&self) -> Layer {
