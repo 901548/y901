@@ -48,7 +48,7 @@ pub mod widget;
 pub use color::{Color, TextStyle};
 pub use command::Command;
 pub use event::{EventPhase, EventResult, Key, Modifiers, MouseButton, PointerCapture, UiEvent};
-pub use geometry::{Edges, Pos, Rect, Size};
+pub use geometry::{Edges,Pos,Rect,Size, place_popup};
 pub use invalidate::{InvalidationHandle, PendingInvalidation};
 pub use json::Json;
 pub use layout::{flex_arrange, flex_measure, layout_tree, Flex, Stack};
@@ -56,7 +56,7 @@ pub use query::{run as query_nodes, Query};
 pub use signal::{Invalidation, Signal};
 pub use text::TextBuffer;
 pub use theme::{State, Style, Theme};
-pub use tree::{hash_semantics, NodeInfo, UiTree};
+pub use tree::{hash_semantics, DirtyRegion, NodeInfo, UiTree};
 pub use widget::MountCtx;
 pub use widget::{
     ActionSpec, Axis, Axis2, Constraints, Cursor, Dimension, EventCtx, FlexItem, InputKind, Layer,

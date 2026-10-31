@@ -143,9 +143,12 @@ impl Widget for Menu {
 
     fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
         self.rect = rect;
-        let w = 220.0_f32.min(rect.w - 16.0);
+        let w = 220.0_f32.min((rect.w - 16.0).max(0.0));
         let h = PAD * 2.0 + self.items.len() as f32 * ITEM_H;
-        self.panel = Rect::new(rect.x + 16.0, rect.y + 16.0, w, h);
+        // 用统一的弹层摆放：下方放不下向上翻转，右侧放不下向左平移，
+        // 且不会超出父区域（命中矩形与绘制矩形都派生自 `panel`，天然同步）。
+        let anchor = Rect::new(rect.x + 16.0, rect.y + 16.0, 0.0, 0.0);
+        self.panel = y901_ui::place_popup(anchor, y901_ui::Size::new(w, h), rect);
     }
 
     fn rect(&self) -> Rect {

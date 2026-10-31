@@ -12,6 +12,35 @@ use std::sync::{Mutex, OnceLock};
 /// 碎片化时 draw 次数会翻倍，反而比一次整帧更慢。
 const MAX_DIRTY_RECTS: usize = 16;
 
+/// 把 `DirtyRegion` 转成后端要的矩形列表。
+///
+/// 返回：`None` = 整窗重绘（`full` 或脏区碎片超过上限）；
+/// `Some(list)` = 逐块重绘。
+///
+/// 抽成独立函数是为了可测：`Window::render` 需要真实窗口，
+/// 而这个决策本身只依赖 `DirtyRegion`。
+fn plan_dirty_rects(dirty: &y901_ui::DirtyRegion) -> Option<Vec<(i32, i32, i32, i32)>> {
+    if dirty.is_full() {
+        return None;
+    }
+    let list: Vec<(i32, i32, i32, i32)> = dirty
+        .rects()
+        .iter()
+        .map(|r| {
+            (
+                r.x.floor() as i32,
+                r.y.floor() as i32,
+                (r.x + r.w).ceil() as i32,
+                (r.y + r.h).ceil() as i32,
+            )
+        })
+        .collect();
+    if list.is_empty() || list.len() > MAX_DIRTY_RECTS {
+        return None;
+    }
+    Some(list)
+}
+
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -645,32 +674,12 @@ impl Window {
         let dirty = tree.dirty();
         // 按**列表**传给后端：不相邻的脏区不能合并成包围盒
         // （包围盒会把中间空隙也清掉，而 CPU 侧剪枝已经跳过了那些节点）。
-        let rects = if dirty.is_full() {
-            None
-        } else {
-            let list: Vec<(i32, i32, i32, i32)> = dirty
-                .rects()
-                .iter()
-                .map(|r| {
-                    (
-                        r.x.floor() as i32,
-                        r.y.floor() as i32,
-                        (r.x + r.w).ceil() as i32,
-                        (r.y + r.h).ceil() as i32,
-                    )
-                })
-                .collect();
-            if list.is_empty() {
-                None
-            } else if list.len() > MAX_DIRTY_RECTS {
-                // 碎片太多：逐块清+画的 draw 次数会翻倍，
-                // 直接升级为整窗重绘（并重新标脏，保证所有节点都被画）。
-                tree.invalidate_all();
-                None
-            } else {
-                Some(list)
-            }
-        };
+        let rects = plan_dirty_rects(dirty);
+        if rects.is_none() && !dirty.is_full() {
+            // 脏区碎片化（> MAX_DIRTY_RECTS）：升级为整窗重绘，
+            // 并重新标脏以保证所有节点都被画。
+            tree.invalidate_all();
+        }
         backend.set_dirty_bounds(rects);
         backend.begin();
         tree.render(backend);
@@ -948,5 +957,66 @@ mod wndproc_sequence_tests {
     fn invalid_codepoint_is_dropped() {
         let mut f = CharFilter::default();
         assert!(handle_wm_msg(WM_CHAR, 0xD800, 0, Modifiers::default(), &mut f).is_none());
+    }
+}
+
+#[cfg(test)]
+mod dirty_plan_tests {
+    use super::MAX_DIRTY_RECTS;
+    use y901_ui::{DirtyRegion, Rect};
+
+    /// 脏区碎片超过上限时必须退化成整窗重绘（返回 `None`）。
+    #[test]
+    fn too_many_dirty_rects_falls_back_to_full() {
+        let mut d = DirtyRegion::default();
+        for i in 0..(MAX_DIRTY_RECTS + 1) {
+            // 彼此不相交、不包含（否则会被合并）
+            d.add(Rect::new(
+                (i as f32) * 40.0,
+                (i as f32) * 40.0,
+                10.0,
+                10.0,
+            ));
+        }
+        assert_eq!(
+            d.rects().len(),
+            MAX_DIRTY_RECTS + 1,
+            "前提：应该真的有 {} 块",
+            MAX_DIRTY_RECTS + 1
+        );
+        assert!(
+            super::plan_dirty_rects(&d).is_none(),
+            "脏区碎片超过上限时必须退化为整窗重绘"
+        );
+    }
+
+    /// 等于上限时仍然走逐块路径（边界条件）。
+    #[test]
+    fn exactly_at_limit_still_partial() {
+        let mut d = DirtyRegion::default();
+        for i in 0..MAX_DIRTY_RECTS {
+            d.add(Rect::new(
+                (i as f32) * 40.0,
+                (i as f32) * 40.0,
+                10.0,
+                10.0,
+            ));
+        }
+        let plan = super::plan_dirty_rects(&d).expect("等于上限时应走逐块");
+        assert_eq!(plan.len(), MAX_DIRTY_RECTS);
+    }
+
+    /// `full` 状态返回 `None`（整窗）。
+    #[test]
+    fn full_region_returns_none() {
+        let d = DirtyRegion::full();
+        assert!(super::plan_dirty_rects(&d).is_none());
+    }
+
+    /// 空脏区返回 `None`（调用方会在 `Window::render` 里提前 return）。
+    #[test]
+    fn empty_region_returns_none() {
+        let d = DirtyRegion::default();
+        assert!(super::plan_dirty_rects(&d).is_none());
     }
 }

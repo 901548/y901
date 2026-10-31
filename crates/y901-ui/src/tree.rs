@@ -67,15 +67,30 @@ impl DirtyRegion {
         if self.full || rect.is_empty() {
             return;
         }
-        // 合并：已被现有区域包含就不重复添加（小区块很多的场景很常见）
-        for r in &self.rects {
-            if r.x <= rect.x
-                && r.y <= rect.y
-                && r.right() >= rect.right()
-                && r.bottom() >= rect.bottom()
-            {
+        // 合并策略（两向 + 相交取并）：
+        // 1. 新矩形被已有矩形包含  → 什么也不用做；
+        // 2. 新矩形包含了已有矩形  → 删掉已有（否则流式增长会无限堆积）；
+        // 3. 两者相交                  → 用并集替换（少一个矩形，且不漏画）。
+        // 之前只有 (1)，AI 流式输出这种"逐次变大"的脏区会一直追加，
+        // 然后撞上 MAX_DIRTY_RECTS 降级成整窗重绘。
+        let mut i = 0;
+        while i < self.rects.len() {
+            let r = self.rects[i];
+            if r.contains_rect(rect) {
                 return;
             }
+            if rect.contains_rect(r) {
+                self.rects.swap_remove(i);
+                continue;
+            }
+            if !r.intersect(rect).is_empty() {
+                let merged = r.union(rect);
+                self.rects.swap_remove(i);
+                // 合并后的矩形可能还能合并其它的：递归一次（数量小，不担心栈深）
+                self.add(merged);
+                return;
+            }
+            i += 1;
         }
         self.rects.push(rect);
     }
