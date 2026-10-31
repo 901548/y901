@@ -7,9 +7,9 @@
 //! 句柄里没有 `UiTree`，也没有任何组件引用。跨线程的数据必须由应用自己用
 //! `Arc<Mutex<…>>` 管理，并在 UI 线程 drain 之后由应用把数据写进组件。
 //!
-//! 典型用法（应用层）：
+//! 典型用法（应用层示意，引用了应用自己的符号，不参与编译）：
 //!
-//! ```ignore
+//! ```text
 //! // 建树后立刻取句柄，交给后台任务
 //! let handle = tree.invalidation_handle();
 //! std::thread::spawn(move || {

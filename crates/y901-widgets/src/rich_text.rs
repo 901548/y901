@@ -3,8 +3,9 @@
 //! 设计取舍：
 //! - **不做通用排版引擎**：按字符等宽换行（框架的文本度量本身就是格契约），
 //!   够渲染 Markdown 段落与代码块，且可预测、可测。
-//! - **流式友好**：`append_stream()` 只追加到"最后一段"，配合
-//!   [`RichText::last_block_rect`] 可以把脏区限制在最后一块的矩形内。
+//! - **只提供机制**：核心 API 是 `update(Vec<Block>)`。“流式追加”由调用方自己
+//!   修改最后一个 `Block` 后再 `update`；配合 [`RichText::last_block_rect`] 可将脏区
+//!   限制在最后一块。
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextStyle,

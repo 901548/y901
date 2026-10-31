@@ -61,7 +61,8 @@ impl MountCtx {
 /// **不是枚举**：框架只提供一组约定常量（panel / button / text …），
 /// 业务角色（例如终端、文件树）由组件库或应用自己定义：
 ///
-/// ```ignore
+/// ```
+/// use y901_ui::Role;
 /// pub const ROLE_TIMELINE: Role = Role("timeline");
 /// ```
 ///

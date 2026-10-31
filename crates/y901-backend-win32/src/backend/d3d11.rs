@@ -1073,7 +1073,6 @@ impl Context {
     ///
     /// 输入：`rect`（像素，右/下为**开区间**）。
     /// 副作用：之后所有 draw 只影响该矩形内的像素。
-    /// TODO(§36)：scissor 已就绪但尚未接到 `render`（下一步局部重绘会用到）。
     #[allow(dead_code)]
     unsafe fn set_scissor(&self, rect: RectI32) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
