@@ -271,8 +271,52 @@ tree.has_popup();
 3. **事件最高优先级**：命中浮层 → 直接派给它；`MouseDown` 在外部 → 关闭全部浮层并消耗；
 4. **关闭必标脏**：`close_popup` / `close_all_popups` 会把浮层原位置加进脏区。
 
-典型用法：下拉菜单、Tooltip、自定义弹出面板。`Dialog`/`Menu` 仍走原来的 `Layer::Overlay/Modal`；
-`open_popup` 适后于“运行时才知道要弹什么”的场景。
+### 12.1 在事件里弹出（推荐）
+
+组件拿不到 `UiTree`，所以框架提供**请求队列**：事件里提交工厂，
+分发结束后由 `finish_dispatch` 统一构造 + 挂载。
+
+```rust
+impl Widget for FileTable {
+    fn event(&mut self, ctx: &mut EventCtx, e: &UiEvent) -> EventResult {
+        if let UiEvent::MouseDown { pos, .. } = e {
+            if self.hit_more_button(*pos) {
+                let rows = self.rows.clone();
+                ctx.request_popup(
+                    Box::new(move || Box::new(MoreMenu::new("more", rows))),
+                    self.more_button_rect(),
+                );
+                return EventResult::Handled;
+            }
+        }
+        EventResult::Ignored
+    }
+}
+```
+
+- `ctx.request_popup(factory, anchor)`——普通浮层（点外部自动关）；
+- `ctx.request_modal_popup(factory, anchor)`——模态（叠黑遮罩、底层不接收事件、
+  点外部**不**关闭）；
+- 工厂只调一次；弹出失败（id 重复）时工厂不会被调用？——**会被调用**，
+  但 `open_popup` 返回 `false` 并丢弃构造出的 widget；调用方无需关心。
+
+### 12.2 唯一机制的架构决定
+
+> **新代码只走 `UiTree::popups`；`Layer` 列举仅为兼容旧组件保留。**
+
+| 能力 | `UiTree::popups`（推荐） | `Layer::Overlay/Modal`（legacy） |
+|---|---|---|
+| 挂载时机 | 运行时任意时刻 | 树内声明（构造时） |
+| 裁切 | 只到视口（天然不受父级影响） | 需 `layer()` 声明，否则被父级裁切 |
+| 点外部关闭 | 自动 | 需组件自己判断 |
+| 命中/绘制一致性 | 同一个 `rect` | 靠 `item_rect()` 与 `render` 自行保持一致 |
+| 语义树 | 已合并进 `snapshot()` | 已在树内 |
+| 焦点作用域 | 暂未限制（跑全树 Tab） | `modal_root` 已实现 |
+
+**迁移计划**（未完成，已记录）：
+1. 把 `Dialog` 的焦点作用域从 `modal_root` 搬到 popup（`popup.modal` 时 Tab 只在浮层内循环）；
+2. `Menu`/`Dialog` 改成 `ctx.request_popup` 弹出，删除 `layer()` 覆盖；
+3. 删除 `Layer` 枚举与 `layer_present` / `deferred` 回放路径。
 
 ## 13. RichText（富文本）接口
 

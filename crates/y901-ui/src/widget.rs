@@ -8,6 +8,22 @@ use crate::color::{Color, TextStyle};
 use crate::event::{EventResult, UiEvent};
 use crate::geometry::{Edges, Pos, Rect, Size};
 
+/// 一个"请求挂浮层"的工厂：组件在事件里只提交工厂，
+/// 真正构建 + 挂载由框架在 `finish_dispatch` 统一做。
+///
+/// 为什么是工厂而不是现成 widget：事件处理期间组件只有 `&mut EventCtx`，
+/// 拿不到 `UiTree`；工厂在分发结束后才调用，避开借用冲突，
+/// 也避免了"弹出失败但已经构造了一半"的浪费。
+pub struct PopupRequest {
+    /// 上层提交的工厂（只调一次）。
+    pub factory: Box<dyn FnOnce() -> Box<dyn Widget>>,
+    /// 触发控件的屏幕矩形。
+    pub anchor: Rect,
+    /// 是否模态（阻塞底层事件）。
+    pub modal: bool,
+}
+
+
 /// 绘制/命中层级。
 ///
 /// 子节点继承父节点的层级，`Modal` 会盖住整个 `Base`。
@@ -664,6 +680,8 @@ pub struct EventCtx {
     pub focus_vetoed: bool,
     /// 请求把 IME 候选窗钉在某个屏幕坐标（组件算好光标位置后填）。
     pub ime_candidate: Option<Pos>,
+    /// 本次分发中组件提交的浮层请求（分发结束后由 `UiTree` 统一挂载）。
+    pub popup_requests: Vec<PopupRequest>,
 }
 
 impl EventCtx {
@@ -683,6 +701,7 @@ impl EventCtx {
             pointer_capture: None,
             focus_vetoed: false,
             ime_candidate: None,
+            popup_requests: Vec::new(),
         }
     }
 
@@ -761,6 +780,37 @@ impl EventCtx {
     }
 
     /// 把组件的返回值与已累积的标志合并。
+    /// 请求打开一个浮层（非模态）。
+    ///
+    /// 输入：`factory`（分发结束后才调用）、`anchor`（触发控件屏幕矩形）。
+    /// 副作用：追加一条请求并标记重绘。
+    pub fn request_popup(
+        &mut self,
+        factory: Box<dyn FnOnce() -> Box<dyn Widget>>,
+        anchor: Rect,
+    ) {
+        self.popup_requests.push(PopupRequest {
+            factory,
+            anchor,
+            modal: false,
+        });
+        self.redraw = true;
+    }
+
+    /// 请求打开一个**模态**浮层（阻塞底层事件）。
+    pub fn request_modal_popup(
+        &mut self,
+        factory: Box<dyn FnOnce() -> Box<dyn Widget>>,
+        anchor: Rect,
+    ) {
+        self.popup_requests.push(PopupRequest {
+            factory,
+            anchor,
+            modal: true,
+        });
+        self.redraw = true;
+    }
+
     pub fn finish(&mut self, result: EventResult) -> EventResult {
         let mut out = result;
         if self.relayout {

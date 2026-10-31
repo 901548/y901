@@ -156,6 +156,8 @@ pub struct Popup {
     anchor: Rect,
     /// 布局阶段算出的真实矩形（绘制与命中共用它）。
     rect: Rect,
+    /// 是否模态：模态时底层控件不接收任何事件（点外部也不会关闭）。
+    modal: bool,
 }
 
 impl Popup {
@@ -177,6 +179,11 @@ impl Popup {
     /// 浮层里装的控件（可变）。
     pub fn widget_mut(&mut self) -> &mut dyn Widget {
         self.widget.as_mut()
+    }
+
+    /// 是否模态。
+    pub fn is_modal(&self) -> bool {
+        self.modal
     }
 }
 
@@ -343,6 +350,15 @@ impl UiTree {
     /// 返回：`false` = 同 id 的浮层已存在（本次忽略）。
     /// 副作用：立刻重新布局（下一次 `layout` 会把它摆好）并标脏。
     pub fn open_popup(&mut self, widget: Box<dyn Widget>, anchor: Rect) -> bool {
+        self.push_popup(widget, anchor, false)
+    }
+
+    /// 打开一个**模态**浮层：底层不接收事件，直到它被关闭。
+    pub fn open_modal_popup(&mut self, widget: Box<dyn Widget>, anchor: Rect) -> bool {
+        self.push_popup(widget, anchor, true)
+    }
+
+    fn push_popup(&mut self, widget: Box<dyn Widget>, anchor: Rect, modal: bool) -> bool {
         let id = widget.id().to_string();
         if self.popups.iter().any(|p| p.id == id) {
             return false;
@@ -352,6 +368,7 @@ impl UiTree {
             widget,
             anchor,
             rect: Rect::ZERO,
+            modal,
         });
         self.layout_requested = true;
         self.dirty = DirtyRegion::full();
@@ -1347,6 +1364,10 @@ impl UiTree {
         if !self.popups.is_empty() {
             let viewport = Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h);
             ctx.push_clip(viewport);
+            // 模态弹层：先铺一层遮罩（与 Dialog 的 0.55 黑一致）
+            if self.popups.iter().any(|p| p.modal) {
+                ctx.fill_rect(viewport, crate::Color::rgba(0.0, 0.0, 0.0, 0.55));
+            }
             for popup in self.popups.iter_mut() {
                 if popup.rect.is_empty() {
                     continue;
@@ -1590,11 +1611,17 @@ impl UiTree {
                         };
                         let merged = ctx.finish(result);
                         self.pending.append(&mut ctx.commands);
+
                         return merged;
                     }
                     None => {
+                        // 模态浮层：点外部**不关闭**（必须显式关），但仍吃掉事件
+                        // 以阻塞底层；非模态：点外部关闭。
                         if matches!(event, UiEvent::MouseDown { .. }) {
-                            self.close_all_popups();
+                            let modal = self.popups.iter().any(|p| p.modal);
+                            if !modal {
+                                self.close_all_popups();
+                            }
                             return EventResult::Handled;
                         }
                     }
@@ -1833,6 +1860,17 @@ impl UiTree {
             self.set_focus(Some(want));
         }
 
+        // 组件在事件里提交的浮层请求：到这里才真正构造 + 挂载。
+        // 工厂已经拿到了需要的数据，此时再调用不会与 `&mut tree` 冲突。
+        for req in ctx.popup_requests.drain(..) {
+            let widget = (req.factory)();
+            if req.modal {
+                self.open_modal_popup(widget, req.anchor);
+            } else {
+                self.open_popup(widget, req.anchor);
+            }
+        }
+
         match ctx.pointer_capture.take() {
             Some(PointerCapture::Capture(id)) => {
                 // 路径在捕获时就解析好，后续 MouseMove 不再查找、不再分配
@@ -1962,7 +2000,17 @@ impl UiTree {
                     .collect(),
             }
         }
-        walk(self.root.as_ref(), self.focus.as_deref())
+        let mut root = walk(self.root.as_ref(), self.focus.as_deref());
+        // 浮层也要进语义树：否则 Agent/无障碍看不见菜单里的项。
+        // 挂在根节点的 `children` 末尾（与绘制顺序一致：浮层最后画）。
+        for popup in &self.popups {
+            let mut info = walk(popup.widget.as_ref(), self.focus.as_deref());
+            // 浮层的布局矩形由 `place_popup` 决定，与 `node.rect()` 可能不一致：
+            // 语义树里必须报**真正绘制/命中**的矩形，否则 Agent 点不中。
+            info.rect = popup.rect;
+            root.children.push(info);
+        }
+        root
     }
 }
 
