@@ -29,7 +29,7 @@ y901-app ──> y901-backend-win32 ──> y901-runtime ──> y901-agent ─�
 关键约束：
 
 - `y901-ui` 的 `[dependencies]` 是**空的**。这不是洁癖，而是测试策略的地基：
-  278 项测试里绝大多数不需要窗口、GPU、PTY。
+  454 项测试（另有 13 项需真机/GPU 的 `#[ignore]`）里绝大多数不需要窗口、GPU、PTY。
 - 只有 `y901-backend-win32` 依赖 `windows-sys`（grep 可验证）。
 - `y901-runtime` 单独存在的原因：`Host::policy()` 需要 `y901_agent::Policy`，
   而 `agent` 依赖 `ui`；若把 `Host` 放进 `ui` 会形成 `ui -> agent -> ui` 循环。
@@ -45,6 +45,12 @@ pub trait RenderCtx: TextMetrics {
     fn fill_rect(...); fn stroke_rect(...);
     fn draw_text(...);                     // 画一串文本
     fn draw_char(...);                     // 画单字符（默认实现用栈缓冲，零分配）
+    // 以下都有默认实现；D3D11 后端覆盖为 GPU 图元（SDF / 渐变）
+    fn fill_round_rect(&mut self, rect, color, radius);
+    fn stroke_round_rect(&mut self, rect, color, width, radius);
+    fn fill_gradient_rect(&mut self, rect, from, to, horizontal);
+    fn fill_gradient_rect_dir(&mut self, rect, from, to, dir: (f32, f32));
+    fn fill_gradient_round_rect(&mut self, rect, from, to, dir: (f32, f32), radius);
     fn push_clip(...); fn pop_clip(...);
     fn theme(&self) -> &Theme;
 }
@@ -60,8 +66,15 @@ pub trait Host {
     fn idle(&mut self, tree: &mut UiTree);
     fn command(&mut self, tree: &mut UiTree, cmd: Command) -> bool;
     fn event(&mut self, tree: &mut UiTree, ev: &UiEvent) -> EventResult;   // 默认 Ignored
+    fn attach_waker(&mut self, waker: Arc<dyn Waker>);                     // 默认空实现
     fn policy(&self) -> &Policy;
     fn ime_position(&self) -> Option<Pos>;
+}
+
+/// 跨线程唤醒器：后台线程（PTY/RPC）拿到数据时 `wake()`，
+/// 打断主循环的阻塞等待（否则要等下一次输入）。
+pub trait Waker: Send + Sync + 'static {
+    fn wake(&self);
 }
 
 pub trait PlatformRuntime {
@@ -223,7 +236,7 @@ dlg.open();
 ## 10. 测试
 
 ```
-cargo test --workspace          # 278 项（含 1 个需真机的 #[ignore]）
+cargo test --workspace          # 454 项（含 13 个需真机/GPU 的 #[ignore]）
 cargo build --workspace         # 零警告
 cargo clippy --workspace --all-targets   # 零警告
 scripts/test-count.ps1          # 唯一可信的计数方式（把输出写文件再解析）

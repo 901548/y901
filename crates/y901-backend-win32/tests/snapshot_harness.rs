@@ -358,9 +358,26 @@ fn round_stroke_draws_ring_only() {
             }
         }
     }
-    // 矩形被视口裁到 200x33：轮廓带约 900，内部约 3400
-    assert!(ring > 600, "轮廓带像素太少：{ring}");
-    assert!(inner > 2000, "内部像素太少：{inner}");
+    // 阈值**按几何动态算**，不写死。
+    // 矩形会被视口裁切（小窗口时拿不到全部 200x64），
+    // 所以先用裁剪后的尺寸算总面积，再按比例约束。
+    let area = (rw.max(1.0) * rh.max(1.0)) as f64;
+    assert!(
+        (ring + inner) as f64 <= area * 1.05,
+        "内部+轮廓不应超过矩形面积：{ring}+{inner} vs {area:.0}"
+    );
+    // 轮廓带面积 ≈ 周长 × 宽度（实测偏小一些，取 20% 作为下限）
+    let expected_ring = ((rw + rh) as f64 * 2.0) * width_px as f64 * 0.2;
+    assert!(
+        ring as f64 >= expected_ring.max(50.0),
+        "轮廓带像素偏少：{ring}（期望≥{expected_ring:.0}）"
+    );
+    // 内部面积 ≈ 总面积 - 轮廓带，取 50% 作为下限
+    let expected_inner = (area - ring as f64) * 0.5;
+    assert!(
+        inner as f64 >= expected_inner.max(100.0),
+        "内部像素偏少：{inner}（期望≥{expected_inner:.0}）"
+    );
     // 说明：矩形被视口下沿裁切，下两个圆角实际不存在，
     // 所以"外部"像素很少；这里只要求不会误判。
     let _ = outside;
@@ -571,4 +588,214 @@ fn invalidate_rect_partial_equals_full() {
         "局部重绘与全量重绘不一致：{diff} 字节不同，首个差异 {first:?}"
     );
     eprintln!("[invalidate_rect] 局部刷新 == 全量重绘（{w1}x{h1}，0 差异）");
+}
+
+
+/// 两块**不相邻**的脏区分别更新：局部重绘必须与整窗重绘逐像素一致。
+///
+/// 这是 "dirty.bounds() 合并包围盒" 这个 bug 的回归测试。
+/// 关键设计：**中间那块是独立子控件**——两块脏区都不与它相交，CPU 侧剪枝会跳过它。
+/// 若后端按包围盒清屏，中间那块会被清掉且不再重绘 → 变黑，测试立刻红。
+#[test]
+#[ignore = "需要真实 GPU：cargo test -p y901-backend-win32 --release --test snapshot_harness -- --ignored --nocapture"]
+fn two_disjoint_dirty_rects_match_full_redraw() {
+    use std::cell::Cell as StdCell;
+    use std::rc::Rc;
+
+    /// 固定位置的小色块（自己画自己那块）。
+    struct Cell {
+        id: String,
+        color: Color,
+        rect: Rect,
+    }
+    impl Widget for Cell {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) -> Size {
+            c.constrain(Size::new(40.0, 20.0))
+        }
+        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+            self.rect = r;
+        }
+        fn rect(&self) -> Rect {
+            self.rect
+        }
+        fn event(&mut self, _c: &mut EventCtx, _e: &y901_ui::UiEvent) -> EventResult {
+            EventResult::Ignored
+        }
+        fn render(&mut self, ctx: &mut dyn RenderCtx) {
+            ctx.fill_rect(self.rect, self.color);
+        }
+        fn semantics(&self) -> Semantics {
+            Semantics::default()
+        }
+    }
+
+    /// 容器：铺满窗口画背景，并按固定位置摆放三个子块。
+    struct Board {
+        rect: Rect,
+        wide: Rc<StdCell<f32>>,
+        kids: Vec<Box<dyn Widget>>,
+    }
+    impl Widget for Board {
+        fn id(&self) -> &str {
+            "board"
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.kids
+        }
+        fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+            Some(&mut self.kids)
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) -> Size {
+            c.constrain(Size::new(c.max.w, c.max.h))
+        }
+        fn arrange(
+            &mut self,
+            r: Rect,
+            m: &dyn TextMetrics,
+            cache: &mut y901_ui::layout::LayoutCache,
+        ) {
+            self.rect = r;
+            // 左上 / 中间（脏区不覆盖它）/ 右下
+            let spots = [
+                Rect::new(r.x + 10.0, r.y + 10.0, 40.0, 20.0),
+                Rect::new(r.x + 200.0, r.y + 80.0, 60.0, 40.0),
+                Rect::new(r.x + 380.0, r.y + 150.0, self.wide.get(), 20.0),
+            ];
+            for (kid, spot) in self.kids.iter_mut().zip(spots) {
+                kid.arrange(spot, m, cache);
+            }
+        }
+        fn rect(&self) -> Rect {
+            self.rect
+        }
+        fn event(&mut self, _c: &mut EventCtx, _e: &y901_ui::UiEvent) -> EventResult {
+            EventResult::Ignored
+        }
+        fn render(&mut self, ctx: &mut dyn RenderCtx) {
+            ctx.fill_rect(self.rect, Color::rgba(0.08, 0.09, 0.11, 1.0));
+        }
+        fn semantics(&self) -> Semantics {
+            Semantics::default()
+        }
+    }
+
+    let make = || {
+        let wide = Rc::new(StdCell::new(40.0f32));
+        let kids: Vec<Box<dyn Widget>> = vec![
+            Box::new(Cell {
+                id: "c0".into(),
+                color: Color::rgba(0.90, 0.20, 0.20, 1.0),
+                rect: Rect::ZERO,
+            }),
+            Box::new(Cell {
+                id: "c1".into(),
+                color: Color::rgba(0.90, 0.90, 0.20, 1.0),
+                rect: Rect::ZERO,
+            }),
+            Box::new(Cell {
+                id: "c2".into(),
+                color: Color::rgba(0.20, 0.90, 0.30, 1.0),
+                rect: Rect::ZERO,
+            }),
+        ];
+        (
+            UiTree::new(Box::new(Board {
+                rect: Rect::ZERO,
+                wide: wide.clone(),
+                kids,
+            })),
+            wide,
+        )
+    };
+
+    let options = Options {
+        title: "y901 disjoint dirty harness".to_string(),
+        width: 520,
+        height: 220,
+        theme: None,
+        font: None,
+    };
+
+    // A：整窗画（c2 宽 40）
+    let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
+    let (mut tree, wide) = make();
+    window.resize(&mut tree);
+    tree.invalidate_all();
+    window.render(&mut tree);
+
+    // B：c2 变宽（80）→ 只标 c0（不变，故意加进来）与 c2 两块脏区
+    wide.set(80.0);
+    tree.mark_layout_dirty("board");
+    tree.layout(window_viewport(&window), &HarnessMetrics);
+    let c0 = tree.rect_of("c0").expect("c0");
+    let c2 = tree.rect_of("c2").expect("c2");
+    tree.invalidate_rect(c0);
+    tree.invalidate_rect(c2);
+    window.request_snapshot();
+    window.render(&mut tree);
+    let (px1, w1, h1) = window.take_snapshot().expect("快照 A/B 失败");
+
+    // C：全新窗口直接画最终内容（c2 宽 80）
+    let mut window2 = Window::create(&options).expect("需要可用的 D3D11 设备");
+    let (mut tree2, wide2) = make();
+    wide2.set(80.0);
+    window2.resize(&mut tree2);
+    tree2.mark_layout_dirty("board");
+    tree2.layout(window_viewport(&window2), &HarnessMetrics);
+    window2.request_snapshot();
+    tree2.invalidate_all();
+    window2.render(&mut tree2);
+    let (px2, w2, h2) = window2.take_snapshot().expect("快照 C 失败");
+
+    assert_eq!((w1, h1), (w2, h2));
+    let mut diff = 0usize;
+    let mut first = None;
+    for i in 0..(w1 * h1 * 4) as usize {
+        if px1[i] != px2[i] {
+            diff += 1;
+            if first.is_none() {
+                let p = i / 4;
+                first = Some((p as u32 % w1, p as u32 / w1));
+            }
+        }
+    }
+    assert_eq!(
+        diff, 0,
+        "两块不相邻脏区的局部重绘与整窗不一致：{diff} 字节不同，首个差异 {first:?}"
+    );
+    eprintln!("[dirty2] 两块不相邻脏区 == 整窗重绘（{w1}x{h1}，0 差异）");
+}
+
+/// 取窗口客户区尺寸（harness 里布局用）。
+fn window_viewport(w: &Window) -> Size {
+    let (cw, ch) = w.viewport();
+    Size::new(cw as f32, ch as f32)
+}
+
+/// harness 用的度量：等宽 8×16。
+struct HarnessMetrics;
+
+impl TextMetrics for HarnessMetrics {
+    fn measure_text(&self, t: &str, _s: &TextStyle) -> Size {
+        Size::new(t.chars().count() as f32 * 8.0, 16.0)
+    }
+    fn line_height(&self, _s: &TextStyle) -> f32 {
+        16.0
+    }
+    fn scale(&self) -> f32 {
+        1.0
+    }
 }

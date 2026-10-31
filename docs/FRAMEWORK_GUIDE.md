@@ -772,9 +772,10 @@ if !had_work && tree.dirty().is_empty() {
 2. 字形按裁剪框缩放 + 重映射 UV（`clip_quad`）：完全在框外直接丢弃，
    部分越界则裁剪矩形并按比例重算 UV——比整字形丢弃更平滑（不会出现半截字突然消失）。
 
-**为什么不上 GPU scissor**：需要新增 `RSSetScissorRects` vtable 槽 + RECT 结构 +
-光栅化状态改写，属于未测试过的 unsafe 路径；CPU 侧 `clip_quad` 是纯函数，
-可单测（见 `clip_quad_tests`），风险低得多。等有 GPU 环境验证后再考虑 GPU scissor。
+**GPU scissor 已经上了**（见 §36）：`RSSetScissorRects` vtable 槽已补齐（按
+`winapi::um::d3d11` 的 `ID3D11DeviceContextVtbl` 逐伪对齐），`scissor_enable = 1`，
+局部重绘按**脏区列表**逐块清屏 + 逐块画。CPU 侧 `clip_quad` 作为
+字形裁剪的保险依然保留（两道防线）。
 
 ### 34.3 仍存在的性能隐患（未修）
 
@@ -827,3 +828,20 @@ if !had_work && tree.dirty().is_empty() {
 | 连续拉伸窗口（60 次/2s） | **6.3%** | 317us | 5.7ms |
 
 两者都远低于 16ms 预算。
+
+## §37 脏区列表化：多块不相邻脏区不能合并成包围盒
+
+**问题**：`Window::render` 曾经只把 `dirty.bounds()`（单个包围盒）传给后端。
+两块不相邻的脏区合并后，**中间的空隙也被清屏**；而 CPU 侧剪枝
+（`needs_paint`）已经跳过了不与任何脏区相交的节点 → 空隙里的内容被清掉且不重绘 → **变黑**。
+
+**修法**：
+
+1. `Window::render` 传 `Vec<(i32,i32,i32,i32)>`（逐脏区）而非包围盒；
+2. `Gfx` 保存脏区列表，`render` 里**逐块**执行 `scissor + clear + DrawInstanced`；
+3. 脏区数 > `MAX_DIRTY_RECTS (16)` 时降级为整窗重绘（碎片化时 draw 次数翻倍反而更慢）。
+
+**验证**：`two_disjoint_dirty_rects_match_full_redraw`（GPU，`#[ignore]`）
+—— 左上、中间（**不受脏区覆盖**）、右下三个独立子控件，
+只标左上与右下两块 → 与整窗重绘逐字节相等。
+变异检验：改回包围盒方案 → 测试立刻在 `(200,80)`（中间块）报错。

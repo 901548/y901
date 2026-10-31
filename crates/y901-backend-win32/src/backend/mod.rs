@@ -192,8 +192,8 @@ impl D3dBackend {
     ///
     /// 输入：`rect = (left, top, right, bottom)` 像素坐标；`None` 表示整窗重绘。
     /// 副作用：下一帧只清/画这块区域（scissor）。脏区为空时调用方应传 `None`。
-    pub fn set_dirty_bounds(&mut self, rect: Option<(i32, i32, i32, i32)>) {
-        self.gfx.set_dirty_bounds(rect);
+    pub fn set_dirty_bounds(&mut self, rects: Option<Vec<(i32, i32, i32, i32)>>) {
+        self.gfx.set_dirty_bounds(rects);
     }
 
     /// 提交一帧。返回是否需要继续重绘。

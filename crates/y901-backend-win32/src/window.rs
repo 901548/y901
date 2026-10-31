@@ -6,6 +6,12 @@
 
 use std::sync::{Mutex, OnceLock};
 
+/// 脏区列表的上限：超过就降级为整窗重绘。
+///
+/// 为什么要有上限：每块脏区都要一次 `scissor + clear + DrawInstanced`，
+/// 碎片化时 draw 次数会翻倍，反而比一次整帧更慢。
+const MAX_DIRTY_RECTS: usize = 16;
+
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -637,19 +643,35 @@ impl Window {
         };
         // 必须在 tree.render 之前取脏区（render 会清空它）
         let dirty = tree.dirty();
-        let bounds = if dirty.is_full() {
+        // 按**列表**传给后端：不相邻的脏区不能合并成包围盒
+        // （包围盒会把中间空隙也清掉，而 CPU 侧剪枝已经跳过了那些节点）。
+        let rects = if dirty.is_full() {
             None
         } else {
-            dirty.bounds().map(|r| {
-                (
-                    r.x.floor() as i32,
-                    r.y.floor() as i32,
-                    (r.x + r.w).ceil() as i32,
-                    (r.y + r.h).ceil() as i32,
-                )
-            })
+            let list: Vec<(i32, i32, i32, i32)> = dirty
+                .rects()
+                .iter()
+                .map(|r| {
+                    (
+                        r.x.floor() as i32,
+                        r.y.floor() as i32,
+                        (r.x + r.w).ceil() as i32,
+                        (r.y + r.h).ceil() as i32,
+                    )
+                })
+                .collect();
+            if list.is_empty() {
+                None
+            } else if list.len() > MAX_DIRTY_RECTS {
+                // 碎片太多：逐块清+画的 draw 次数会翻倍，
+                // 直接升级为整窗重绘（并重新标脏，保证所有节点都被画）。
+                tree.invalidate_all();
+                None
+            } else {
+                Some(list)
+            }
         };
-        backend.set_dirty_bounds(bounds);
+        backend.set_dirty_bounds(rects);
         backend.begin();
         tree.render(backend);
         let (w, h) = self.viewport;
@@ -682,7 +704,9 @@ impl Window {
         self.backend.as_mut()?.take_snapshot()
     }
 
-    /// 取一个跨线程唤醒句柄（`Send + Sync`），交给后台线程在"有数据了"时调用。
+    /// 峙区列表的上限：超过就降级为整窗重绘。
+///
+/// 取一个跨线程唤醒句柄（`Send + Sync`），交给后台线程在"有数据了"时调用。
     ///
     /// 返回：可 clone 的 [`WakeHandle`]。
     /// 用途：主循环空闲时阻塞等待，只有 Windows 消息能唤醒它；

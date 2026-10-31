@@ -1647,8 +1647,11 @@ pub struct Gfx {
     height: u32,
     /// 自持渲染目标（尺寸随窗口，重建/改变尺寸时丢弃重建）。
     cached: Option<CachedTarget>,
-    /// 本帧需要更新的矩形（None = 整窗）。
-    dirty: Option<RectI32>,
+    /// 本帧需要更新的矩形列表（`None`/空 = 整窗）。
+    ///
+    /// 为什么是列表而不是包围盒：两块不相邻的脏区若按包围盒清屏，
+    /// 中间空隙会被清掉，而 CPU 侧剪枝已跳过了那些节点→空隙变黑。
+    dirty: Option<Vec<RectI32>>,
     /// 已渲染帧数（快照自检只在第二帧之后跑，避免拿未初始化内容比较）。
     frames: u64,
     /// 下一帧是否需要回读像素（必须在 present 之前拿）。
@@ -1940,15 +1943,23 @@ impl Gfx {
             right: w as i32,
             bottom: h as i32,
         };
-        let rect = match self.dirty {
-            Some(d) if d.right > d.left && d.bottom > d.top => d,
-            _ => full,
+        // 逐脏区清屏 + 逐脏区画。
+        // 单块时走快路径；多块时逐个 scissor。CPU 侧剪枝已经把
+        // "命中任一脏区"的节点都放进了实例流，所以每块自己清 + 画就不会错。
+        let rects: Vec<RectI32> = match &self.dirty {
+            Some(list) if !list.is_empty() => list.clone(),
+            _ => vec![full],
         };
-        let is_full =
-            rect.left == 0 && rect.top == 0 && rect.right >= w as i32 && rect.bottom >= h as i32;
-        draw_scene(
-            context, pipeline, atlas, cached, instances, count, rect, is_full, w, h,
-        );
+        let full_frame = self.dirty.as_ref().is_none_or(|v| v.is_empty());
+        for rect in rects {
+            let is_full = rect.left == 0
+                && rect.top == 0
+                && rect.right >= w as i32
+                && rect.bottom >= h as i32;
+            draw_scene(
+                context, pipeline, atlas, cached, instances, count, rect, is_full, w, h,
+            );
+        }
 
         // ---- 阶段 B：自持 RT → 后备缓冲 ----
         blit_cached(context, pipeline, cached, atlas, rtv, w, h);
@@ -1990,7 +2001,7 @@ impl Gfx {
         //
         // 前提：上一帧已经是完整画面。此后用**同一批实例**只重画一个小矩形，
         // 结果应当与整窗重绘逐像素一致 —— 这验证"局部清屏 + scissor"没有破坏画面。
-        if std::env::var_os("Y901_SCISSOR_TEST").is_some() && self.frames >= 2 && is_full {
+        if std::env::var_os("Y901_SCISSOR_TEST").is_some() && self.frames >= 2 && full_frame {
             let before = self.read_back_hash();
             let small = RectI32 {
                 left: 0,
@@ -2237,12 +2248,18 @@ impl Gfx {
     ///
     /// 输入：`rect = (left, top, right, bottom)`，像素坐标，右/下开区间。
     /// 副作用：下一帧 `render` 会用它做 scissor + 局部清屏；`None` 时退化为整窗。
-    pub fn set_dirty_bounds(&mut self, rect: Option<(i32, i32, i32, i32)>) {
-        self.dirty = rect.map(|(l, t, r, b)| RectI32 {
-            left: l,
-            top: t,
-            right: r,
-            bottom: b,
+    pub fn set_dirty_bounds(&mut self, rects: Option<Vec<(i32, i32, i32, i32)>>) {
+        // 过滤空矩形；列表为空时归为"整窗"（呼叫方已通过 dirty.bounds 判断）
+        self.dirty = rects.map(|v| {
+            v.into_iter()
+                .filter(|(l, t, r, b)| r > l && b > t)
+                .map(|(l, t, r, b)| RectI32 {
+                    left: l,
+                    top: t,
+                    right: r,
+                    bottom: b,
+                })
+                .collect::<Vec<_>>()
         });
     }
 
