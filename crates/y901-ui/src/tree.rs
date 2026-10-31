@@ -145,8 +145,45 @@ impl DirtyRegion {
     }
 }
 
+/// 挂在 Overlay 层的浮层（菜单/Tooltip/弹窗都用它）。
+///
+/// 为什么不直接当普通子节点：普通子节点会继承父链的 `push_clip`
+/// （滚动容器/面板会裁切），而浮层必须画在窗口最上层、裁切只到视口。
+pub struct Popup {
+    id: String,
+    widget: Box<dyn Widget>,
+    /// 触发控件的屏幕矩形（弹层据此摆放，放不下会翻转）。
+    anchor: Rect,
+    /// 布局阶段算出的真实矩形（绘制与命中共用它）。
+    rect: Rect,
+}
+
+impl Popup {
+    /// 浮层 id（取自内部控件）。
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// 浮层当前的屏幕矩形（布局后有效）。
+    pub fn rect(&self) -> Rect {
+        self.rect
+    }
+
+    /// 浮层里装的控件（只读）。
+    pub fn widget(&self) -> &dyn Widget {
+        self.widget.as_ref()
+    }
+
+    /// 浮层里装的控件（可变）。
+    pub fn widget_mut(&mut self) -> &mut dyn Widget {
+        self.widget.as_mut()
+    }
+}
+
 pub struct UiTree {
     root: Box<dyn Widget>,
+    /// Overlay 层的浮层（按开启顺序，后开的在上）。
+    popups: Vec<Popup>,
     focus: Option<String>,
     viewport: Size,
     /// id -> rect 的缓存，避免每次 RPC 都走一遍树。
@@ -217,6 +254,7 @@ impl UiTree {
     pub fn new(root: Box<dyn Widget>) -> Self {
         let mut this = Self {
             root,
+            popups: Vec::new(),
             focus: None,
             viewport: Size::ZERO,
             rects: HashMap::new(),
@@ -296,6 +334,78 @@ impl UiTree {
     /// "无法用矩形表达"的场景。不要每帧调用——它会让脏区剪枝完全失效。
     pub fn invalidate_all(&mut self) {
         self.dirty = DirtyRegion::full();
+    }
+
+    /// 把一个控件挂到 Overlay 层（屏幕最上层，不受父级裁切）。
+    ///
+    /// 输入：`widget`（id 必须树内唯一）、`anchor`（触发控件的屏幕矩形，
+    /// 用于摆放：下方放不下会向上翻转）。
+    /// 返回：`false` = 同 id 的浮层已存在（本次忽略）。
+    /// 副作用：立刻重新布局（下一次 `layout` 会把它摆好）并标脏。
+    pub fn open_popup(&mut self, widget: Box<dyn Widget>, anchor: Rect) -> bool {
+        let id = widget.id().to_string();
+        if self.popups.iter().any(|p| p.id == id) {
+            return false;
+        }
+        self.popups.push(Popup {
+            id,
+            widget,
+            anchor,
+            rect: Rect::ZERO,
+        });
+        self.layout_requested = true;
+        self.dirty = DirtyRegion::full();
+        true
+    }
+
+    /// 关闭指定浮层（不存在返回 `false`）。
+    pub fn close_popup(&mut self, id: &str) -> bool {
+        let Some(pos) = self.popups.iter().position(|p| p.id() == id) else {
+            return false;
+        };
+        let rect = self.popups[pos].rect;
+        self.popups.remove(pos);
+        if !rect.is_empty() {
+            self.dirty.add(rect);
+        }
+        true
+    }
+
+    /// 关闭全部浮层，返回关了几个。
+    pub fn close_all_popups(&mut self) -> usize {
+        let n = self.popups.len();
+        for p in self.popups.drain(..) {
+            if !p.rect.is_empty() {
+                self.dirty.add(p.rect);
+            }
+        }
+        n
+    }
+
+    /// 是否有浮层打开。
+    pub fn has_popup(&self) -> bool {
+        !self.popups.is_empty()
+    }
+
+    /// 浮层列表（按开启顺序）。
+    pub fn popups(&self) -> &[Popup] {
+        &self.popups
+    }
+
+    /// 某个浮层的屏幕矩形（布局后有效）。
+    pub fn popup_rect(&self, id: &str) -> Option<Rect> {
+        self.popups.iter().find(|p| p.id() == id).map(|p| p.rect)
+    }
+
+    /// 抉一个浮层内部控件的可变引用（改内容后记得标脏）。
+    pub fn with_popup_mut(&mut self, id: &str, f: &mut dyn FnMut(&mut dyn Widget)) -> bool {
+        match self.popups.iter_mut().find(|p| p.id() == id) {
+            Some(p) => {
+                f(p.widget.as_mut());
+                true
+            }
+            None => false,
+        }
     }
 
     /// 按**像素矩形**标脏（不查树、不找节点）。
@@ -1028,6 +1138,20 @@ impl UiTree {
             self.snapshot_rects()
         };
         crate::layout::layout_tree(self.root.as_mut(), viewport, metrics, &mut self.cache);
+
+        // 浮层摆放：先量尺寸（浮层自己决定内容高），再用 `place_popup`
+        // 把它放在锚点旁且不超出视口。绘制与命中都用这个 rect。
+        let bounds = Rect::new(0.0, 0.0, viewport.w, viewport.h);
+        for popup in self.popups.iter_mut() {
+            let size = popup.widget.measure(
+                metrics,
+                crate::Constraints::loose(viewport),
+                &mut self.cache,
+            );
+            let rect = crate::place_popup(popup.anchor, size, bounds);
+            popup.rect = rect;
+            popup.widget.arrange(rect, metrics, &mut self.cache);
+        }
         if !self.layout_stats().skipped {
             self.rebuild_indices();
             if !before.is_empty() {
@@ -1217,6 +1341,22 @@ impl UiTree {
             if let Some(node) = self.node_at_mut(&path) {
                 render_subtree(node, ctx, &dirty);
             }
+        }
+
+        // Overlay 层：浮层在最后画，裁切**只到视口**（不继承任何父级 clip）。
+        if !self.popups.is_empty() {
+            let viewport = Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h);
+            ctx.push_clip(viewport);
+            for popup in self.popups.iter_mut() {
+                if popup.rect.is_empty() {
+                    continue;
+                }
+                if popup.rect.intersect(viewport).is_empty() && !dirty.is_full() {
+                    continue;
+                }
+                popup.widget.render(ctx);
+            }
+            ctx.pop_clip();
         }
 
         self.dirty.clear();
@@ -1420,6 +1560,48 @@ impl UiTree {
     ///
     /// 路径只解析一次，派发沿路径递归一趟，每个节点只访问一次。
     pub fn dispatch(&mut self, event: &UiEvent) -> EventResult {
+        // Overlay 层最高优先级：
+        //   - 命中浮层 → 直接派给浮层内部控件（不走树的命中，避免被遮挡）；
+        //   - 点在浮层外 → 关闭全部浮层并吃掉这次按下（点外关闭的标准行为）。
+        if !self.popups.is_empty() {
+            if let Some(pos) = match event {
+                UiEvent::MouseDown { pos, .. }
+                | UiEvent::MouseUp { pos, .. }
+                | UiEvent::MouseMove { pos, .. }
+                | UiEvent::Wheel { pos, .. }
+                | UiEvent::FileDrop { pos, .. } => Some(*pos),
+                _ => None,
+            } {
+                let hit = self
+                    .popups
+                    .iter()
+                    .rev()
+                    .find(|p| p.rect.contains(pos))
+                    .map(|p| p.id.clone());
+                match hit {
+                    Some(id) => {
+                        let viewport = self.viewport;
+                        let mut ctx = EventCtx::new(self.focus.clone(), viewport);
+                        ctx.phase = EventPhase::Target;
+                        ctx.target = id.clone();
+                        let result = match self.popups.iter_mut().find(|p| p.id == id) {
+                            Some(p) => p.widget.event(&mut ctx, event),
+                            None => EventResult::Ignored,
+                        };
+                        let merged = ctx.finish(result);
+                        self.pending.append(&mut ctx.commands);
+                        return merged;
+                    }
+                    None => {
+                        if matches!(event, UiEvent::MouseDown { .. }) {
+                            self.close_all_popups();
+                            return EventResult::Handled;
+                        }
+                    }
+                }
+            }
+        }
+
         // Tab / Shift+Tab：**焦点组件声明要自己处理时放行**，否则走焦点遍历。
         // 终端用它做 shell 补全；单行输入框不声明（Tab 仍切焦点）。
         if let UiEvent::Key {

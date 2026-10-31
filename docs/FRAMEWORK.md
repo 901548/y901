@@ -247,3 +247,51 @@ MCP 协议往返、图集打包、revision 语义面哈希、RPC 写队列边界
 
 需要真机的测试只有 `rebuild_reuploads_atlas`（D3D11 设备重建后图集重传），
 在无显卡权限的机器上会打印 `[skip]` 并返回。
+
+## 12. Overlay（浮层）机制
+
+任何控件都可以把自己挂到**屏幕最上层**，不受父级 `push_clip` 裁切：
+
+```rust
+// 挂载（anchor = 触发控件的屏幕矩形）
+tree.open_popup(Box::new(my_menu), trigger_rect);
+
+// 查询 / 关闭
+tree.popup_rect("my_menu");   // 布局后的屏幕矩形（绘制与命中同源）
+tree.close_popup("my_menu");
+tree.close_all_popups();
+tree.has_popup();
+```
+
+不变量：
+
+1. **裁切只到视口**：浮层在所有层之后绘制，clip 只压视口；
+2. **摆放不越界**：用 `place_popup(anchor, size, viewport)`，
+   下方放不下向上翻转、右侧放不下向左平移；
+3. **事件最高优先级**：命中浮层 → 直接派给它；`MouseDown` 在外部 → 关闭全部浮层并消耗；
+4. **关闭必标脏**：`close_popup` / `close_all_popups` 会把浮层原位置加进脏区。
+
+典型用法：下拉菜单、Tooltip、自定义弹出面板。`Dialog`/`Menu` 仍走原来的 `Layer::Overlay/Modal`；
+`open_popup` 适后于“运行时才知道要弹什么”的场景。
+
+## 13. RichText（富文本）接口
+
+框架只提供“数据 + 排版”，不提供业务语义（不知道什么叫“流式追加”）：
+
+```rust
+pub struct RichText;                     // 组件（Widget）
+pub enum Block { Paragraph(Vec<Span>), Code { lang: String, lines: Vec<String> } }
+pub struct Span { text: String, style: InlineStyle }
+pub struct InlineStyle { bold, italic, color: Option<Color> }
+
+impl RichText {
+    pub fn update(&mut self, blocks: Vec<Block>);   // 核心 API
+    pub fn blocks(&self) -> &[Block];
+    pub fn content_height(&self) -> f32;            // 最近一次 measure 的结果
+    pub fn block_rect(&self, i: usize) -> Option<Rect>;      // 屏幕矩形
+    pub fn last_block_rect(&self) -> Option<Rect>;           // 配合 invalidate_rect 做局部标脏
+}
+```
+
+流式追加由**调用方**完成：改最后一个 `Block` 的文本 → `update(blocks)` →
+`last_block_rect()` → `tree.invalidate_rect(rect)`。框架负责重排与只重绘那一块。

@@ -444,7 +444,7 @@ impl Dialog {
         self.open = open;
     }
 
-    /// 子节点（inherent 版本，Demo 不必 `use y901_ui::Widget`）。
+    /// 子节点（inherent 版本，调用方不必 `use y901_ui::Widget`）。
     pub fn children(&self) -> &[Box<dyn Widget>] {
         &self.children
     }

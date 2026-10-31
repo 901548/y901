@@ -133,14 +133,13 @@ fn paragraphs_and_code_block_render() {
 }
 
 #[test]
-fn streaming_grows_content_and_returns_last_block_rect() {
+fn update_relayouts_and_returns_last_block_rect() {
     let mut rt = RichText::new("rt");
-    rt.append_stream("first line");
+    rt.update(vec![y901_widgets::Block::Paragraph(vec![Span::new("first line")])]);
     let mut tree = build(rt);
     tree.invalidate_all();
     tree.render(&mut Sink);
 
-    // 追加大量文本 → 内容变高
     let before = {
         let mut h = 0.0;
         tree.with_node_mut("rt", &mut |w| {
@@ -152,14 +151,19 @@ fn streaming_grows_content_and_returns_last_block_rect() {
         });
         h
     };
+
+    // 调用方自己把最后一段改长，然后 update 一次
     tree.with_node_mut("rt", &mut |w| {
         if let Some(any) = w.as_any_mut() {
             if let Some(r) = any.downcast_mut::<RichText>() {
-                r.append_stream(&" word".repeat(20));
+                let mut blocks = r.blocks().to_vec();
+                if let Some(y901_widgets::Block::Paragraph(spans)) = blocks.last_mut() {
+                    spans.push(Span::new(" word".repeat(20)));
+                }
+                r.update(blocks);
             }
         }
     });
-    // 版本变了 → 重新布局
     tree.mark_layout_dirty("rt");
     tree.layout(Size::new(320.0, 400.0), &Mono);
 
@@ -176,28 +180,44 @@ fn streaming_grows_content_and_returns_last_block_rect() {
         });
         (h, r)
     };
-    assert!(after > before, "追加文本后内容应变高：{before} → {after}");
+    assert!(after > before, "更新后内容应变高：{before} → {after}");
     let rect = rect.expect("应有最后一块矩形");
     assert!(rect.h > 0.0 && rect.w > 0.0, "块矩形必须有效：{rect:?}");
 }
 
 #[test]
-fn streaming_marks_only_last_block_dirty() {
+fn update_then_partial_invalidate_stays_local() {
     let mut rt = RichText::new("rt");
-    rt.push_text("line one");
-    rt.push_text("line two");
+    rt.update(vec![
+        y901_widgets::Block::Paragraph(vec![Span::new("line one")]),
+        y901_widgets::Block::Paragraph(vec![Span::new("line two")]),
+    ]);
     let mut tree = build(rt);
     tree.invalidate_all();
     tree.render(&mut Sink);
     assert!(tree.dirty().is_empty());
 
-    // 模拟一个 token 追加：只把最后一块标脏
+    // 1) 改数据
+    tree.with_node_mut("rt", &mut |w| {
+        if let Some(any) = w.as_any_mut() {
+            if let Some(rt2) = any.downcast_mut::<RichText>() {
+                let mut blocks = rt2.blocks().to_vec();
+                if let Some(y901_widgets::Block::Paragraph(spans)) = blocks.last_mut() {
+                    spans.push(Span::new("..."));
+                }
+                rt2.update(blocks);
+            }
+        }
+    });
+    // 2) 重排（update 只作废缓存，不会自己跑布局）
+    tree.mark_layout_dirty("rt");
+    tree.layout(Size::new(320.0, 400.0), &Mono);
+    // 3) 拿最后一块的屏幕矩形
     let rect = {
         let mut r = None;
         tree.with_node_mut("rt", &mut |w| {
             if let Some(any) = w.as_any_mut() {
                 if let Some(rt2) = any.downcast_mut::<RichText>() {
-                    rt2.append_stream("...");
                     r = rt2.last_block_rect();
                 }
             }
@@ -206,7 +226,7 @@ fn streaming_marks_only_last_block_dirty() {
     };
     tree.invalidate_rect(rect);
 
-    assert!(!tree.dirty().is_full(), "流式追加不能退化成整窗重绘");
+    assert!(!tree.dirty().is_full(), "局部更新不能退化成整窗重绘");
     let b = tree.dirty().bounds().expect("应有脏区");
     assert!(
         b.h <= rect.h + 1.0,

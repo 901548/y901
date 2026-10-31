@@ -37,7 +37,7 @@ impl Clipboard for NullClipboard {
     fn set(&mut self, _text: &str) {}
 }
 
-/// 内存实现：demo 与测试用。
+/// 内存实现：测试与无系统剪贴板的平台用。
 #[derive(Default)]
 pub struct MemoryClipboard {
     text: String,

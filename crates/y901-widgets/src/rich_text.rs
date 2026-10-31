@@ -157,20 +157,23 @@ impl RichText {
         self.version += 1;
     }
 
-    /// 流式追加：把文本接到**最后一个段落**末尾（没有段落就新建一个）。
+    /// 更新整个块列表（核心 API）。
     ///
-    /// 返回：被修改块的索引（0 基）。调用方拿它 + [`RichText::block_rect`] 做局部标脏。
-    pub fn append_stream(&mut self, text: &str) -> usize {
+    /// 输入：新的 `Vec<Block>`。副作用：作废布局缓存、bump 版本（下一次
+    /// `measure` 会重新排版）。
+    ///
+    /// 为什么不提供“追加 token”这种业务 API：框架只负责“把数据排好版”。
+    /// 流式追加在调用方那边就是“改最后一个 Block 的文本”，然后 `update` 一次即可；
+    /// 配合 [`RichText::last_block_rect`] 还能把脏区限制在最后一块。
+    pub fn update(&mut self, blocks: Vec<Block>) {
+        self.blocks = blocks;
+        self.layout.clear();
         self.version += 1;
-        if let Some(Block::Paragraph(spans)) = self.blocks.last_mut() {
-            match spans.last_mut() {
-                Some(span) => span.text.push_str(text),
-                None => spans.push(Span::new(text)),
-            }
-            return self.blocks.len() - 1;
-        }
-        self.blocks.push(Block::Paragraph(vec![Span::new(text)]));
-        self.blocks.len() - 1
+    }
+
+    /// 当前的块列表（只读）。
+    pub fn blocks(&self) -> &[Block] {
+        &self.blocks
     }
 
     /// 清空全部内容。
