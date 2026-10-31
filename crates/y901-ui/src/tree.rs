@@ -158,6 +158,8 @@ pub struct Popup {
     rect: Rect,
     /// 是否模态：模态时底层控件不接收任何事件（点外部也不会关闭）。
     modal: bool,
+    /// 弹出前的焦点（关闭时还回去）。
+    prev_focus: Option<String>,
 }
 
 impl Popup {
@@ -343,6 +345,71 @@ impl UiTree {
         self.dirty = DirtyRegion::full();
     }
 
+    /// 浮层内部的可聚焦控件 id（前序，与树内 `rebuild_focus_order` 同一契约）。
+    fn popup_focus_ids(popup: &Popup) -> Vec<String> {
+        fn walk(node: &dyn Widget, out: &mut Vec<String>) {
+            if node.is_open() && node.focusable() && !node.is_disabled() {
+                out.push(node.id().to_string());
+            }
+            for c in node.children() {
+                walk(c.as_ref(), out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(popup.widget.as_ref(), &mut out);
+        out
+    }
+
+    /// 某个 id 是否属于浯层（返回浯层下标）。
+    fn popup_index_of(&self, id: &str) -> Option<usize> {
+        fn contains(node: &dyn Widget, id: &str) -> bool {
+            if node.id() == id {
+                return true;
+            }
+            node.children().iter().any(|c| contains(c.as_ref(), id))
+        }
+        self.popups
+            .iter()
+            .position(|p| contains(p.widget.as_ref(), id))
+    }
+
+    /// 当前最上层的模态浯层（没有则 `None`）。
+    ///
+    /// 用途：调用方判断"现在是否处于模态态"（例如决定是否屏蔽快捷键）。
+    pub fn modal_popup(&self) -> Option<&Popup> {
+        self.popups.iter().rev().find(|p| p.modal)
+    }
+
+    /// 在模态浯层内循环焦点（Tab / Shift+Tab）。
+    ///
+    /// 返回：`true` = 已在浯层内移动焦点（上层应吃掉这次 Tab）。
+    pub fn focus_next_in_modal(&mut self, delta: i32) -> bool {
+        let Some(popup) = self.popups.iter().rev().find(|p| p.modal) else {
+            return false;
+        };
+        let ids = Self::popup_focus_ids(popup);
+        if ids.is_empty() {
+            return false;
+        }
+        let cur = self
+            .focus
+            .as_deref()
+            .and_then(|f| ids.iter().position(|i| i == f));
+        let len = ids.len() as i32;
+        let next = match cur {
+            Some(i) => (i as i32 + delta).rem_euclid(len),
+            None => {
+                if delta >= 0 {
+                    0
+                } else {
+                    len - 1
+                }
+            }
+        } as usize;
+        let target = ids[next].clone();
+        self.set_focus(Some(target))
+    }
+
     /// 把一个控件挂到 Overlay 层（屏幕最上层，不受父级裁切）。
     ///
     /// 输入：`widget`（id 必须树内唯一）、`anchor`（触发控件的屏幕矩形，
@@ -363,12 +430,15 @@ impl UiTree {
         if self.popups.iter().any(|p| p.id == id) {
             return false;
         }
+        // 记下弹出前的焦点：关闭时要还回去（否则键盘用户会"丢失焦点"）。
+        let prev_focus = self.focus.clone();
         self.popups.push(Popup {
             id,
             widget,
             anchor,
             rect: Rect::ZERO,
             modal,
+            prev_focus,
         });
         self.layout_requested = true;
         self.dirty = DirtyRegion::full();
@@ -381,7 +451,9 @@ impl UiTree {
             return false;
         };
         let rect = self.popups[pos].rect;
+        let prev = self.popups[pos].prev_focus.clone();
         self.popups.remove(pos);
+        self.restore_focus(prev);
         if !rect.is_empty() {
             self.dirty.add(rect);
         }
@@ -391,12 +463,29 @@ impl UiTree {
     /// 关闭全部浮层，返回关了几个。
     pub fn close_all_popups(&mut self) -> usize {
         let n = self.popups.len();
+        // 最早弹出的那个记录了"弹出前的焦点"，它才是要还回去的目标。
+        let restore = self.popups.first().and_then(|p| p.prev_focus.clone());
         for p in self.popups.drain(..) {
             if !p.rect.is_empty() {
                 self.dirty.add(p.rect);
             }
         }
+        self.restore_focus(restore);
         n
+    }
+
+    /// 关闭浮层后把焦点还给弹出前的控件（已不存在则不动）。
+    fn restore_focus(&mut self, prev: Option<String>) {
+        let Some(id) = prev else {
+            return;
+        };
+        if self.focus.as_deref() == Some(id.as_str()) {
+            return;
+        }
+        // 目标还在树里且仍可聚焦才恢复
+        if self.find_path(&id).is_some() {
+            self.set_focus(Some(id));
+        }
     }
 
     /// 是否有浮层打开。
@@ -528,6 +617,19 @@ impl UiTree {
             return false; // 焦点事件里再改焦点：直接拒绝，防重入
         }
         if let Some(target) = &id {
+            // 浯层内的控件不在树里（不参与 `find_path`）：单独走一条路。
+            if self.find_path(target).is_none() {
+                let Some(idx) = self.popup_index_of(target) else {
+                    return false;
+                };
+                let Some(node) = find_in(self.popups[idx].widget.as_ref(), target) else {
+                    return false;
+                };
+                if !node.focusable() || node.is_disabled() {
+                    return false;
+                }
+                return self.apply_focus_change(id);
+            }
             let Some(path) = self.find_path(target) else {
                 return false;
             };
@@ -549,6 +651,13 @@ impl UiTree {
                 return false;
             }
         }
+        self.apply_focus_change(id)
+    }
+
+    /// 真正改焦点：给旧节点发 `Focus(false)`、给新节点发 `Focus(true)`。
+    ///
+    /// 输入：目标 id（`None` = 取消焦点）。返回：是否真的改成了。
+    fn apply_focus_change(&mut self, id: Option<String>) -> bool {
         if self.focus == id {
             return true;
         }
@@ -1581,6 +1690,42 @@ impl UiTree {
     ///
     /// 路径只解析一次，派发沿路径递归一趟，每个节点只访问一次。
     pub fn dispatch(&mut self, event: &UiEvent) -> EventResult {
+        // 模态浮层存在时：**键盘事件只走浮层**。
+        //   - Tab / Shift+Tab → 在浮层内循环（不能逃到底层）；
+        //   - Escape → 关闭浮层（并恢复焦点）；
+        //   - 其它键盘/文本 → 只在焦点属于浮层时派发。
+        if self.popups.iter().any(|p| p.modal) {
+            match event {
+                UiEvent::Key {
+                    key: crate::event::Key::Tab,
+                    modifiers,
+                } => {
+                    let delta = if modifiers.shift { -1 } else { 1 };
+                    let _ = self.focus_next_in_modal(delta);
+                    return EventResult::Handled;
+                }
+                UiEvent::Key {
+                    key: crate::event::Key::Escape,
+                    ..
+                } => {
+                    self.close_all_popups();
+                    return EventResult::Handled;
+                }
+                UiEvent::Key { .. } | UiEvent::Text(_) | UiEvent::Compose(_) => {
+                    let in_popup = self
+                        .focus
+                        .as_deref()
+                        .map(|f| self.popup_index_of(f).is_some())
+                        .unwrap_or(false);
+                    if !in_popup {
+                        return EventResult::Ignored;
+                    }
+                    // 继续走下面的浮层命中分支
+                }
+                _ => {}
+            }
+        }
+
         // Overlay 层最高优先级：
         //   - 命中浮层 → 直接派给浮层内部控件（不走树的命中，避免被遮挡）；
         //   - 点在浮层外 → 关闭全部浮层并吃掉这次按下（点外关闭的标准行为）。

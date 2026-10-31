@@ -313,10 +313,29 @@ impl Widget for FileTable {
 | 语义树 | 已合并进 `snapshot()` | 已在树内 |
 | 焦点作用域 | 暂未限制（跑全树 Tab） | `modal_root` 已实现 |
 
-**迁移计划**（未完成，已记录）：
-1. 把 `Dialog` 的焦点作用域从 `modal_root` 搬到 popup（`popup.modal` 时 Tab 只在浮层内循环）；
-2. `Menu`/`Dialog` 改成 `ctx.request_popup` 弹出，删除 `layer()` 覆盖；
-3. 删除 `Layer` 枚举与 `layer_present` / `deferred` 回放路径。
+### 12.3 模态浮层的焦点作用域（已实现）
+
+`open_modal_popup` / `request_modal_popup` 打开后：
+
+| 事件 | 行为 |
+|---|---|
+| `Tab` / `Shift+Tab` | **只在浮层内的可聚焦控件之间循环**（`focus_next_in_modal`），绝不逃回底层 |
+| `Escape` | 关闭全部浯层并恢复焦点 |
+| 其它键盘 / 文本 | 仅当焦点属于浯层时派发；否则丢弃 |
+| 鼠标 | 命中浯层 → 派给它；点外部 → 吃掉事件，不关闭 |
+| 关闭后 | 焦点还给弹出前的控件（`Popup::prev_focus`） |
+
+实现要点：`set_focus` 对浯层内的 id 走独立路径（它们不在树里，
+没有 `find_path`），且不受 `modal_root` 限制。
+
+**剩余迁移（未完成）**：
+1. `Menu`/`Dialog` 改成 `ctx.request_popup` 弹出，删除 `layer()` 覆盖；
+2. 删除 `Layer` 枚举与 `layer_present` / `deferred` 回放路径。
+
+阻碍：仓内有 **20 个文件 / 158 处** 引用 `Dialog` / `Menu::` / `Layer::`，
+删除 `Layer` 属于破坏性改动（需逐个重写测试与 `modal_root` 路径）。
+已提供桥：`Dialog::set_scrim(false)` 可让 Dialog 作为 `open_modal_popup` 的内容时
+不叠两层遮罩；弹层层已提供焦点作用域。
 
 ## 13. RichText（富文本）接口
 

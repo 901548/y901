@@ -277,3 +277,252 @@ fn render_draws_popup_after_base_with_viewport_clip() {
     tree.render(&mut rec);
     assert!(seen.get() > 0.0, "浮层应被绘制出来");
 }
+
+// ---------------------------------------------------------------- 焦点作用域
+
+/// 一个可聚焦的探针（记录自己是否拿到焦点）。
+struct FocusProbe {
+    id: &'static str,
+    focused: std::rc::Rc<Cell<bool>>,
+    rect: Rect,
+}
+
+impl Widget for FocusProbe {
+    fn id(&self) -> &str {
+        self.id
+    }
+    fn focusable(&self) -> bool {
+        true
+    }
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
+        c.constrain(Size::new(80.0, 24.0))
+    }
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+        self.rect = r;
+    }
+    fn rect(&self) -> Rect {
+        self.rect
+    }
+    fn event(&mut self, _c: &mut EventCtx, e: &UiEvent) -> EventResult {
+        if let UiEvent::Focus(on) = e {
+            self.focused.set(*on);
+        }
+        EventResult::Ignored
+    }
+    fn render(&mut self, _c: &mut dyn RenderCtx) {}
+    fn semantics(&self) -> Semantics {
+        Semantics::default()
+    }
+}
+
+/// 一个只有两个可聚焦子控件的浮层容器。
+struct TwoButtons {
+    rect: Rect,
+    kids: Vec<Box<dyn Widget>>,
+}
+
+impl Widget for TwoButtons {
+    fn id(&self) -> &str {
+        "modal"
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.kids
+    }
+    fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        Some(&mut self.kids)
+    }
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _c: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
+        c.constrain(Size::new(200.0, 80.0))
+    }
+    fn arrange(&mut self, r: Rect, m: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
+        self.rect = r;
+        for (i, kid) in self.kids.iter_mut().enumerate() {
+            kid.arrange(
+                Rect::new(r.x + 8.0, r.y + 8.0 + i as f32 * 28.0, 80.0, 24.0),
+                m,
+                cache,
+            );
+        }
+    }
+    fn rect(&self) -> Rect {
+        self.rect
+    }
+    fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult {
+        EventResult::Ignored
+    }
+    fn render(&mut self, _c: &mut dyn RenderCtx) {}
+    fn semantics(&self) -> Semantics {
+        Semantics::default()
+    }
+}
+
+/// 底层的一个可聚焦控制（验证焦点不会逃回去）。
+fn build_modal_tree() -> (UiTree, Rect, std::rc::Rc<Cell<bool>>) {
+    let bottom_focused = std::rc::Rc::new(Cell::new(false));
+    struct Root {
+        rect: Rect,
+        kid: Box<dyn Widget>,
+    }
+    impl Widget for Root {
+        fn id(&self) -> &str {
+            "root"
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            std::slice::from_ref(&self.kid)
+        }
+        fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+            None
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _c: &mut y901_ui::layout::LayoutCache,
+        ) -> Size {
+            c.constrain(Size::new(c.max.w, c.max.h))
+        }
+        fn arrange(
+            &mut self,
+            r: Rect,
+            m: &dyn TextMetrics,
+            cache: &mut y901_ui::layout::LayoutCache,
+        ) {
+            self.rect = r;
+            self.kid.arrange(r, m, cache);
+        }
+        fn rect(&self) -> Rect {
+            self.rect
+        }
+        fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult {
+            EventResult::Ignored
+        }
+        fn render(&mut self, _c: &mut dyn RenderCtx) {}
+        fn semantics(&self) -> Semantics {
+            Semantics::default()
+        }
+    }
+
+    let bottom = FocusProbe {
+        id: "bottom",
+        focused: bottom_focused.clone(),
+        rect: Rect::ZERO,
+    };
+    let root = Root {
+        rect: Rect::ZERO,
+        kid: Box::new(bottom),
+    };
+    let mut tree = UiTree::new(Box::new(root));
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+    let r = tree.rect_of("bottom").expect("bottom");
+    (tree, r, bottom_focused)
+}
+
+#[test]
+fn modal_popup_confines_tab_to_popup() {
+    let (mut tree, _r, bottom_focused) = build_modal_tree();
+    // 底层先拿到焦点
+    tree.set_focus(Some("bottom".into()));
+    assert!(tree.focus().is_some());
+
+    // 弹一个带两个可聚焦子控件的模态浮层
+    tree.open_modal_popup(
+        Box::new(TwoButtons {
+            rect: Rect::ZERO,
+            kids: vec![
+                Box::new(FocusProbe {
+                    id: "ok",
+                    focused: std::rc::Rc::new(Cell::new(false)),
+                    rect: Rect::ZERO,
+                }),
+                Box::new(FocusProbe {
+                    id: "cancel",
+                    focused: std::rc::Rc::new(Cell::new(false)),
+                    rect: Rect::ZERO,
+                }),
+            ],
+        }),
+        Rect::new(10.0, 10.0, 10.0, 10.0),
+    );
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+
+    // Tab 应只在浮层内循环
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    for _ in 0..6 {
+        let _ = tree.dispatch(&UiEvent::Key {
+            key: y901_ui::Key::Tab,
+            modifiers: y901_ui::Modifiers::default(),
+        });
+        let f = tree.focus().map(|s| s.to_string());
+        seen.borrow_mut().push(f.clone());
+        let f = f.expect("应有焦点");
+        assert!(
+            f == "ok" || f == "cancel",
+            "焦点逃出浮层了：{f}（历史 {seen:?}）"
+        );
+    }
+    assert!(!bottom_focused.get(), "底层不应拿到焦点");
+}
+
+#[test]
+fn closing_modal_restores_previous_focus() {
+    let (mut tree, _r, _bottom) = build_modal_tree();
+    tree.set_focus(Some("bottom".into()));
+
+    tree.open_modal_popup(
+        Box::new(TwoButtons {
+            rect: Rect::ZERO,
+            kids: vec![Box::new(FocusProbe {
+                id: "ok",
+                focused: std::rc::Rc::new(Cell::new(false)),
+                rect: Rect::ZERO,
+            })],
+        }),
+        Rect::new(10.0, 10.0, 10.0, 10.0),
+    );
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+    let _ = tree.dispatch(&UiEvent::Key {
+        key: y901_ui::Key::Tab,
+        modifiers: y901_ui::Modifiers::default(),
+    });
+    assert_eq!(tree.focus(), Some("ok"));
+
+    tree.close_all_popups();
+    assert_eq!(
+        tree.focus(),
+        Some("bottom"),
+        "关闭弹窗后焦点应还给触发控件"
+    );
+}
+
+#[test]
+fn escape_closes_modal_popup() {
+    let (mut tree, _r, _b) = build_modal_tree();
+    tree.open_modal_popup(
+        Box::new(TwoButtons {
+            rect: Rect::ZERO,
+            kids: vec![Box::new(FocusProbe {
+                id: "ok",
+                focused: std::rc::Rc::new(Cell::new(false)),
+                rect: Rect::ZERO,
+            })],
+        }),
+        Rect::new(10.0, 10.0, 10.0, 10.0),
+    );
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+    let res = tree.dispatch(&UiEvent::Key {
+        key: y901_ui::Key::Escape,
+        modifiers: y901_ui::Modifiers::default(),
+    });
+    assert!(res.is_handled());
+    assert!(!tree.has_popup(), "Escape 应关闭模态弹窗");
+}

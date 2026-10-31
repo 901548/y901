@@ -296,6 +296,8 @@ pub struct Dialog {
     panel_style: Option<crate::style::WidgetStyle>,
     /// 底部按钮样式（`None` = 走主题）。
     button_style: Option<crate::style::WidgetStyle>,
+    /// 是否画全屏遮罩（`false` 时可作为普通弹窗挂在 popup 层）。
+    scrim: bool,
 }
 
 impl Dialog {
@@ -318,6 +320,7 @@ impl Dialog {
             panel_size: Size::new(420.0, 220.0),
             panel_style: None,
             button_style: None,
+            scrim: true,
         }
     }
 
@@ -438,6 +441,16 @@ impl Dialog {
     pub fn button_style(mut self, style: crate::style::WidgetStyle) -> Self {
         self.button_style = Some(style);
         self
+    }
+
+    /// 关闭全屏遮罩（当它作为 `open_modal_popup` 的内容时，
+    /// 遮罩已由浯层层统一绘制，再画一层会叠加变黑）。
+    pub fn set_scrim(&mut self, on: bool) -> bool {
+        if self.scrim == on {
+            return false;
+        }
+        self.scrim = on;
+        true
     }
 
     pub fn set_open(&mut self, open: bool) {
@@ -642,7 +655,9 @@ impl Widget for Dialog {
         if !self.open {
             return;
         }
-        ctx.fill_rect(self.rect, y901_ui::Color::rgba(0.0, 0.0, 0.0, 0.55));
+        if self.scrim {
+            ctx.fill_rect(self.rect, y901_ui::Color::rgba(0.0, 0.0, 0.0, 0.55));
+        }
         let panel_style = ctx.theme().style(Role("panel"), State::Normal);
         match self.panel_style {
             Some(style) if style.has_bg() => {

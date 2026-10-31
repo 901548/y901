@@ -292,3 +292,24 @@ fn scrollbar_style_is_applied() {
 /// 让 `EventCtx`/`EventResult` 等导入被使用（否则 clippy 报 unused）。
 #[allow(dead_code)]
 fn _unused(_c: &mut EventCtx, _r: EventResult, _m: Modifiers, _c2: Constraints) {}
+
+#[test]
+fn dialog_can_be_used_as_a_popup_without_double_scrim() {
+    // 作为 popup 内容时，遮罩已由浮层层统一画，Dialog 自己不应再画一层
+    let mut dlg = y901_widgets::Dialog::new("dlg2", "Title");
+    dlg.set_open(true);
+    assert!(dlg.set_scrim(false), "应能关闭遮罩");
+
+    let calls = Calls::new();
+    let mut tree = tree_with(Box::new(dlg));
+    tree.invalidate_all();
+    tree.render(&mut rec(&calls));
+
+    // 没了遮罩：不应出现"全屏黑底"那么大的填充
+    let big = calls
+        .fills
+        .borrow()
+        .iter()
+        .any(|r| r.w >= 300.0 && r.h >= 200.0);
+    assert!(!big, "关闭遮罩后不应再有满屏填充：{:?}", calls.fills.borrow());
+}
