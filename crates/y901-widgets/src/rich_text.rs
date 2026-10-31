@@ -202,6 +202,20 @@ impl RichText {
         Some(Rect::new(self.rect.x, self.rect.y + y, self.rect.w, h))
     }
 
+    /// 流式追加到最后一个段落；没有段落时新建。
+    pub fn append_stream(&mut self, text: &str) -> usize {
+        self.version += 1;
+        if let Some(Block::Paragraph(spans)) = self.blocks.last_mut() {
+            match spans.last_mut() {
+                Some(span) => span.text.push_str(text),
+                None => spans.push(Span::new(text)),
+            }
+            return self.blocks.len() - 1;
+        }
+        self.blocks.push(Block::Paragraph(vec![Span::new(text)]));
+        self.blocks.len() - 1
+    }
+
     /// 最后一块的屏幕矩形（流式追加时用它标脏）。
     pub fn last_block_rect(&self) -> Option<Rect> {
         self.block_rect(self.blocks.len().checked_sub(1)?)
