@@ -220,6 +220,8 @@ impl Popup {
 }
 
 pub struct UiTree {
+    /// 活动中的动画（key → 动画）。**同 key 重新设置即打断旧动画**。
+    animations: Vec<ActiveAnim>,
     root: Box<dyn Widget>,
     /// Overlay 层的浮层（按开启顺序，后开的在上）。
     popups: Vec<Popup>,
@@ -280,7 +282,112 @@ pub struct UiTree {
     pending_semantic: std::collections::HashSet<String>,
 }
 
+/// 一个活动中的动画项。
+pub struct ActiveAnim {
+    /// 属性标识（同一个 key 只能有一个动画）
+    pub key: u64,
+    /// 动画本体
+    pub anim: crate::animation::Animate,
+    /// 需要重绘的节点（`None` = 不标脏任何节点）
+    pub node: Option<String>,
+    /// 完成回调（只调一次）
+    pub on_complete: Option<Box<dyn FnOnce() + Send>>,
+}
+
 impl UiTree {
+    /// 启动一个动画。
+    ///
+    /// 输入：`key`（属性标识）、`anim`、`node`（需重绘的节点 id）。
+    /// 行为：**同 key 的旧动画被立即取代**（不会两个同时写同一属性）。
+    /// 副作用：若节点存在则标脏它。
+    pub fn animate(
+        &mut self,
+        key: u64,
+        anim: crate::animation::Animate,
+        node: Option<&str>,
+    ) -> &mut crate::animation::Animate {
+        if let Some(pos) = self.animations.iter().position(|a| a.key == key) {
+            self.animations.remove(pos);
+        }
+        self.animations.push(ActiveAnim {
+            key,
+            anim,
+            node: node.map(|s| s.to_string()),
+            on_complete: None,
+        });
+        if let Some(n) = node {
+            self.invalidate(n);
+        }
+        let last = self.animations.len() - 1;
+        &mut self.animations[last].anim
+    }
+
+    /// 推进所有动画一帧。
+    ///
+    /// 返回：`true` = 还有活动动画（主循环应保持快节奏）；
+    /// `false` = 已全部完成（**主循环可以回到休眠节奏，不占 CPU**）。
+    ///
+    /// 副作用：每个未完成动画会标脏它的节点；完成项被移除并触发回调。
+    pub fn tick_animations(&mut self, dt: std::time::Duration) -> bool {
+        // 先推进所有动画（不碰 self 的其他字段，避免借用冲突）
+        let mut dirty_nodes: Vec<String> = Vec::new();
+        for a in self.animations.iter_mut() {
+            let running = a.anim.tick(dt);
+            if let Some(n) = a.node.clone() {
+                dirty_nodes.push(n);
+            }
+            let _ = running;
+        }
+        // 再把完成的项搬出来（FnOnce 回调需要拥有权）
+        let mut completed: Vec<ActiveAnim> = Vec::new();
+        let mut kept: Vec<ActiveAnim> = Vec::new();
+        for a in std::mem::take(&mut self.animations) {
+            if a.anim.is_done() {
+                completed.push(a);
+            } else {
+                kept.push(a);
+            }
+        }
+        let still_running = !kept.is_empty();
+        self.animations = kept;
+
+        for n in dirty_nodes {
+            self.invalidate(&n);
+        }
+        for mut a in completed {
+            if let Some(n) = a.node.as_deref() {
+                self.invalidate(n);
+            }
+            if let Some(cb) = a.on_complete.take() {
+                cb();
+            }
+        }
+        still_running
+    }
+
+    /// 挂一个"完成回调"到已存在的动画上。
+    ///
+    /// 输入：`key`、`cb`（动画完成时调一次）。
+    /// 行为：若 key 不存在则**忽略**（回调丢失比 panic 安全）。
+    pub fn set_animation_on_complete(&mut self, key: u64, cb: Box<dyn FnOnce() + Send>) {
+        if let Some(a) = self.animations.iter_mut().find(|a| a.key == key) {
+            a.on_complete = Some(cb);
+        }
+    }
+
+    /// 某个 key 的动画当前值（`None` = 该属性没有动画）。
+    pub fn animation_value(&self, key: u64) -> Option<f32> {
+        self.animations
+            .iter()
+            .find(|a| a.key == key)
+            .map(|a| a.anim.value())
+    }
+
+    /// 当前活动动画数量（诊断与测试用）。
+    pub fn active_animation_count(&self) -> usize {
+        self.animations.len()
+    }
+
     /// 用根节点建一棵树。
     ///
     /// **副作用**：递归调用每个节点的 `on_mount`（Signal 的 `bind()` 靠它自动订阅），
@@ -290,6 +397,7 @@ impl UiTree {
     /// 调用方必须随后调 `layout(viewport, metrics)`，否则 `rect_of` 全为空。
     pub fn new(root: Box<dyn Widget>) -> Self {
         let mut this = Self {
+            animations: Vec::new(),
             root,
             popups: Vec::new(),
             focus: None,

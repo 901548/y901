@@ -33,6 +33,7 @@
 
 pub mod color;
 pub mod command;
+pub mod animation;
 pub mod event;
 pub mod geometry;
 pub mod invalidate;
