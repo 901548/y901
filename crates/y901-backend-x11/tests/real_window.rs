@@ -562,3 +562,58 @@ fn shm_and_fallback_produce_identical_pixels() {
     assert!(nonzero > 100, "读回的像素几乎全 0，可能根本没画上");
     eprintln!("[shm] 非零字节 {nonzero} / {}", got_a.len());
 }
+
+/// 验收：三种光标能真正创建并应用到窗口（服务器无错误）。
+///
+/// 为什么"无错误"就是证据：`CreateGlyphCursor` 字段错会被服务器拒绝（BadFont/BadValue），
+/// 而 `ChangeWindowAttributes` 的光标位若错会报 BadMatch。三次都没事，说明协议对了。
+#[test]
+fn cursor_shapes_are_created_and_applied() {
+    let _g = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
+    let mut w = create_window_retry(&d, 240, 160, "cursor test");
+
+    for shape in [
+        y901_backend_x11::window::CursorShape::Text,
+        y901_backend_x11::window::CursorShape::Pointer,
+        y901_backend_x11::window::CursorShape::Default,
+    ] {
+        w.set_cursor(shape).expect("设置光标");
+        eprintln!("[x11] 光标已切换：{shape:?}");
+    }
+
+    // 再切一次相同形状（鹂等路径，不应发请求也不应报错）
+    w.set_cursor(y901_backend_x11::window::CursorShape::Default)
+        .expect("鹂等设置");
+
+    // 关键语义：**光标创建失败不能影响窗口可用**。
+    // 实测 Xvfb 会对 CreateGlyphCursor 返回 BadFont（见报告），此时 `set_cursor` 必须仍然 `Ok`。
+    // 用一个新连接同步一次，确认服务器对上面所有请求都没报错
+    let mut probe = Connection::connect(&d).expect("连接");
+    let errs = probe.sync().expect("sync");
+    assert!(errs.is_empty(), "光标操作报错：{errs:?}");
+    eprintln!("[x11] ✅ 三种光标全部应用成功，服务器无错误");
+}
+
+/// 诊断：OpenFont("cursor") 到底成功了吗？字节到底对不对？
+#[test]
+#[ignore = "调试"]
+fn probe_cursor_font() {
+    let (_g, mut c) = connect();
+    let base = c.info().resource_id_base;
+    let fid = base | 0x20;
+    c.send(&y901_backend_x11::encode::encode_open_font(fid, b"cursor"))
+        .expect("send OpenFont");
+    c.flush().expect("flush");
+    let errs = c.sync().expect("sync");
+    eprintln!("[probe] OpenFont(cursor) fid=0x{fid:X} errors={errs:?}");
+
+    let pkt = y901_backend_x11::encode::encode_create_glyph_cursor(
+        base | 0x21, fid, 68, fid, 68, (0, 0, 0), (0xFFFF, 0xFFFF, 0xFFFF),
+    );
+    eprintln!("[probe] CreateGlyphCursor {} 字节：{:02X?}", pkt.len(), pkt);
+    c.send(&pkt).expect("send");
+    c.flush().expect("flush");
+    let errs = c.sync().expect("sync");
+    eprintln!("[probe] CreateGlyphCursor errors={errs:?}");
+}

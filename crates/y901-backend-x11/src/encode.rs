@@ -679,3 +679,90 @@ pub fn encode_shm_put_image(major_opcode: u8, a: &ShmPutImageArgs) -> Vec<u8> {
     put_u32(&mut out, a.offset);
     out
 }
+
+// ============================ 光标（cursor 字体 → 光标形状）============================
+
+/// 编码 `OpenFont`（opcode 45）—— 光标形状来自服务器内置的 `"cursor"` 字体。
+///
+/// ```text
+/// 0   : opcode 45         1   : unused
+/// 2-3 : length = 3 + ceil(n/4)
+/// 4-7 : fid（客户端分配的字体 ID）
+/// 8-9 : name length n     10-11: unused
+/// 12..: name (padded to 4)
+/// ```
+pub fn encode_open_font(fid: u32, name: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(12 + pad4(name.len()));
+    out.push(opcode::OPEN_FONT);
+    out.push(0);
+    put_u16(&mut out, (3 + pad4(name.len()) / 4) as u16);
+    put_u32(&mut out, fid);
+    put_u16(&mut out, name.len() as u16);
+    put_u16(&mut out, 0);
+    push_padded(&mut out, name);
+    out
+}
+
+/// 编码 `CreateGlyphCursor`（opcode 94）—— 用字体里的一个字形当光标。
+///
+/// ```text
+/// 0   : opcode 94         1   : unused
+/// 2-3 : length = 8
+/// 4-7 : cid               8-11: source font
+/// 12-13: source char      14-17: mask font（FONT，4 字节）
+/// 18-19: mask char        20-21: fore red
+/// 22-23: fore green       24-25: fore blue
+/// 26-27: back red         28-29: back green
+/// 30-31: back blue
+/// ```
+///
+/// 为什么用字形而不是位图：服务器自带 `cursor` 字体，里面就是标准光标形状
+/// （XC_left_ptr=68、XC_xterm=152、XC_hand2=60）——零图片资源、零上传。
+#[allow(clippy::too_many_arguments)]
+pub fn encode_create_glyph_cursor(
+    cid: u32,
+    source_font: u32,
+    source_char: u16,
+    mask_font: u32,
+    mask_char: u16,
+    fore: (u16, u16, u16),
+    back: (u16, u16, u16),
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(32);
+    out.push(opcode::CREATE_GLYPH_CURSOR);
+    out.push(0);
+    put_u16(&mut out, 8);
+    put_u32(&mut out, cid);
+    put_u32(&mut out, source_font);
+    put_u16(&mut out, source_char);
+    put_u32(&mut out, mask_font);
+    put_u16(&mut out, mask_char);
+    put_u16(&mut out, fore.0);
+    put_u16(&mut out, fore.1);
+    put_u16(&mut out, fore.2);
+    put_u16(&mut out, back.0);
+    put_u16(&mut out, back.1);
+    put_u16(&mut out, back.2);
+    // 总长 = 4(头) + 4(cid) + 4(font) + 2(char) + 4(mask font) + 2(mask char) + 12(颜色) = 32 字节 = 8 单位
+    out
+}
+
+/// 编码 `FreeCursor`（opcode 95）。
+pub fn encode_free_cursor(cid: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8);
+    out.push(opcode::FREE_CURSOR);
+    out.push(0);
+    put_u16(&mut out, 2);
+    put_u32(&mut out, cid);
+    out
+}
+
+/// 编码 `CloseFont`（opcode 46）。
+pub fn encode_close_font(fid: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8);
+    out.push(opcode::CLOSE_FONT);
+    out.push(0);
+    put_u16(&mut out, 2);
+    put_u32(&mut out, fid);
+    out
+}

@@ -38,7 +38,8 @@ pub use encode::{
     encode_change_property, encode_configure_window, encode_create_gc, encode_create_window,
     encode_destroy_window, encode_free_gc, encode_get_image, encode_get_input_focus,
     encode_intern_atom,
-    encode_get_keyboard_mapping, encode_map_window, encode_query_extension, encode_send_event,
+    encode_close_font, encode_create_glyph_cursor, encode_free_cursor,
+    encode_get_keyboard_mapping, encode_map_window, encode_open_font, encode_query_extension, encode_send_event,
     encode_shm_attach, encode_shm_detach, encode_shm_put_image, encode_shm_query_version,
     synth_key_event, ShmPutImageArgs, encode_no_operation, encode_put_image,
     encode_set_input_focus,
@@ -86,6 +87,16 @@ pub mod opcode {
     pub const SEND_EVENT: u8 = 25;
     /// `QueryExtension`
     pub const QUERY_EXTENSION: u8 = 98;
+    /// `ChangeWindowAttributes`
+    pub const CHANGE_WINDOW_ATTRIBUTES: u8 = 2;
+    /// `OpenFont`
+    pub const OPEN_FONT: u8 = 45;
+    /// `CloseFont`
+    pub const CLOSE_FONT: u8 = 46;
+    /// `CreateGlyphCursor`
+    pub const CREATE_GLYPH_CURSOR: u8 = 94;
+    /// `FreeCursor`
+    pub const FREE_CURSOR: u8 = 95;
     /// `NoOperation`
     pub const NO_OPERATION: u8 = 127;
 }

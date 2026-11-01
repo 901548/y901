@@ -632,3 +632,37 @@ fn keymap_lookup_respects_first_keycode_and_columns() {
     // 表里只有 2 个 keycode（8/9），各一个可打印字符 → 2
     assert_eq!(km.ascii_coverage(), 2);
 }
+
+// ---------------------------------------------------------------- 光标
+
+#[test]
+fn create_glyph_cursor_is_32_bytes() {
+    // 字段：cid(4) source(4) char(2) maskfont(4) maskchar(2) fore(6) back(6) → 28 + 4 头 = 32
+    let got = y901_backend_x11::encode::encode_create_glyph_cursor(
+        0x300001,
+        0x300002,
+        152,       // XC_xterm
+        0x300002,
+        152,
+        (0, 0, 0),
+        (0xFFFF, 0xFFFF, 0xFFFF),
+    );
+    assert_eq!(got.len(), 32, "CreateGlyphCursor 应为 32 字节");
+    assert_eq!(got[0], 94, "opcode 94");
+    assert_eq!(&got[2..4], &[0x08, 0x00], "length = 8 单位");
+    assert_eq!(&got[12..14], &[152, 0], "source char = XC_xterm(152)");
+    assert_eq!(&got[14..18], &[0x02, 0x00, 0x30, 0x00], "mask font 是 4 字节");
+    assert_eq!(&got[30..32], &[0xFF, 0xFF], "back blue 在最后");
+}
+
+#[test]
+fn open_font_pads_name() {
+    let got = y901_backend_x11::encode::encode_open_font(0x400001, b"cursor");
+    // "cursor" = 6 字节 → 补 2 → 2 个单位；length = 3 + 2 = 5
+    assert_eq!(got.len(), 12 + 8);
+    assert_eq!(got[0], 45, "opcode 45");
+    assert_eq!(&got[2..4], &[0x05, 0x00], "length = 5");
+    assert_eq!(&got[8..10], &[6, 0], "name length = 6");
+    assert_eq!(&got[12..18], b"cursor");
+    assert_eq!(&got[18..20], &[0, 0], "补齐");
+}

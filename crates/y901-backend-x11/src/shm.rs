@@ -41,7 +41,10 @@ impl ShmSegment {
         const SHM_R: i32 = 0o400;
         const SHM_W: i32 = 0o200;
         // SAFETY: 标准 libc 调用；参数是纯数值，无指针\u3b7问。
-        let shmid = unsafe { shmget(IPC_PRIVATE, size.max(1), IPC_CREAT | SHM_R | SHM_W) };
+        // **先 clamp 再存储**：否则 `size()` 会谎报 0，而 `write()` 会拒绝一切写入。
+        // （这个 bug 是 `zero_size_is_clamped_not_a_panic` 抓出来的。）
+        let size = size.max(1);
+        let shmid = unsafe { shmget(IPC_PRIVATE, size, IPC_CREAT | SHM_R | SHM_W) };
         if shmid < 0 {
             return Err(format!(
                 "shmget 失败: {}",
@@ -143,9 +146,12 @@ mod tests {
 
     #[test]
     fn zero_size_is_clamped_not_a_panic() {
-        // size=0 应被 clamp 到 1，而不是向内核传 0
-        if let Ok(seg) = ShmSegment::new(0) {
-            assert!(seg.size() >= 1);
+        // size=0 应被 clamp 到 1，而不是向内核传 0。
+        // 实测：某些内核/WSL 下 `shmget(size=1)` 本身仍返 EINVAL（最小页对齐）。
+        // 因此这里只断言"不 panic、不越界"，不断言必须成功。
+        match ShmSegment::new(0) {
+            Ok(seg) => assert!(seg.size() >= 1),
+            Err(e) => eprintln!("[跳过] size=0 在本环境不可用：{e}"),
         }
     }
 }

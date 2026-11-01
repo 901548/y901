@@ -30,6 +30,29 @@ pub struct X11Window {
     woken: Arc<AtomicBool>,
     /// MIT-SHM：有则走共享内存，没有则回退到分块 PutImage
     shm: Option<ShmState>,
+    /// 三种光标形状（`None` = 服务器没有 cursor 字体，保持默认）
+    cursors: Option<Cursors>,
+    /// 当前光标形状（避免每帧重发请求）
+    cursor_now: CursorShape,
+}
+
+/// 对外可用的光标形状（与 `y901_ui::Cursor` 一一对应）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorShape {
+    /// 箭头（XC_left_ptr = 68）
+    Default,
+    /// I 型（XC_xterm = 152）—— 文本输入区
+    Text,
+    /// 手型（XC_hand2 = 60）—— 可点击元素
+    Pointer,
+}
+
+/// 预先创建好的三个光标资源。
+struct Cursors {
+    /// cursor 字体 ID（用完需 CloseFont）
+    font: u32,
+    /// 三个光标 ID，顺序：Default / Text / Pointer
+    ids: [u32; 3],
 }
 
 /// 共享内存上屏所需的全部状态。
@@ -119,6 +142,18 @@ impl X11Window {
             }
         };
 
+        // 光标：用服务器内置 "cursor" 字体的字形创建（零图片资源）
+        let cursors = match create_cursors(&mut conn, base) {
+            Ok(c) => {
+                eprintln!("[y901] 光标形状已就绪：箭头 / I 型 / 手型");
+                Some(c)
+            }
+            Err(e) => {
+                eprintln!("[y901] 光标创建失败（{e}），使用默认箭头");
+                None
+            }
+        };
+
         Ok(Self {
             conn,
             wid,
@@ -129,6 +164,8 @@ impl X11Window {
             keymap,
             woken: Arc::new(AtomicBool::new(false)),
             shm,
+            cursors,
+            cursor_now: CursorShape::Default,
         })
     }
 
@@ -217,6 +254,43 @@ impl X11Window {
             }
             _ => return None,
         })
+    }
+}
+
+impl X11Window {
+    /// 切换窗口光标形状。
+    ///
+    /// 输入：形状枚举。副作用：向服务器发一个 `ChangeWindowAttributes`。
+    /// 失败：`Err` 当服务器不接受（如无 cursor 字体）。
+    ///
+    /// 为什么要幂等：`poll` 每帧都会告知"鼠标在哪"，如果每帧都发一次请求，
+    /// 就是白白浪费带宽与服务端 CPU。
+    pub fn set_cursor(&mut self, shape: CursorShape) -> Result<(), String> {
+        if self.cursor_now == shape {
+            return Ok(());
+        }
+        let Some(cursors) = self.cursors.as_ref() else {
+            self.cursor_now = shape;
+            return Ok(());
+        };
+        let idx = match shape {
+            CursorShape::Default => 0,
+            CursorShape::Text => 1,
+            CursorShape::Pointer => 2,
+        };
+        let cid = cursors.ids[idx];
+        // ChangeWindowAttributes(window, value-mask=Cursor(1<<14), value-list=cid)
+        let mut out = Vec::with_capacity(16);
+        out.push(crate::opcode::CHANGE_WINDOW_ATTRIBUTES);
+        out.push(0);
+        out.extend_from_slice(&4u16.to_le_bytes());
+        out.extend_from_slice(&self.wid.to_le_bytes());
+        out.extend_from_slice(&(1u32 << 14).to_le_bytes());
+        out.extend_from_slice(&cid.to_le_bytes());
+        self.conn.send(&out)?;
+        self.conn.flush()?;
+        self.cursor_now = shape;
+        Ok(())
     }
 }
 
@@ -391,4 +465,38 @@ fn try_enable_shm(
         w: width,
         h: height,
     }))
+}
+
+/// 用服务器内置 `"cursor"` 字体的字形创建三个光标。
+///
+/// 字形号来自 X11 的 `cursorfont.h`：`XC_left_ptr` = 68、`XC_xterm` = 152、`XC_hand2` = 60。
+fn create_cursors(conn: &mut Connection, base: u32) -> Result<Cursors, String> {
+    let font = base | 0x20;
+    conn.send(&crate::encode::encode_open_font(font, b"cursor"))?;
+    conn.flush()?;
+    let errs = conn.sync()?;
+    if !errs.is_empty() {
+        return Err(format!("OpenFont(cursor) 报错：{errs:?}"));
+    }
+    const SHAPES: [(u16, u32); 3] = [(68, 0x21), (152, 0x22), (60, 0x23)];
+    let mut ids = [0u32; 3];
+    for (i, (ch, off)) in SHAPES.iter().enumerate() {
+        let cid = base | off;
+        conn.send(&crate::encode::encode_create_glyph_cursor(
+            cid,
+            font,
+            *ch,
+            font,
+            *ch,
+            (0, 0, 0),
+            (0xFFFF, 0xFFFF, 0xFFFF),
+        ))?;
+        ids[i] = cid;
+    }
+    conn.flush()?;
+    let errs = conn.sync()?;
+    if !errs.is_empty() {
+        return Err(format!("CreateGlyphCursor 报错：{errs:?}"));
+    }
+    Ok(Cursors { font, ids })
 }
