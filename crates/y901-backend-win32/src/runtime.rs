@@ -26,6 +26,7 @@ impl PlatformRuntime for Win32Runtime {
         }
         host.attach_waker(std::sync::Arc::new(WindowWaker(window.wake_handle())));
 
+        let started = std::time::Instant::now();
         let mut tree = build();
 
         // 首帧布局：后端与文本度量都就绪后才能算
@@ -34,6 +35,7 @@ impl PlatformRuntime for Win32Runtime {
         // 帧耗时打点（`Y901_PROFILE=1` 时每 2 秒打印一次）。
         // 只在显式开启时有一点开销，默认零成本。
         let profile = std::env::var_os("Y901_PROFILE").is_some();
+        let mut first_frame_done = false;
         let mut stat_frames: u32 = 0;
         let mut stat_rendered: u32 = 0;
         let mut stat_full: u32 = 0;
@@ -141,9 +143,17 @@ impl PlatformRuntime for Win32Runtime {
                 window.request_snapshot();
             }
 
+            let first_frame = !first_frame_done;
             let dirty_full = tree.dirty().is_full();
             let dirty_any = !tree.dirty().is_empty();
             window.render(&mut tree);
+            if first_frame && !first_frame_done {
+                first_frame_done = true;
+                eprintln!(
+                    "[y901] first frame ready in {:.1}ms",
+                    started.elapsed().as_secs_f64() * 1e3
+                );
+            }
             if snapshot_requested {
                 if let Some((pixels, w, h)) = window.take_snapshot() {
                     host.on_snapshot(&pixels, w, h);
