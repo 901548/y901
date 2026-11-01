@@ -1,4 +1,4 @@
-# 逐 crate 统计测试数量（唯一可信口径）
+﻿# 逐 crate 统计测试数量（唯一可信口径）
 #
 # 为什么需要脚本：`cargo test --workspace 2>&1 | Select-String ...` 在
 # PowerShell 下会因为 stdout/stderr 合流而丢行，曾把 183 误报成 126。
@@ -6,6 +6,21 @@
 
 # cargo 的 warning 走 stderr，Stop 会把它当致命错误中断解析
 $ErrorActionPreference = "Continue"
+
+# ---- MSRV 守卫：本仓库要求 rustc >= 1.92（见 rust-toolchain.toml）----
+# 为什么在这里检查：这是每次跑测试都会经过的唯一入口，比另开一个 CI 脚本更难被绕过。
+$verLine = (& rustc --version) -join " "
+if ($verLine -match 'rustc (\d+)\.(\d+)\.(\d+)') {
+    $maj = [int]$Matches[1]; $min = [int]$Matches[2]
+    if ($maj -lt 1 -or ($maj -eq 1 -and $min -lt 92)) {
+        Write-Host "[MSRV] rustc $maj.$min 低于要求的 1.92（$verLine）" -ForegroundColor Red
+        exit 2
+    }
+    Write-Host "[MSRV] $verLine OK"
+} else {
+    Write-Host "[MSRV] 无法识别 rustc 版本：$verLine" -ForegroundColor Red
+    exit 2
+}
 $root = Split-Path -Parent $PSScriptRoot
 $log = Join-Path $root "target\test-workspace.log"
 
