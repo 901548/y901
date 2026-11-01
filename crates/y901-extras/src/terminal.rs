@@ -137,6 +137,20 @@ impl TerminalWidget {
         )
     }
 
+    /// **仅测试用**：直接馈入一段 VT 字节流（绕开 PTY）。
+    ///
+    /// 与 `read_only` 模式下 RPC 注入走的是**同一条 `feed_bytes` 路径**，
+    /// 所以用它做渲染断言与真实输出一致。
+    #[doc(hidden)]
+    pub fn feed_vt_for_test(&mut self, bytes: &[u8]) {
+        feed_bytes(
+            &mut self.text,
+            &mut self.pending_utf8,
+            &mut self.grid,
+            bytes,
+        );
+    }
+
     /// 当前单格尺寸（测量得出，渲染与坐标换算都用它）。
     pub fn cell_size(&self) -> Size {
         self.cell
@@ -597,11 +611,13 @@ impl Widget for TerminalWidget {
                 // （SGR reverse 在默认配色下同样一直无效）。
                 let mut fg = palette::resolve(st.fg, DEFAULT_FG);
                 let mut bg = palette::resolve(st.bg, DEFAULT_BG);
-                // 选区反色与 SGR reverse 共用同一个交换；叠加时翻回来（可接受）
+                // 选区反色与 SGR reverse 共用同一个交换，但用 **XOR** 而非 OR：
+                // 两者同时成立时应"双重反转 = 恢复原色"。
+                // 用 OR 会只反一次 → 选中已反色文字时高亮看不出变化（实测已留在测试里）。
                 let selected = self
                     .selection
                     .is_some_and(|sel| sel.contains(view_row, col));
-                if st.reverse || selected {
+                if st.reverse ^ selected {
                     std::mem::swap(&mut fg, &mut bg);
                 }
 
