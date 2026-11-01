@@ -92,11 +92,84 @@ pub trait Host {
 
 /// 平台侧：每个后端实现一次。
 pub trait PlatformRuntime {
+    /// 跑完整主循环（建窗 → 事件 → 重绘 → 直到关闭）。
+    ///
+    /// ## 为什么是 `&mut self` 而不是静态方法
+    ///
+    /// 只有取 `&mut self`，才能写成 `Box<dyn PlatformRuntime>` 并在运行时选后端；
+    /// 静态方法在 `dyn` 上不可调用（它不在 vtable 里），那就只能编译期选后端——
+    /// 业务层就得认识具体类型。
     fn run(
+        &mut self,
         host: Box<dyn Host>,
         build: Box<dyn FnOnce() -> UiTree>,
         options: Options,
     ) -> Result<(), String>;
+}
+
+/// 不透明的窗口句柄：**业务与组件永远不接触 `HWND`/`XID`/`NSWindow*`**。
+///
+/// 包含尺寸与 `scale`（HiDPI），因为它们是平台无关的事实；
+/// 底层句柄只供后端自己解包（而不是业务层）。
+#[derive(Clone, Copy, Debug)]
+pub struct WindowHandle {
+    raw: gfx::PlatformWindowHandle,
+    width: u32,
+    height: u32,
+    /// 物理像素 / 逻辑像素。Windows 通常 1.0，macOS Retina 2.0，Linux 可能 1.25/1.5。
+    scale: f32,
+}
+
+impl WindowHandle {
+    /// 由后端构造（业务不应调用）。
+    pub fn new(raw: gfx::PlatformWindowHandle, width: u32, height: u32, scale: f32) -> Self {
+        Self {
+            raw,
+            width,
+            height,
+            scale: if scale > 0.0 { scale } else { 1.0 },
+        }
+    }
+
+    /// 逻辑尺寸。
+    pub fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// 比例因子（物理/逻辑）。
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+
+    /// 底层句柄（**只给后端用**）。
+    pub fn raw(&self) -> gfx::PlatformWindowHandle {
+        self.raw
+    }
+}
+
+/// 事件源：把"事件从哪来"藏在实现里（Win32 消息队列 / X11 socket / Cocoa runloop）。
+///
+/// 和 `Presenter` 分开的理由：桥接两者的时机完全不同——
+/// 事件源负责阻塞等待，`Presenter` 负责一帧像素上屏；合并会让每个平台各写一遍重绘策略。
+pub trait EventSource {
+    /// 取一批事件；`timeout_ms = 0` 表示不阻塞。
+    fn poll(&mut self, timeout_ms: u32) -> Vec<RawEvent>;
+
+    /// 跨线程唤醒句柄（后台线程用它打断 `poll` 的阻塞）。
+    fn waker(&self) -> std::sync::Arc<dyn Waker>;
+}
+
+/// 像素呈现器：**纯 CPU 后端的统一出口**。
+///
+/// 为什么是 `&[u8]` 而不是 `Vec<u32>`：三个平台的底层都吃字节布局（
+/// GDI `StretchDIBits` / X11 `PutImage` / `CGImage`），逐像素类型对接反而多一层转换。
+/// 格式约定：**BGRA（预乘 alpha）**，行主序，与 `SoftBackend` 的缓冲区完全一致。
+pub trait Presenter {
+    /// 调整呈现尺寸（缓冲区重建）。
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String>;
+
+    /// 把一帧 BGRA 像素贴到窗口客户区。
+    fn present(&mut self, pixels: &[u8], width: u32, height: u32) -> Result<(), String>;
 }
 
 /// 窗口参数。

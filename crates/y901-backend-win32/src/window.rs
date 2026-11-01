@@ -645,8 +645,23 @@ impl Window {
         }
     }
 
+    /// 原始 `HWND`。
+    ///
+    /// **业务/组件不要用它**——请用 [`Window::handle`] 拿平台无关句柄。
+    /// 保留公开仅为同仓库的集成测试（热重建纯 CPU 后端时需要真实 hwnd）。
+    #[doc(hidden)]
     pub fn hwnd(&self) -> HWND {
         self.hwnd
+    }
+
+    /// 窗口句柄的**平台无关包装**（业务与组件只能拿到这个）。
+    pub fn handle(&self) -> y901_runtime::WindowHandle {
+        y901_runtime::WindowHandle::new(
+            y901_runtime::gfx::PlatformWindowHandle::Win32(self.hwnd),
+            self.viewport.0,
+            self.viewport.1,
+            1.0,
+        )
     }
 
     pub fn viewport(&self) -> (u32, u32) {
@@ -1100,5 +1115,64 @@ mod dirty_plan_tests {
     fn empty_region_returns_none() {
         let d = DirtyRegion::default();
         assert!(super::plan_dirty_rects(&d).is_none());
+    }
+}
+
+// ============================ S1：四原语的 Win32 实现 ============================
+
+impl y901_runtime::EventSource for Window {
+    fn poll(&mut self, timeout_ms: u32) -> Vec<y901_runtime::RawEvent> {
+        if timeout_ms > 0 {
+            let _ = self.wait_message(timeout_ms);
+        }
+        if !self.pump() {
+            return vec![y901_runtime::RawEvent::Close];
+        }
+        self.drain_events()
+    }
+
+    fn waker(&self) -> std::sync::Arc<dyn y901_runtime::Waker> {
+        struct W(crate::window::WakeHandle);
+        impl y901_runtime::Waker for W {
+            fn wake(&self) {
+                self.0.wake();
+            }
+        }
+        std::sync::Arc::new(W(self.wake_handle()))
+    }
+}
+
+impl y901_runtime::Presenter for Window {
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        self.viewport = (width.max(1), height.max(1));
+        if let Some(soft) = self.soft.as_mut() {
+            if soft.resize(width, height) {
+                // 尺寸变了 = 帧缓冲被重建 → 整窗重绘（模块级函数）
+                crate::window::request_full_redraw();
+            }
+        }
+        Ok(())
+    }
+
+    fn present(&mut self, pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
+        let Some(soft) = self.soft.as_mut() else {
+            return Err(
+                "当前为 GPU（D3D11）后端：Presenter 只接受纯 CPU 像素（请用 --force-soft）"
+                    .to_string(),
+            );
+        };
+        let expect = (width as usize) * (height as usize) * 4;
+        if pixels.len() != expect {
+            return Err(format!(
+                "像素长度 {} 与 {width}x{height}x4 = {expect} 不符",
+                pixels.len()
+            ));
+        }
+        soft.blit(pixels, width, height);
+        // SAFETY: 在拥有窗口的线程上，hwnd 仍有效。
+        unsafe {
+            let _ = soft.present();
+        }
+        Ok(())
     }
 }

@@ -1,0 +1,11 @@
+[package]
+name = "y901-shell"
+version.workspace = true
+edition.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+y901-backend-win32 = { path = "../y901-backend-win32" }
+
+[dependencies]
+y901-runtime = { path = "../y901-runtime" }
+y901-ui = { path = "../y901-ui" }

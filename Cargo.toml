@@ -11,6 +11,7 @@ members = [
     "crates/y901-mcp",
     "crates/y901-backend-win32",
     "crates/y901-app",
+    "crates/y901-shell",
 ]
 
 [workspace.package]

@@ -177,6 +177,29 @@ impl SoftBackend {
         self.height
     }
 
+    /// 把一帧 **BGRA** 字节拷贝进帧缓冲（供 `Presenter::present` 使用）。
+    ///
+    /// 为什么不直接换成 `Vec<u32>`：底层已经是 `u32`，而 `present` 只拿到字节切片；
+    /// 这里做一次无分配的按字节拷贝（不转换颜色通道顺序，因为它们本来就一致）。
+    pub fn blit(&mut self, pixels: &[u8], width: u32, height: u32) {
+        if self.resize(width, height) {
+            // 尺寸变了 → 缓冲区已重建；接下来全量拷贝即可
+        }
+        let need = (width as usize) * (height as usize) * 4;
+        if pixels.len() < need {
+            return;
+        }
+        // SAFETY: `buf` 是 `u32` 数组，`pixels` 至少 `need` 字节，
+        // 且两边长度一致；这是按字节拷贝到已分配的同尺寸内存。
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                pixels.as_ptr(),
+                self.buf.as_mut_ptr() as *mut u8,
+                need,
+            );
+        }
+    }
+
     /// 像素内存（BGRA 字节序，GDI 直接可用）。
     pub fn pixels(&self) -> &[u8] {
         // SAFETY: `Px` 是 `u32`，`u32` 的内存布局就是 4 个字节；

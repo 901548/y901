@@ -11,6 +11,7 @@ path = "src/main.rs"
 # 不实现组件逻辑（y901-widgets），也不定义布局规则（y901-ui）。
 [dependencies]
 y901-backend-win32 = { path = "../y901-backend-win32" }
+y901-shell = { path = "../y901-shell" }
 y901-runtime = { path = "../y901-runtime" }
 y901-mcp = { path = "../y901-mcp" }
 y901-agent = { path = "../y901-agent" }

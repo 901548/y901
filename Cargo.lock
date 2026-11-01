@@ -390,6 +390,7 @@ dependencies = [
  "y901-backend-win32",
  "y901-mcp",
  "y901-runtime",
+ "y901-shell",
  "y901-ui",
  "y901-widgets",
 ]
@@ -441,6 +442,15 @@ dependencies = [
  "y901-agent",
  "y901-ui",
  "y901-widgets",
+]
+
+[[package]]
+name = "y901-shell"
+version = "0.1.0"
+dependencies = [
+ "y901-backend-win32",
+ "y901-runtime",
+ "y901-ui",
 ]
 
 [[package]]

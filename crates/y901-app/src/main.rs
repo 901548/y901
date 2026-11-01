@@ -6,8 +6,8 @@
 mod host;
 
 use y901_agent::{McpServer, Policy};
-use y901_backend_win32::runtime::Win32Runtime;
-use y901_runtime::{Host, Options, PlatformRuntime};
+use y901_shell::create_runtime;
+use y901_runtime::{Host, Options};
 use y901_ui::{Color, Edges, Flex, FlexItem, Size, UiTree};
 use y901_widgets::TextLabel;
 
@@ -111,5 +111,5 @@ fn main() -> Result<(), String> {
         }
     }
 
-    Win32Runtime::run(Box::new(shell), Box::new(build_shell), Options::default())
+    create_runtime().run(Box::new(shell), Box::new(build_shell), Options::default())
 }

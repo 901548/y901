@@ -10,6 +10,7 @@ pub struct Win32Runtime;
 
 impl PlatformRuntime for Win32Runtime {
     fn run(
+        &mut self,
         mut host: Box<dyn Host>,
         build: Box<dyn FnOnce() -> UiTree>,
         options: Options,
