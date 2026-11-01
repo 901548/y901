@@ -83,17 +83,20 @@ fn soft() -> SoftBackend {
     SoftBackend::new_headless(W, H, Box::new(engine), cell).expect("soft")
 }
 
-/// 与背景不同的像素的包围盒（`None` = 什么都没画）。
+/// 亮像素（面板白底）的包围盒（`None` = 没有面板）。
 ///
-/// 为什么不用"接近白色"：半程时淡入遮罩会把白色压暗（白 × 0.5），
-/// 用绝对亮度阈值会误判成"没画"。这里改成"与背景不同"，与透明度无关。
-fn ink_bbox(s: &SoftBackend) -> Option<(u32, u32, u32, u32)> {
-    let bg = s.pixel(0, 0).expect("背景像素");
+/// 为什么必须用"亮"而不是"与背景不同"：弹层的淡入遮罩是一层 alpha 很低的背景色矩形，
+/// 它盖住了**整个终态矩形**——用"非背景"判定会把遮罩算进包围盒，于是首帧和终态一样大，
+/// 看起来像"变换没生效"。实测正是踩了这个坑（探针显示 fill_rect 的 transforms.len()=1，
+/// 但被遮罩的矩形撑满了 bbox）。
+fn panel_bbox(s: &SoftBackend) -> Option<(u32, u32, u32, u32)> {
     let mut bbox: Option<(u32, u32, u32, u32)> = None;
     for y in 0..H {
         for x in 0..W {
             let p = s.pixel(x, y).expect("像素");
-            if p == bg {
+            let (r, g, b) = ((p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF);
+            // 半程时遮罩把白压到 ~224，仍高于 200
+            if r < 200 || g < 200 || b < 200 {
                 continue;
             }
             bbox = Some(match bbox {
@@ -106,7 +109,6 @@ fn ink_bbox(s: &SoftBackend) -> Option<(u32, u32, u32, u32)> {
 }
 
 #[test]
-#[ignore = "known issue: progress reaches RenderCtx (0.875) but the popup is still drawn at full size — transform not applied on this path yet"]
 fn popup_open_animation_shrinks_the_first_frame() {
     let mut soft = soft();
     let mut tree = UiTree::new(Box::new(Root { rect: Rect::ZERO }));
@@ -129,7 +131,7 @@ fn popup_open_animation_shrinks_the_first_frame() {
     tree.invalidate_all();
     soft.clear();
     tree.render(&mut soft);
-    let first = ink_bbox(&soft).expect("半程应有弹层像素");
+    let first = panel_bbox(&soft).expect("半程应有弹层像素");
 
 
     // 推进到动画结束
@@ -140,7 +142,7 @@ fn popup_open_animation_shrinks_the_first_frame() {
     tree.invalidate_all();
     soft.clear();
     tree.render(&mut soft);
-    let last = ink_bbox(&soft).expect("终态应有弹层像素");
+    let last = panel_bbox(&soft).expect("终态应有弹层像素");
 
     let size = |b: (u32, u32, u32, u32)| (b.2 - b.0 + 1, b.3 - b.1 + 1);
     let (fw, fh) = size(first);
@@ -154,7 +156,7 @@ fn popup_open_animation_shrinks_the_first_frame() {
     // 缩放下限 0.6，首帧宽度应约为终态的 0.8（scale = 0.8 + 0.2*0）
     let ratio = fw as f32 / lw as f32;
     assert!(
-        (0.7..0.95).contains(&ratio),
-        "首帧宽度应约为终态的 0.8 倍，实际 {ratio:.2}"
+        (0.93..0.99).contains(&ratio),
+        "首帧宽度应约为终态的 0.975 倍（progress 0.875），实际 {ratio:.2}"
     );
 }
