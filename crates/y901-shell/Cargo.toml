@@ -10,6 +10,9 @@ windows-sys = { version = "0.59", features = [
     "Win32_Security_Cryptography",
 ] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+y901-backend-x11 = { path = "../y901-backend-x11" }
+
 [dependencies]
 y901-runtime = { path = "../y901-runtime" }
 y901-ui = { path = "../y901-ui" }

@@ -411,6 +411,7 @@ dependencies = [
 name = "y901-backend-x11"
 version = "0.1.0"
 dependencies = [
+ "y901-render",
  "y901-runtime",
  "y901-ui",
 ]
@@ -467,6 +468,7 @@ version = "0.1.0"
 dependencies = [
  "windows-sys",
  "y901-backend-win32",
+ "y901-backend-x11",
  "y901-runtime",
  "y901-ui",
 ]

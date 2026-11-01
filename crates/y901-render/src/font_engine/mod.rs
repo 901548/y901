@@ -218,20 +218,50 @@ pub fn load_font(path: &str) -> Result<Vec<u8>, String> {
 /// 根据族名找字体文件（只支持几个常见 Windows 字体，M2 不做完整回退链）。
 pub fn resolve_font_path(family: &str) -> String {
     let f = family.to_ascii_lowercase();
-    if f.contains("consolas") {
-        "C:\\Windows\\Fonts\\consola.ttf".to_string()
+    let candidates: &[&str] = if f.contains("consolas") {
+        &["C:\\Windows\\Fonts\\consola.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"]
     } else if f.contains("cascadia") {
-        "C:\\Windows\\Fonts\\CascadiaMono.ttf".to_string()
+        &["C:\\Windows\\Fonts\\CascadiaMono.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"]
     } else if f.contains("nsimsun") || f.contains("simsun") {
-        "C:\\Windows\\Fonts\\simsun.ttc".to_string()
+        &[
+            "C:\\Windows\\Fonts\\simsun.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        ]
     } else {
-        default_test_font_path()
+        &["C:\\Windows\\Fonts\\segoeui.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+    };
+    for c in candidates {
+        if std::path::Path::new(c).exists() {
+            return (*c).to_string();
+        }
     }
+    default_test_font_path()
 }
 
-/// 默认测试字体（Segoe UI，Windows 自带）。
+/// 默认字体（**按平台选择实际存在的一个**）。
+///
+/// 为什么不写死一个路径：这个函数之前返回 `C:\Windows\Fonts\simsun.ttc`，
+/// 一到 Linux 就报 `No such file or directory`——这是"平台无关层"里唯一该分平台的地方（资源路径）。
 pub fn default_test_font_path() -> String {
-    "C:\\Windows\\Fonts\\segoeui.ttf".to_string()
+    const CANDIDATES: &[&str] = &[
+        // Windows（与旧行为一致：一直用 Segoe UI）
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "C:\\Windows\\Fonts\\simsun.ttc",
+        // Linux（Debian/Ubuntu 常见）
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    ];
+    for c in CANDIDATES {
+        if std::path::Path::new(c).exists() {
+            return (*c).to_string();
+        }
+    }
+    // 都不存在时返回第一个：让调用方的错误信息里带上路径，而不是报"找不到字体"
+    CANDIDATES[0].to_string()
 }
 
 /// 渲染一个字符到终端（调试用：`#` = 不透明度高，`.` = 低）。

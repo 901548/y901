@@ -10,3 +10,4 @@ edition.workspace = true
 y901-ui = { path = "../y901-ui" }
 # 事件要汇成 `RawEvent`，`Presenter` 要实现 runtime 的 trait
 y901-runtime = { path = "../y901-runtime" }
+y901-render = { path = "../y901-render" }

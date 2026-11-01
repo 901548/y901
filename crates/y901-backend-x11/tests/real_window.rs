@@ -330,3 +330,85 @@ fn window_implements_event_source_and_presenter() {
     eprintln!("[x11] poll 拿到 {} 个 RawEvent：{got:?}", got.len());
     assert!(!got.is_empty(), "poll 应至少拿到 Expose/Resize");
 }
+
+/// 验收：**键盘输入能路到上层**。
+///
+/// 做法：另开一个连接，用 `SendEvent` 把一个**真实格式的 KeyPress 事件**
+/// 发给我们的窗口，然后看 `X11Window::poll` 能不能翻译成 `RawEvent::KeyDown`。
+///
+/// 为什么不用 `xdotool`：CI 不一定装了它（装也要 sudo）。
+/// 这条测试只依赖我们自己的协议层，任何有 X server 的环境都能跑。
+#[test]
+fn keyboard_input_reaches_the_ui_layer() {
+    let _g = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
+    let mut w = X11Window::create(&d, 300, 200, "keyboard test").expect("建窗");
+
+    // 从真机键盘表里找出 'a' 的 keycode（而不是写死 38）
+    let km = w.keymap().clone();
+    let mut a_keycode = None;
+    for kc in km.first_keycode..=km.first_keycode.saturating_add(200) {
+        if km.keysym(kc, 0) == Some(0x61) {
+            a_keycode = Some(kc);
+            break;
+        }
+    }
+    let kc = a_keycode.expect("键盘表里应有 'a'");
+    eprintln!("[x11] 'a' 的 keycode = {kc}");
+
+    // 等一下窗口真正显示（Expose），否则事件可能被丢
+    for _ in 0..20 {
+        let evs = w.poll(50);
+        if evs.iter().any(|e| matches!(e, y901_runtime::RawEvent::Resize { .. })) {
+            break;
+        }
+    }
+
+    // 用另一个连接发事件（同一个 X server，靠 SERVER_LOCK 串行化）
+    {
+        let mut sender = Connection::connect(&d).expect("发送端连接");
+        const KEY_PRESS_MASK: u32 = 0x0000_0001;
+        let ev = y901_backend_x11::encode::synth_key_event(w.wid, kc, 0, 10, 20, true);
+        sender
+            .send(&y901_backend_x11::encode::encode_send_event(w.wid, KEY_PRESS_MASK, &ev))
+            .expect("发 SendEvent");
+        sender.flush().expect("flush");
+        // 同步一次，确认服务器没报错
+        let errs = sender.sync().expect("sync");
+        assert!(errs.is_empty(), "SendEvent 报错：{errs:?}");
+    }
+
+    // 期待拿到 KeyDown(Char('a'))
+    let mut got = Vec::new();
+    for _ in 0..20 {
+        got.extend(w.poll(100));
+        if got.iter().any(|e| matches!(e, y901_runtime::RawEvent::KeyDown { .. })) {
+            break;
+        }
+    }
+    eprintln!("[x11] poll 拿到：{got:?}");
+    let hit = got.iter().find_map(|e| match e {
+        y901_runtime::RawEvent::KeyDown { key, mods } => Some((*key, *mods)),
+        _ => None,
+    });
+    let (key, mods) = hit.expect("应拿到 KeyDown");
+    assert_eq!(key, y901_ui::Key::Char('a'), "应是字符 'a'");
+    assert!(!mods.shift && !mods.ctrl && !mods.alt, "不带修饰键");
+    eprintln!("[x11] ✅ 键盘链路通：SendEvent(KeyPress keycode={kc}) → KeyDown(Char('a'))");
+}
+
+/// `SendEvent` 的字节布局（纯逻辑，不连服务器）。
+#[test]
+fn send_event_packet_layout() {
+    let ev = y901_backend_x11::encode::synth_key_event(0x1234, 38, 1, 10, 20, true);
+    let pkt = y901_backend_x11::encode::encode_send_event(0x1234, 1, &ev);
+    assert_eq!(pkt.len(), 44, "SendEvent = 12 字节头 + 32 字节事件");
+    assert_eq!(pkt[0], 25, "opcode 25");
+    assert_eq!(pkt[1], 0, "propagate = False");
+    assert_eq!(&pkt[2..4], &[0x0B, 0x00], "length = 11");
+    assert_eq!(&pkt[4..8], &[0x34, 0x12, 0x00, 0x00], "destination");
+    assert_eq!(&pkt[8..12], &[0x01, 0x00, 0x00, 0x00], "event-mask = KeyPressMask");
+    assert_eq!(pkt[12], 2, "事件码 KeyPress");
+    assert_eq!(pkt[13], 38, "keycode");
+    assert_eq!(&pkt[40..42], &[0x01, 0x00], "state = Shift");
+}

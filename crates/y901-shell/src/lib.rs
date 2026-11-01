@@ -21,9 +21,9 @@
 pub mod secret;
 
 use y901_runtime::PlatformRuntime;
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 use y901_runtime::{Host, Options};
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 use y901_ui::UiTree;
 
 /// 创建当前平台的运行时。
@@ -36,7 +36,12 @@ pub fn create_runtime() -> Box<dyn PlatformRuntime> {
         Box::new(y901_backend_win32::runtime::Win32Runtime)
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(y901_backend_x11::runtime::X11Runtime)
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         Box::new(UnsupportedRuntime)
     }
@@ -46,10 +51,10 @@ pub fn create_runtime() -> Box<dyn PlatformRuntime> {
 ///
 /// 为什么不 `unimplemented!()`：那会让"Linux 上能不能编译"变成"能编译但一跑就崩"，
 /// 而 `cargo check --target x86_64-unknown-linux-gnu` 是我们唯一的跨平台验证手段（见文档 §5）。
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 struct UnsupportedRuntime;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 impl PlatformRuntime for UnsupportedRuntime {
     fn run(
         &mut self,

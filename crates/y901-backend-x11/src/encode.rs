@@ -492,3 +492,54 @@ pub fn encode_get_image(
 pub fn encode_get_keyboard_mapping(first_keycode: u8, count: u8) -> Vec<u8> {
     vec![opcode::GET_KEYBOARD_MAPPING, 0, 2, 0, first_keycode, count, 0, 0]
 }
+
+/// 编码 `SendEvent`（opcode 25）—— 把一个**构造好的 32 字节事件**发给某个窗口。
+///
+/// ```text
+/// 0   : opcode 25         1   : propagate (0/非0)
+/// 2-3 : length = 11
+/// 4-7 : destination       8-11: event-mask
+/// 12..43: event（32 字节）
+/// ```
+///
+/// 用途：测试里模拟"真的有个键被按下"，而不得依赖 `xdotool` 这类外部工具
+/// （CI 环境不一定有，安装还要 sudo）。
+pub fn encode_send_event(destination: u32, event_mask: u32, event: &[u8; 32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(44);
+    out.push(opcode::SEND_EVENT);
+    out.push(0); // propagate = False
+    put_u16(&mut out, 11);
+    put_u32(&mut out, destination);
+    put_u32(&mut out, event_mask);
+    out.extend_from_slice(event);
+    out
+}
+
+/// 构造一个 32 字节的 `KeyPress`/`KeyRelease` 事件（用于 SendEvent）。
+///
+/// 字段布局与真实事件完全一致（见 `decode_event`）；
+/// `state` 是修饰键掩码（Shift=1, Ctrl=4, Alt=8）。
+pub fn synth_key_event(
+    window: u32,
+    keycode: u8,
+    state: u16,
+    x: i16,
+    y: i16,
+    pressed: bool,
+) -> [u8; 32] {
+    let mut e = [0u8; 32];
+    e[0] = if pressed {
+        crate::event_code::KEY_PRESS
+    } else {
+        crate::event_code::KEY_RELEASE
+    };
+    e[1] = keycode;
+    e[4..8].copy_from_slice(&0u32.to_le_bytes()); // time
+    e[8..12].copy_from_slice(&window.to_le_bytes()); // root（模拟时这里无所谓）
+    e[12..16].copy_from_slice(&window.to_le_bytes()); // event window
+    e[24..26].copy_from_slice(&(x as u16).to_le_bytes());
+    e[26..28].copy_from_slice(&(y as u16).to_le_bytes());
+    e[28..30].copy_from_slice(&state.to_le_bytes());
+    e[30] = 1; // same-screen
+    e
+}
