@@ -142,3 +142,26 @@ fn indexed_colour_bounds_are_well_defined() {
         assert!(c.iter().all(|v| v.is_finite()), "Indexed({i}) 应产生有效颜色");
     }
 }
+
+/// truecolor（`Rgb`）下的反色：反色矩阵的最后一块。
+///
+/// 用 `ESC[38;2;255;0;0m`（前景真彩色红）与 `ESC[48;2;0;0;255m`（背景蓝）。
+/// 反色后背景应变红、前景变蓝。
+#[test]
+fn reverse_with_truecolor_colours() {
+    let mut soft = soft();
+    let (px, rect, cell) = render(
+        b"\x1b[38;2;255;0;0;48;2;0;0;255mabc\x1b[7mdef",
+        &mut soft,
+    );
+    let normal = bg_at(&px, rect, cell, 0);
+    let reversed = bg_at(&px, rect, cell, 4);
+    eprintln!("[probe E] 正常背景={normal:?} 反色后背景={reversed:?}");
+
+    assert_eq!(normal, (0, 0, 255), "未反色时背景应为蓝 (0,0,255)");
+    assert_eq!(
+        reversed,
+        (255, 0, 0),
+        "反色后背景应变成原前景色红 (255,0,0)"
+    );
+}
