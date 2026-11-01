@@ -216,8 +216,6 @@ impl SoftBackend {
     ///
     /// 返回：`true` = 成功提交。
     /// # Safety
-    ///
-
     #[inline]
     fn clip_rect(&self, r: Rect) -> Rect {
         let mut out = Rect::new(

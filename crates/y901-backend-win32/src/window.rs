@@ -501,7 +501,7 @@ pub struct Window {
     hwnd: HWND,
     backend: Option<D3dBackend>,
     /// 纯 CPU 后端（`Y901_FORCE_SOFT=1` 时启用；与 `backend` 互斥）。
-    soft: Option<crate::backend::soft::SoftBackend>,
+    soft: Option<y901_render::soft::SoftBackend>,
     viewport: (u32, u32),
 }
 
@@ -584,14 +584,34 @@ impl Window {
         let force_soft = std::env::var_os("Y901_FORCE_SOFT").is_some();
         let soft = if force_soft {
             Some(
-                crate::backend::soft::SoftBackend::new(
-                    hwnd,
-                    viewport.0,
-                    viewport.1,
-                    Some(theme),
-                    &font.family,
-                )
-                .map_err(|e| format!("soft backend init failed: {e}"))?,
+                {
+                    // 字形引擎：自研（Y901_FONT=self）或 DirectWrite（默认）
+                    let (cw, ch) = crate::backend::font::cell_metrics_for(font.size);
+                    let cell = y901_ui::Size::new(cw, ch);
+                    let engine: Box<dyn crate::backend::font::FontEngine> =
+                        if std::env::var("Y901_FONT").map(|v| v == "self").unwrap_or(false) {
+                            Box::new(
+                                y901_render::MyFontEngine::new(
+                                    y901_render::load_font(&y901_render::resolve_font_path(&font.family))
+                                        .unwrap_or_default(),
+                                    font.size,
+                                    cell,
+                                )
+                                .map_err(|e| format!("MyFontEngine init failed: {e}"))?,
+                            )
+                        } else {
+                            Box::new(
+                                crate::backend::font::TextEngine::new(
+                                    &font.family,
+                                    font.size,
+                                    cw,
+                                    ch,
+                                )?,
+                            )
+                        };
+                    y901_render::soft::SoftBackend::new(viewport.0, viewport.1, engine, cell, Some(theme))
+                        .map_err(|e| format!("soft backend init failed: {e}"))?
+                },
             )
         } else {
             None
@@ -726,10 +746,7 @@ impl Window {
             tree.render(soft);
             let (w, h) = self.viewport;
             let _ = (w, h);
-            unsafe {
-                // SAFETY: 在拥有窗口的线程上，hwnd 仍有效。
-                let _ = soft.present();
-            }
+            gdi_present(self.hwnd, soft.pixels(), soft.width(), soft.height());
             return;
         }
         let Some(backend) = self.backend.as_mut() else {
@@ -1169,10 +1186,52 @@ impl y901_runtime::Presenter for Window {
             ));
         }
         soft.blit(pixels, width, height);
-        // SAFETY: 在拥有窗口的线程上，hwnd 仍有效。
-        unsafe {
-            let _ = soft.present();
-        }
+        gdi_present(self.hwnd, soft.pixels(), soft.width(), soft.height());
         Ok(())
+    }
+}
+
+/// 用 GDI `StretchDIBits` 把一帧 BGRA 像素贴到窗口客户区。
+///
+/// 为什么留在这里而不在 `y901-render`：这是 **Windows 的上屏手段**，
+/// 渲染层只负责画像素（`SoftBackend::pixels()`），上屏归各平台。
+fn gdi_present(hwnd: HWND, pixels: &[u8], width: u32, height: u32) {
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetDC, ReleaseDC, StretchDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        SRCCOPY,
+    };
+    // SAFETY: 在拥有窗口的线程上调用，hwnd 有效；DC 获取后立即释放。
+    unsafe {
+        let hdc = GetDC(hwnd);
+        if hdc.is_null() {
+            return;
+        }
+        let mut bmi: BITMAPINFO = std::mem::zeroed();
+        bmi.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width as i32,
+            // 负高度 = 从上到下的 DIB（与我们的行主序一致）
+            biHeight: -(height as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            ..std::mem::zeroed()
+        };
+        let _ = StretchDIBits(
+            hdc,
+            0,
+            0,
+            width as i32,
+            height as i32,
+            0,
+            0,
+            width as i32,
+            height as i32,
+            pixels.as_ptr() as *const core::ffi::c_void,
+            &bmi,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        );
+        ReleaseDC(hwnd, hdc);
     }
 }

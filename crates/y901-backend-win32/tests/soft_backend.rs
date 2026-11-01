@@ -3,11 +3,25 @@
 //! 这里只验证"数学"：像素能不能按预期落在应该的地方。
 //! 与 D3D11 的逐像素对拍在 `soft_vs_d3d`里（需 GPU）。
 
-use y901_backend_win32::backend::soft::SoftBackend;
+use y901_backend_win32::soft::SoftBackend;
 use y901_ui::{Color, Pos, Rect, RenderCtx, TextStyle};
 
 fn soft() -> SoftBackend {
-    SoftBackend::new_headless(200, 120).expect("字形引擎初始化失败")
+    headless(200, 120)
+}
+
+
+/// 造一个测试用的软后端（用自研 TTF 引擎，不依赖 DirectWrite）。
+fn headless(w: u32, h: u32) -> SoftBackend {
+    let (cw, ch) = y901_backend_win32::backend::font::cell_metrics_for(15.0);
+    let cell = y901_ui::Size::new(cw, ch);
+    let engine = y901_render::MyFontEngine::new(
+        y901_render::load_font(&y901_render::default_test_font_path()).expect("font"),
+        15.0,
+        cell,
+    )
+    .expect("engine");
+    SoftBackend::new_headless(w, h, Box::new(engine), cell).expect("init")
 }
 
 #[test]
@@ -176,7 +190,7 @@ fn resize_rebuilds_buffer_and_reports_change() {
 #[ignore = "基准：--ignored --nocapture"]
 fn soft_fill_rate_1280x800() {
     use std::time::Instant;
-    let mut b = SoftBackend::new_headless(1280, 800).expect("init");
+    let mut b = headless(1280, 800);
     let full = Rect::new(0.0, 0.0, 1280.0, 800.0);
     let color = Color::rgba(0.2, 0.4, 0.6, 1.0);
 
@@ -226,7 +240,6 @@ fn soft_fill_rate_1280x800() {
 #[test]
 #[ignore = "需要真实 GPU（对照组用 D3D11）"]
 fn soft_matches_d3d_within_antialiasing_tolerance() {
-    use y901_backend_win32::backend::soft::SoftBackend;
     use y901_backend_win32::window::Window;
     use y901_runtime::Options;
     use y901_ui::{Color, Rect, RenderCtx, Size, TextMetrics, UiTree};
@@ -318,10 +331,15 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
     win.request_snapshot();
     win.render(&mut tree_a);
     let (px_d3d, w, h) = win.take_snapshot().expect("快照");
-    let hwnd = win.hwnd();
+    let _hwnd = win.hwnd();
 
     // B）纯 CPU（同一窗口句柄、同一尺寸）
-    let mut soft = unsafe { SoftBackend::new(hwnd, w, h, None, "Segoe UI") }.expect("soft init");
+    let (cw, ch) = y901_backend_win32::backend::font::cell_metrics_for(15.0);
+    let cell = Size::new(cw, ch);
+    let engine = Box::new(
+        y901_backend_win32::backend::font::TextEngine::new("Segoe UI", 15.0, cw, ch).expect("dwrite"),
+    );
+    let mut soft = SoftBackend::new(w, h, engine, cell, None).expect("soft init");
     let mut tree_b = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
         translucent: false,
@@ -383,10 +401,9 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
 /// 属于另一个需要单独查的问题（已记入报告）。这里把 CPU 的正确性锁死。
 #[test]
 fn translucent_overlay_matches_analytic_source_over() {
-    use y901_backend_win32::backend::soft::SoftBackend;
     use y901_ui::{Color, Rect, RenderCtx};
 
-    let mut b = SoftBackend::new_headless(64, 64).expect("init");
+    let mut b = headless(64, 64);
     b.clear();
     b.fill_rect(Rect::new(0.0, 0.0, 64.0, 64.0), Color::rgba(0.8, 0.2, 0.1, 1.0));
     b.fill_rect(Rect::new(0.0, 0.0, 64.0, 64.0), Color::rgba(0.2, 0.8, 0.3, 0.5));

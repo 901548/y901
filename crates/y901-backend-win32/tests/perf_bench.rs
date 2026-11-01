@@ -6,7 +6,7 @@
 
 use std::time::Instant;
 
-use y901_backend_win32::backend::atlas::SkylinePacker;
+use y901_render::atlas::SkylinePacker;
 use y901_backend_win32::window::Window;
 use y901_runtime::Options;
 use y901_ui::{

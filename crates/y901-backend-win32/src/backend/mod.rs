@@ -7,8 +7,6 @@
 //! 框架和组件都看不到 D3D11 类型，只看到 `RenderCtx`。
 
 #[allow(dead_code)] // Atlas/Placement 是给多页图集预留的 API，暂由 SkylinePacker 先行使用
-pub mod atlas;
-pub mod soft;
 pub mod d3d11;
 pub mod font;
 
