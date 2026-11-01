@@ -456,6 +456,7 @@ dependencies = [
 name = "y901-shell"
 version = "0.1.0"
 dependencies = [
+ "windows-sys",
  "y901-backend-win32",
  "y901-runtime",
  "y901-ui",

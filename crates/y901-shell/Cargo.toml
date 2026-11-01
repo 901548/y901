@@ -5,6 +5,10 @@ edition.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 y901-backend-win32 = { path = "../y901-backend-win32" }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }
 
 [dependencies]
 y901-runtime = { path = "../y901-runtime" }
