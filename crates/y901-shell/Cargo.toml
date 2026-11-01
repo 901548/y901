@@ -8,6 +8,9 @@ y901-backend-win32 = { path = "../y901-backend-win32" }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

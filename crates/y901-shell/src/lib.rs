@@ -18,6 +18,7 @@
 //! 未实现的平台不会 panic，而是返回 `Err("请看文档")——这样 CI 能在 Linux 上
 //! `cargo build` 通过（做类型检查），只是真正跑的时候会得到一个清楚的错误。
 
+pub mod clipboard;
 pub mod secret;
 
 use y901_runtime::PlatformRuntime;

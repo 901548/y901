@@ -617,3 +617,27 @@ fn probe_cursor_font() {
     let errs = c.sync().expect("sync");
     eprintln!("[probe] CreateGlyphCursor errors={errs:?}");
 }
+
+/// 验收：X11 剪贴板双向工作（含中文）。
+///
+/// 测的是**完整链路**：
+///   set_text → 线程抢占 CLIPBOARD → get_text → ConvertSelection
+///   → 线程应答 SelectionRequest（ChangeProperty + SendEvent）
+///   → get_text 收 SelectionNotify → GetProperty → 读出文本
+#[test]
+fn clipboard_roundtrip_through_selection_protocol() {
+    let (_g, _c) = connect();
+    let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
+    let cb = y901_backend_x11::clipboard::X11Clipboard::start(&d).expect("启动剪贴板线程");
+
+    for which in [
+        y901_backend_x11::clipboard::Selection::Clipboard,
+        y901_backend_x11::clipboard::Selection::Primary,
+    ] {
+        let text = format!("剪贴板 {which:?} 测试：ABC 123 中文");
+        cb.set(which, &text).expect("写入");
+        let got = cb.get(which).expect("读取");
+        eprintln!("[cb] {which:?}：写 {:?} → 读 {:?}", text, got);
+        assert_eq!(got, text, "{which:?} 往返应一致");
+    }
+}

@@ -23,6 +23,8 @@ pub mod decode;
 pub mod encode;
 pub mod keys;
 #[cfg(unix)]
+pub mod clipboard;
+#[cfg(unix)]
 pub mod shm;
 #[cfg(unix)]
 pub mod runtime;
@@ -38,7 +40,8 @@ pub use encode::{
     encode_change_property, encode_configure_window, encode_create_gc, encode_create_window,
     encode_destroy_window, encode_free_gc, encode_get_image, encode_get_input_focus,
     encode_intern_atom,
-    encode_close_font, encode_create_glyph_cursor, encode_free_cursor,
+    encode_close_font, encode_convert_selection, encode_create_glyph_cursor,
+    encode_free_cursor, encode_get_property, encode_set_selection_owner,
     encode_get_keyboard_mapping, encode_map_window, encode_open_font, encode_query_extension, encode_send_event,
     encode_shm_attach, encode_shm_detach, encode_shm_put_image, encode_shm_query_version,
     synth_key_event, ShmPutImageArgs, encode_no_operation, encode_put_image,
@@ -89,6 +92,12 @@ pub mod opcode {
     pub const QUERY_EXTENSION: u8 = 98;
     /// `ChangeWindowAttributes`
     pub const CHANGE_WINDOW_ATTRIBUTES: u8 = 2;
+    /// `GetProperty`
+    pub const GET_PROPERTY: u8 = 20;
+    /// `SetSelectionOwner`
+    pub const SET_SELECTION_OWNER: u8 = 22;
+    /// `ConvertSelection`
+    pub const CONVERT_SELECTION: u8 = 24;
     /// `OpenFont`
     pub const OPEN_FONT: u8 = 45;
     /// `CloseFont`
@@ -121,6 +130,12 @@ pub mod event_code {
     pub const CONFIGURE_NOTIFY: u8 = 22;
     /// `ClientMessage`
     pub const CLIENT_MESSAGE: u8 = 33;
+    /// `SelectionClear`
+    pub const SELECTION_CLEAR: u8 = 29;
+    /// `SelectionRequest`
+    pub const SELECTION_REQUEST: u8 = 30;
+    /// `SelectionNotify`
+    pub const SELECTION_NOTIFY: u8 = 31;
 }
 
 /// 将 `n` 向上对齐到 4 字节的倍数。

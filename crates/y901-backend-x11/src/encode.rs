@@ -766,3 +766,64 @@ pub fn encode_close_font(fid: u32) -> Vec<u8> {
     put_u32(&mut out, fid);
     out
 }
+
+// ============================ 剪贴板（Selections）============================
+
+/// 编码 `SetSelectionOwner`（opcode 22）—— 声明"某个 selection 归我"。
+///
+/// `owner = 0` 表示主动放弃。`time = 0` 是 `CurrentTime`。
+pub fn encode_set_selection_owner(owner: u32, selection: u32, time: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(16);
+    out.push(opcode::SET_SELECTION_OWNER);
+    out.push(0);
+    put_u16(&mut out, 4);
+    put_u32(&mut out, owner);
+    put_u32(&mut out, selection);
+    put_u32(&mut out, time);
+    out
+}
+
+/// 编码 `ConvertSelection`（opcode 24）——"请把 selection 换成我要的格式，写到我的属性里"。
+///
+/// 应答是异步的：服务器会给 requestor 发一个 `SelectionNotify`。
+pub fn encode_convert_selection(
+    requestor: u32,
+    selection: u32,
+    target: u32,
+    property: u32,
+    time: u32,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(24);
+    out.push(opcode::CONVERT_SELECTION);
+    out.push(0);
+    put_u16(&mut out, 6);
+    put_u32(&mut out, requestor);
+    put_u32(&mut out, selection);
+    put_u32(&mut out, target);
+    put_u32(&mut out, property);
+    put_u32(&mut out, time);
+    out
+}
+
+/// 编码 `GetProperty`（opcode 20）—— 把属性内容读回来。
+///
+/// `delete_after`：读完是否删掉该属性（剪贴板场景用 `true`，避免残留旧数据）。
+pub fn encode_get_property(
+    window: u32,
+    property: u32,
+    type_atom: u32,
+    long_offset: u32,
+    long_length: u32,
+    delete_after: bool,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(24);
+    out.push(opcode::GET_PROPERTY);
+    out.push(u8::from(delete_after));
+    put_u16(&mut out, 6);
+    put_u32(&mut out, window);
+    put_u32(&mut out, property);
+    put_u32(&mut out, type_atom);
+    put_u32(&mut out, long_offset);
+    put_u32(&mut out, long_length);
+    out
+}

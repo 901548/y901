@@ -323,6 +323,65 @@ impl Connection {
         }
     }
 
+    /// 读一个**原始 32 字节包**（事件或错误都不解析）。
+    ///
+    /// 为什么需要它：剪贴板要处理 `SelectionRequest`/`SelectionNotify`
+    /// 这类上层不关心的事件，而 `poll_events` 会把未知事件丢掉。
+    pub fn next_packet(&mut self, timeout_ms: u32) -> Result<[u8; 32], String> {
+        self.stream
+            .set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+            .map_err(|e| format!("set_read_timeout: {e}"))?;
+        let mut buf = [0u8; 32];
+        self.stream
+            .read_exact(&mut buf)
+            .map_err(|e| format!("读包失败: {e}"))?;
+        Ok(buf)
+    }
+
+    /// 读属性（`GetProperty`）。
+    ///
+    /// 返回：`(format, data)`。属性不存在或为空时 `data` 为空。
+    pub fn get_property(
+        &mut self,
+        window: u32,
+        property: u32,
+        type_atom: u32,
+        long_offset: u32,
+        long_length: u32,
+        delete_after: bool,
+    ) -> Result<(u8, Vec<u8>), String> {
+        self.send(&crate::encode::encode_get_property(
+            window,
+            property,
+            type_atom,
+            long_offset,
+            long_length,
+            delete_after,
+        ))?;
+        self.flush()?;
+        let mut head = [0u8; 32];
+        self.read_exact(&mut head)?;
+        if head[0] != 1 {
+            return Err(format!("GetProperty 未得到响应（字节 0 = {}）", head[0]));
+        }
+        let format = head[1];
+        let n_items = u32::from_le_bytes([head[16], head[17], head[18], head[19]]) as usize;
+        let units = u16::from_le_bytes([head[4], head[5]]) as usize;
+        let mut data = vec![0u8; units * 4];
+        if !data.is_empty() {
+            self.read_exact(&mut data)?;
+        }
+        // format=8 时每项 1 字节；32 时每项 4 字节
+        let bytes = match format {
+            8 => n_items,
+            16 => n_items * 2,
+            32 => n_items * 4,
+            _ => 0,
+        };
+        data.truncate(bytes.min(data.len()));
+        Ok((format, data))
+    }
+
     /// 探测扩展：返回它的**主 opcode**（不支持则 `None`）。
     ///
     /// 为什么要问而不是硬编码：X11 扩展的 opcode 是**服务器分配的**，
