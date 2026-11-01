@@ -137,6 +137,11 @@ impl TerminalWidget {
         )
     }
 
+    /// 当前单格尺寸（测量得出，渲染与坐标换算都用它）。
+    pub fn cell_size(&self) -> Size {
+        self.cell
+    }
+
     /// **仅测试用**：直接设定 rect 与单格尺寸，绕开 `arrange`。
     #[doc(hidden)]
     pub fn set_layout_for_test(&mut self, rect: Rect, cell: Size) {
@@ -585,17 +590,21 @@ impl Widget for TerminalWidget {
             for col in 0..len {
                 let cell = line.cells[col];
                 let st = self.grid.style_at(cell.style);
-                let (mut fg_spec, mut bg_spec) = (st.fg, st.bg);
-                // 选区反色：与 SGR reverse 共用同一个 swap，因此两者叠加时会翻回来——
-                // 这是可以接受的（选中反色文字本来就看不出反色效果）。
+                // **必须先解析成颜色、再交换**，不能先交换 spec 再解析：
+                // `palette::resolve(spec, fallback)` 里 `Default` 的含义是"用该角色的默认色"，
+                // 若把默认前景 spec 拿去当背景解析（fallback=DEFAULT_BG），它会解析成**背景色**，
+                // 于是"默认色 × 反色"看起来毫无变化 —— 这是像素回读测试抓出来的真 bug
+                // （SGR reverse 在默认配色下同样一直无效）。
+                let mut fg = palette::resolve(st.fg, DEFAULT_FG);
+                let mut bg = palette::resolve(st.bg, DEFAULT_BG);
+                // 选区反色与 SGR reverse 共用同一个交换；叠加时翻回来（可接受）
                 let selected = self
                     .selection
                     .is_some_and(|sel| sel.contains(view_row, col));
                 if st.reverse || selected {
-                    std::mem::swap(&mut fg_spec, &mut bg_spec);
+                    std::mem::swap(&mut fg, &mut bg);
                 }
 
-                let bg = palette::resolve(bg_spec, DEFAULT_BG);
                 if bg != DEFAULT_BG {
                     ctx.fill_rect(
                         Rect::new(rect.x + col as f32 * cell_w, y, cell_w, cell_h),
@@ -607,7 +616,7 @@ impl Widget for TerminalWidget {
                     continue;
                 }
 
-                let mut ts = TextStyle::fg(to_color(palette::resolve(fg_spec, DEFAULT_FG)));
+                let mut ts = TextStyle::fg(to_color(fg));
                 ts.bold = st.bold;
                 ts.underline = st.underline;
 

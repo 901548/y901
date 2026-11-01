@@ -431,6 +431,7 @@ dependencies = [
  "portable-pty",
  "y901-agent",
  "y901-core",
+ "y901-render",
  "y901-ui",
  "y901-widgets",
 ]
