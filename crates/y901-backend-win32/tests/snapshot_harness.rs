@@ -799,3 +799,200 @@ impl TextMetrics for HarnessMetrics {
         1.0
     }
 }
+
+/// 最小红线：`TextLabel` 的文字必须真的出现在像素里。
+///
+/// 为什么要单独测这个：文字路径上疹点太多——字形图集、UV重映、
+/// 裁剪圆角、字形 PS 的 alpha。它们任何一个坏了，表现都是"代码调了 draw_text
+/// 但屏幕没字"。这个用例把"没字"和"没调" 区分开。
+#[test]
+#[ignore = "需要真实 GPU"]
+fn text_label_paints_visible_non_background_pixels() {
+    use y901_widgets::TextLabel;
+
+    let options = Options {
+        title: "y901 text harness".to_string(),
+        width: 320,
+        height: 120,
+        theme: None,
+        font: None,
+    };
+    let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
+    let mut tree = UiTree::new(Box::new(
+        y901_ui::Flex::column("root").push(Box::new(
+            TextLabel::new("lbl", "Hello Y901")
+                .color(y901_ui::Color::rgba(1.0, 1.0, 1.0, 1.0))
+                .flex_item(y901_ui::FlexItem::height(40.0)),
+        )),
+    ));
+    window.resize(&mut tree);
+    tree.invalidate_all();
+    window.request_snapshot();
+    window.render(&mut tree);
+    let (px, w, h) = window.take_snapshot().expect("快照失败");
+
+    // 背景色（取左下角一定没字的像素作为基准）
+    let base_idx = (((h - 2) * w + 2) * 4) as usize;
+    let bg = [px[base_idx], px[base_idx + 1], px[base_idx + 2]];
+
+    let mut bright = 0usize;
+    let mut first = None;
+    for y in 0..h {
+        for x in 0..w {
+            let i = ((y * w + x) * 4) as usize;
+            let r = px[i] as i32;
+            let g = px[i + 1] as i32;
+            let b = px[i + 2] as i32;
+            let d = (r - bg[0] as i32).abs() + (g - bg[1] as i32).abs() + (b - bg[2] as i32).abs();
+            if d > 40 {
+                bright += 1;
+                if first.is_none() {
+                    first = Some((x, y, [px[i], px[i + 1], px[i + 2], px[i + 3]]));
+                }
+            }
+        }
+    }
+    assert!(
+        bright >= 40,
+        "文字没画出来：与背景差异的像素只有 {bright} 个（背景 {bg:?}，{w}x{h}）"
+    );
+    eprintln!(
+        "[text] 文字像素 {bright} 个，首个差异 {first:?}，背景 {bg:?}"
+    );
+}
+
+/// 同一句话，但放在 `ScrollView`（带裁剪）里。
+///
+/// 区分"文字不画"与"文字被裁剪吃掉"：若上一个用例过、
+/// 这个不过，问题就在 `push_clip` / `clip_quad`。
+#[test]
+#[ignore = "需要真实 GPU"]
+fn text_inside_scrollview_is_not_clipped_away() {
+    use y901_widgets::{ScrollView, TextLabel};
+
+    let options = Options {
+        title: "y901 text-in-scroll harness".to_string(),
+        width: 320,
+        height: 160,
+        theme: None,
+        font: None,
+    };
+    let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
+    let sv = ScrollView::new(
+        "sv",
+        Box::new(
+            TextLabel::new("lbl", "Scrolled text")
+                .color(y901_ui::Color::rgba(1.0, 1.0, 1.0, 1.0))
+                .flex_item(y901_ui::FlexItem::height(30.0)),
+        ),
+    );
+    let mut tree = UiTree::new(Box::new(
+        y901_ui::Flex::column("root").push(Box::new(sv)),
+    ));
+    window.resize(&mut tree);
+    tree.invalidate_all();
+    window.request_snapshot();
+    window.render(&mut tree);
+    let (px, w, h) = window.take_snapshot().expect("快照失败");
+
+    let base_idx = (((h - 2) * w + 2) * 4) as usize;
+    let bg = [px[base_idx], px[base_idx + 1], px[base_idx + 2]];
+    let mut bright = 0usize;
+    for y in 0..h {
+        for x in 0..w {
+            let i = ((y * w + x) * 4) as usize;
+            let d = (px[i] as i32 - bg[0] as i32).abs()
+                + (px[i + 1] as i32 - bg[1] as i32).abs()
+                + (px[i + 2] as i32 - bg[2] as i32).abs();
+            if d > 40 {
+                bright += 1;
+            }
+        }
+    }
+    assert!(
+        bright >= 40,
+        "ScrollView 里的文字被裁掉了：只有 {bright} 个非背景像素"
+    );
+    eprintln!("[text] ScrollView 内文字像素 {bright} 个");
+}
+
+/// 自持 RT 被重建（尺寸变化）后，**下一帧必须整窗清屏 + 整窗重绘**。
+///
+/// 早期实现两个缺陷：
+/// 1. `Gfx::resize` 把 `cached = None`，新 RT 未初始化（alpha=0）
+///    → 未被脏区覆盖的地方 blit 出**纯黑**；
+/// 2. `Window::resize` 不标脏 → CPU 剪枝跳过没移动的节点
+///    → 它们的文字永远不重画（看上去就是"文字被吃了"）。
+///
+/// 关键设计：**只改高度**（宽度不变），两个文本都靠上左定位，
+/// 重布局后它们的矩形**不变** → `mark_moved` 不会把它们标脏。
+#[test]
+#[ignore = "需要真实 GPU"]
+fn rebuild_of_cached_target_does_not_leave_black_areas() {
+    let options = Options {
+        title: "y901 resize harness".to_string(),
+        width: 320,
+        height: 160,
+        theme: None,
+        font: None,
+    };
+    let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
+    let mut tree = UiTree::new(Box::new(
+        y901_ui::Flex::column("root")
+            .push(Box::new(
+                y901_widgets::TextLabel::new("lbl", "resize check")
+                    .color(y901_ui::Color::rgba(1.0, 1.0, 1.0, 1.0))
+                    .flex_item(y901_ui::FlexItem::height(30.0)),
+            ))
+            .push(Box::new(
+                y901_widgets::TextLabel::new("tail", "|")
+                    .color(y901_ui::Color::rgba(1.0, 1.0, 1.0, 1.0))
+                    .flex_item(y901_ui::FlexItem::height(20.0)),
+            )),
+    ));
+    window.resize(&mut tree);
+    tree.invalidate_all();
+    window.render(&mut tree);
+
+    // 只改高度：两个 label 的矩形不变 → 重布局不会把它们标脏
+    window.resize_to_for_test(&mut tree, 320, 200);
+
+    // 只标小尾巴那一行（模拟"只有小区域脏"）：若整窗重绘生效，
+    // 上面那句 "resize check" 也应该被重新画出来
+    tree.invalidate("tail");
+    window.request_snapshot();
+    window.render(&mut tree);
+    let (px, w, h) = window.take_snapshot().expect("快照失败");
+
+    // (a) 不能有纯黑（alpha=0的未初始化像素）
+    let mut black = 0usize;
+    for i in (0..(w * h * 4) as usize).step_by(4) {
+        if px[i] < 3 && px[i + 1] < 3 && px[i + 2] < 3 && px[i + 3] < 3 {
+            black += 1;
+        }
+    }
+    assert_eq!(
+        black, 0,
+        "重建后出现 {black} 个纯黑像素（{w}x{h}）——整窗清屏没生效"
+    );
+
+    // (b) "上面那句话"必须在（只重画尾巴行时它会消失）
+    let base_idx = (((h - 2) * w + 2) * 4) as usize;
+    let bg = [px[base_idx], px[base_idx + 1], px[base_idx + 2]];
+    let mut bright = 0usize;
+    for y in 0..60.min(h) {
+        for x in 0..w {
+            let i = ((y * w + x) * 4) as usize;
+            let d = (px[i] as i32 - bg[0] as i32).abs()
+                + (px[i + 1] as i32 - bg[1] as i32).abs()
+                + (px[i + 2] as i32 - bg[2] as i32).abs();
+            if d > 40 {
+                bright += 1;
+            }
+        }
+    }
+    assert!(
+        bright >= 40,
+        "重建后上方文字没重画：只有 {bright} 个非背景像素"
+    );
+}

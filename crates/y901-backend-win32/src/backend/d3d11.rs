@@ -1653,6 +1653,8 @@ pub struct Gfx {
     dirty: Option<Vec<RectI32>>,
     /// 已渲染帧数（快照自检只在第二帧之后跑，避免拿未初始化内容比较）。
     frames: u64,
+    /// 下一帧必须整帧清屏（自持 RT 刚被重建，内容不可信）。
+    force_full: bool,
     /// 下一帧是否需要回读像素（必须在 present 之前拿）。
     snapshot_requested: bool,
     /// 最近一次快照的像素（BGRA）与尺寸。
@@ -1687,6 +1689,7 @@ impl Gfx {
             cached: None,
             dirty: None,
             frames: 0,
+            force_full: true,
             snapshot_requested: false,
             snapshot: None,
         };
@@ -1844,9 +1847,9 @@ impl Gfx {
     ///
     /// 违反会导致：DXGI 返回 `DXGI_ERROR_INVALID_CALL`（可恢复，本次 resize 失败），
     /// 或旧引用与新建缓冲并存，造成画面错乱。
-    pub unsafe fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+    pub unsafe fn resize(&mut self, width: u32, height: u32) -> Result<bool, String> {
         if width == 0 || height == 0 || (width == self.width && height == self.height) {
-            return Ok(());
+            return Ok(false);
         }
         let (Some(swap_chain), Some(context), Some(device)) = (
             self.swap_chain.as_ref(),
@@ -1867,7 +1870,10 @@ impl Gfx {
         self.height = height;
         // 尺寸变了：自持 RT 必须重建（旧尺寸 blit 会错位/越界）。
         self.cached = None;
-        Ok(())
+        // 新 RT 是**未初始化**的。下一帧必须整帧清屏，
+        // 否则没被脏区覆盖的区域保持 alpha=0 → blit 出纯黑。
+        self.force_full = true;
+        Ok(true)
     }
 
     /// 提交一帧：上传实例、画一次 `DrawInstanced`、`Present`。
@@ -1945,11 +1951,17 @@ impl Gfx {
         // 逐脏区清屏 + 逐脏区画。
         // 单块时走快路径；多块时逐个 scissor。CPU 侧剪枝已经把
         // "命中任一脏区"的节点都放进了实例流，所以每块自己清 + 画就不会错。
-        let rects: Vec<RectI32> = match &self.dirty {
-            Some(list) if !list.is_empty() => list.clone(),
-            _ => vec![full],
+        let force = self.force_full;
+        self.force_full = false;
+        let rects: Vec<RectI32> = if force {
+            vec![full]
+        } else {
+            match &self.dirty {
+                Some(list) if !list.is_empty() => list.clone(),
+                _ => vec![full],
+            }
         };
-        let full_frame = self.dirty.as_ref().is_none_or(|v| v.is_empty());
+        let full_frame = force || self.dirty.as_ref().is_none_or(|v| v.is_empty());
         for rect in rects {
             let is_full = rect.left == 0
                 && rect.top == 0

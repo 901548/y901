@@ -347,8 +347,18 @@ impl Widget for StyledText {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
+        if self.rect.is_empty() {
+            return;
+        }
+        // 自己的绘制不得越出自己的矩形。
+        // 否则长行会画到邻居身上，而邻居只标自己的脏区时，
+        // 那些"越界像素"会被清掉却无人重画 → 残影/黑块。
+        ctx.push_clip(self.rect);
         let theme = ctx.theme();
-        let fg = theme.style(y901_ui::Role::PANEL, y901_ui::State::Normal).fg;
+        // 文本颜色必须取 `TEXT` 槽位。
+        // 早期写成 `PANEL`：一旦主题里 panel 的 fg 是深色（浅色面板），
+        // 文字就与背景同色 → "代码画了但屏幕没字"。
+        let fg = theme.style(y901_ui::Role::TEXT, y901_ui::State::Normal).fg;
         let line_h = ctx.line_height(&TextStyle::default());
         let per_line = self.chars_per_line(ctx, self.rect.w);
         let code_bg = self
@@ -386,6 +396,7 @@ impl Widget for StyledText {
                 }
             }
         }
+        ctx.pop_clip();
     }
 
     fn semantics(&self) -> Semantics {

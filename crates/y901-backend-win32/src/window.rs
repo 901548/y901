@@ -737,12 +737,25 @@ impl Window {
     pub fn resize(&mut self, tree: &mut UiTree) {
         let (w, h) = self.viewport;
         if let Some(backend) = self.backend.as_mut() {
-            unsafe {
+            let target_rebuilt = unsafe {
                 // SAFETY: backend 由本窗口创建，hwnd 仍有效；w/h 来自当前客户区。
-                backend.resize(w, h);
-            }
+                backend.resize(w, h)
+            };
             tree.layout(Size::new(w as f32, h as f32), backend);
+            // **尺寸变了 = 自持 RT 被重建 = 内容全部丢失**。
+            // 必须整窗重绘：否则只有脏区被清画，其余保持未初始化
+            // → blit 出一片**纯黑**（alpha=0）。这是"代码明明画了，屏幕却黑"的典型来源。
+            if target_rebuilt {
+                tree.invalidate_all();
+            }
         }
+    }
+
+    /// 测试专用：把客户区改成指定尺寸并重排（不走 WM_SIZE）。
+    #[doc(hidden)]
+    pub fn resize_to_for_test(&mut self, tree: &mut UiTree, w: u32, h: u32) {
+        self.viewport = (w.max(1), h.max(1));
+        self.resize(tree);
     }
 
     /// 设置系统光标。

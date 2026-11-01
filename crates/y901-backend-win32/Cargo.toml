@@ -17,3 +17,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+y901-widgets = { path = "../y901-widgets" }

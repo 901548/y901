@@ -396,6 +396,7 @@ dependencies = [
  "y901-core",
  "y901-runtime",
  "y901-ui",
+ "y901-widgets",
 ]
 
 [[package]]

@@ -257,11 +257,18 @@ impl D3dBackend {
     ///
     /// 违反会导致：`ResizeBuffers` 返回 `DXGI_ERROR_INVALID_CALL`；
     /// 本方法只打印错误并保留旧尺寸，不会 panic。
-    pub unsafe fn resize(&mut self, width: u32, height: u32) {
+    /// 调整交换链与自持 RT 尺寸。
+    ///
+    /// 返回：`true` = 自持 RT 被重建（**内容丢失，调用方必须整窗重绘**）。
+    pub unsafe fn resize(&mut self, width: u32, height: u32) -> bool {
         self.viewport = Size::new(width as f32, height as f32);
         // 交换链尺寸更新交给 present 前的 rebuild 路径；这里只记尺寸。
-        if let Err(err) = self.gfx.resize(width, height) {
-            eprintln!("[y901] swapchain resize failed: {err}");
+        match self.gfx.resize(width, height) {
+            Ok(rebuilt) => rebuilt,
+            Err(err) => {
+                eprintln!("[y901] swapchain resize failed: {err}");
+                false
+            }
         }
     }
 
@@ -423,7 +430,7 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
 
     fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
         // SAFETY: 同 rebuild；尺寸来自当前客户区。
-        unsafe { D3dBackend::resize(self, width, height) };
+        let _ = unsafe { D3dBackend::resize(self, width, height) };
         self.size = (width, height);
         Ok(())
     }

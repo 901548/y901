@@ -2298,6 +2298,20 @@ fn render_pass(node: &mut dyn Widget, ctx: &mut dyn RenderCtx, dirty: &DirtyRegi
         return;
     }
     if node.needs_paint(dirty) {
+        // 诊断开关：按**真实绘制顺序**打印每个节点的 id/矩形/裁切，
+        // 用于定位"文字被后画的背景盖掉"这类问题。
+        if std::env::var_os("Y901_PAINT_TRACE").is_some() {
+            let r = node.rect();
+            eprintln!(
+                "[paint] {:<24} rect=({:.0},{:.0} {:.0}x{:.0}) clip={:?}",
+                node.id(),
+                r.x,
+                r.y,
+                r.w,
+                r.h,
+                node.clip()
+            );
+        }
         node.render(ctx);
     }
     // 滚动容器：子节点只能画在视口内
