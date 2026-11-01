@@ -18,6 +18,17 @@ use y901_ui::{
 use crate::palette::{self, DEFAULT_BG, DEFAULT_FG};
 use crate::vt::{feed_bytes, VtFilter};
 
+/// 终端需要的剪贴板能力就这么两个方法。
+///
+/// 为什么在 `y901-extras` 里另定义一个而不用 `y901-shell::clipboard::Clipboard`：
+/// 依赖方向是 `shell → extras`，反过来会成环。宿主只需写一个 6 行适配器。
+pub trait TextClipboard {
+    /// 取文本（`None` = 空或不可用）。
+    fn get(&self) -> Option<String>;
+    /// 写文本。
+    fn set(&self, text: &str);
+}
+
 /// 终端组件：Grid + PTY + VT 解析。
 pub struct TerminalWidget {
     id: String,
@@ -36,6 +47,10 @@ pub struct TerminalWidget {
     read_only: bool,
     /// 语义版本：每收到一次 PTY 输出 +1（供增量推送感知变化）。
     revision: u64,
+    /// bracketed paste 探测器（shell 通过 `ESC[?2004h` 开启）
+    paste_detect: crate::paste::BracketedPasteDetector,
+    /// 系统剪贴板（宿主注入）
+    clipboard: Option<Box<dyn TextClipboard>>,
 }
 
 struct PtySession {
@@ -54,6 +69,8 @@ impl TerminalWidget {
             text: VtFilter::new(),
             pending_utf8: Vec::new(),
             pty: None,
+            paste_detect: crate::paste::BracketedPasteDetector::default(),
+            clipboard: None,
             rect: Rect::ZERO,
             cell: Size::new(8.0, 16.0),
             item: FlexItem::fill(),
@@ -93,6 +110,30 @@ impl TerminalWidget {
     /// 只给测试与"注入历史输出"的场景用，产品路径请走 PTY。
     pub fn grid_mut(&mut self) -> &mut Grid {
         &mut self.grid
+    }
+
+    /// 注入系统剪贴板（由 app/shell 层提供适配器）。
+    ///
+    /// 为什么用一个 trait 而不是直接依赖平台实现：`y901-extras` 不能往上依赖
+    /// `y901-shell`，否则依赖方向就倒了。
+    pub fn set_clipboard(&mut self, cb: Box<dyn TextClipboard>) {
+        self.clipboard = Some(cb);
+    }
+
+    /// 把一段文本当作"粘贴"写进 PTY（过滤控制字符 + bracketed 包裹）。
+    ///
+    /// 返回：`true` = 已写入。副作用：写 PTY、重置滚动。
+    pub fn paste(&mut self, text: &str) -> bool {
+        if self.read_only {
+            return false;
+        }
+        let bytes = crate::paste::wrap(text, self.paste_detect.enabled());
+        if bytes.is_empty() {
+            return false;
+        }
+        self.grid.reset_scroll_on_input();
+        self.write(&bytes);
+        true
     }
 
     /// 启动 shell 并把 PTY 接上。
@@ -165,6 +206,8 @@ impl TerminalWidget {
         let mut any = false;
         if let Some(pty) = self.pty.as_ref() {
             while let Ok(bytes) = pty.rx.try_recv() {
+                // 顺路追踪 bracketed paste 开关（shell 会发 `ESC[?2004h`）
+                self.paste_detect.feed(&bytes);
                 feed_bytes(
                     &mut self.text,
                     &mut self.pending_utf8,
@@ -338,7 +381,25 @@ impl Widget for TerminalWidget {
                 }
                 EventResult::Redraw
             }
-            UiEvent::Key { key, .. } => {
+            UiEvent::Key { key, modifiers: mods } => {
+                // Ctrl+Shift+C / V：终端专用剪贴板快捷键
+                // 规则：有选中才复制；没选中时 Ctrl+Shift+C 不拦截（交给 shell 处理 SIGINT）
+                if mods.ctrl && mods.shift {
+                    match key {
+                        Key::Char('c') | Key::Char('C') => return EventResult::Ignored,
+                        Key::Char('v') | Key::Char('V') => {
+                            if let Some(cb) = self.clipboard.as_ref() {
+                                if let Some(text) = cb.as_ref().get() {
+                                    if self.paste(&text) {
+                                        return EventResult::Handled;
+                                    }
+                                }
+                            }
+                            return EventResult::Handled;
+                        }
+                        _ => {}
+                    }
+                }
                 if let Some(bytes) = Self::key_bytes(*key) {
                     self.grid.reset_scroll_on_input();
                     self.write(bytes);
@@ -349,6 +410,10 @@ impl Widget for TerminalWidget {
             }
             // RPC 投递、IME 提交、粘贴都走这里
             UiEvent::Text(text) => {
+                // 粘贴路径必须过滤控制字符 + 按 bracketed 模式包装
+                if self.paste(text) {
+                    return EventResult::Redraw;
+                }
                 self.grid.reset_scroll_on_input();
                 if self.read_only {
                     // 只读演示：直接喂给 VT 解析器，不碰 PTY

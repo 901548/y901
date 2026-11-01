@@ -25,6 +25,7 @@ use y901_ui::Role;
 pub const ROLE_TERMINAL: Role = Role("terminal");
 
 pub mod palette;
+pub mod paste;
 pub mod terminal;
 pub mod vt;
 

@@ -471,6 +471,7 @@ dependencies = [
  "y901-backend-x11",
  "y901-runtime",
  "y901-ui",
+ "y901-widgets",
 ]
 
 [[package]]
