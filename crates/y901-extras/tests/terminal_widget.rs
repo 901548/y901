@@ -161,3 +161,44 @@ fn selection_text_reaches_the_clipboard() {
     let text = sel.text(t.grid(), t.grid().cols as usize);
     assert_eq!(text, "ello\nwor", "跨行选区应拼出两行");
 }
+
+/// 验收：**`arrange` 之前收到鼠标按下不得 panic**，也不建出一个错位的选区。
+#[test]
+fn mouse_down_before_arrange_does_not_panic_or_select() {
+    use y901_ui::Pos;
+
+    let mut t = TerminalWidget::new("t", 20, 4).read_only();
+    // 此时 rect 仍是 Rect::ZERO（没 arrange 过）
+    let started = t.begin_selection(Pos::new(50.0, 50.0));
+    assert!(!started, "布局前不应建选区");
+    assert!(t.selected_text().is_none(), "不应有选中文本");
+}
+
+/// 验收：`arrange` 之后，坐标 → 单元格的映射正确。
+#[test]
+fn selection_after_arrange_maps_coordinates_correctly() {
+    use y901_ui::Pos;
+
+    let mut t = TerminalWidget::new("t", 20, 4).read_only();
+    {
+        let g = t.grid_mut();
+        g.set_cursor(0, 0);
+        for ch in "abcdefghij".chars() {
+            g.place_cell(ch, 0);
+        }
+    }
+    // 直接设 rect + 单格尺寸（arrange 需要 TextMetrics，这里用 setter 更直接）
+    t.set_layout_for_test(y901_ui::Rect::new(100.0, 100.0, 200.0, 80.0), y901_ui::Size::new(10.0, 20.0));
+
+    // 第 0 行第 0 列
+    assert!(t.begin_selection(Pos::new(100.0, 100.0)), "左上角应能选");
+    assert_eq!(t.selected_cell(), Some((0, 0)));
+
+    // 拖到第 2 行第 5 列（x=150,y=140）
+    assert!(t.drag_selection_to(Pos::new(150.0, 140.0)));
+    assert_eq!(t.selected_cell(), Some((2, 5)));
+
+    // 拖到窗口外 → 位置不变（不能把选区弄乱）
+    assert!(!t.drag_selection_to(Pos::new(500.0, 500.0)));
+    assert_eq!(t.selected_cell(), Some((2, 5)), "窗口外的拖拽应被忽略");
+}

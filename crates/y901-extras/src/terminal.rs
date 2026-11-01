@@ -123,18 +123,58 @@ impl TerminalWidget {
         self.clipboard = Some(cb);
     }
 
-    /// 屏幕 y 坐标 → 行号（超出范围时裁剪到边界）。
-    fn row_at(&self, y: f32) -> usize {
-        let h = self.cell.h.max(1.0);
-        let r = ((y - self.rect.y) / h).floor();
-        r.clamp(0.0, (self.grid.rows.saturating_sub(1)) as f32) as usize
+    /// 屏幕坐标 → 网格单元格（`None` = 不能映射，如布局前）。
+    ///
+    /// 纯函数在 `selection::pos_to_cell`（已单测覆盖 rect=ZERO / 边界 / 负坐标）。
+    fn cell_at(&self, pos: y901_ui::Pos) -> Option<(usize, usize)> {
+        crate::selection::pos_to_cell(
+            (pos.x, pos.y),
+            (self.rect.x, self.rect.y, self.rect.w, self.rect.h),
+            self.cell.w,
+            self.cell.h,
+            self.grid.cols as usize,
+            self.grid.rows as usize,
+        )
     }
 
-    /// 屏幕 x 坐标 → 列号。
-    fn col_at(&self, x: f32) -> usize {
-        let w = self.cell.w.max(1.0);
-        let c = ((x - self.rect.x) / w).floor();
-        c.clamp(0.0, (self.grid.cols.saturating_sub(1)) as f32) as usize
+    /// **仅测试用**：直接设定 rect 与单格尺寸，绕开 `arrange`。
+    #[doc(hidden)]
+    pub fn set_layout_for_test(&mut self, rect: Rect, cell: Size) {
+        self.rect = rect;
+        self.cell = cell;
+    }
+
+    /// 当前选区的活动端坐标（测试与诊断用）。
+    #[doc(hidden)]
+    pub fn selected_cell(&self) -> Option<(usize, usize)> {
+        self.selection.map(|s| s.end)
+    }
+
+    /// 在屏幕坐标处开始一个选区（鼠标按下路径）。
+    ///
+    /// 返回：`false` = 坐标无法映射（如 `arrange` 之前），此时**不建选区也不 panic**。
+    pub fn begin_selection(&mut self, pos: y901_ui::Pos) -> bool {
+        let Some((r, c)) = self.cell_at(pos) else {
+            return false;
+        };
+        self.selection = Some(crate::selection::Selection::new(r, c));
+        true
+    }
+
+    /// 把选区的活动端拖到屏幕坐标处。
+    ///
+    /// 返回：`false` = 当前没选区或坐标无法映射。
+    pub fn drag_selection_to(&mut self, pos: y901_ui::Pos) -> bool {
+        if self.selection.is_none() {
+            return false;
+        }
+        let Some((r, c)) = self.cell_at(pos) else {
+            return false;
+        };
+        if let Some(sel) = self.selection.as_mut() {
+            sel.drag_to(r, c);
+        }
+        true
     }
 
     /// 把当前选区取成文本（`None` = 没选中或选个空）。
@@ -407,21 +447,14 @@ impl Widget for TerminalWidget {
             }
             UiEvent::MouseDown { pos, .. } => {
                 ctx.request_focus(self.id.clone());
-                self.selection = Some(crate::selection::Selection::new(
-                    self.row_at(pos.y),
-                    self.col_at(pos.x),
-                ));
+                self.begin_selection(*pos);
                 EventResult::Redraw
             }
             UiEvent::MouseMove { pos } => {
-                // 先算坐标，再取可变引用（避开同时借 self 的冲突）
                 if self.selection.is_none() {
                     return EventResult::Ignored;
                 }
-                let (r, c) = (self.row_at(pos.y), self.col_at(pos.x));
-                if let Some(sel) = self.selection.as_mut() {
-                    sel.drag_to(r, c);
-                }
+                self.drag_selection_to(*pos);
                 EventResult::Redraw
             }
             UiEvent::MouseUp { .. } => {

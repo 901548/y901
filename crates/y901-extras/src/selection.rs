@@ -105,6 +105,40 @@ impl Selection {
     }
 }
 
+/// 屏幕坐标 → 网格单元格 的**纯函数**。
+///
+/// 输入：鼠标点 `pos`、窗口矩形 `rect`、单格尺寸、网格行列数。
+/// 输出：`Some((row, col))`；`None` = 不能映射（rect 尚未布局、坐标在外、或单格尺寸非正）。
+///
+/// 为什么要抽成纯函数：这是选区里**唯一无法单单靠选区逻辑验证**的一步，
+/// 而且 `rect = ZERO`（布局前）这种情况一旦算错就是"点哪儿都选中第一格"。
+///
+/// 边界取舍：右/下边界属于**内部**（裁剪到最后一格）。
+/// 理由：鼠标停在网格最右列末尾时，用户期望选中最后一列，而不是"啥也没选"。
+pub fn pos_to_cell(
+    pos: (f32, f32),
+    rect: (f32, f32, f32, f32),
+    cell_w: f32,
+    cell_h: f32,
+    cols: usize,
+    rows: usize,
+) -> Option<(usize, usize)> {
+    let (rx, ry, rw, rh) = rect;
+    // 布局前（ZERO 或尺寸非正）→ 不能映射
+    if rw <= 0.0 || rh <= 0.0 || cell_w <= 0.0 || cell_h <= 0.0 || cols == 0 || rows == 0 {
+        return None;
+    }
+    let (x, y) = pos;
+    // 左上边界开，右下边界闭
+    if x < rx || y < ry || x > rx + rw || y > ry + rh {
+        return None;
+    }
+    let col = ((x - rx) / cell_w).floor().max(0.0) as usize;
+    let row = ((y - ry) / cell_h).floor().max(0.0) as usize;
+    // 裁剪到最后一个有效单元格（右/下边界会计算出 cols/rows）
+    Some((row.min(rows - 1), col.min(cols - 1)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,4 +223,72 @@ mod tests {
         let sel = Selection::new(2, 5);
         assert!(sel.is_empty(), "只点一下不算选中");
     }
+    // ---------------- 坐标换算（pos_to_cell）----------------
+
+    #[test]
+    fn pos_to_cell_normal_path() {
+        let rect = (100.0, 100.0, 800.0, 600.0);
+        assert_eq!(
+            pos_to_cell((100.0, 100.0), rect, 10.0, 20.0, 80, 30),
+            Some((0, 0)),
+            "左上角 = 第 0 行第 0 列"
+        );
+        assert_eq!(
+            pos_to_cell((110.0, 120.0), rect, 10.0, 20.0, 80, 30),
+            Some((1, 1)),
+            "正好一格之后 = (1,1)"
+        );
+        assert_eq!(
+            pos_to_cell((155.0, 130.0), rect, 10.0, 20.0, 80, 30),
+            Some((1, 5)),
+            "单元格内部任意点都归同一格"
+        );
+    }
+
+    #[test]
+    fn pos_to_cell_zero_rect_returns_none() {
+        // 这就是"布局之前收到 MouseDown"的场景
+        assert_eq!(pos_to_cell((10.0, 10.0), (0.0, 0.0, 0.0, 0.0), 10.0, 20.0, 80, 30), None);
+    }
+
+    #[test]
+    fn pos_to_cell_outside_rect_returns_none() {
+        let rect = (100.0, 100.0, 800.0, 600.0);
+        assert_eq!(pos_to_cell((50.0, 50.0), rect, 10.0, 20.0, 80, 30), None, "左上外");
+        assert_eq!(pos_to_cell((950.0, 120.0), rect, 10.0, 20.0, 80, 30), None, "右外");
+        assert_eq!(pos_to_cell((120.0, 750.0), rect, 10.0, 20.0, 80, 30), None, "下外");
+    }
+
+    #[test]
+    fn pos_to_cell_negative_coords_return_none() {
+        let rect = (100.0, 100.0, 800.0, 600.0);
+        assert_eq!(pos_to_cell((-10.0, -10.0), rect, 10.0, 20.0, 80, 30), None);
+    }
+
+    #[test]
+    fn pos_to_cell_bottom_right_edge_clamps_to_last_cell() {
+        let rect = (100.0, 100.0, 800.0, 600.0);
+        // 右下角（100+800, 100+600）应裁剪到最后一格 (rows-1, cols-1) = (29, 79)
+        assert_eq!(
+            pos_to_cell((900.0, 700.0), rect, 10.0, 20.0, 80, 30),
+            Some((29, 79)),
+            "边界点不能越界，但要落在最后一格"
+        );
+        // 右下再多 1px 就是外部
+        assert_eq!(pos_to_cell((901.0, 700.0), rect, 10.0, 20.0, 80, 30), None);
+    }
+
+    #[test]
+    fn pos_to_cell_zero_cell_size_returns_none() {
+        assert_eq!(pos_to_cell((120.0, 120.0), (100.0, 100.0, 100.0, 100.0), 0.0, 20.0, 10, 10), None);
+    }
+
+    #[test]
+    fn pos_to_cell_clamps_when_rect_is_larger_than_grid() {
+        // rect 比网格实际占用的区域大：点在远处也应裁剪到最后一格而不越界
+        let rect = (0.0, 0.0, 1000.0, 1000.0);
+        let (r, c) = pos_to_cell((950.0, 950.0), rect, 10.0, 20.0, 10, 5).expect("应能映射");
+        assert!(r < 5 && c < 10, "行列应被裁剪在网格内，实际 ({r},{c})");
+    }
+
 }
