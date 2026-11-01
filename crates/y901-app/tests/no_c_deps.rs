@@ -117,7 +117,7 @@ fn find_crate_dir(name: &str, workspace_root: &Path) -> Option<PathBuf> {
                         .split(['.', '-', '+'])
                         .filter_map(|p| p.parse::<u64>().ok())
                         .collect();
-                    if best.as_ref().map_or(true, |(b, _)| &ver > b) {
+                    if best.as_ref().is_none_or(|(b, _)| &ver > b) {
                         best = Some((ver, e.path()));
                     }
                 }
