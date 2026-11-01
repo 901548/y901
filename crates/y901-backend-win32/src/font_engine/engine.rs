@@ -16,14 +16,16 @@ use super::super::backend::atlas::SkylinePacker;
 use super::super::backend::font::{DirtyRect, FontEngine, GlyphInfo};
 use super::{rasterize_glyph_phased, GlyphBitmap};
 
-/// 图集边长（与 legacy 一致）。
-const ATLAS_SIZE: u32 = 1024;
+/// 图集边长。
+///
+/// 1024² 对 CJK + 4 相位**不够**：1200 字 × 4 相位 = 4800 槽，
+/// 而 1024² 只能装 ~2,300 槽（Skyline ~70% 利用率）→ 每帧抽动。
+/// 2048² 约 9,000 槽，够用（16 MiB）。
+const ATLAS_SIZE: u32 = 2048;
 /// 字形之间的间隙（与 legacy 一致）。
 const PADDING: u32 = 1;
 /// 热集保护：最近 N 个字形不参与驱逐。
 const PIN_LAST: usize = 512;
-/// 驱逐目标占用率（每次驱逐降到这个值以下）。
-const EVICT_TARGET: f32 = 0.85;
 
 /// 自研字形引擎（图集 + LRU）。
 pub struct MyFontEngine {
@@ -77,6 +79,25 @@ impl MyFontEngine {
         })
     }
 
+    /// 指定图集边长构造（**测试用**：用来制造"装不下"以强制触发驱逐）。
+    pub fn with_atlas_size(
+        data: Vec<u8>,
+        size_px: f32,
+        cell: Size,
+        atlas_size: u32,
+    ) -> Result<Self, String> {
+        let mut e = Self::new(data, size_px, cell)?;
+        e.atlas_size = atlas_size.max(64);
+        e.atlas = vec![0; (e.atlas_size * e.atlas_size * 4) as usize];
+        e.packer = SkylinePacker::new(e.atlas_size);
+        Ok(e)
+    }
+
+    /// 当前图集边长（验收用）。
+    pub fn atlas_dim(&self) -> u32 {
+        self.atlas_size
+    }
+
     /// 字形占用的格数。
     ///
     /// **与 legacy 同一来源**：`y901_core::Grid::width_of_char`。
@@ -111,9 +132,19 @@ impl MyFontEngine {
         let (w, h) = (bmp.width.max(1), bmp.height.max(1));
         let mut pos = self.packer.insert(w + PADDING, h + PADDING);
         if pos.is_none() {
-            // 满了：驱逐到目标占用率以下再试一次
-            self.evict_until(EVICT_TARGET);
-            pos = self.packer.insert(w + PADDING, h + PADDING);
+            // 满了：**逐个驱逐直到能装下**。
+            //
+            // 为什么不能只按"占用率降到 target"循环：
+            // Skyline 碎片化后，缓存字形的面积和可能远小于占用率上限（空洞无法利用），
+            // 那时 `occupancy() < target` 但 `insert` 仍然失败 → 字形被静默丢弃（实测：256² 下 600 字全丢）。
+            let mut attempts = 0;
+            while pos.is_none() && attempts < 64 {
+                if !self.evict_one() {
+                    break; // 全是热集，驱不动了
+                }
+                attempts += 1;
+                pos = self.packer.insert(w + PADDING, h + PADDING);
+            }
         }
         let (ax, ay) = pos?;
 
@@ -147,50 +178,40 @@ impl MyFontEngine {
         })
     }
 
-    /// 按 LRU 驱逐到占用率低于 `target`。
+    /// 驱逐**一个**最久未用的字形（保留热集）。
     ///
-    /// 策略：最近 `PIN_LAST` 个不动（热集保护）；其余按 `last_used` 升序驱逐。
-    fn evict_until(&mut self, target: f32) {
-        let total = (self.atlas_size * self.atlas_size) as f32;
-        let mut evicted = 0usize;
-        while self.occupancy() > target {
-            // 选一个候选：不在热集中、`last_used` 最小
-            let cutoff = self.frame.saturating_sub(PIN_LAST as u64);
-            let victim = self
-                .cache
-                .iter()
-                .filter(|(_, g)| g.last_used < cutoff)
-                .min_by_key(|(_, g)| g.last_used)
-                .map(|(c, _)| *c);
-            let Some(victim) = victim else {
-                break; // 全是热集，无法再驱逐
-            };
-            if let Some(g) = self.cache.remove(&victim) {
-                // 图集里的像素清零（避免残影），并标脏该区域
-                let asz = self.atlas_size as usize;
-                for y in g.atlas_y..g.atlas_y + g.height {
-                    for x in g.atlas_x..g.atlas_x + g.width {
-                        let i = ((y as usize) * asz + x as usize) * 4;
-                        self.atlas[i..i + 4].fill(0);
-                    }
+    /// 返回：`false` = 没有可驱逐的候选（全在热集保护期内）。
+    fn evict_one(&mut self) -> bool {
+        let cutoff = self.frame.saturating_sub(PIN_LAST as u64);
+        let victim = self
+            .cache
+            .iter()
+            .filter(|(_, g)| g.last_used < cutoff)
+            .min_by_key(|(_, g)| g.last_used)
+            .map(|(c, _)| *c);
+        let Some(victim) = victim else {
+            return false;
+        };
+        if let Some(g) = self.cache.remove(&victim) {
+            let asz = self.atlas_size as usize;
+            for y in g.atlas_y..g.atlas_y + g.height {
+                for x in g.atlas_x..g.atlas_x + g.width {
+                    let i = ((y as usize) * asz + x as usize) * 4;
+                    self.atlas[i..i + 4].fill(0);
                 }
-                self.dirty.push(DirtyRect {
-                    x: g.atlas_x,
-                    y: g.atlas_y,
-                    width: g.width,
-                    height: g.height,
-                });
-                // 把死了的区域还给 packer：重建 packer 会丢失其他字形布局，
-                // 所以这里不重建（M2 接受一定的空洞浪费；M3 再做紧凑）。
-                evicted += 1;
             }
-            if evicted > 4096 {
-                break;
-            }
+            self.dirty.push(DirtyRect {
+                x: g.atlas_x,
+                y: g.atlas_y,
+                width: g.width,
+                height: g.height,
+            });
+            self.evicted_last_frame += 1;
+            return true;
         }
-        self.evicted_last_frame += evicted;
-        let _ = total;
+        false
     }
+
 
     /// 图集占用率（0..1）。
     pub fn occupancy(&self) -> f32 {
