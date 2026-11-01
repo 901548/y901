@@ -464,6 +464,65 @@ impl GlyphInfo {
     }
 }
 
+/// 字形引擎的统一接口。
+///
+/// 为什么要这个 trait：两个后端（D3D11 / 纯 CPU）都只需这 9 个能力。
+/// 把它们抽出来之后，`TextEngine`（DirectWrite）与 [`MyFontEngine`]（自研）
+/// 可以**互相替换**，而 `y901-widgets` / `y901-ui` 一行不改。
+///
+/// 【硬约束】图集像素格式与脏区协议必须一致：
+/// RGBA、`rgb` = 覆盖度、`a` = 255；`take_dirty` 的 `reset` 是消耗式。
+pub trait FontEngine {
+    /// 取字形（可能会现场光栅化并写图集）。
+    fn glyph(&mut self, ch: char) -> Option<&GlyphInfo>;
+    /// 字符占用的格数。
+    fn cell_span(&self, ch: char) -> u32;
+    /// 图集像素（RGBA）。
+    fn atlas(&self) -> &[u8];
+    /// 图集边长。
+    fn atlas_size(&self) -> u32;
+    /// 取走脏区（消耗式协议）。
+    fn take_dirty(&mut self) -> (bool, Vec<DirtyRect>);
+    /// 开始一帧。
+    fn begin_frame(&mut self);
+    /// 基线高度。
+    fn ascent(&self) -> f32;
+    /// 格宽度。
+    fn cell_width(&self) -> f32;
+    /// 格高度。
+    fn cell_height(&self) -> f32;
+}
+
+impl FontEngine for TextEngine {
+    fn glyph(&mut self, ch: char) -> Option<&GlyphInfo> {
+        TextEngine::glyph(self, ch)
+    }
+    fn cell_span(&self, ch: char) -> u32 {
+        TextEngine::cell_span(self, ch)
+    }
+    fn atlas(&self) -> &[u8] {
+        &self.atlas
+    }
+    fn atlas_size(&self) -> u32 {
+        self.atlas_size
+    }
+    fn take_dirty(&mut self) -> (bool, Vec<DirtyRect>) {
+        TextEngine::take_dirty(self)
+    }
+    fn begin_frame(&mut self) {
+        TextEngine::begin_frame(self)
+    }
+    fn ascent(&self) -> f32 {
+        self.ascent
+    }
+    fn cell_width(&self) -> f32 {
+        self.cell_width
+    }
+    fn cell_height(&self) -> f32 {
+        self.cell_height
+    }
+}
+
 pub struct TextEngine {
     factory: Factory,
     face: FontFace,

@@ -63,6 +63,12 @@ fn main() -> Result<(), String> {
     // `--force-soft`：纯 CPU 渲染（不创建 D3D11 设备）。
     // 底层用环境变量传递（`Window::create` 读 `Y901_FORCE_SOFT`），
     // 因为 `Options` 是公开结构体，加字段会破坏所有现有构造点。
+    // `--font=self`：用自研 TTF 引擎（底层读 `Y901_FONT`）。
+    // 默认 legacy（DirectWrite）；自研引擎初始化失败会自动回退。
+    if args.iter().any(|a| a == "--font=self") {
+        std::env::set_var("Y901_FONT", "self");
+        eprintln!("[y901] --font=self：使用自研 TTF 字形引擎");
+    }
     if args.iter().any(|a| a == "--force-soft") {
         std::env::set_var("Y901_FORCE_SOFT", "1");
         eprintln!("[y901] --force-soft：使用纯 CPU 软渲染后端");

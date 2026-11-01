@@ -7,9 +7,11 @@
 //! 2. 曲线自适应展平，平坦度阈值 **0.25px**；直线段直接保留；
 //! 3. 扫描线用**非零环绕规则**，半开区间 `[ymin, ymax)` 避免顶点双计。
 
+mod engine;
 mod flatten;
 mod raster;
 
+pub use engine::MyFontEngine;
 pub use flatten::{flatten_glyph, Line};
 pub use raster::{rasterize, Coverage};
 
@@ -194,6 +196,20 @@ pub fn glyph_geometry(font_data: &[u8], ch: char, size_px: f32) -> Option<GlyphG
 /// 便利：读一个系统字体到内存（常驻）。
 pub fn load_font(path: &str) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|e| format!("读字体失败 {path}: {e}"))
+}
+
+/// 根据族名找字体文件（只支持几个常见 Windows 字体，M2 不做完整回退链）。
+pub fn resolve_font_path(family: &str) -> String {
+    let f = family.to_ascii_lowercase();
+    if f.contains("consolas") {
+        "C:\\Windows\\Fonts\\consola.ttf".to_string()
+    } else if f.contains("cascadia") {
+        "C:\\Windows\\Fonts\\CascadiaMono.ttf".to_string()
+    } else if f.contains("nsimsun") || f.contains("simsun") {
+        "C:\\Windows\\Fonts\\simsun.ttc".to_string()
+    } else {
+        default_test_font_path()
+    }
 }
 
 /// 默认测试字体（Segoe UI，Windows 自带）。

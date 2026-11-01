@@ -54,7 +54,9 @@ fn set_font_builds_new_engine_before_swapping() {
     let create = body
         .find("TextEngine::new")
         .expect("必须先创建新引擎（否则无法在失败时保留旧状态）");
-    let swap = body.find("self.text = text").expect("必须替换引擎");
+    let swap = body
+        .find("self.text = Box::new(text)")
+        .expect("必须替换引擎");
     assert!(
         create < swap,
         "顺序错误：必须**先** TextEngine::new 失败返回，**再**替换 self.text；\

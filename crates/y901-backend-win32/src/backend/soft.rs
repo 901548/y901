@@ -70,7 +70,7 @@ pub struct SoftBackend {
     /// 帧缓冲：`0xAARRGGBB`。
     buf: Vec<Px>,
     clips: Vec<Rect>,
-    text: TextEngine,
+    text: Box<dyn super::font::FontEngine>,
     cell: Size,
     theme: Theme,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
@@ -101,7 +101,7 @@ impl SoftBackend {
             height: height.max(1),
             buf: vec![0; (width.max(1) * height.max(1)) as usize],
             clips: Vec::new(),
-            text,
+            text: Box::new(text),
             cell,
             theme: theme.unwrap_or(Theme::DARK),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
@@ -120,7 +120,7 @@ impl SoftBackend {
             height: h,
             buf: vec![0; (w * h) as usize],
             clips: Vec::new(),
-            text,
+            text: Box::new(text),
             cell: Size::new(cw, ch),
             theme: Theme::DARK,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
@@ -156,7 +156,7 @@ impl SoftBackend {
     /// 切换字体：建新的字形引擎（尺寸变化 → 重排）。
     pub fn set_font(&mut self, family: &str, size: f32) -> Result<(), String> {
         let (cw, ch) = super::font::cell_metrics_for(size);
-        self.text = TextEngine::new(family, size, cw, ch)?;
+        self.text = Box::new(TextEngine::new(family, size, cw, ch)?);
         self.cell = Size::new(cw, ch);
         Ok(())
     }
@@ -313,7 +313,7 @@ impl RenderCtx for SoftBackend {
         let mut pen_x = origin.x;
         let start = pen_x;
         let cell_w = self.cell.w;
-        let ascent = self.text.ascent;
+        let ascent = self.text.ascent();
         for ch in text.chars() {
             let span = self.text.cell_span(ch).max(1) as f32;
             if style.bg.a > 0.0 {
@@ -326,7 +326,7 @@ impl RenderCtx for SoftBackend {
                 // 字形贴图：从 TextEngine 的 RGBA 图集抽 coverage → 按颜色混合
                 if let Some(g) = self.text.glyph(ch).cloned() {
                     if !g.is_empty() {
-                        let atlas_size = self.text.atlas_size as usize;
+                        let atlas_size = self.text.atlas_size() as usize;
                         let bx = (pen_x + g.bearing_x as f32).floor() as i32;
                         let by = (origin.y + ascent + g.bearing_y as f32).floor() as i32;
                         for gy in 0..g.height as i32 {
@@ -347,7 +347,7 @@ impl RenderCtx for SoftBackend {
                                 let ax = g.atlas_x as usize + gx as usize;
                                 let ay = g.atlas_y as usize + gy as usize;
                                 let si = (ay * atlas_size + ax) * 4;
-                                let cov = self.text.atlas.get(si).copied().unwrap_or(0) as f32 / 255.0;
+                                let cov = self.text.atlas().get(si).copied().unwrap_or(0) as f32 / 255.0;
                                 if cov <= 0.0 {
                                     continue;
                                 }

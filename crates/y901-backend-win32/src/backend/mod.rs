@@ -44,7 +44,7 @@ fn default_font_config() -> y901_runtime::FontConfig {
 
 pub struct D3dBackend {
     pub gfx: Gfx,
-    text: TextEngine,
+    text: Box<dyn crate::backend::font::FontEngine>,
     instances: Vec<Instance>,
     viewport: Size,
     clips: Vec<Rect>,
@@ -87,10 +87,32 @@ impl D3dBackend {
         let gfx = Gfx::new(hwnd, width, height)?;
         // 字号是全局的（不支持富文本）：cell 尺寸由字号推出，见 cell_metrics_for。
         let (cell_w, cell_h) = crate::backend::font::cell_metrics_for(font.size);
-        let text = TextEngine::new(&font.family, font.size, cell_w, cell_h)?;
+        // 字形引擎选择：`Y901_FONT=self` 用自研，否则 DirectWrite（默认）。
+        // 失败就**自动回退**到 DirectWrite，绝不让应用起不来。
+        let want_self = std::env::var("Y901_FONT").map(|v| v == "self").unwrap_or(false);
+        let (text, engine_name): (Box<dyn crate::backend::font::FontEngine>, &str) = if want_self {
+            match crate::font_engine::MyFontEngine::new(
+                crate::font_engine::load_font(&crate::font_engine::resolve_font_path(&font.family))
+                    .unwrap_or_default(),
+                font.size,
+                Size::new(cell_w, cell_h),
+            ) {
+                Ok(e) => {
+                    eprintln!("[y901] 字形引擎：自研 MyFontEngine（ttf-parser + CPU 光栅化）");
+                    (Box::new(e), "self")
+                }
+                Err(err) => {
+                    eprintln!("[y901] 自研引擎初始化失败（{err}），回退 DirectWrite");
+                    (Box::new(TextEngine::new(&font.family, font.size, cell_w, cell_h)?), "legacy")
+                }
+            }
+        } else {
+            (Box::new(TextEngine::new(&font.family, font.size, cell_w, cell_h)?), "legacy")
+        };
         eprintln!(
-            "[y901] backend ready: ascent={:.2} descent={:.2} atlas={}",
-            text.ascent, text.descent, text.atlas_size
+            "[y901] backend ready: engine={engine_name} ascent={:.2} atlas={}",
+            text.ascent(),
+            text.atlas_size()
         );
 
         let mut backend = Self {
@@ -139,7 +161,7 @@ impl D3dBackend {
         // 1) 先创建新引擎：这一步失败就直接返回，旧引擎与旧 cell 尺寸原封不动
         let text = TextEngine::new(&font.family, font.size, cell_w, cell_h)?;
         // 2) 成功后才替换（新引擎的 reset_pending = true → 图集整张重传）
-        self.text = text;
+        self.text = Box::new(text);
         self.cell = Size::new(cell_w, cell_h);
         Ok(())
     }
@@ -167,7 +189,7 @@ impl D3dBackend {
             .map(|d| (d.x, d.y, d.width, d.height))
             .collect();
         self.gfx
-            .update_atlas(&self.text.atlas, self.text.atlas_size, reset, &rects)
+            .update_atlas(self.text.atlas(), self.text.atlas_size(), reset, &rects)
     }
 
     /// 回读后备缓冲（BGRA）：供快照 / 像素数学验证使用。
@@ -234,7 +256,7 @@ impl D3dBackend {
             // 设备重建后纹理是空的：全量重传
             if let Err(err) =
                 self.gfx
-                    .update_atlas(&self.text.atlas, self.text.atlas_size, true, &[])
+                    .update_atlas(self.text.atlas(), self.text.atlas_size(), true, &[])
             {
                 eprintln!("[y901] atlas re-upload failed: {err}");
             }
@@ -305,8 +327,8 @@ impl D3dBackend {
     /// 居中补偿 `offset_x = (span*CELL_W - advance)/2`：字体 advance 与格宽
     /// 不精确相等时（跨平台常见），字形仍落在格子中央而不是贴左。
     fn push_glyph(&mut self, x: f32, y: f32, span: f32, ch: char, color: Color, bold: bool) {
-        let atlas_size = self.text.atlas_size as f32;
-        let ascent = self.text.ascent;
+        let atlas_size = self.text.atlas_size() as f32;
+        let ascent = self.text.ascent();
 
         let Some(glyph) = self.text.glyph(ch).cloned() else {
             return;
@@ -423,7 +445,7 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
         // SAFETY: 同上；reset=true 表示整张重传。
         unsafe {
             self.gfx
-                .update_atlas(&self.text.atlas, self.text.atlas_size, true, &[])
+                .update_atlas(self.text.atlas(), self.text.atlas_size(), true, &[])
         }
         .map_err(|err| format!("rebuild 后图集重传失败: {err}"))?;
         Ok(())
@@ -448,7 +470,7 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
         //    TODO(§18)：抽 GlyphProvider 时把图集管理统一到 trait。
         //
         // 图集未同步 = 采样空纹理 = 整屏缺字。debug 断言 + release 只警告一次。
-        if !self.gfx.has_atlas() && !self.text.atlas.is_empty() {
+        if !self.gfx.has_atlas() && !self.text.atlas().is_empty() {
             debug_assert!(false, "present 时图集未同步（rebuild 后未重传图集）");
             if !ATLAS_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 eprintln!(
