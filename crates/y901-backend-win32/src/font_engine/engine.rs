@@ -14,7 +14,7 @@ use y901_ui::Size;
 
 use super::super::backend::atlas::SkylinePacker;
 use super::super::backend::font::{DirtyRect, FontEngine, GlyphInfo};
-use super::{rasterize_glyph, GlyphBitmap};
+use super::{rasterize_glyph_phased, GlyphBitmap};
 
 /// 图集边长（与 legacy 一致）。
 const ATLAS_SIZE: u32 = 1024;
@@ -39,8 +39,8 @@ pub struct MyFontEngine {
     atlas: Vec<u8>,
     atlas_size: u32,
     packer: SkylinePacker,
-    /// 字符 → 字形信息。
-    cache: HashMap<char, GlyphInfo>,
+    /// `(char, phase)` → 字形信息。
+    cache: HashMap<(char, u8), GlyphInfo>,
     /// 当前帧号（LRU 用）。
     frame: u64,
     /// 待上传的脏区。
@@ -87,15 +87,23 @@ impl MyFontEngine {
 
     /// 取字形（不命中则现场光栅化并入图集）。
     pub fn glyph(&mut self, ch: char) -> Option<&GlyphInfo> {
-        if !self.cache.contains_key(&ch) {
-            let bitmap = rasterize_glyph(&self.data, ch, self.size)?;
+        self.glyph_phased(ch, 0)
+    }
+
+    /// 带亚像素相位取字形（`phase` ∈ 0..=3）。
+    ///
+    /// 缓存 key 是 `(char, phase)`——同一字的 4 个相位是 4 张不同位图。
+    pub fn glyph_phased(&mut self, ch: char, phase: u8) -> Option<&GlyphInfo> {
+        let key = (ch, phase & 3);
+        if !self.cache.contains_key(&key) {
+            let bitmap = rasterize_glyph_phased(&self.data, ch, self.size, phase)?;
             let info = self.insert_into_atlas(ch, &bitmap)?;
-            self.cache.insert(ch, info);
+            self.cache.insert(key, info);
         }
-        if let Some(g) = self.cache.get_mut(&ch) {
+        if let Some(g) = self.cache.get_mut(&key) {
             g.last_used = self.frame;
         }
-        self.cache.get(&ch)
+        self.cache.get(&key)
     }
 
     /// 把一张覆盖度位图写进图集，返回字形信息。

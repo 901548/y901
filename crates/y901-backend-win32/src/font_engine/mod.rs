@@ -98,6 +98,20 @@ impl GlyphBitmap {
 /// 若把它存进结构体就得弄自引用（`ouroboros` 那类）。构造成本只是几个表偏移的计算，
 /// 相对光栅化（十微秒级）可忽略。
 pub fn rasterize_glyph(font_data: &[u8], ch: char, size_px: f32) -> Option<GlyphBitmap> {
+    rasterize_glyph_phased(font_data, ch, size_px, 0)
+}
+
+/// 带**亚像素相位**的光栅化：轮廓在 x 轴平移 `phase/4` 个像素。
+///
+/// 输入：`phase` ∈ 0..=3（对应 0 / 0.25 / 0.5 / 0.75 px）。
+/// 为什么是"真平移"而非"取整"：取整会让一行里每个字的左右间距跳 0.5px，
+/// 中文尤其明显。平移后重新光栅化，边缘覆盖度才会真正随亚像素变化。
+pub fn rasterize_glyph_phased(
+    font_data: &[u8],
+    ch: char,
+    size_px: f32,
+    phase: u8,
+) -> Option<GlyphBitmap> {
     let face = ttf_parser::Face::parse(font_data, 0).ok()?;
     let gid = face.glyph_index(ch)?;
     let units = face.units_per_em() as f32;
@@ -132,15 +146,18 @@ pub fn rasterize_glyph(font_data: &[u8], ch: char, size_px: f32) -> Option<Glyph
     let width = (max_x.ceil() as i32 - bearing_x).max(1) as u32 + 1;
     let height = (max_y.ceil() as i32 - bearing_y).max(1) as u32 + 1;
 
+    // 亚像素平移：phase/4 像素 = phase*16，单位仍是 26.6（1/64 px）
+    let subpixel = (phase as i32 & 3) * 16;
     // 平移到位图坐标（仍然 26.6）
     let ox = (bearing_x as i64) * 64;
     let oy = (bearing_y as i64) * 64;
     let shifted: Vec<Line> = lines
         .iter()
         .map(|l| Line {
-            x0: l.x0 - ox as i32,
+            // 亚像素平移是**向右**的：phase 越大，字形越往右
+            x0: l.x0 - ox as i32 + subpixel,
             y0: l.y0 - oy as i32,
-            x1: l.x1 - ox as i32,
+            x1: l.x1 - ox as i32 + subpixel,
             y1: l.y1 - oy as i32,
         })
         .collect();
