@@ -444,6 +444,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "y901-render"
+version = "0.1.0"
+dependencies = [
+ "ttf-parser",
+ "y901-core",
+ "y901-ui",
+]
+
+[[package]]
 name = "y901-runtime"
 version = "0.1.0"
 dependencies = [

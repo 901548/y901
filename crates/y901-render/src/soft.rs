@@ -11,16 +11,12 @@
 //! 为什么先不动字体：字形光栅化需要 TTF 解析 + 贝塞尔离散化，
 //! 那是 Step 2；本轮先把"图元 + 呈现"这两段彻底搬到 CPU。
 
-use windows_sys::Win32::Foundation::HWND;
-use windows_sys::Win32::Graphics::Gdi::{
-    GetDC, ReleaseDC, StretchDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY,
-};
 use y901_ui::theme::Theme;
 use y901_ui::{
     Color, Edges, Pos, Rect, RenderCtx, Size, TextStyle, TextMetrics,
 };
 
-use super::font::TextEngine;
+use crate::font::FontEngine;
 
 /// 一个 32 位像素（存储为 `0xAARRGGBB`，适后直接交给 GDI）。
 type Px = u32;
@@ -64,7 +60,6 @@ fn round_sdf(px: f32, py: f32, cx: f32, cy: f32, hw: f32, hh: f32, r: f32) -> f3
 
 /// 纯 CPU 后端。
 pub struct SoftBackend {
-    hwnd: HWND,
     width: u32,
     height: u32,
     /// 帧缓冲：`0xAARRGGBB`。
@@ -83,25 +78,20 @@ impl SoftBackend {
     /// # Safety
     ///
     /// `hwnd` 必须是调用线程拥有的有效窗口。
-    pub unsafe fn new(
-        hwnd: HWND,
+    pub fn new(
         width: u32,
         height: u32,
+        font: Box<dyn FontEngine>,
+        cell: Size,
         theme: Option<Theme>,
-        font_family: &str,
     ) -> Result<Self, String> {
-        // cell 尺寸与 D3D 后端保持一致（否则同一布局在两个后端下排版不同）
-        const FONT_SIZE: f32 = 15.0;
-        let (cw, ch) = super::font::cell_metrics_for(FONT_SIZE);
-        let text = TextEngine::new(font_family, FONT_SIZE, cw, ch)?;
-        let cell = Size::new(cw, ch);
+        let _ = Size::new(0.0, 0.0);
         Ok(Self {
-            hwnd,
             width: width.max(1),
             height: height.max(1),
             buf: vec![0; (width.max(1) * height.max(1)) as usize],
             clips: Vec::new(),
-            text: Box::new(text),
+            text: font,
             cell,
             theme: theme.unwrap_or(Theme::DARK),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
@@ -110,18 +100,20 @@ impl SoftBackend {
 
     /// 无窗口构造（仅测试用）：不能 `present`，但光栅化行为完全一致。
     #[doc(hidden)]
-    pub fn new_headless(width: u32, height: u32) -> Result<Self, String> {
-        let (cw, ch) = super::font::cell_metrics_for(15.0);
-        let text = TextEngine::new("Segoe UI", 15.0, cw, ch)?;
+    pub fn new_headless(
+        width: u32,
+        height: u32,
+        font: Box<dyn FontEngine>,
+        cell: Size,
+    ) -> Result<Self, String> {
         let (w, h) = (width.max(1), height.max(1));
         Ok(Self {
-            hwnd: std::ptr::null_mut(),
             width: w,
             height: h,
             buf: vec![0; (w * h) as usize],
             clips: Vec::new(),
-            text: Box::new(text),
-            cell: Size::new(cw, ch),
+            text: font,
+            cell,
             theme: Theme::DARK,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
         })
@@ -154,11 +146,9 @@ impl SoftBackend {
     }
 
     /// 切换字体：建新的字形引擎（尺寸变化 → 重排）。
-    pub fn set_font(&mut self, family: &str, size: f32) -> Result<(), String> {
-        let (cw, ch) = super::font::cell_metrics_for(size);
-        self.text = Box::new(TextEngine::new(family, size, cw, ch)?);
-        self.cell = Size::new(cw, ch);
-        Ok(())
+    pub fn set_font(&mut self, engine: Box<dyn FontEngine>, cell: Size) {
+        self.text = engine;
+        self.cell = cell;
     }
 
     /// 清屏（整张缓冲）。
@@ -227,41 +217,6 @@ impl SoftBackend {
     /// 返回：`true` = 成功提交。
     /// # Safety
     ///
-    /// 必须在拥有窗口的线程上调用，且 `hwnd` 仍有效。
-    pub unsafe fn present(&mut self) -> bool {
-        let hdc = GetDC(self.hwnd);
-        if hdc.is_null() {
-            return false;
-        }
-        let mut bmi: BITMAPINFO = std::mem::zeroed();
-        bmi.bmiHeader = BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: self.width as i32,
-            // 负高度 = 从上到下的 DIB（与我们的行布局一致）
-            biHeight: -(self.height as i32),
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB,
-            ..std::mem::zeroed()
-        };
-        let ok = StretchDIBits(
-            hdc,
-            0,
-            0,
-            self.width as i32,
-            self.height as i32,
-            0,
-            0,
-            self.width as i32,
-            self.height as i32,
-            self.buf.as_ptr() as *const core::ffi::c_void,
-            &bmi,
-            DIB_RGB_COLORS,
-            SRCCOPY,
-        );
-        ReleaseDC(self.hwnd, hdc);
-        ok > 0
-    }
 
     #[inline]
     fn clip_rect(&self, r: Rect) -> Rect {

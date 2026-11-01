@@ -12,8 +12,8 @@ use std::collections::HashMap;
 
 use y901_ui::Size;
 
-use super::super::backend::atlas::SkylinePacker;
-use super::super::backend::font::{DirtyRect, FontEngine, GlyphInfo};
+use crate::atlas::SkylinePacker;
+use crate::font::{DirtyRect, FontEngine, GlyphInfo};
 use super::{rasterize_glyph_phased, GlyphBitmap};
 
 /// 图集边长。
