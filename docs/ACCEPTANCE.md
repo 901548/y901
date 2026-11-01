@@ -8,14 +8,15 @@
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **484 passed / 0 failed** |
-| 加上 `--include-ignored` | **495 passed / 0 failed**（82 个测试目标） |
+| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **499 passed / 0 failed** |
+| 加上 `--include-ignored` | **523 passed / 0 failed**（含基准与 doc-test） |
 
-差值 11 = 需要真机/耗时的 `#[ignore]` 用例：
+差值 24 = 需要真机/耗时的 `#[ignore]` 用例：
 
 - **7 个 GPU harness**（D3D11 逐像素对拍，见下表）
 - **1 个 GPU 图集重建**：`backend::rebuild_atlas_tests::rebuild_reuploads_atlas`
 - **3 个万节点性能基准**：`layout_10k_full_relayout`、`rev_snapshot_is_linear_on_10k_nodes`、`public_tree_is_linear_on_10k_nodes`
+- **11 个性能基准用例**（`perf_bench` / `perf_alloc`）——见 [PERFORMANCE.md](PERFORMANCE.md)
 
 ## 7 个 GPU harness（真机 D3D11，全部 ok）
 
@@ -32,6 +33,11 @@
 ## Clippy
 
 `cargo clippy --workspace --all-targets --offline`：**0 error / 0 warning**
+
+## 性能
+
+详见 **[PERFORMANCE.md](PERFORMANCE.md)**（官方白皮书）：
+脏区合并 −220×、布局 −44~49%、图集与实例提交经实测确认不是瓶颈。
 
 ## 浮层架构（最终形态）
 

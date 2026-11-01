@@ -1,6 +1,6 @@
 //! 通用虚拟列表：**只管滚动、可见区间、虚拟化裁剪**，不规定行长什么样。
 //!
-//! ```ignore
+//! ```text
 //! let list = ListView::new("log", 20.0)
 //!     .len(entries.len())
 //!     .painter(move |index, rect, ctx| {

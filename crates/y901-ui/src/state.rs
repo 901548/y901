@@ -6,7 +6,7 @@
 //!
 //! `State<T>` \u628a\u201c\u6539\u503c\u201d\u548c\u201c\u6807\u810f\u5c5e\u4e3b\u201d\u7ed1\u5728\u4e00\u8d77\uff1a
 //!
-//! ```ignore
+//! ```text
 //! let mut count = tree.use_state("counter", 0u32);   // \u7ed1\u5b9a\u5230 id="counter" \u7684\u7ec4\u4ef6
 //! count.set(count.get() + 1);                        // \u81ea\u52a8\u628a "counter" \u6807\u810f
 //! ```
