@@ -106,6 +106,26 @@ impl MyFontEngine {
         y901_core::Grid::width_of_char(ch) as u32
     }
 
+    /// **预取**：把一批字符的 **phase 0** 字形提前光栅化并入图集。
+    ///
+    /// 用途：滚动前把"即将进入视口的 1~2 行"热好，避免滚动时现场光栅化造成的顿挫。
+    /// 为什么只预取 phase 0：亚像素相位依赖真实 pen 位置，预取时还不知道；
+    /// 4 相位应由**可见行**在绘制时按需生成（C 方案）。
+    ///
+    /// 返回：新增的字形数。
+    pub fn prefetch(&mut self, chars: &[char]) -> usize {
+        let mut added = 0usize;
+        for ch in chars {
+            if self.cache.contains_key(&(*ch, 0)) {
+                continue;
+            }
+            if self.glyph_phased(*ch, 0).is_some() {
+                added += 1;
+            }
+        }
+        added
+    }
+
     /// 取字形（不命中则现场光栅化并入图集）。
     pub fn glyph(&mut self, ch: char) -> Option<&GlyphInfo> {
         self.glyph_phased(ch, 0)
