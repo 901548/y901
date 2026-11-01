@@ -500,6 +500,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 pub struct Window {
     hwnd: HWND,
     backend: Option<D3dBackend>,
+    /// 纯 CPU 后端（`Y901_FORCE_SOFT=1` 时启用；与 `backend` 互斥）。
+    soft: Option<crate::backend::soft::SoftBackend>,
     viewport: (u32, u32),
 }
 
@@ -574,14 +576,44 @@ impl Window {
 
         let theme = options.theme.unwrap_or(y901_ui::theme::Theme::DARK);
         let font = options.font.clone().unwrap_or_default();
-        let backend = D3dBackend::new(hwnd, viewport.0, viewport.1, theme, &font)
-            .map_err(|e| format!("D3D11 init failed: {e}"))?;
+
+        // 纯 CPU 模式：不创建 D3D11 设备。
+        // 为什么用环境变量而不是 `Options` 字段：`Options` 是公开结构体，
+        // 加字段会破坏所有现有构造点（测试里有十几处）。
+        // `--force-soft` 在 app 层译成这个环境变量。
+        let force_soft = std::env::var_os("Y901_FORCE_SOFT").is_some();
+        let soft = if force_soft {
+            Some(
+                crate::backend::soft::SoftBackend::new(
+                    hwnd,
+                    viewport.0,
+                    viewport.1,
+                    Some(theme),
+                    &font.family,
+                )
+                .map_err(|e| format!("soft backend init failed: {e}"))?,
+            )
+        } else {
+            None
+        };
+        if force_soft {
+            eprintln!("[y901] 纯 CPU 渲染后端已启用（Y901_FORCE_SOFT）：不创建 D3D11 设备");
+        }
+        let backend = if force_soft {
+            None
+        } else {
+            Some(
+                D3dBackend::new(hwnd, viewport.0, viewport.1, theme, &font)
+                    .map_err(|e| format!("D3D11 init failed: {e}"))?,
+            )
+        };
 
         ShowWindow(hwnd, SW_SHOW);
 
         Ok(Self {
             hwnd,
-            backend: Some(backend),
+            backend,
+            soft,
             viewport,
         })
     }
@@ -592,6 +624,9 @@ impl Window {
     /// 副作用：主题字段更新。**全量重绘需要调用方做**
     /// （`UiTree::invalidate_all`）——窗口不认识 UI 树。
     pub fn set_theme(&mut self, theme: y901_ui::theme::Theme) -> Result<(), String> {
+        if let Some(soft) = self.soft.as_mut() {
+            return soft.set_theme(theme);
+        }
         match self.backend.as_mut() {
             Some(b) => b.set_theme(theme),
             None => Err("渲染后端尚未就绪".to_string()),
@@ -667,6 +702,21 @@ impl Window {
         if tree.dirty().is_empty() {
             return;
         }
+        if let Some(soft) = self.soft.as_mut() {
+            // 纯 CPU：先清整张缓冲，再强制整树重绘。
+            // 为什么不能只重绘脏区：软缓冲每帧都被清掉，
+            // 没被标脏的节点不重画就会出现空洞（这一点与 D3D 的自持 RT 相反）。
+            tree.invalidate_all();
+            soft.clear();
+            tree.render(soft);
+            let (w, h) = self.viewport;
+            let _ = (w, h);
+            unsafe {
+                // SAFETY: 在拥有窗口的线程上，hwnd 仍有效。
+                let _ = soft.present();
+            }
+            return;
+        }
         let Some(backend) = self.backend.as_mut() else {
             return;
         };
@@ -694,6 +744,10 @@ impl Window {
     /// 返回：`(pixels, width, height)`；未初始化或回读失败时 `None`。
     /// 说明：必须在 `render` 之后调用（且下一帧 `render` 之前）。
     pub fn read_back_pixels(&self) -> Option<(Vec<u8>, u32, u32)> {
+        if let Some(soft) = self.soft.as_ref() {
+            let (w, h) = (soft.width(), soft.height());
+            return Some((soft.pixels().to_vec(), w, h));
+        }
         // SAFETY: 已在拥有窗口的线程上，backend 已初始化。
         unsafe { self.backend.as_ref()?.read_back_pixels() }
     }
@@ -703,6 +757,9 @@ impl Window {
     /// 为什么不直接 `read_back_pixels`：`FLIP_DISCARD` 在 present 后内容未定义，
     /// 帧后读会得到全 0。
     pub fn request_snapshot(&mut self) {
+        if self.soft.is_some() {
+            return; // 纯 CPU：帧缓冲一直在内存里，随时可取
+        }
         if let Some(b) = self.backend.as_mut() {
             b.request_snapshot();
         }
@@ -710,6 +767,10 @@ impl Window {
 
     /// 取走上次快照的像素（BGRA）。
     pub fn take_snapshot(&mut self) -> Option<(Vec<u8>, u32, u32)> {
+        if let Some(soft) = self.soft.as_ref() {
+            let (w, h) = (soft.width(), soft.height());
+            return Some((soft.pixels().to_vec(), w, h));
+        }
         self.backend.as_mut()?.take_snapshot()
     }
 
@@ -736,6 +797,14 @@ impl Window {
     /// 重新布局（尺寸变化后调用）。
     pub fn resize(&mut self, tree: &mut UiTree) {
         let (w, h) = self.viewport;
+        if let Some(soft) = self.soft.as_mut() {
+            let rebuilt = soft.resize(w, h);
+            tree.layout(Size::new(w as f32, h as f32), soft);
+            if rebuilt {
+                tree.invalidate_all();
+            }
+            return;
+        }
         if let Some(backend) = self.backend.as_mut() {
             let target_rebuilt = unsafe {
                 // SAFETY: backend 由本窗口创建，hwnd 仍有效；w/h 来自当前客户区。

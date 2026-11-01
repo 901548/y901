@@ -8,6 +8,7 @@
 
 #[allow(dead_code)] // Atlas/Placement 是给多页图集预留的 API，暂由 SkylinePacker 先行使用
 pub mod atlas;
+pub mod soft;
 pub mod d3d11;
 pub mod font;
 

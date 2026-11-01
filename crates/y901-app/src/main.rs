@@ -60,6 +60,13 @@ fn main() -> Result<(), String> {
     let want_mcp = args.iter().any(|a| a == "--mcp");
     let headless = args.iter().any(|a| a == "--headless");
     let want_rpc = args.iter().any(|a| a == "--rpc");
+    // `--force-soft`：纯 CPU 渲染（不创建 D3D11 设备）。
+    // 底层用环境变量传递（`Window::create` 读 `Y901_FORCE_SOFT`），
+    // 因为 `Options` 是公开结构体，加字段会破坏所有现有构造点。
+    if args.iter().any(|a| a == "--force-soft") {
+        std::env::set_var("Y901_FORCE_SOFT", "1");
+        eprintln!("[y901] --force-soft：使用纯 CPU 软渲染后端");
+    }
 
     let token = std::env::var("Y901_TOKEN").unwrap_or_default();
     let policy = Policy {
