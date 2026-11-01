@@ -4,6 +4,7 @@
 //! 的 Win32 实现。上层（y901-app）不直接依赖 `windows-sys` 的类型。
 
 pub mod backend;
+pub mod font_engine;
 pub mod ime;
 pub mod runtime;
 pub mod window;
