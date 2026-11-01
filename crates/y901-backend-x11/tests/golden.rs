@@ -134,8 +134,10 @@ fn create_window_value_mask_and_list_order() {
         0x00, 0x00,             // border-width = 0
         0x01, 0x00,             // class = InputOutput(1)
         0x00, 0x00, 0x00, 0x00, // visual = CopyFromParent
-        // value-mask = BackPixel(bit1) | EventMask(bit10) = 0x402
-        0x02, 0x04, 0x00, 0x00,
+        // value-mask = BackPixel(bit1) | EventMask(bit11) = 0x0802
+        // 【真服务器纠正】我一开始把 EventMask 当成 bit10（那是 SaveUnder），
+        // 导致 CreateWindow 报 BadValue；规范里 EventMask 是 bit 11。
+        0x02, 0x08, 0x00, 0x00,
         // value-list：必须按位升序 → BackPixel 在前，EventMask 在后
         0xFF, 0xFF, 0xFF, 0x00, // BackPixel = 0x00FFFFFF
         0x03, 0x00, 0x00, 0x00, // EventMask = 0x3

@@ -30,22 +30,28 @@ pub enum PropMode {
 /// 而这种 bug 在运行时只表现为"窗口没出现"——极难排查。用枚举能在编译期拦住。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValueMask {
-    /// 背景像素（bit 1）
+    /// 背景像素（bit 0）
     BackPixmap = 1 << 0,
-    /// 背景像素值（bit 2）
+    /// 背景像素值（bit 1）
     BackPixel = 1 << 1,
-    /// 边框像素（bit 3）
+    /// 边框像素（bit 2）
     BorderPixmap = 1 << 2,
-    /// 边框像素值（bit 4）
+    /// 边框像素值（bit 3）
     BorderPixel = 1 << 3,
-    /// 位图（bit 5）
+    /// 位图（bit 4）
     BitGravity = 1 << 4,
-    /// 窗口事件掩码（bit 11）
-    EventMask = 1 << 10,
-    /// 不要窗口管理器干预（bit 14）
-    OverrideRedirect = 1 << 13,
-    /// 鼠标光标形状（bit 6）
-    Cursor = 1 << 5,
+    /// 不要窗口管理器干预（bit 9）
+    OverrideRedirect = 1 << 9,
+    /// 存储屏幕外区域（bit 10）
+    SaveUnder = 1 << 10,
+    /// 窗口事件掩码（bit 11）—— 易错点：不是 bit 10
+    EventMask = 1 << 11,
+    /// 不传播的事件（bit 12）
+    DontPropagate = 1 << 12,
+    /// 色彩表（bit 13）
+    Colormap = 1 << 13,
+    /// 鼠标光标形状（bit 14）
+    Cursor = 1 << 14,
 }
 
 /// 编码连接初始化包（Setup request）。
@@ -297,4 +303,177 @@ pub fn encode_get_input_focus() -> Vec<u8> {
 /// 编码 `NoOperation`（opcode 127）。服务端什么也不做，也不回应。
 pub fn encode_no_operation() -> Vec<u8> {
     vec![opcode::NO_OPERATION, 0, 1, 0]
+}
+
+// ============================ GC / 窗口管理（S2 第二步）============================
+
+/// `CreateGC` 的属性位（value-mask）。
+///
+/// 只列出本轮用到的；完整表见 X11 规范 `CreateGC` 一节。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GcMask {
+    /// 画图函数（bit 0），如 `GXcopy` = 3
+    Function = 1 << 0,
+    /// 平面掩码（bit 1）
+    PlaneMask = 1 << 1,
+    /// 前景色（bit 2）
+    Foreground = 1 << 2,
+    /// 背景色（bit 3）
+    Background = 1 << 3,
+    /// 线宽（bit 4）
+    LineWidth = 1 << 4,
+    /// 图形暴露事件（bit 16）—— 置 0 可避免 `GraphicsExpose` 噪音
+    GraphicsExposures = 1 << 16,
+}
+
+/// 编码 `CreateGC`（opcode 55）。
+///
+/// ```text
+/// 0   : opcode 55         1   : unused
+/// 2-3 : length = 4 + n
+/// 4-7 : cid (GC ID)       8-11: drawable
+/// 12-15: value-mask       16.. : value-list（每个 4 字节，按位升序）
+/// ```
+pub fn encode_create_gc(gc: u32, drawable: u32, values: &[(GcMask, u32)]) -> Vec<u8> {
+    let (mask, list) = gc_mask_and_list(values);
+    let mut out = Vec::with_capacity(16 + list.len() * 4);
+    out.push(opcode::CREATE_GC);
+    out.push(0);
+    put_u16(&mut out, (4 + list.len()) as u16);
+    put_u32(&mut out, gc);
+    put_u32(&mut out, drawable);
+    put_u32(&mut out, mask);
+    for v in list {
+        put_u32(&mut out, v);
+    }
+    out
+}
+
+/// 编码 `ChangeGC`（opcode 56）。布局与 `CreateGC` 相同，但**没有 drawable**，length = 3 + n。
+pub fn encode_change_gc(gc: u32, values: &[(GcMask, u32)]) -> Vec<u8> {
+    let (mask, list) = gc_mask_and_list(values);
+    let mut out = Vec::with_capacity(12 + list.len() * 4);
+    out.push(opcode::CHANGE_GC);
+    out.push(0);
+    put_u16(&mut out, (3 + list.len()) as u16);
+    put_u32(&mut out, gc);
+    put_u32(&mut out, mask);
+    for v in list {
+        put_u32(&mut out, v);
+    }
+    out
+}
+
+/// 编码 `FreeGC`（opcode 60）。固定 8 字节。
+pub fn encode_free_gc(gc: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8);
+    out.push(opcode::FREE_GC);
+    out.push(0);
+    put_u16(&mut out, 2);
+    put_u32(&mut out, gc);
+    out
+}
+
+/// 编码 `DestroyWindow`（opcode 4）。固定 8 字节。
+pub fn encode_destroy_window(wid: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8);
+    out.push(opcode::DESTROY_WINDOW);
+    out.push(0);
+    put_u16(&mut out, 2);
+    put_u32(&mut out, wid);
+    out
+}
+
+/// `ConfigureWindow` 的属性位。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigureMask {
+    /// x 坐标（bit 0）
+    X = 1 << 0,
+    /// y 坐标（bit 1）
+    Y = 1 << 1,
+    /// 宽（bit 2）
+    Width = 1 << 2,
+    /// 高（bit 3）
+    Height = 1 << 3,
+    /// 边框宽（bit 4）
+    BorderWidth = 1 << 4,
+}
+
+/// 编码 `ConfigureWindow`（opcode 12）。length = 3 + n。
+pub fn encode_configure_window(wid: u32, values: &[(ConfigureMask, u32)]) -> Vec<u8> {
+    let mut sorted: Vec<(ConfigureMask, u32)> = values.to_vec();
+    sorted.sort_by_key(|(m, _)| *m as u32);
+    let mut mask = 0u32;
+    for (m, _) in &sorted {
+        mask |= *m as u32;
+    }
+    let mut out = Vec::with_capacity(12 + sorted.len() * 4);
+    out.push(opcode::CONFIGURE_WINDOW);
+    out.push(0);
+    put_u16(&mut out, (3 + sorted.len()) as u16);
+    put_u32(&mut out, wid);
+    put_u32(&mut out, mask);
+    for (_, v) in &sorted {
+        put_u32(&mut out, *v);
+    }
+    out
+}
+
+/// 编码 `SetInputFocus`（opcode 42）。固定 12 字节（length = 3）。
+///
+/// - `focus`：`PointerRoot` = 1，`None` = 0，或具体窗口 ID
+/// - `revert_to`：`RevertToParent` = 2
+/// - `time`：`CurrentTime` = 0
+pub fn encode_set_input_focus(focus: u32, revert_to: u8, time: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(12);
+    out.push(opcode::SET_INPUT_FOCUS);
+    out.push(revert_to);
+    put_u16(&mut out, 3);
+    put_u32(&mut out, focus);
+    put_u32(&mut out, time);
+    out
+}
+
+/// 把属性列表按 mask 位升序排序并合并成 mask。
+///
+/// 为什么单独抽出来：GC 和 ConfigureWindow 都要求同样的"按位升序"约束，
+/// 一处写错就会把值填到错属性上（而且服务端不报错，只是画得不对）。
+fn gc_mask_and_list(values: &[(GcMask, u32)]) -> (u32, Vec<u32>) {
+    let mut sorted: Vec<(GcMask, u32)> = values.to_vec();
+    sorted.sort_by_key(|(m, _)| *m as u32);
+    let mut mask = 0u32;
+    for (m, _) in &sorted {
+        mask |= *m as u32;
+    }
+    (mask, sorted.into_iter().map(|(_, v)| v).collect())
+}
+
+/// 编码 `GetImage`（opcode 73）—— 用于**回读像素验证"真的画上了"。
+///
+/// ```text
+/// 0   : opcode 73         1   : format (2 = ZPixmap)
+/// 2-3 : length = 5
+/// 4-7 : drawable          8-9 : x
+/// 10-11: y                12-13: width
+/// 14-15: height           16-19: plane-mask (全 1 = 所有通道)
+/// ```
+pub fn encode_get_image(
+    drawable: u32,
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+    plane_mask: u32,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(20);
+    out.push(opcode::GET_IMAGE);
+    out.push(ImageFormat::ZPixmap as u8);
+    put_u16(&mut out, 5);
+    put_u32(&mut out, drawable);
+    put_u16(&mut out, x as u16);
+    put_u16(&mut out, y as u16);
+    put_u16(&mut out, width);
+    put_u16(&mut out, height);
+    put_u32(&mut out, plane_mask);
+    out
 }

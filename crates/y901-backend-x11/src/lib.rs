@@ -21,13 +21,18 @@
 
 pub mod decode;
 pub mod encode;
+#[cfg(unix)]
+pub mod conn;
+#[cfg(unix)]
+pub mod xauth;
 
 pub use decode::{decode_event, DecodeError, X11Event};
 pub use encode::{
-    encode_change_property, encode_create_window, encode_get_input_focus, encode_intern_atom,
-    encode_map_window, encode_no_operation, encode_put_image, encode_setup_request, PropMode,
-    PutImageArgs,
-    WindowClass, ValueMask,
+    encode_change_property, encode_configure_window, encode_create_gc, encode_create_window,
+    encode_destroy_window, encode_free_gc, encode_get_image, encode_get_input_focus,
+    encode_intern_atom,
+    encode_map_window, encode_no_operation, encode_put_image, encode_set_input_focus,
+    encode_setup_request, ConfigureMask, GcMask, PropMode, PutImageArgs, ValueMask, WindowClass,
 };
 
 /// X11 协议主版本号。
@@ -43,6 +48,18 @@ pub mod opcode {
     pub const CREATE_WINDOW: u8 = 1;
     /// `MapWindow`
     pub const MAP_WINDOW: u8 = 8;
+    /// `DestroyWindow`
+    pub const DESTROY_WINDOW: u8 = 4;
+    /// `ConfigureWindow`
+    pub const CONFIGURE_WINDOW: u8 = 12;
+    /// `SetInputFocus`
+    pub const SET_INPUT_FOCUS: u8 = 42;
+    /// `CreateGC`
+    pub const CREATE_GC: u8 = 55;
+    /// `ChangeGC`
+    pub const CHANGE_GC: u8 = 56;
+    /// `FreeGC`
+    pub const FREE_GC: u8 = 60;
     /// `InternAtom`
     pub const INTERN_ATOM: u8 = 16;
     /// `ChangeProperty`
@@ -51,6 +68,8 @@ pub mod opcode {
     pub const GET_INPUT_FOCUS: u8 = 43;
     /// `PutImage`
     pub const PUT_IMAGE: u8 = 72;
+    /// `GetImage`
+    pub const GET_IMAGE: u8 = 73;
     /// `NoOperation`
     pub const NO_OPERATION: u8 = 127;
 }
