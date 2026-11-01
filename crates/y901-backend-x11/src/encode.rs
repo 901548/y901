@@ -543,3 +543,139 @@ pub fn synth_key_event(
     e[30] = 1; // same-screen
     e
 }
+
+// ============================ MIT-SHM（共享内存扩展）============================
+
+/// 编码 `QueryExtension`（opcode 98）—— 用来探测服务器是否支持 `MIT-SHM`。
+///
+/// ```text
+/// 0   : opcode 98         1   : unused
+/// 2-3 : length = 2 + ceil(n/4)
+/// 4-5 : name length n     6-7 : unused
+/// 8.. : name (padded to 4)
+/// ```
+pub fn encode_query_extension(name: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + pad4(name.len()));
+    out.push(opcode::QUERY_EXTENSION);
+    out.push(0);
+    put_u16(&mut out, (2 + pad4(name.len()) / 4) as u16);
+    put_u16(&mut out, name.len() as u16);
+    put_u16(&mut out, 0);
+    push_padded(&mut out, name);
+    out
+}
+
+/// 编码 `MIT-SHM` 的 `QueryVersion`（扩展内 minor opcode 0）。
+///
+/// 布局：`[主 opcode, 次 opcode, length=1, 0]`。
+pub fn encode_shm_query_version(major_opcode: u8) -> Vec<u8> {
+    vec![major_opcode, 0, 1, 0]
+}
+
+/// 编码 `MIT-SHM` 的 `Attach`（次 opcode 1）—— 把共享内存段告诉服务器。
+///
+/// ```text
+/// 0   : 主 opcode         1   : 次 opcode = 1
+/// 2-3 : length = 4
+/// 4-7 : shmseg（客户端自己分配的 ID）
+/// 8-11: shmid（shmget 返回的段 ID）
+/// 12  : read-only (0/非0)
+/// 13-15: unused
+/// ```
+pub fn encode_shm_attach(major_opcode: u8, shmseg: u32, shmid: u32, read_only: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(16);
+    out.push(major_opcode);
+    out.push(1);
+    put_u16(&mut out, 4);
+    put_u32(&mut out, shmseg);
+    put_u32(&mut out, shmid);
+    out.push(u8::from(read_only));
+    out.extend_from_slice(&[0, 0, 0]);
+    out
+}
+
+/// 编码 `MIT-SHM` 的 `Detach`（次 opcode 2）。
+pub fn encode_shm_detach(major_opcode: u8, shmseg: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8);
+    out.push(major_opcode);
+    out.push(2);
+    put_u16(&mut out, 2);
+    put_u32(&mut out, shmseg);
+    out
+}
+
+/// `ShmPutImage` 的参数。
+#[derive(Clone, Copy, Debug)]
+pub struct ShmPutImageArgs {
+    /// 目标 drawable
+    pub drawable: u32,
+    /// GC
+    pub gc: u32,
+    /// 整张图的宽（必须与共享内存里的行幅匹配）
+    pub total_width: u16,
+    /// 整张图的高
+    pub total_height: u16,
+    /// 源区域 x
+    pub src_x: u16,
+    /// 源区域 y
+    pub src_y: u16,
+    /// 源区域宽
+    pub src_width: u16,
+    /// 源区域高
+    pub src_height: u16,
+    /// 目标 x
+    pub dst_x: i16,
+    /// 目标 y
+    pub dst_y: i16,
+    /// 深度
+    pub depth: u8,
+    /// 是否要求完成事件（异步通知）
+    pub send_event: bool,
+    /// 共享内存段句柄（客户端自己分配）
+    pub shmseg: u32,
+    /// 像素在段内的字节偏移
+    pub offset: u32,
+}
+
+/// 编码 `MIT-SHM` 的 `PutImage`（次 opcode 3）。
+///
+/// 布局（共 40 字节 = 10 个单位）：
+/// ```text
+/// 0    : 主 opcode        1    : 次 opcode = 3
+/// 2-3  : length = 10
+/// 4-7  : drawable          8-11 : gc
+/// 12-13: total_width       14-15: total_height
+/// 16-17: src_x             18-19: src_y
+/// 20-21: src_width         22-23: src_height
+/// 24-25: dst_x             26-27: dst_y
+/// 28   : depth             29   : format (2 = ZPixmap)
+/// 30   : send_event        31   : unused
+/// 32-35: shmseg            36-39: offset
+/// ```
+///
+/// **注意**：这里的 `send_event` 是"干完发一个事件告诉我"，
+/// 与 `SendEvent` 请求的 `propagate` 是两回事。要接异步完成事件，
+/// 还需要在 `CreateWindow` 时注册 `ShmCompletion` 事件掩码。
+pub fn encode_shm_put_image(major_opcode: u8, a: &ShmPutImageArgs) -> Vec<u8> {
+    let mut out = Vec::with_capacity(40);
+    out.push(major_opcode);
+    out.push(3);
+    put_u16(&mut out, 10);
+    put_u32(&mut out, a.drawable);
+    put_u32(&mut out, a.gc);
+    put_u16(&mut out, a.total_width);
+    put_u16(&mut out, a.total_height);
+    put_u16(&mut out, a.src_x);
+    put_u16(&mut out, a.src_y);
+    put_u16(&mut out, a.src_width);
+    put_u16(&mut out, a.src_height);
+    put_u16(&mut out, a.dst_x as u16);
+    put_u16(&mut out, a.dst_y as u16);
+    out.push(a.depth);
+    out.push(ImageFormat::ZPixmap as u8);
+    out.push(u8::from(a.send_event));
+    out.push(0);
+    put_u32(&mut out, a.shmseg);
+    put_u32(&mut out, a.offset);
+    out
+}

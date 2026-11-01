@@ -323,6 +323,39 @@ impl Connection {
         }
     }
 
+    /// 探测扩展：返回它的**主 opcode**（不支持则 `None`）。
+    ///
+    /// 为什么要问而不是硬编码：X11 扩展的 opcode 是**服务器分配的**，
+    /// 不同服务器/不同加载顺序都可能不同。硬编码就是猜。
+    pub fn query_extension(&mut self, name: &[u8]) -> Result<Option<u8>, String> {
+        self.send(&crate::encode::encode_query_extension(name))?;
+        self.flush()?;
+        let mut head = [0u8; 32];
+        self.read_exact(&mut head)?;
+        if head[0] != 1 {
+            return Err(format!("期待响应，收到字节 0 = {}", head[0]));
+        }
+        // 响应布局：byte8 = present，byte9 = major-opcode
+        Ok(if head[8] != 0 { Some(head[9]) } else { None })
+    }
+
+    /// `MIT-SHM` 的 `QueryVersion`：返回 `(major, minor)`。
+    ///
+    /// 失败：`Err` 当扩展不可用或响应异常。
+    pub fn shm_query_version(&mut self, major_opcode: u8) -> Result<(u16, u16), String> {
+        self.send(&crate::encode::encode_shm_query_version(major_opcode))?;
+        self.flush()?;
+        let mut head = [0u8; 32];
+        self.read_exact(&mut head)?;
+        if head[0] != 1 {
+            return Err(format!("ShmQueryVersion 未得到响应（字节 0 = {}）", head[0]));
+        }
+        // byte8 = shared_pixmaps；bytes 10-11 = major；12-13 = minor
+        let major = u16::from_le_bytes([head[10], head[11]]);
+        let minor = u16::from_le_bytes([head[12], head[13]]);
+        Ok((major, minor))
+    }
+
     /// 读一个"只带一个 u32 结果"的响应（`InternAtom` 的原子 ID 在字节 8-11）。
     ///
     /// 为什么单独写：`sync()` 会丢弃"不属于当前序列"的响应，

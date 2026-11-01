@@ -28,6 +28,21 @@ pub struct X11Window {
     keymap: Keymap,
     /// 被 `wake()` 置位的标志（`poll` 的短轮询会检查它）
     woken: Arc<AtomicBool>,
+    /// MIT-SHM：有则走共享内存，没有则回退到分块 PutImage
+    shm: Option<ShmState>,
+}
+
+/// 共享内存上屏所需的全部状态。
+struct ShmState {
+    /// 扩展主 opcode（服务器分配）
+    major: u8,
+    /// 客户端自己分配的 shmseg ID
+    seg_id: u32,
+    /// 内存段（Drop 时自动 shmdt + shmctl）
+    seg: crate::shm::ShmSegment,
+    /// 段对应的像素尺寸（不匹配时需要重建）
+    w: u16,
+    h: u16,
 }
 
 impl X11Window {
@@ -88,6 +103,22 @@ impl X11Window {
         let count = info.max_keycode.saturating_sub(info.min_keycode).saturating_add(1);
         let keymap = conn.get_keyboard_mapping(info.min_keycode, count)?;
 
+        // MIT-SHM 探测：支持就用，不支持（或失败）静默回退
+        let shm = match try_enable_shm(&mut conn, base | 0x10, width, height, info.root_depth) {
+            Ok(Some(state)) => {
+                eprintln!("[y901] MIT-SHM 已启用（{}x{}，共享内存 {}字节）", width, height, state.seg.size());
+                Some(state)
+            }
+            Ok(None) => {
+                eprintln!("[y901] 服务器不支持 MIT-SHM，回退到分块 PutImage");
+                None
+            }
+            Err(e) => {
+                eprintln!("[y901] MIT-SHM 启用失败（{e}），回退到分块 PutImage");
+                None
+            }
+        };
+
         Ok(Self {
             conn,
             wid,
@@ -97,6 +128,7 @@ impl X11Window {
             depth: info.root_depth,
             keymap,
             woken: Arc::new(AtomicBool::new(false)),
+            shm,
         })
     }
 
@@ -237,6 +269,40 @@ impl Presenter for X11Window {
     fn present(&mut self, pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
         let w = width.min(self.width as u32) as u16;
         let h = height.min(self.height as u32) as u16;
+
+        // 优先走共享内存：一次 memcpy + 一个 40 字节请求
+        if let Some(state) = self.shm.as_mut() {
+            if state.w == w && state.h == h {
+                let need = w as usize * h as usize * 4;
+                if pixels.len() >= need {
+                    state.seg.write(&pixels[..need])?;
+                    self.conn.send(&crate::encode::encode_shm_put_image(
+                        state.major,
+                        &crate::encode::ShmPutImageArgs {
+                            drawable: self.wid,
+                            gc: self.gc,
+                            total_width: w,
+                            total_height: h,
+                            src_x: 0,
+                            src_y: 0,
+                            src_width: w,
+                            src_height: h,
+                            dst_x: 0,
+                            dst_y: 0,
+                            depth: self.depth,
+                            // false：不要求完成事件（我们不做阻塞等待，
+                            // 下一帧的 ShmPutImage 会自然排在后面）
+                            send_event: false,
+                            shmseg: state.seg_id,
+                            offset: 0,
+                        },
+                    ))?;
+                    self.conn.flush()?;
+                    return Ok(());
+                }
+            }
+        }
+
         self.conn.put_image_bgra(self.wid, self.gc, w, h, pixels, self.depth)?;
         Ok(())
     }
@@ -285,4 +351,44 @@ pub fn mods_name(m: &Modifiers) -> String {
         if m.ctrl { "Ctrl+" } else { "" },
         if m.alt { "Alt+" } else { "" }
     )
+}
+
+/// 尝试启用 MIT-SHM：探测扩展 → 查版本 → 建段 → 挂载。
+///
+/// 返回：`Ok(None)` = 服务器不支持（正常情况，调用方应回退）；
+/// `Err` = 支持但启用过程出错（同样回退，但要打日志）。
+fn try_enable_shm(
+    conn: &mut Connection,
+    seg_id: u32,
+    width: u16,
+    height: u16,
+    _depth: u8,
+) -> Result<Option<ShmState>, String> {
+    // 强制回退开关：用于验证"没有 SHM 时画面也对"以及性能对比
+    if std::env::var_os("Y901_NO_SHM").is_some() {
+        return Ok(None);
+    }
+    let Some(major) = conn.query_extension(b"MIT-SHM")? else {
+        return Ok(None);
+    };
+    let (vmajor, vminor) = conn.shm_query_version(major)?;
+    if vmajor == 0 && vminor == 0 {
+        return Ok(None);
+    }
+    let bytes = width as usize * height as usize * 4;
+    let seg = crate::shm::ShmSegment::new(bytes)?;
+    let shmid = seg.id() as u32;
+    conn.send(&crate::encode::encode_shm_attach(major, seg_id, shmid, false))?;
+    conn.flush()?;
+    let errs = conn.sync()?;
+    if !errs.is_empty() {
+        return Err(format!("ShmAttach 报错：{errs:?}"));
+    }
+    Ok(Some(ShmState {
+        major,
+        seg_id,
+        seg,
+        w: width,
+        h: height,
+    }))
 }

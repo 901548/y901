@@ -23,6 +23,8 @@ pub mod decode;
 pub mod encode;
 pub mod keys;
 #[cfg(unix)]
+pub mod shm;
+#[cfg(unix)]
 pub mod runtime;
 #[cfg(unix)]
 pub mod window;
@@ -36,7 +38,9 @@ pub use encode::{
     encode_change_property, encode_configure_window, encode_create_gc, encode_create_window,
     encode_destroy_window, encode_free_gc, encode_get_image, encode_get_input_focus,
     encode_intern_atom,
-    encode_get_keyboard_mapping, encode_map_window, encode_send_event, synth_key_event, encode_no_operation, encode_put_image,
+    encode_get_keyboard_mapping, encode_map_window, encode_query_extension, encode_send_event,
+    encode_shm_attach, encode_shm_detach, encode_shm_put_image, encode_shm_query_version,
+    synth_key_event, ShmPutImageArgs, encode_no_operation, encode_put_image,
     encode_set_input_focus,
     encode_setup_request, ConfigureMask, GcMask, PropMode, PutImageArgs, ValueMask, WindowClass,
 };
@@ -80,6 +84,8 @@ pub mod opcode {
     pub const GET_KEYBOARD_MAPPING: u8 = 101;
     /// `SendEvent`
     pub const SEND_EVENT: u8 = 25;
+    /// `QueryExtension`
+    pub const QUERY_EXTENSION: u8 = 98;
     /// `NoOperation`
     pub const NO_OPERATION: u8 = 127;
 }

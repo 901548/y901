@@ -39,8 +39,36 @@ fn connect() -> (std::sync::MutexGuard<'static, ()>, Connection) {
     let guard = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
     eprintln!("[x11] 连接 DISPLAY={d}");
-    let c = Connection::connect(&d).unwrap_or_else(|e| panic!("连接失败：{e}"));
-    (guard, c)
+    // 重试 3 次：实测 Xvfb 在高频建连（测试并行时）偶尔会 RST 掉握手。
+    // 生产路径只建一个连接，不会遇到；这里重试是为了让测试**不因工具链抖动而假红**。
+    let mut last = String::new();
+    for attempt in 0..3 {
+        match Connection::connect(&d) {
+            Ok(c) => return (guard, c),
+            Err(e) => {
+                last = e;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                eprintln!("[x11] 连接重试 #{}（{last}）", attempt + 1);
+            }
+        }
+    }
+    panic!("连接失败：{last}");
+}
+
+
+/// 建窗（带重试）：理由同 [`connect`] —— Xvfb 在高频建连时偶尔 RST。
+fn create_window_retry(d: &str, w: u16, h: u16, title: &str) -> X11Window {
+    let mut last = String::new();
+    for _ in 0..3 {
+        match X11Window::create(d, w, h, title) {
+            Ok(x) => return x,
+            Err(e) => {
+                last = e;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+    panic!("建窗失败：{last}");
 }
 
 #[test]
@@ -307,7 +335,7 @@ fn keyboard_mapping_covers_ascii() {
 fn window_implements_event_source_and_presenter() {
     let _g = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
-    let mut w = X11Window::create(&d, 200, 120, "y901 x11 window").expect("建窗");
+    let mut w = create_window_retry(&d, 200, 120, "y901 x11 window");
     eprintln!("[x11] X11Window wid=0x{:X} size={:?} ascii={}", w.wid, w.size(), w.keymap().ascii_coverage());
     assert!(w.keymap().ascii_coverage() >= 45, "键盘表应已加载（实际 {} 个）", w.keymap().ascii_coverage());
 
@@ -342,7 +370,7 @@ fn window_implements_event_source_and_presenter() {
 fn keyboard_input_reaches_the_ui_layer() {
     let _g = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
-    let mut w = X11Window::create(&d, 300, 200, "keyboard test").expect("建窗");
+    let mut w = create_window_retry(&d, 300, 200, "keyboard test");
 
     // 从真机键盘表里找出 'a' 的 keycode（而不是写死 38）
     let km = w.keymap().clone();
@@ -411,4 +439,126 @@ fn send_event_packet_layout() {
     assert_eq!(pkt[12], 2, "事件码 KeyPress");
     assert_eq!(pkt[13], 38, "keycode");
     assert_eq!(&pkt[40..42], &[0x01, 0x00], "state = Shift");
+}
+
+/// 性能对比：**分块 PutImage vs MIT-SHM**（1920×1080，各 100 帧）。
+///
+/// 为什么要真测而不是算：`PutImage` 的耗时主要在**序列化 8MB + 走 socket**，
+/// 而 SHM 的耗时在**一次 memcpy + 一个 40 字节请求**。两者量级不同，只有真跑才知道。
+#[test]
+fn benchmark_shm_vs_putimage_1080p() {
+    let _g = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
+    let (w, h) = (1920u16, 1080u16);
+
+    // 先看服务器支持不支持（不支持就只测 PutImage）
+    let mut probe = Connection::connect(&d).expect("连接");
+    let has_shm = probe.query_extension(b"MIT-SHM").ok().flatten();
+    eprintln!("[bench] MIT-SHM 支持：{}", if has_shm.is_some() { "是" } else { "否" });
+
+    let mut wdw = create_window_retry(&d, w, h, "bench");
+    let mut px = vec![0u8; w as usize * h as usize * 4];
+    for p in px.chunks_exact_mut(4) {
+        p[2] = 0x40; // 深红底
+    }
+
+    // 预热（首帧会创建各种资源）
+    wdw.present(&px, w as u32, h as u32).expect("warmup");
+
+    const FRAMES: usize = 100;
+    let t0 = std::time::Instant::now();
+    for _ in 0..FRAMES {
+        wdw.present(&px, w as u32, h as u32).expect("present");
+    }
+    let total = t0.elapsed().as_secs_f64() * 1000.0;
+    eprintln!(
+        "[bench] present x{FRAMES}（{w}x{h}）：总 {total:.1}ms，单帧 {:.2}ms，理论上限 {:.0}fps",
+        total / FRAMES as f64,
+        1000.0 / (total / FRAMES as f64)
+    );
+    // 对比组：强制关掉 SHM，走分块 PutImage
+    drop(wdw);
+    std::env::set_var("Y901_NO_SHM", "1");
+    let mut wdw2 = create_window_retry(&d, w, h, "bench-fallback");
+    wdw2.present(&px, w as u32, h as u32).expect("warmup2");
+    let t1 = std::time::Instant::now();
+    for _ in 0..FRAMES {
+        wdw2.present(&px, w as u32, h as u32).expect("present2");
+    }
+    let total_fallback = t1.elapsed().as_secs_f64() * 1000.0;
+    std::env::remove_var("Y901_NO_SHM");
+    eprintln!(
+        "[bench] 回退路径（分块 PutImage）x{FRAMES}：总 {total_fallback:.1}ms，单帧 {:.2}ms",
+        total_fallback / (FRAMES as f64)
+    );
+    eprintln!(
+        "[bench] 提速比：{:.1}x（SHM {:.2}ms vs PutImage {:.2}ms）",
+        total_fallback / total,
+        total / (FRAMES as f64),
+        total_fallback / (FRAMES as f64)
+    );
+
+    // 不做硬断言（虚拟机上不稳），但必须小于 50ms/帧，否则说明路径可能错了
+    assert!(total / (FRAMES as f64) < 50.0, "单帧 {}ms 过慢", total / FRAMES as f64);
+    assert!(
+        total < total_fallback,
+        "SHM 应快于分块 PutImage（{total:.1}ms vs {total_fallback:.1}ms）"
+    );
+}
+
+/// 验收：**回退路径画出来的像素必须与 SHM 路径逐字节相同**。
+///
+/// 怎么比：两条路径各画一帧相同的图，然后用 `GetImage` 从服务器把像素读回来对比。
+/// 注意是**服务器端**的像素——这才能证明"上屏结果一致"，而不是"我们的缓冲区一致"。
+#[test]
+fn shm_and_fallback_produce_identical_pixels() {
+    let _g = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
+    let (w, h) = (64u16, 48u16);
+    let mut px = vec![0u8; w as usize * h as usize * 4];
+    for (i, p) in px.chunks_exact_mut(4).enumerate() {
+        p[0] = (i % 256) as u8;        // B
+        p[1] = ((i / 3) % 256) as u8;  // G
+        p[2] = ((i / 7) % 256) as u8;  // R
+        p[3] = 0;
+    }
+
+    // A：SHM 路径
+    std::env::remove_var("Y901_NO_SHM");
+    let mut a = create_window_retry(&d, w, h, "pixels-shm");
+    a.present(&px, w as u32, h as u32).expect("present A");
+    let (depth_a, got_a) = {
+        let mut c = Connection::connect(&d).expect("连接");
+        let r = c.get_image(a.wid, 0, 0, w, h).expect("GetImage A");
+        let _ = c.sync();
+        r
+    };
+    drop(a);
+
+    // B：回退路径
+    std::env::set_var("Y901_NO_SHM", "1");
+    let mut b = create_window_retry(&d, w, h, "pixels-fallback");
+    b.present(&px, w as u32, h as u32).expect("present B");
+    let (depth_b, got_b) = {
+        let mut c = Connection::connect(&d).expect("连接");
+        let r = c.get_image(b.wid, 0, 0, w, h).expect("GetImage B");
+        let _ = c.sync();
+        r
+    };
+    std::env::remove_var("Y901_NO_SHM");
+    drop(b);
+
+    assert_eq!(depth_a, depth_b, "两路得到的 depth 应相同");
+    assert_eq!(got_a.len(), got_b.len(), "像素字节数应相同");
+    let diff = got_a.iter().zip(got_b.iter()).filter(|(x, y)| x != y).count();
+    eprintln!(
+        "[shm] SHM vs 回退：depth={depth_a}，像素 {} 字节，不同 {diff} 字节",
+        got_a.len()
+    );
+    assert_eq!(diff, 0, "SHM 与回退路径的上屏像素应逐字节相同（差 {diff} 字节）");
+
+    // 且不能是全 0（否则说明两边都没画上，相同也无意义）
+    let nonzero = got_a.iter().filter(|b| **b != 0).count();
+    assert!(nonzero > 100, "读回的像素几乎全 0，可能根本没画上");
+    eprintln!("[shm] 非零字节 {nonzero} / {}", got_a.len());
 }
