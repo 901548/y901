@@ -1,10 +1,45 @@
-//! 性能基准（不进默认测试）：布局引擎 + 脏区合并。
+//! 性能基准（不进默认测试）：布局引擎 + 脏区合并 + **分配计数**。
 //!
 //! 运行：
 //! ```text
 //! cargo test -p y901-ui --release --test perf_bench -- --ignored --nocapture
 //! cargo test -p y901-ui --test perf_bench -- --ignored --nocapture        # debug
 //! ```
+
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// 计数分配器：只在这个基准二进制里生效。
+struct Counting;
+
+static ALLOCS: AtomicUsize = AtomicUsize::new(0);
+static BYTES: AtomicUsize = AtomicUsize::new(0);
+
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+        System.alloc(layout)
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        System.dealloc(ptr, layout)
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        BYTES.fetch_add(new_size, Ordering::Relaxed);
+        System.realloc(ptr, layout, new_size)
+    }
+}
+
+#[global_allocator]
+static GLOBAL: Counting = Counting;
+
+fn take_allocs() -> (usize, usize) {
+    (
+        ALLOCS.swap(0, Ordering::Relaxed),
+        BYTES.swap(0, Ordering::Relaxed),
+    )
+}
 
 use std::time::Instant;
 
@@ -224,4 +259,27 @@ fn bench_layout_id_length_sensitivity() {
         let avg = samples.iter().sum::<f64>() / samples.len() as f64;
         eprintln!("[layout] id_len={pad:2}: 10k nodes avg={avg:.0}us");
     }
+}
+
+/// 一次全量重排会分配多少次？（测试 id 字符串 / 路径副本的代价）
+#[test]
+#[ignore = "基准：--ignored --nocapture"]
+fn bench_layout_allocations_10k() {
+    let mut tree = UiTree::new(flat(10_000));
+    tree.layout(Size::new(2000.0, 2000.0), &Mono);
+
+    let mut rows = Vec::new();
+    for i in 0..10 {
+        let w = if i % 2 == 0 { 2000.0 } else { 2001.0 };
+        let _ = take_allocs();
+        tree.layout(Size::new(w, 2000.0), &Mono);
+        rows.push(take_allocs());
+    }
+    let avg_allocs = rows.iter().map(|(a, _)| *a).sum::<usize>() / rows.len();
+    let avg_bytes = rows.iter().map(|(_, b)| *b).sum::<usize>() / rows.len();
+    eprintln!(
+        "[alloc] 10k nodes full relayout: avg_allocs={avg_allocs} avg_bytes={avg_bytes}  \
+         (每节点 {:.2} 次分配)",
+        avg_allocs as f64 / 10_001.0
+    );
 }

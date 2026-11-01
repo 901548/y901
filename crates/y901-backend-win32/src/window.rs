@@ -991,15 +991,15 @@ mod dirty_plan_tests {
                 10.0,
             ));
         }
-        assert_eq!(
-            d.rects().len(),
-            MAX_DIRTY_RECTS + 1,
-            "前提：应该真的有 {} 块",
-            MAX_DIRTY_RECTS + 1
+        // 上限已前移到 `DirtyRegion::add`：超过 16 块时直接 `full = true`。
+        // 这比"先攒着、渲染时再退化"更彻底：攒的过程本身就是 O(n²)。
+        assert!(
+            d.is_full(),
+            "碎片超过上限时应立即标记为整窗"
         );
         assert!(
             super::plan_dirty_rects(&d).is_none(),
-            "脏区碎片超过上限时必须退化为整窗重绘"
+            "整窗脏区必须走整窗重绘路径"
         );
     }
 

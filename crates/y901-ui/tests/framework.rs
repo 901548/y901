@@ -380,7 +380,19 @@ fn hover_only_dirties_two_nodes() {
         pos: Pos::new(150.0, 50.0),
     });
     assert_eq!(tree.hovered(), Some("b"));
-    assert_eq!(tree.dirty().len(), 2, "旧节点 a + 新节点 b");
+    // a 与 b 是相邻兄弟（共用一条边）。边贴边合并之后只剩 1 块脏区——
+    // 这是预期行为（合并只会让脏区变大，不会漏画），所以改成断言覆盖范围。
+    let b = tree.dirty().bounds().expect("应有脏区");
+    let (ra, rb) = (
+        tree.rect_of("a").expect("a"),
+        tree.rect_of("b").expect("b"),
+    );
+    assert!(
+        b.contains(y901_ui::Pos::new(ra.x + 1.0, ra.y + 1.0))
+            && b.contains(y901_ui::Pos::new(rb.x + 1.0, rb.y + 1.0)),
+        "脏区必须同时覆盖旧节点 a 与新节点 b：{b:?}"
+    );
+    assert!(!tree.dirty().is_full(), "不能退化成整窗");
 
     // 渲染后脏区清空
     tree.render(&mut rec);

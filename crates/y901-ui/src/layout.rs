@@ -49,7 +49,8 @@ struct Entry {
 /// 为什么不用 `String` 做键：每次 measure 都要 `id.to_string()`（堆分配）+
 /// SipHash（比 FNV 慢数倍），10k 节点的全量重排会因此多花毫秒级。
 /// FNV-1a 对短 ASCII id 足够分散，且零分配。
-fn id_key(id: &str) -> u64 {
+/// 把节点 id 哈希成 `u64`（FNV-1a）。公开供 `UiTree` 的索引表复用。
+pub fn id_key(id: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for b in id.as_bytes() {
         hash ^= *b as u64;
