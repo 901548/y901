@@ -600,6 +600,20 @@ impl UiTree {
         });
         self.layout_requested = true;
         self.dirty = DirtyRegion::full();
+        // 弹出层开启动画：150ms 缓动。
+        // key 取该浮层的 id，于是"同一浮层重开"会打断上一次动画而不是叠加。
+        // node 传 None：浮层不在普通节点索引里，靠整窗脏区重绘。
+        let key = crate::animation::key_of(&self.popups.last().map(|p| p.id.clone()).unwrap_or_default());
+        self.animate(
+            key,
+            crate::animation::Animate::new(
+                0.0,
+                1.0,
+                std::time::Duration::from_millis(crate::animation::POPUP_OPEN_MS),
+                crate::animation::Easing::EaseOutCubic,
+            ),
+            None,
+        );
         true
     }
 
@@ -1616,6 +1630,16 @@ impl UiTree {
         if self.dirty.is_empty() {
             return;
         }
+        // 把本帧动画快照交给后端：控件在 render 里用 `ctx.animation(key)` 取进度。
+        // 为什么不给每个控件塞一个 `Animate`：动画是「展示层事实」，控件只该问"我现在该是几"，
+        // 不该自己管时间；而这正是控件拿不到 dt 的唯一解法。
+        let snapshot = crate::animation::AnimSnapshot::new(
+            self.animations
+                .iter()
+                .map(|a| (a.key, a.anim.progress()))
+                .collect(),
+        );
+        ctx.set_animations(&snapshot);
         let dirty = self.dirty.clone();
 
         // 单遍绘制：**树序就是绘制顺序**（后访问的后画，后画的在上）。

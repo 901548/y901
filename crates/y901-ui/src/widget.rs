@@ -346,6 +346,20 @@ pub const GRADIENT_STEPS: usize = 32;
 pub const AA_SAMPLES: usize = 4;
 
 pub trait RenderCtx: TextMetrics {
+    /// 某个动画 key 的当前进度（0..=1）。
+    ///
+    /// 默认返回 `1.0`："没有动画 → 就是终态"。这是现有控件不改一行也不受影响的原因。
+    fn animation(&self, _key: u64) -> f32 {
+        1.0
+    }
+
+    /// 注入本帧的动画快照（由 `UiTree::render` 调用）。
+    ///
+    /// 为什么是"注入快照"而不是传 `&UiTree`：`RenderCtx` 由各后端实现，
+    /// 它不应认识 UiTree（否则 UI 层与后端反向耦合）。
+    fn set_animations(&mut self, _snapshot: &crate::animation::AnimSnapshot) {}
+
+
     /// 视口尺寸（逻辑像素）。
     fn size(&self) -> Size;
 

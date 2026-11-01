@@ -258,3 +258,49 @@ mod tests {
         assert!(p < 1.0);
     }
 }
+
+/// 把一个字符串 id 散列成动画 key（FNV-1a）。
+///
+/// 为什么要有它：控件在 `render` 里只知道自己的 id，
+/// 而动画表需要稳定的 `u64` key。两边用同一个函数才不会对不上。
+pub fn key_of(id: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in id.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// 弹出层开启动画的时长（毫秒）。
+pub const POPUP_OPEN_MS: u64 = 150;
+
+/// 一帧的动画快照（key → 进度）。
+///
+/// 为什么用小型 Vec 而不是 HashMap：同时活动的动画通常只有 0~3 个，
+/// 线性查找比散列快、且不需要每帧分配哈希表。
+#[derive(Clone, Debug, Default)]
+pub struct AnimSnapshot {
+    /// 各 key 的当前进度
+    entries: Vec<(u64, f32)>,
+}
+
+impl AnimSnapshot {
+    /// 从"已完成度" 列表构造。
+    pub fn new(entries: Vec<(u64, f32)>) -> Self {
+        Self { entries }
+    }
+
+    /// 查询某个 key 的进度（不存在 → `None`）。
+    pub fn get(&self, key: u64) -> Option<f32> {
+        self.entries
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| *v)
+    }
+
+    /// 是否为空。
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
