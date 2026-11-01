@@ -66,6 +66,8 @@ struct GlyphX {
 
 pub struct TextInput {
     id: String,
+    /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。
+    key: u64,
     buffer: TextBuffer,
     style: TextStyle,
     selection_color: Color,
@@ -112,8 +114,11 @@ impl TextInput {
     /// 输入：`id`（树内唯一）。返回：未挂载的组件。
     /// 副作用：无（不读剪贴板、不订阅）。
     pub fn new(id: impl Into<String>) -> Self {
+        let id = id.into();
+        let key = y901_ui::layout::id_key(&id);
         Self {
-            id: id.into(),
+            id,
+            key,
             buffer: TextBuffer::new(),
             style: TextStyle::fg(Color::WHITE).with_bg(Color::rgba(0.10, 0.11, 0.14, 1.0)),
             selection_color: Color::rgba(0.24, 0.45, 0.75, 0.55),
@@ -495,6 +500,10 @@ impl Widget for TextInput {
     /// 向下转型：Host 需要拿到 `&mut TextInput` 本体（例如读光标、设选区）时用。
     ///
     /// 只读文本**优先**走 `semantics().value`（不需要 downcast）。
+    fn cache_key(&self) -> Option<u64> {
+        Some(self.key)
+    }
+
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
     }

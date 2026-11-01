@@ -1420,7 +1420,12 @@ impl UiTree {
                 (None, None) => None,
             };
 
-            out.rects.insert(crate::layout::id_key(node.id()), rect);
+            // 优先用组件预算好的 key（热路径组件都缓存了一份），
+            // 没缓存的才现场哈希字符串。
+            let key = node
+                .cache_key()
+                .unwrap_or_else(|| crate::layout::id_key(node.id()));
+            out.rects.insert(key, rect);
             // 自己在 `order` 里的下标：子节点要用它当 parent
             let me = out.order.len();
 

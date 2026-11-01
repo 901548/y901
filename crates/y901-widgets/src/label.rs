@@ -9,6 +9,8 @@ use y901_ui::{
 
 pub struct TextLabel {
     id: String,
+    /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。
+    key: u64,
     text: String,
     /// 可选的响应式来源：挂载后由 Signal 驱动文本。
     signal: Option<y901_ui::Signal<String>>,
@@ -24,8 +26,11 @@ impl TextLabel {
     /// 返回：未挂载的组件；不带 Signal（文本不会自动更新）。
     /// 副作用：无。
     pub fn new(id: impl Into<String>, text: impl Into<String>) -> Self {
+        let id = id.into();
+        let key = y901_ui::layout::id_key(&id);
         Self {
-            id: id.into(),
+            id,
+            key,
             text: text.into(),
             signal: None,
             color: Color::WHITE,
@@ -112,6 +117,10 @@ impl Widget for TextLabel {
     }
 
     /// 向下转型：Host 运行时调 `set_text` 的唯一路径（UiTree 不暴露具体类型）。
+    fn cache_key(&self) -> Option<u64> {
+        Some(self.key)
+    }
+
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
     }

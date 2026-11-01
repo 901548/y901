@@ -11,6 +11,8 @@ use y901_ui::{
 
 pub struct Button {
     id: String,
+    /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。
+    key: u64,
     label: String,
     /// 点击时发给应用层的命令名；`args` 原样透传。
     command: String,
@@ -34,8 +36,11 @@ impl Button {
     /// 默认点击发送 `click` 命令（无参数），可用 `on_click` 覆盖。
     /// 副作用：无。
     pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        let id = id.into();
+        let key = y901_ui::layout::id_key(&id);
         Self {
-            id: id.into(),
+            id,
+            key,
             label: label.into(),
             command: "click".to_string(),
             args: Json::obj(),
@@ -140,6 +145,10 @@ impl Widget for Button {
 
     /// 向下转型：`Host` 运行时调 `set_selected` 的唯一路径
     /// （`UiTree` 不暴露具体类型，只能 `find_mut(id).as_any_mut()`）。
+    fn cache_key(&self) -> Option<u64> {
+        Some(self.key)
+    }
+
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
     }

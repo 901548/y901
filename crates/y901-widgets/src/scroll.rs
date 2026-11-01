@@ -17,6 +17,8 @@ pub const BAR_WIDTH: f32 = 10.0;
 /// 竖向滚动容器：**主轴无界测量**子节点，超出部分靠视口裁剪。
 pub struct ScrollView {
     id: String,
+    /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。
+    key: u64,
     kids: Vec<Box<dyn Widget>>,
     bar: Scrollbar,
     /// 当前滚动偏移（像素，0 = 顶部）。
@@ -43,9 +45,11 @@ impl ScrollView {
     /// 副作用：无（滚动条是子组件，随容器一起挂载/卸载）。
     pub fn new(id: impl Into<String>, child: Box<dyn Widget>) -> Self {
         let id = id.into();
+        let key = y901_ui::layout::id_key(&id);
         Self {
             bar: Scrollbar::new(format!("{id}.bar"), id.clone()),
             id,
+            key,
             kids: vec![child],
             offset: 0.0,
             content_h: 0.0,
@@ -225,6 +229,10 @@ impl Widget for ScrollView {
     }
 
     /// 向下转型：运行时调 `scroll_to_end` / `set_stick_to_bottom` 的唯一路径。
+    fn cache_key(&self) -> Option<u64> {
+        Some(self.key)
+    }
+
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
     }

@@ -29,6 +29,8 @@ const BAR_WIDTH: f32 = 6.0;
 /// 虚拟化列表（数据由回调提供）。
 pub struct ListView {
     id: String,
+    /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。
+    key: u64,
     row_height: f32,
     /// 总行数（由调用方告知，框架不存数据）。
     len: usize,
@@ -60,9 +62,11 @@ impl ListView {
     /// 返回：未设行数/回调的实例。副作用：无。
     pub fn new(id: impl Into<String>, row_height: f32) -> Self {
         let id = id.into();
+        let key = y901_ui::layout::id_key(&id);
         Self {
             bar: Scrollbar::new(format!("{id}.bar"), id.clone()),
             id,
+            key,
             row_height: row_height.max(1.0),
             len: 0,
             offset: 0.0,
@@ -372,6 +376,10 @@ impl ListView {
 }
 
 impl Widget for ListView {
+    fn cache_key(&self) -> Option<u64> {
+        Some(self.key)
+    }
+
     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
     }
