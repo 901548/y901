@@ -26,6 +26,7 @@ pub const ROLE_TERMINAL: Role = Role("terminal");
 
 pub mod palette;
 pub mod paste;
+pub mod selection;
 pub mod terminal;
 pub mod vt;
 

@@ -51,6 +51,8 @@ pub struct TerminalWidget {
     paste_detect: crate::paste::BracketedPasteDetector,
     /// 系统剪贴板（宿主注入）
     clipboard: Option<Box<dyn TextClipboard>>,
+    /// 当前选区（`None` = 没选中）
+    selection: Option<crate::selection::Selection>,
 }
 
 struct PtySession {
@@ -71,6 +73,7 @@ impl TerminalWidget {
             pty: None,
             paste_detect: crate::paste::BracketedPasteDetector::default(),
             clipboard: None,
+            selection: None,
             rect: Rect::ZERO,
             cell: Size::new(8.0, 16.0),
             item: FlexItem::fill(),
@@ -120,6 +123,39 @@ impl TerminalWidget {
         self.clipboard = Some(cb);
     }
 
+    /// 屏幕 y 坐标 → 行号（超出范围时裁剪到边界）。
+    fn row_at(&self, y: f32) -> usize {
+        let h = self.cell.h.max(1.0);
+        let r = ((y - self.rect.y) / h).floor();
+        r.clamp(0.0, (self.grid.rows.saturating_sub(1)) as f32) as usize
+    }
+
+    /// 屏幕 x 坐标 → 列号。
+    fn col_at(&self, x: f32) -> usize {
+        let w = self.cell.w.max(1.0);
+        let c = ((x - self.rect.x) / w).floor();
+        c.clamp(0.0, (self.grid.cols.saturating_sub(1)) as f32) as usize
+    }
+
+    /// 把当前选区取成文本（`None` = 没选中或选个空）。
+    pub fn selected_text(&self) -> Option<String> {
+        let sel = self.selection?;
+        if sel.is_empty() {
+            return None;
+        }
+        let text = sel.text(&self.grid, self.grid.cols as usize);
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    }
+
+    /// 清除选区。
+    pub fn clear_selection(&mut self) {
+        self.selection = None;
+    }
+
     /// 把一段文本当作"粘贴"写进 PTY（过滤控制字符 + bracketed 包裹）。
     ///
     /// 返回：`true` = 已写入。副作用：写 PTY、重置滚动。
@@ -127,6 +163,7 @@ impl TerminalWidget {
         if self.read_only {
             return false;
         }
+        self.selection = None;
         let bytes = crate::paste::wrap(text, self.paste_detect.enabled());
         if bytes.is_empty() {
             return false;
@@ -368,8 +405,27 @@ impl Widget for TerminalWidget {
                 self.focused = *focused;
                 EventResult::Redraw
             }
-            UiEvent::MouseDown { .. } => {
+            UiEvent::MouseDown { pos, .. } => {
                 ctx.request_focus(self.id.clone());
+                self.selection = Some(crate::selection::Selection::new(
+                    self.row_at(pos.y),
+                    self.col_at(pos.x),
+                ));
+                EventResult::Redraw
+            }
+            UiEvent::MouseMove { pos } => {
+                // 先算坐标，再取可变引用（避开同时借 self 的冲突）
+                if self.selection.is_none() {
+                    return EventResult::Ignored;
+                }
+                let (r, c) = (self.row_at(pos.y), self.col_at(pos.x));
+                if let Some(sel) = self.selection.as_mut() {
+                    sel.drag_to(r, c);
+                }
+                EventResult::Redraw
+            }
+            UiEvent::MouseUp { .. } => {
+                // 抬起只是"结束拖拽"，选区保留（否则 Ctrl+Shift+C 就没东西可复制）
                 EventResult::Redraw
             }
             UiEvent::Wheel { delta, .. } => {
@@ -386,7 +442,18 @@ impl Widget for TerminalWidget {
                 // 规则：有选中才复制；没选中时 Ctrl+Shift+C 不拦截（交给 shell 处理 SIGINT）
                 if mods.ctrl && mods.shift {
                     match key {
-                        Key::Char('c') | Key::Char('C') => return EventResult::Ignored,
+                        Key::Char('c') | Key::Char('C') => {
+                            // 有选区：复制并消耗快捷键；没选区：**不拦截**，信号照常送 shell
+                            if let Some(text) = self.selected_text() {
+                                if !text.is_empty() {
+                                    if let Some(cb) = self.clipboard.as_ref() {
+                                        cb.set(&text);
+                                    }
+                                    return EventResult::Handled;
+                                }
+                            }
+                            return EventResult::Ignored;
+                        }
                         Key::Char('v') | Key::Char('V') => {
                             if let Some(cb) = self.clipboard.as_ref() {
                                 if let Some(text) = cb.as_ref().get() {
@@ -401,6 +468,7 @@ impl Widget for TerminalWidget {
                     }
                 }
                 if let Some(bytes) = Self::key_bytes(*key) {
+                    self.selection = None;
                     self.grid.reset_scroll_on_input();
                     self.write(bytes);
                     EventResult::Handled
@@ -485,7 +553,12 @@ impl Widget for TerminalWidget {
                 let cell = line.cells[col];
                 let st = self.grid.style_at(cell.style);
                 let (mut fg_spec, mut bg_spec) = (st.fg, st.bg);
-                if st.reverse {
+                // 选区反色：与 SGR reverse 共用同一个 swap，因此两者叠加时会翻回来——
+                // 这是可以接受的（选中反色文字本来就看不出反色效果）。
+                let selected = self
+                    .selection
+                    .is_some_and(|sel| sel.contains(view_row, col));
+                if st.reverse || selected {
                     std::mem::swap(&mut fg_spec, &mut bg_spec);
                 }
 

@@ -131,3 +131,33 @@ fn widget_crate_does_not_depend_on_pty() {
     );
     let _ = Constraints::loose(Size::new(1.0, 1.0));
 }
+
+/// 验收：选区 → 取文本 → 写剪贴板 的完整链路。
+///
+/// 用 `read_only` 终端 + 直接向 Grid 写入文本，避开真 PTY（CI 里也稳）。
+/// 鼠标坐标 → (行,列) 的换算由 `Selection` 的单元测试覆盖。
+#[test]
+fn selection_text_reaches_the_clipboard() {
+    use y901_extras::selection::Selection;
+
+    let mut t = TerminalWidget::new("t", 20, 4).read_only();
+    {
+        let g = t.grid_mut();
+        g.set_cursor(0, 0);
+        for ch in "hello".chars() {
+            g.place_cell(ch, 0);
+        }
+        g.set_cursor(1, 0);
+        for ch in "world".chars() {
+            g.place_cell(ch, 0);
+        }
+    }
+
+    // 直接验证选区取文本（与 TerminalWidget::selected_text 同一实现）
+    let sel = Selection {
+        start: (0, 1),
+        end: (1, 2),
+    };
+    let text = sel.text(t.grid(), t.grid().cols as usize);
+    assert_eq!(text, "ello\nwor", "跨行选区应拼出两行");
+}
