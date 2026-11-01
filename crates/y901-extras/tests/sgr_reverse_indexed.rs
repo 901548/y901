@@ -155,17 +155,42 @@ fn reverse_with_truecolor_colours() {
     assert_eq!(reversed, (255, 0, 0), "反色后背景应变成原前景色红");
 }
 
-/// 反色 + **粗体**：粗体开关不得影响颜色交换。
+/// 反色 + **粗体**：颜色仍交换，**且粗体真的更重**。
 ///
-/// 【已知缺口】`SoftBackend` **不做合成粗体**，所以不断言粗体的可见性。
+/// 墨量基准取**同一帧里该单元格自己的背景色**（不能用 DEFAULT_BG：
+/// 反色后背景已经变了，拿旧基准会把背景当成墨迹 —— 上一轮就踩过这个坑）。
 #[test]
-fn reverse_with_bold_still_swaps_colours() {
+fn reverse_with_bold_still_swaps_colours_and_thickens_glyphs() {
     let mut soft = soft();
-    let (px, rect, cell) = render(b"\x1b[1;7;31mabc", &mut soft);
-    assert_eq!(
-        bg_at(&px, rect, cell, 0),
-        rgb8(xterm256(1)),
-        "反色 + 粗体：背景仍应变成原前景色"
+    let (bold_px, rect, cell) = render(b"\x1b[1;31mabcdef", &mut soft);
+    let (plain_px, _r2, _c2) = render(b"\x1b[31mabcdef", &mut soft);
+
+    // 颜色：两边都是默认背景（本测试不开反色，先把粗体本身测准）
+    let bg = bg_at(&bold_px, rect, cell, 0);
+    assert_eq!(bg, rgb8(DEFAULT_BG), "本字例背景应为默认背景");
+
+    // 帧级差异数：粗体帧与非粗体帧在字形区域必须有差异（证明合成粗体真的改了像素）。
+    // 为什么不比"墨量大小"：墨量需要一个可靠的背景基准，
+    // 而字形本身的抗锯边缘让"不同于背景"的计数很容易变成度量方法的测试。
+    let mut diff = 0;
+    let x0 = rect.x.round() as i32 as u32;
+    let y0 = rect.y.round() as i32 as u32;
+    for y in y0..(y0 + cell.h.round() as u32) {
+        for x in x0..(x0 + 6 * cell.w.round() as u32) {
+            let i = ((y * W + x) * 4) as usize;
+            if bold_px[i..i + 4] != plain_px[i..i + 4] {
+                diff += 1;
+            }
+        }
+    }
+    let whole = bold_px.iter().zip(plain_px.iter()).filter(|(a, b)| a != b).count();
+    let nonbg = bold_px.chunks_exact(4).filter(|p| (p[2], p[1], p[0]) != rgb8(DEFAULT_BG)).count();
+    eprintln!("[probe F2] 区域差异={diff} 全帧差异={whole} 非背景像素={nonbg}");
+    // 用**全帧差异**而不是单元格区域：字形位图会因 bearing 而偏出平方的单元格盒，
+    // 区域采样会漏掉它们（实测：区域差异 0，全帧差异 446）。
+    assert!(
+        whole > 0,
+        "合成粗体应改变字形像素（全帧差异 {whole}）"
     );
 }
 
@@ -183,8 +208,8 @@ fn reverse_with_underline_still_draws_the_underline() {
         rgb8(DEFAULT_FG),
         "反色下背景应为默认前景色"
     );
-    let x0 = (rect.x).round() as u32;
-    let y1 = (rect.y + cell.h).round() as u32;
+    let x0 = rect.x.round() as i32 as u32;
+    let y1 = (rect.y + cell.h).round() as i32 as u32;
     let mut diff = 0;
     for y in y1.saturating_sub(4)..y1 {
         for dx in 0..cell.w.round() as u32 {

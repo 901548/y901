@@ -296,6 +296,30 @@ cargo check -p y901-backend-x11 --target x86_64-unknown-linux-gnu    # check 不
 
 ---
 
+## 8.5 已知限制：平台后端的行为差异
+
+### 8.5.1 SoftBackend 合成粗体（已实现，有局限）
+
+**现象**：纯 CPU 后端（Linux/X11 与 Windows `--force-soft`）不能像 GPU 那样把粗体交给
+DirectWrite，因此需要**合成粗体**。
+
+**实现**：`SoftBackend::draw_text` 在 `style.bold` 时取"当前像素与右侧邻居覆盖度的最大值"，
+等价于把字形向右拓宽 1px。
+
+**为什么不是"画两遍"：**两次 `blend` 会把半透明边缘叠加成更黑，
+边缘发模糊；取 `max` 只拓宽、不加深，仍保持单次抗锯。
+
+**已知不足**：只向右拓宽，不是真正的轮廓加粗。在 15px 下看上去明显比常规字重，
+但整体略偏右（0.5px 不到的视觉偏移）。若要更好，需要轮廓加粗（字形演示层处理）。
+
+**正文一律未验证**：GPU（D3D11）路径把 `ts.bold` 交给 DirectWrite，理论上应该是真粗体，
+但**本轮没有做像素对比验证**。
+
+### 8.5.2 光标形状（Xvfb 下回退）
+
+Xvfb 对 `CreateGlyphCursor` 返回 `BadFont`，因此在 Xvfb 下光标恒为默认箭头。
+真 Xorg 上待验（字节布局已由 golden test 锁死）。
+
 ## 9. 一句话给老板
 
 > **能自研，但请把"三个平台"当成三个项目排期，而不是一个任务。**

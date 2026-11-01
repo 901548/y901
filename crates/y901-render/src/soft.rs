@@ -323,7 +323,22 @@ impl RenderCtx for SoftBackend {
                                 let ax = g.atlas_x as usize + gx as usize;
                                 let ay = g.atlas_y as usize + gy as usize;
                                 let si = (ay * atlas_size + ax) * 4;
-                                let cov = self.text.atlas().get(si).copied().unwrap_or(0) as f32 / 255.0;
+                                let mut cov = self.text.atlas().get(si).copied().unwrap_or(0) as f32 / 255.0;
+                                if style.bold {
+                                    // 合成粗体（synthetic bold）：把当前像素与"左侧一列"的覆盖度取最大值，
+                                    // 等价于把字形向右拓宽 1px。
+                                    //
+                                    // 为什么用 max 而不是"画两遍 blend"：两次混合会把半透明边缘叠加成更黑，
+                                    // 字形边缘会发模糊；max 只拓宽、不加深，边缘仍保持单次抗锯。
+                                    // 取**右侧邻居**的覆盖度取最大值 → 字形向右拓宽 1px。
+                                    // （取左邻居是错的：它只会把已有的墨再加深，字形几乎不变宽）。
+                                    let right = if (gx as u32) + 1 < g.width {
+                                        self.text.atlas().get(si + 4).copied().unwrap_or(0) as f32 / 255.0
+                                    } else {
+                                        0.0
+                                    };
+                                    cov = cov.max(right);
+                                }
                                 if cov <= 0.0 {
                                     continue;
                                 }
