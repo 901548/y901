@@ -1666,7 +1666,30 @@ impl UiTree {
                 if popup.rect.intersect(viewport).is_empty() && !dirty.is_full() {
                     continue;
                 }
-                popup.widget.render(ctx);
+                // 弹层开启动画：从锚点缩放 + 淡入。
+                //
+                // 为什么"缩放"和"淡入"要同时做：只缩放会让内容瞬间出现（只是变小），
+                // 只淡入则没有"从哪里弹出来"的空间感。两者叠加才是常见弹层观感。
+                let progress = ctx.animation(crate::animation::key_of(popup.id()));
+                if progress < 1.0 {
+                    let anchor = Pos::new(
+                        popup.rect.x + popup.rect.w * 0.5,
+                        popup.rect.y + popup.rect.h * 0.5,
+                    );
+                    // scale 下限 0.8：再小会让文字糊成一团，且 rect 可能算成负尺寸
+                    let scale = (0.8 + 0.2 * progress).clamp(0.6, 1.0);
+                    ctx.push_transform(anchor, scale);
+                    popup.widget.render(ctx);
+                    ctx.pop_transform();
+                    // 淡入：用背景色盖一层 (1-progress) 透明度的膜
+                    let bg = ctx.background_color();
+                    ctx.fill_rect(
+                        popup.rect,
+                        crate::Color::rgba(bg.r, bg.g, bg.b, (1.0 - progress).clamp(0.0, 1.0)),
+                    );
+                } else {
+                    popup.widget.render(ctx);
+                }
             }
             ctx.pop_clip();
         }

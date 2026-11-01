@@ -359,6 +359,22 @@ pub trait RenderCtx: TextMetrics {
     /// 它不应认识 UiTree（否则 UI 层与后端反向耦合）。
     fn set_animations(&mut self, _snapshot: &crate::animation::AnimSnapshot) {}
 
+    /// 压入一层坐标变换：以 `origin` 为中心、按 `scale` 缩放后续绘制。
+    ///
+    /// 默认空实现：不支持变换的后端（以及测试 mock）保持原样，绘制仍按绝对坐标。
+    /// 为什么允许"不支持"：变换是**视觉增强**，不是正确性前提——没有它界面也应完整可用。
+    fn push_transform(&mut self, _origin: Pos, _scale: f32) {}
+
+    /// 弹出最近一层变换（与 [`RenderCtx::push_transform`] 配对）。
+    fn pop_transform(&mut self) {}
+
+    /// 当前背景色（用于淡入/淡出遮罩）。
+    ///
+    /// 默认黑色：没有主题信息时至少能给出可用的中性遮罩色。
+    fn background_color(&self) -> Color {
+        Color::rgba(0.0, 0.0, 0.0, 1.0)
+    }
+
 
     /// 视口尺寸（逻辑像素）。
     fn size(&self) -> Size;

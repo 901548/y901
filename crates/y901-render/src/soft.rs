@@ -65,6 +65,8 @@ pub struct SoftBackend {
     /// 帧缓冲：`0xAARRGGBB`。
     buf: Vec<Px>,
     clips: Vec<Rect>,
+    transforms: Vec<(y901_ui::Pos, f32)>,
+    anims: y901_ui::animation::AnimSnapshot,
     text: Box<dyn super::font::FontEngine>,
     cell: Size,
     theme: Theme,
@@ -91,6 +93,8 @@ impl SoftBackend {
             height: height.max(1),
             buf: vec![0; (width.max(1) * height.max(1)) as usize],
             clips: Vec::new(),
+            transforms: Vec::new(),
+            anims: y901_ui::animation::AnimSnapshot::default(),
             text: font,
             cell,
             theme: theme.unwrap_or(Theme::DARK),
@@ -112,6 +116,8 @@ impl SoftBackend {
             height: h,
             buf: vec![0; (w * h) as usize],
             clips: Vec::new(),
+            transforms: Vec::new(),
+            anims: y901_ui::animation::AnimSnapshot::default(),
             text: font,
             cell,
             theme: Theme::DARK,
@@ -217,6 +223,27 @@ impl SoftBackend {
     /// 返回：`true` = 成功提交。
     /// # Safety
     #[inline]
+    /// 叠代复合变换：从最内层开始得到屏幕坐标。
+    fn map_point(&self, p: y901_ui::Pos) -> y901_ui::Pos {
+        let mut x = p.x;
+        let mut y = p.y;
+        for (o, s) in self.transforms.iter().rev() {
+            x = o.x + (x - o.x) * s;
+            y = o.y + (y - o.y) * s;
+        }
+        y901_ui::Pos::new(x, y)
+    }
+
+    /// 变换一个矩形（位置与尺寸同时缩放）。
+    fn map_rect(&self, r: Rect) -> Rect {
+        if self.transforms.is_empty() {
+            return r;
+        }
+        let a = self.map_point(y901_ui::Pos::new(r.x, r.y));
+        let b = self.map_point(y901_ui::Pos::new(r.right(), r.bottom()));
+        Rect::new(a.x, a.y, (b.x - a.x).max(0.0), (b.y - a.y).max(0.0))
+    }
+
     fn clip_rect(&self, r: Rect) -> Rect {
         let mut out = Rect::new(
             r.x.max(0.0),
@@ -256,7 +283,36 @@ impl RenderCtx for SoftBackend {
         &self.theme
     }
 
+    /// 压入一层缩放变换（以 `origin` 为中心）。
+    ///
+    /// 语义与 `Map` 一致：`p' = origin + (p - origin) * scale`，嵌套时逐层复合。
+    fn push_transform(&mut self, origin: Pos, scale: f32) {
+        // 缩放为 0 或负数会让矩形退化成 0/反向，直接忽略更安全
+        if !(scale.is_finite() && scale > 0.0) {
+            return;
+        }
+        self.transforms.push((origin, scale));
+    }
+
+    fn pop_transform(&mut self) {
+        self.transforms.pop();
+    }
+
+    fn animation(&self, key: u64) -> f32 {
+        self.anims.get(key).unwrap_or(1.0)
+    }
+
+    fn set_animations(&mut self, snapshot: &y901_ui::animation::AnimSnapshot) {
+        self.anims = snapshot.clone();
+    }
+
+    /// 背景色：取主题 panel 槽位的底色（用于弹层淡入適罩）。
+    fn background_color(&self) -> Color {
+        self.theme.style(y901_ui::Role::PANEL, y901_ui::theme::State::Normal).bg
+    }
+
     fn fill_rect(&mut self, rect: Rect, color: Color) {
+        let rect = self.map_rect(rect);
         let r = self.clip_rect(rect);
         if r.w <= 0.0 || r.h <= 0.0 {
             return;
@@ -286,6 +342,10 @@ impl RenderCtx for SoftBackend {
     }
 
     fn draw_text(&mut self, origin: Pos, text: &str, style: &TextStyle) -> f32 {
+        // 文本第一版**只跟随平移，不缩放**（缩放需要重新光栅化或重采样）。
+        // 这是已知限制，已写在报告与文档里。
+        let mapped = self.map_point(origin);
+        let origin = Pos::new(mapped.x, mapped.y);
         let mut pen_x = origin.x;
         let start = pen_x;
         let cell_w = self.cell.w;
@@ -376,6 +436,7 @@ impl RenderCtx for SoftBackend {
     }
 
     fn fill_round_rect(&mut self, rect: Rect, color: Color, radius: f32) {
+        let rect = self.map_rect(rect);
         let r = radius.clamp(0.0, rect.w.min(rect.h) * 0.5);
         if r <= 0.5 {
             self.fill_rect(rect, color);
@@ -415,6 +476,7 @@ impl RenderCtx for SoftBackend {
     }
 
     fn fill_gradient_rect_dir(&mut self, rect: Rect, from: Color, to: Color, dir: (f32, f32)) {
+        let rect = self.map_rect(rect);
         let area = self.clip_rect(rect);
         if area.w <= 0.0 || area.h <= 0.0 || rect.w <= 0.0 || rect.h <= 0.0 {
             return;
