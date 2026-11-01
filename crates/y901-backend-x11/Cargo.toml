@@ -1,0 +1,7 @@
+[package]
+name = "y901-backend-x11"
+version.workspace = true
+edition.workspace = true
+
+# 零依赖：只用 std。不引入 x11 / xcb / x11rb —— 这是整个自研方案的前提。
+[dependencies]
