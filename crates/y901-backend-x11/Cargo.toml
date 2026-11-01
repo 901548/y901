@@ -3,5 +3,10 @@ name = "y901-backend-x11"
 version.workspace = true
 edition.workspace = true
 
-# 零依赖：只用 std。不引入 x11 / xcb / x11rb —— 这是整个自研方案的前提。
+# 零 C 依赖：只用 std + 本仓库的纯 Rust crate。
+# 不引入 x11 / xcb / x11rb —— 这是整个自研方案的前提。
 [dependencies]
+# 键盘事件要映射成 `y901_ui::Key` / `Modifiers`，所以需要它（纯 Rust、零依赖）
+y901-ui = { path = "../y901-ui" }
+# 事件要汇成 `RawEvent`，`Presenter` 要实现 runtime 的 trait
+y901-runtime = { path = "../y901-runtime" }

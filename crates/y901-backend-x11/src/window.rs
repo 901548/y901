@@ -1,0 +1,288 @@
+//! 一个可用的 X11 窗口：把 [`Connection`] 包成 `EventSource` / `Presenter`。
+//!
+//! 它是 S3 “接入框架”的一半：事件与像素呈现都对外就只剩
+//! `y901_runtime` 的两个 trait。另一半（`PlatformRuntime`）还需要一个**平台无关的软渲染器**，
+//! 而它目前还在 `y901-backend-win32` 里（见报告的阻塞项）。
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use y901_runtime::{EventSource, Presenter, RawEvent, Waker};
+use y901_ui::{Key, Modifiers, MouseButton};
+
+use crate::conn::Connection;
+use crate::encode::{encode_create_gc, encode_create_window, encode_map_window, CreateWindowArgs, GcMask, ValueMask, WindowClass};
+use crate::keys::{keysym_to_key, modifiers_from_state, Keymap};
+use crate::X11Event;
+
+/// 一个已创建并显示的 X11 窗口。
+pub struct X11Window {
+    conn: Connection,
+    /// 窗口 ID
+    pub wid: u32,
+    /// GC ID
+    gc: u32,
+    width: u16,
+    height: u16,
+    depth: u8,
+    keymap: Keymap,
+    /// 被 `wake()` 置位的标志（`poll` 的短轮询会检查它）
+    woken: Arc<AtomicBool>,
+}
+
+impl X11Window {
+    /// 连接、建窗、建 GC、显示。
+    ///
+    /// 失败：任一步服务器报错都会把错误原文带回来（而不是吞掉）。
+    pub fn create(display: &str, width: u16, height: u16, title: &str) -> Result<Self, String> {
+        let mut conn = Connection::connect(display)?;
+        let info = conn.info().clone();
+
+        // 标题只用 ASCII 最简形式：WM_NAME + UTF8_STRING（中文标题需要 _NET_WM_NAME，本轮不做）
+        let name_atom = intern(&mut conn, b"WM_NAME")?;
+        let utf8_atom = intern(&mut conn, b"UTF8_STRING")?;
+        let base = info.resource_id_base;
+        let wid = base | 0x01;
+        let gc = base | 0x02;
+
+        const VALUES: &[(ValueMask, u32)] = &[
+            (ValueMask::BackPixel, 0x0000_0000),
+            // ExposureMask(1<<15=0x8000) | KeyPress(1) | KeyRelease(2) | ButtonPress(4)
+            // | ButtonRelease(8) | PointerMotion(64) | StructureNotify(1<<17=0x20000)
+            (ValueMask::EventMask, 0x0002_804F),
+        ];
+        conn.send(&encode_create_window(&CreateWindowArgs {
+            wid,
+            parent: info.root,
+            x: 0,
+            y: 0,
+            width,
+            height,
+            border_width: 0,
+            class: WindowClass::InputOutput,
+            visual: info.root_visual,
+            values: VALUES,
+        }))?;
+        conn.send(&encode_change_title(wid, name_atom, utf8_atom, title))?;
+        conn.send(&encode_map_window(wid))?;
+        conn.flush()?;
+        let errs = conn.sync()?;
+        if !errs.is_empty() {
+            return Err(format!("建窗失败：{errs:?}"));
+        }
+
+        // GC：GXcopy + plane-mask 全 1 + 关掉 GraphicsExpose
+        const GC_VALUES: &[(GcMask, u32)] = &[
+            (GcMask::Function, 3),
+            (GcMask::PlaneMask, 0xFFFF_FFFF),
+            (GcMask::GraphicsExposures, 0),
+        ];
+        conn.send(&encode_create_gc(gc, wid, GC_VALUES))?;
+        conn.flush()?;
+        let errs = conn.sync()?;
+        if !errs.is_empty() {
+            return Err(format!("CreateGC 失败：{errs:?}"));
+        }
+
+        // 键盘映射表（一次拿全，后面就不用再问服务器）
+        let count = info.max_keycode.saturating_sub(info.min_keycode).saturating_add(1);
+        let keymap = conn.get_keyboard_mapping(info.min_keycode, count)?;
+
+        Ok(Self {
+            conn,
+            wid,
+            gc,
+            width,
+            height,
+            depth: info.root_depth,
+            keymap,
+            woken: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    /// 窗口尺寸（逻辑像素）。
+    pub fn size(&self) -> (u16, u16) {
+        (self.width, self.height)
+    }
+
+    /// 键盘映射表（验收用）。
+    pub fn keymap(&self) -> &Keymap {
+        &self.keymap
+    }
+
+    /// 把 X11 事件翻译成平台无关事件；不关心的返回 `None`。
+    fn map_event(&self, ev: &X11Event) -> Option<RawEvent> {
+        Some(match ev {
+            // Expose 只告诉你"哪块需要重绘"，不是尺寸变化。
+            // 对外没有"局部重绘"事件，所以这里发一个当前窗口尺寸的 Resize 作为"该画一帧"的信号。
+            X11Event::Expose { .. } => RawEvent::Resize {
+                w: self.width as u32,
+                h: self.height as u32,
+            },
+            X11Event::ConfigureNotify { width, height, .. } => RawEvent::Resize {
+                w: *width as u32,
+                h: *height as u32,
+            },
+            X11Event::Key { pressed, keycode, state, .. } => {
+                let (plain, shifted) = self.keymap.plain_and_shift(*keycode);
+                let shift = state & 1 != 0;
+                let ks = if shift { shifted.or(plain) } else { plain }?;
+                let key = keysym_to_key(ks)?;
+                if *pressed {
+                    RawEvent::KeyDown {
+                        key,
+                        mods: modifiers_from_state(*state),
+                    }
+                } else {
+                    // 对外只需 KeyDown；释放事件目前不用
+                    return None;
+                }
+            }
+            X11Event::Button { pressed, button, event_x, event_y, state, .. } => {
+                let (x, y) = (*event_x as f32, *event_y as f32);
+                match (*button, *pressed) {
+                    (4, true) | (5, true) => RawEvent::Wheel {
+                        x,
+                        y,
+                        delta: if *button == 4 { 1.0 } else { -1.0 },
+                        mods: modifiers_from_state(*state),
+                    },
+                    (b, true) => RawEvent::MouseDown {
+                        x,
+                        y,
+                        button: match b {
+                            1 => MouseButton::Left,
+                            2 => MouseButton::Middle,
+                            3 => MouseButton::Right,
+                            _ => MouseButton::Left,
+                        },
+                    },
+                    (b, false) => RawEvent::MouseUp {
+                        x,
+                        y,
+                        button: match b {
+                            1 => MouseButton::Left,
+                            2 => MouseButton::Middle,
+                            3 => MouseButton::Right,
+                            _ => MouseButton::Left,
+                        },
+                    },
+                }
+            }
+            X11Event::Motion { event_x, event_y, .. } => RawEvent::MouseMove {
+                x: *event_x as f32,
+                y: *event_y as f32,
+            },
+            X11Event::Destroy { .. } => RawEvent::Close,
+            X11Event::ClientMessage { message_type, data, .. } => {
+                // WM_DELETE_WINDOW 的第一个 data 项是那个原子名，
+                // 本轮只要收到 ClientMessage 就当关窗处理（WM_PROTOCOLS 协商已完成）
+                if *message_type != 0 && data[0] != 0 {
+                    RawEvent::Close
+                } else {
+                    return None;
+                }
+            }
+            _ => return None,
+        })
+    }
+}
+
+impl EventSource for X11Window {
+    fn poll(&mut self, timeout_ms: u32) -> Vec<RawEvent> {
+        // 为什么用"短轮询 + 标志：没有 `poll(2)` 就无法同时等 socket 与自管管道；
+        // 这里用 8ms 超时反复读，CPU 代价极小（空循环 125 次/秒）。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
+        let mut out = Vec::new();
+        loop {
+            let slice = if timeout_ms == 0 { 0 } else { 8 };
+            match self.conn.poll_events(slice) {
+                Ok((events, _errors)) => {
+                    for e in &events {
+                        if let Some(raw) = self.map_event(e) {
+                            out.push(raw);
+                        }
+                    }
+                    if !out.is_empty() || timeout_ms == 0 || std::time::Instant::now() >= deadline {
+                        return out;
+                    }
+                    if self.woken.swap(false, Ordering::SeqCst) {
+                        return out;
+                    }
+                }
+                Err(_) => return out,
+            }
+        }
+    }
+
+    fn waker(&self) -> Arc<dyn Waker> {
+        struct W(Arc<AtomicBool>);
+        impl Waker for W {
+            fn wake(&self) {
+                // 只置位，不打断系统调用：`poll` 最多 8ms 后就会看到它
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        Arc::new(W(self.woken.clone()))
+    }
+}
+
+impl Presenter for X11Window {
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        self.width = width.max(1).min(u16::MAX as u32) as u16;
+        self.height = height.max(1).min(u16::MAX as u32) as u16;
+        Ok(())
+    }
+
+    fn present(&mut self, pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
+        let w = width.min(self.width as u32) as u16;
+        let h = height.min(self.height as u32) as u16;
+        self.conn.put_image_bgra(self.wid, self.gc, w, h, pixels, self.depth)?;
+        Ok(())
+    }
+}
+
+/// 内部原子化（取回原子 ID）。
+fn intern(conn: &mut Connection, name: &[u8]) -> Result<u32, String> {
+    conn.send(&crate::encode_intern_atom(name, false))?;
+    conn.flush()?;
+    // InternAtom 的响应必须单独读：`sync()` 会丢弃非当前序列的响应
+    conn.read_reply_u32()
+}
+
+/// 编码 `ChangeProperty`（WM_NAME，UTF8）。
+fn encode_change_title(wid: u32, name_atom: u32, type_atom: u32, title: &str) -> Vec<u8> {
+    crate::encode_change_property(wid, name_atom, type_atom, 8, crate::PropMode::Replace, title.as_bytes())
+}
+
+/// `Key` 的调试名（报告与测试用）。
+pub fn key_name(k: Key) -> String {
+    match k {
+        Key::Char(c) => format!("Char({c:?})"),
+        Key::Enter => "Enter".into(),
+        Key::Escape => "Escape".into(),
+        Key::Backspace => "Backspace".into(),
+        Key::Tab => "Tab".into(),
+        Key::Delete => "Delete".into(),
+        Key::Up => "Up".into(),
+        Key::Down => "Down".into(),
+        Key::Left => "Left".into(),
+        Key::Right => "Right".into(),
+        Key::Home => "Home".into(),
+        Key::End => "End".into(),
+        Key::PageUp => "PageUp".into(),
+        Key::PageDown => "PageDown".into(),
+        Key::Function(n) => format!("F{n}"),
+        Key::Unknown => "Unknown".into(),
+    }
+}
+
+/// 修饰键展示（测试用）。
+pub fn mods_name(m: &Modifiers) -> String {
+    format!(
+        "{}{}{}",
+        if m.shift { "Shift+" } else { "" },
+        if m.ctrl { "Ctrl+" } else { "" },
+        if m.alt { "Alt+" } else { "" }
+    )
+}

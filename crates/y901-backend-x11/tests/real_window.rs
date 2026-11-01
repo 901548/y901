@@ -17,7 +17,9 @@ use y901_backend_x11::encode::{
     encode_create_gc, encode_create_window, encode_destroy_window, encode_intern_atom,
     encode_map_window, encode_set_input_focus, CreateWindowArgs, GcMask, ValueMask, WindowClass,
 };
+use y901_backend_x11::window::X11Window;
 use y901_backend_x11::X11Event;
+use y901_runtime::{EventSource, Presenter};
 
 const W: u16 = 320;
 const H: u16 = 200;
@@ -228,4 +230,103 @@ fn concurrent_connections_probe() {
         }
     }
     assert_eq!(ok, 4, "并发 4 个连接，成功 {ok} 个");
+}
+
+/// 验收：**真服务器的键盘映射表能覆盖 ASCII**。
+#[test]
+fn keyboard_mapping_covers_ascii() {
+    let (_g, mut c) = connect();
+    let info = c.info().clone();
+    let count = info.max_keycode.saturating_sub(info.min_keycode).saturating_add(1);
+    let km = c
+        .get_keyboard_mapping(info.min_keycode, count)
+        .expect("GetKeyboardMapping");
+    eprintln!(
+        "[x11] keymap: first={} count={} per_keycode={} ascii_coverage={}",
+        km.first_keycode,
+        count,
+        km.keysyms_per_keycode,
+        km.ascii_coverage()
+    );
+    // 注意：数量本身不是好指标——Xvfb 默认布局列 0 只有 51 个可打印键位
+    // （字母 26 + 数字 10 + 标点 11 + 空格，小键盘右侧部分键是 level-3）。
+    // 所以真正该断言的是"**字母与数字都在**"，而不是"有多少个"。
+    assert!(
+        km.ascii_coverage() >= 45,
+        "ASCII 可打印字符覆盖不足：{}",
+        km.ascii_coverage()
+    );
+    let chars: std::collections::HashSet<char> = (0..km.keysyms.len() / km.keysyms_per_keycode as usize)
+        .filter_map(|i| {
+            let ks = km.keysyms[i * km.keysyms_per_keycode as usize];
+            if (0x20..=0x7E).contains(&ks) { char::from_u32(ks) } else { None }
+        })
+        .collect();
+    for c in ('a'..='z').chain('0'..='9') {
+        assert!(chars.contains(&c), "键盘表缺字符 {c:?}（已有 {} 个）", chars.len());
+    }
+    for c in [' ', ',', '.', '/', '-', '='] {
+        assert!(chars.contains(&c), "键盘表缺标点 {c:?}");
+    }
+    eprintln!("[x11] 键盘表含 {} 个 ASCII 可打印字符（含全部 a-z / 0-9）", chars.len());
+
+    // 具体查几个键：'a' / 'A' / Return / Backspace / Escape / 左右上下
+    let mut found = std::collections::HashMap::new();
+    for kc in km.first_keycode..=info.max_keycode {
+        if let (Some(p), Some(s)) = km.plain_and_shift(kc) {
+            found.entry(p).or_insert((kc, s));
+        }
+    }
+    for (label, ks) in [
+        ("a", 0x61u32),
+        ("A", 0x41),
+        ("Return", 0xFF0D),
+        ("Backspace", 0xFF08),
+        ("Escape", 0xFF1B),
+        ("Left", 0xFF51),
+        ("Right", 0xFF53),
+        ("Up", 0xFF52),
+        ("Down", 0xFF54),
+        ("Tab", 0xFF09),
+    ] {
+        let hit = km.keysyms.iter().any(|k| *k == ks);
+        eprintln!("[x11] keysym {label} ({ks:#06x}) 在表中：{hit}");
+        assert!(hit, "键盘映射表里找不到 {label}");
+    }
+    // 'a' 与 'A' 应在同一 keycode 的两列
+    if let Some((kc, shifted)) = found.get(&0x61) {
+        assert_eq!(*shifted, 0x41, "keycode {kc} 的 Shift 列应为 'A'");
+        eprintln!("[x11] 'a' 在 keycode {kc}，Shift 列 = 'A' ✓");
+    } else {
+        panic!("找不到 'a' 的 keycode");
+    }
+}
+
+/// 验收：`X11Window` 实现的 `EventSource` / `Presenter` 能真正工作。
+#[test]
+fn window_implements_event_source_and_presenter() {
+    let _g = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
+    let mut w = X11Window::create(&d, 200, 120, "y901 x11 window").expect("建窗");
+    eprintln!("[x11] X11Window wid=0x{:X} size={:?} ascii={}", w.wid, w.size(), w.keymap().ascii_coverage());
+    assert!(w.keymap().ascii_coverage() >= 45, "键盘表应已加载（实际 {} 个）", w.keymap().ascii_coverage());
+
+    // present 一帧纯红
+    let mut px = vec![0u8; 200 * 120 * 4];
+    for p in px.chunks_exact_mut(4) {
+        p[2] = 0xFF;
+    }
+    w.present(&px, 200, 120).expect("present");
+
+    // poll 应能拿到 Expose → Resize（说明事件路径与窗口都在工作）
+    let mut got = Vec::new();
+    for _ in 0..20 {
+        let evs = w.poll(100);
+        got.extend(evs);
+        if !got.is_empty() {
+            break;
+        }
+    }
+    eprintln!("[x11] poll 拿到 {} 个 RawEvent：{got:?}", got.len());
+    assert!(!got.is_empty(), "poll 应至少拿到 Expose/Resize");
 }

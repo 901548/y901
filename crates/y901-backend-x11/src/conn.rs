@@ -323,6 +323,19 @@ impl Connection {
         }
     }
 
+    /// 读一个"只带一个 u32 结果"的响应（`InternAtom` 的原子 ID 在字节 8-11）。
+    ///
+    /// 为什么单独写：`sync()` 会丢弃"不属于当前序列"的响应，
+    /// 而 `InternAtom` 的响应正好需要拿回来用，不能丢。
+    pub fn read_reply_u32(&mut self) -> Result<u32, String> {
+        let mut head = [0u8; 32];
+        self.read_exact(&mut head)?;
+        if head[0] != 1 {
+            return Err(format!("期待响应，收到字节 0 = {}", head[0]));
+        }
+        Ok(u32::from_le_bytes([head[8], head[9], head[10], head[11]]))
+    }
+
     /// 回读一块像素（`GetImage`）。
     ///
     /// 返回：`(depth, pixels)`，`pixels` 是 ZPixmap 原始字节（小端序，24bpp 时每像素 4 字节 BGRX）。
@@ -360,6 +373,42 @@ impl Connection {
             self.read_exact(&mut data)?;
         }
         Ok((depth, data))
+    }
+
+    /// 拿到 keyboard mapping 表（keycode → keysym）。
+    ///
+    /// 读起来复杂的地方：响应的 `length` 字段是**4 字节单位的数量**，
+    /// 而 keysym 正好 4 字节 → 所以 `n_keysyms == length`。
+    pub fn get_keyboard_mapping(
+        &mut self,
+        first_keycode: u8,
+        count: u8,
+    ) -> Result<crate::keys::Keymap, String> {
+        self.send(&crate::encode::encode_get_keyboard_mapping(first_keycode, count))?;
+        self.flush()?;
+        let mut head = [0u8; 32];
+        self.read_exact(&mut head)?;
+        if head[0] != 1 {
+            return Err(format!(
+                "GetKeyboardMapping 未得到响应（字节 0 = {}）",
+                head[0]
+            ));
+        }
+        let per = head[1];
+        let n_keysyms = u16::from_le_bytes([head[4], head[5]]) as usize;
+        let mut raw = vec![0u8; n_keysyms * 4];
+        if !raw.is_empty() {
+            self.read_exact(&mut raw)?;
+        }
+        let keysyms = raw
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        Ok(crate::keys::Keymap {
+            first_keycode,
+            keysyms_per_keycode: per,
+            keysyms,
+        })
     }
 
     /// 非阻塞地读一批事件（`timeout_ms = 0` 表示不等）。

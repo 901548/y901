@@ -7,6 +7,8 @@
 //! 最终真相只能由 **S2 第二步的真服务器握手**畑开（服务器会拒绝格式错的包）。
 
 use y901_backend_x11::encode::{CreateWindowArgs, ImageFormat, PropMode, PutImageArgs, ValueMask, WindowClass};
+use y901_backend_x11::keys::{keysym_to_char, keysym_to_key, modifiers_from_state, Keymap};
+use y901_ui::Key;
 use y901_backend_x11::{
     decode_event, encode_change_property, encode_create_window, encode_get_input_focus,
     encode_intern_atom, encode_map_window, encode_no_operation, encode_put_image,
@@ -555,4 +557,78 @@ fn decode_short_buffer_is_an_error_not_a_panic() {
 fn decode_unknown_event_is_preserved() {
     let e = event32(99, 0, &[]);
     assert_eq!(decode_event(&e).unwrap(), X11Event::Unknown { code: 99 });
+}
+
+// ---------------------------------------------------------------- 键盘映射（纯逻辑）
+
+#[test]
+fn keysym_ascii_maps_to_char() {
+    // Latin-1 可打印区：keysym 值 == ASCII 码点
+    for cp in 0x20u32..=0x7E {
+        let k = keysym_to_key(cp).unwrap_or_else(|| panic!("keysym {cp:#x} 应是字符键"));
+        match k {
+            Key::Char(c) => assert_eq!(c as u32, cp),
+            other => panic!("keysym {cp:#x} 应为 Char，实际 {other:?}"),
+        }
+        assert_eq!(keysym_to_char(cp).map(|c| c as u32), Some(cp));
+    }
+}
+
+#[test]
+fn special_keysyms_map_to_function_keys() {
+    let cases = [
+        (0xFF0Du32, Key::Enter),   // Return
+        (0xFF8Du32, Key::Enter),   // KP_Enter
+        (0xFF08u32, Key::Backspace),
+        (0xFF09u32, Key::Tab),
+        (0xFF1Bu32, Key::Escape),
+        (0xFFFFu32, Key::Delete),
+        (0xFF51u32, Key::Left),
+        (0xFF52u32, Key::Up),
+        (0xFF53u32, Key::Right),
+        (0xFF54u32, Key::Down),
+        (0xFF50u32, Key::Home),
+        (0xFF57u32, Key::End),
+        (0xFF55u32, Key::PageUp),
+        (0xFF56u32, Key::PageDown),
+    ];
+    for (ks, want) in cases {
+        assert_eq!(keysym_to_key(ks), Some(want), "keysym {ks:#x}");
+    }
+    assert_eq!(keysym_to_key(0xFFBE), Some(Key::Function(1)), "F1");
+    assert_eq!(keysym_to_key(0xFFC9), Some(Key::Function(12)), "F12");
+}
+
+#[test]
+fn modifier_keysyms_are_not_characters() {
+    // Shift_L/R, Control_L/R, Alt_L/R, Super —— 不应产生字符事件
+    for ks in [0xFFE1u32, 0xFFE2, 0xFFE3, 0xFFE4, 0xFFE9, 0xFFEA] {
+        assert_eq!(keysym_to_key(ks), None, "keysym {ks:#x} 不应映射");
+    }
+}
+
+#[test]
+fn x11_state_bits_map_to_modifiers() {
+    // Shift=1<<0, Lock=1<<1, Control=1<<2, Mod1(Alt)=1<<3
+    let m = modifiers_from_state(0b1101);
+    assert!(m.shift, "bit0 应为 Shift");
+    assert!(m.ctrl, "bit2 应为 Ctrl");
+    assert!(m.alt, "bit3 应为 Alt");
+    assert!(!modifiers_from_state(0).shift);
+}
+
+#[test]
+fn keymap_lookup_respects_first_keycode_and_columns() {
+    // first=8, per=2：keycode 8 -> cols [0x61('a'), 0x41('A')]，keycode 9 -> [0x62('b'), 0x42('B')]
+    let km = Keymap {
+        first_keycode: 8,
+        keysyms_per_keycode: 2,
+        keysyms: vec![0x61, 0x41, 0x62, 0x42],
+    };
+    assert_eq!(km.plain_and_shift(8), (Some(0x61), Some(0x41)));
+    assert_eq!(km.plain_and_shift(9), (Some(0x62), Some(0x42)));
+    assert_eq!(km.plain_and_shift(7), (None, None), "低于 first_keycode 应为 None");
+    assert_eq!(km.keysym(8, 2), None, "列越界应为 None");
+    // 表里只有 2 个 keycode（8/9），各一个可打印字符 → 2
+    assert_eq!(km.ascii_coverage(), 2);
 }

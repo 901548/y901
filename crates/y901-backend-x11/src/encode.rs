@@ -477,3 +477,18 @@ pub fn encode_get_image(
     put_u32(&mut out, plane_mask);
     out
 }
+
+/// 编码 `GetKeyboardMapping`（opcode 101）。
+///
+/// ```text
+/// 0   : opcode 101        1   : unused
+/// 2-3 : length = 2
+/// 4   : first-keycode     5   : count
+/// 6-7 : unused
+/// ```
+///
+/// 为什么要单独发它：`KeyPress` 事件只给**keycode**（物理键位），
+/// 不给字符。必须先拿到这张表，才能把 keycode 译成 keysym → 字符。
+pub fn encode_get_keyboard_mapping(first_keycode: u8, count: u8) -> Vec<u8> {
+    vec![opcode::GET_KEYBOARD_MAPPING, 0, 2, 0, first_keycode, count, 0, 0]
+}
