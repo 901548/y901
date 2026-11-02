@@ -67,6 +67,8 @@ pub struct SoftBackend {
     clips: Vec<Rect>,
     transforms: Vec<(y901_ui::Pos, f32)>,
     anims: y901_ui::animation::AnimSnapshot,
+    textures: std::collections::HashMap<y901_ui::image::TextureId, (u32, u32, Vec<u8>)>,
+    next_texture: u64,
     text: Box<dyn super::font::FontEngine>,
     cell: Size,
     theme: Theme,
@@ -95,6 +97,8 @@ impl SoftBackend {
             clips: Vec::new(),
             transforms: Vec::new(),
             anims: y901_ui::animation::AnimSnapshot::default(),
+            textures: std::collections::HashMap::new(),
+            next_texture: 0,
             text: font,
             cell,
             theme: theme.unwrap_or(Theme::DARK),
@@ -118,6 +122,8 @@ impl SoftBackend {
             clips: Vec::new(),
             transforms: Vec::new(),
             anims: y901_ui::animation::AnimSnapshot::default(),
+            textures: std::collections::HashMap::new(),
+            next_texture: 0,
             text: font,
             cell,
             theme: Theme::DARK,
@@ -244,6 +250,37 @@ impl SoftBackend {
         Rect::new(a.x, a.y, (b.x - a.x).max(0.0), (b.y - a.y).max(0.0))
     }
 
+    /// 双线性采样（像素中心对齐）。
+    ///
+    /// 为什么要 `-0.5`：直接用 `sx` 当索引会把边缘采到"半个像素外"，
+    /// 2×2 纹理放大到 20×20 时四角颜色会明显偏 —— 这是最容易踩的 off-by-half。
+    fn sample_bilinear_tex(data: (&[u8], u32, u32), sx: f32, sy: f32) -> [f32; 4] {
+        let (data, w, h) = data;
+        if w == 0 || h == 0 || data.is_empty() {
+            return [0.0; 4];
+        }
+        let (wf, hf) = (w as f32, h as f32);
+        let x = (sx - 0.5).clamp(0.0, wf - 1.0);
+        let y = (sy - 0.5).clamp(0.0, hf - 1.0);
+        let (x0, y0) = (x.floor(), y.floor());
+        let (fx, fy) = (x - x0, y - y0);
+        let x1 = (x0 + 1.0).min(wf - 1.0);
+        let y1 = (y0 + 1.0).min(hf - 1.0);
+        let at = |px: f32, py: f32| -> [f32; 4] {
+            let i = ((py as u32 * w + px as u32) * 4) as usize;
+            let d = |k: usize| data.get(i + k).copied().unwrap_or(0) as f32 / 255.0;
+            [d(0), d(1), d(2), d(3)]
+        };
+        let (p00, p10, p01, p11) = (at(x0, y0), at(x1, y0), at(x0, y1), at(x1, y1));
+        let mut out = [0.0f32; 4];
+        for k in 0..4 {
+            let top = p00[k] * (1.0 - fx) + p10[k] * fx;
+            let bottom = p01[k] * (1.0 - fx) + p11[k] * fx;
+            out[k] = top * (1.0 - fy) + bottom * fy;
+        }
+        out
+    }
+
     fn clip_rect(&self, r: Rect) -> Rect {
         let mut out = Rect::new(
             r.x.max(0.0),
@@ -304,6 +341,102 @@ impl RenderCtx for SoftBackend {
 
     fn set_animations(&mut self, snapshot: &y901_ui::animation::AnimSnapshot) {
         self.anims = snapshot.clone();
+    }
+
+    fn upload_texture(&mut self, width: u32, height: u32, rgba: &[u8]) -> y901_ui::image::TextureId {
+        if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
+            return y901_ui::image::TextureId::INVALID;
+        }
+        self.next_texture += 1;
+        let id = y901_ui::image::TextureId(self.next_texture);
+        // 只保留需要的字节：调用方可能持有一个很大的缓冲
+        let bytes = rgba[..(width * height * 4) as usize].to_vec();
+        self.textures.insert(id, (width, height, bytes));
+        id
+    }
+
+    fn draw_image(
+        &mut self,
+        rect: Rect,
+        texture: y901_ui::image::TextureId,
+        style: y901_ui::image::ImageStyle,
+    ) {
+        // 变换在入口应用一次；采样本身用绝对像素坐标
+        let rect = self.map_rect(rect);
+        let Some(tex) = self.textures.get(&texture) else {
+            return;
+        };
+        let (tw, th) = (tex.0, tex.1);
+        if tw == 0 || th == 0 {
+            return;
+        }
+
+        // 适配模式在 CPU 侧就先化简成"目标子矩形 + 源子矩形"，
+        // 采样循环里只做比例映射 —— 避免每条扫描线重算 fit 语义。
+        let (dst, src) = style.layout(rect, tw, th);
+        if dst.w <= 0.0 || dst.h <= 0.0 || src.w <= 0.0 || src.h <= 0.0 {
+            return;
+        }
+
+        // 额外裁剪：与目标求交，并按同一比例把裁剪回推到源区域
+        let area = match style.clip {
+            Some(c) => dst.intersect(c),
+            None => dst,
+        };
+        let area = self.clip_rect(area);
+        if area.w <= 0.0 || area.h <= 0.0 {
+            return;
+        }
+
+        // 预算 uv：`u0/v0` 是目标区域左上角在源图里的归一化坐标，`du/dv` 是每像素增量
+        let sx0 = src.x + (area.x - dst.x) / dst.w * src.w;
+        let sy0 = src.y + (area.y - dst.y) / dst.h * src.h;
+        let du = src.w / dst.w;
+        let dv = src.h / dst.h;
+
+        // 把纹理字节先拷一份：循环里要同时读纹理、写帧缓冲，
+        // 都通过 `self` 会被借用检查器拦下来（它看不出是两个字段）。
+        let tex_bytes = tex.2.clone();
+
+        let x0 = area.x.floor() as i32;
+        let x1 = area.right().ceil() as i32;
+        let y0 = area.y.floor() as i32;
+        let y1 = area.bottom().ceil() as i32;
+        for y in y0..y1 {
+            if y < 0 || y >= self.height as i32 {
+                continue;
+            }
+            let py = y as f32 + 0.5;
+            if py < area.y || py >= area.bottom() {
+                continue;
+            }
+            let sy = sy0 + (py - area.y) * dv;
+            for x in x0..x1 {
+                if x < 0 || x >= self.width as i32 {
+                    continue;
+                }
+                let px = x as f32 + 0.5;
+                if px < area.x || px >= area.right() {
+                    continue;
+                }
+                let sx = sx0 + (px - area.x) * du;
+                let mut c = Self::sample_bilinear_tex((tex_bytes.as_slice(), tw, th), sx, sy);
+                if let Some(t) = style.tint {
+                    c[0] *= t.r;
+                    c[1] *= t.g;
+                    c[2] *= t.b;
+                    c[3] *= t.a;
+                }
+                if c[3] <= 0.0 {
+                    continue;
+                }
+                let src_px = pack(Color::rgba(c[0], c[1], c[2], c[3]), 1.0);
+                let di = (y as u32 * self.width + x as u32) as usize;
+                if let Some(dst_px) = self.buf.get_mut(di) {
+                    *dst_px = blend(*dst_px, src_px);
+                }
+            }
+        }
     }
 
     /// 背景色：取主题 panel 槽位的底色（用于弹层淡入適罩）。

@@ -368,6 +368,21 @@ pub trait RenderCtx: TextMetrics {
     /// 弹出最近一层变换（与 [`RenderCtx::push_transform`] 配对）。
     fn pop_transform(&mut self) {}
 
+    /// 上传一张 RGBA 纹理，返回句柄。
+    ///
+    /// 默认返回 [`crate::image::TextureId::INVALID`]（= 0）：不支持纹理的后端
+    /// 会得到一个无效句柄，随后 `draw_image` 什么都不画——**不崩、不报错**。
+    /// 这是为什么现有后端与测试 mock 不改一行也不会坏。
+    fn upload_texture(&mut self, _width: u32, _height: u32, _rgba: &[u8]) -> crate::image::TextureId {
+        crate::image::TextureId::INVALID
+    }
+
+    /// 按适配模式绘制纹理。
+    ///
+    /// 默认空实现（不画任何东西），与 [`RenderCtx::upload_texture`] 配套。
+    fn draw_image(&mut self, _rect: Rect, _texture: crate::image::TextureId, _style: crate::image::ImageStyle) {
+    }
+
     /// 当前背景色（用于淡入/淡出遮罩）。
     ///
     /// 默认黑色：没有主题信息时至少能给出可用的中性遮罩色。

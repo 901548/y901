@@ -23,6 +23,7 @@
 
 pub mod button;
 pub mod label;
+pub mod image;
 pub mod list;
 pub mod list_view;
 pub mod overlay;
