@@ -33,6 +33,7 @@ pub mod scroll;
 pub mod split;
 pub mod style;
 pub mod progress;
+pub mod radio;
 pub mod tabs;
 pub mod text_input;
 
