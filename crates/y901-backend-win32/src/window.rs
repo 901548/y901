@@ -506,6 +506,7 @@ pub struct Window {
 }
 
 impl Window {
+    /// 创建窗口与渲染后端。`Options.width/height` 是**窗口尺寸**（含边框与标题栏），实际渲染用的是 `GetClientRect` 得到的客户区，后者会小一圈。
     pub fn create(options: &Options) -> Result<Self, String> {
         unsafe { Self::create_inner(options) }
     }
@@ -684,6 +685,7 @@ impl Window {
         )
     }
 
+    /// 当前客户区尺寸（像素）；布局与渲染都以它为准。
     pub fn viewport(&self) -> (u32, u32) {
         self.viewport
     }
@@ -884,6 +886,7 @@ impl Window {
         }
     }
 
+    /// 请求关闭窗口（投递退出消息）。为什么不是析构：关闭要经过消息循环，直接销毁会让正在处理的这条消息访问悬垂句柄。
     pub fn close(&self) {
         unsafe {
             DestroyWindow(self.hwnd);

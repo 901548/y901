@@ -3,8 +3,10 @@
 //! 内容零丢失的 reflow：行尾 padding 不计入逻辑流（用 `len` 区分），
 //! 宽字符只会整字下推，光标用 `CursorAnchor` 的逻辑坐标跨重排存活。
 
+#![warn(missing_docs)]
 use unicode_width::UnicodeWidthChar;
 
+/// 默认样式的固定下标。为什么要有它：空格/空白单元格占绝大多数，如果每次都去 `intern` 一遍，样式表会在启动时就被撑大。
 pub const STYLE_DEFAULT: u16 = 0;
 
 /// 一个颜色槽的取值：默认 / 索引色 / 24 位真彩色。
@@ -14,13 +16,16 @@ pub const STYLE_DEFAULT: u16 = 0;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum ColorSpec {
     #[default]
+    /// 使用宿主默认色。具体是什么颜色由渲染后端/主题决定——数据层不认识主题。
     Default,
     /// 0..=255：0 保留给默认，1..=16 是 ANSI，17..=255 是 256 色扩展。
     Indexed(u8),
+    /// 24 位真彩色。
     Rgb(u8, u8, u8),
 }
 
 impl ColorSpec {
+    /// 是否是"未指定颜色"。调用方据此决定要不要去查主题，而不是把默认色提前解析成具体 RGB（那样换主题就不会生效）。
     pub const fn is_default(self) -> bool {
         matches!(self, ColorSpec::Default)
     }
@@ -29,19 +34,26 @@ impl ColorSpec {
 /// 一个格子的完整视觉属性。
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct CellStyle {
+    /// 前景色；`Default` 表示用主题前景。
     pub fg: ColorSpec,
+    /// 背景色；`Default` 表示透明/继承下层。
     pub bg: ColorSpec,
+    /// 粗体。
     pub bold: bool,
+    /// 下划线。
     pub underline: bool,
+    /// 反色：渲染时交换前景与背景。
     pub reverse: bool,
 }
 
 impl CellStyle {
+    /// 设置前景色并返回自身（链式构造，便于写常量样式）。
     pub const fn fg(mut self, color: ColorSpec) -> Self {
         self.fg = color;
         self
     }
 
+    /// 设置背景色并返回自身。
     pub const fn bg(mut self, color: ColorSpec) -> Self {
         self.bg = color;
         self
@@ -56,6 +68,7 @@ impl CellStyle {
         }
     }
 
+    /// 是否等价于默认样式。渲染路径靠它跳过样式解析——绝大多数单元格都是纯默认样式。
     pub fn is_plain(&self) -> bool {
         *self == CellStyle::default()
     }
@@ -80,6 +93,7 @@ impl Default for StyleTable {
 }
 
 impl StyleTable {
+    /// 把样式去重后返回下标。为什么用下标而不是内联结构体：单元格只需 2 字节，1 万个单元格不必各自存一份完整样式。
     pub fn intern(&mut self, style: CellStyle) -> u16 {
         if style.is_plain() {
             return STYLE_DEFAULT;
@@ -96,14 +110,17 @@ impl StyleTable {
         id
     }
 
+    /// 按下标取回样式。未知下标返回默认样式而不是 panic——渲染路径不该因为数据问题崩掉。
     pub fn get(&self, id: u16) -> CellStyle {
         self.entries.get(id as usize).copied().unwrap_or_default()
     }
 
+    /// 已收录的样式数（去重后的数量，可用于评估样式表规模）。
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// 是否还没有任何样式。
     pub fn is_empty(&self) -> bool {
         self.entries.len() <= 1
     }
@@ -111,9 +128,13 @@ impl StyleTable {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
+/// 单元格的宽度种类：东亚宽字符占两格，必须成对标记，否则光标与选中会错位。
 pub enum CellKind {
+    /// 窄字符（占 1 格）。
     Narrow = 0,
+    /// 宽字符的左半（后一格是 `WideTail`）。
     WideHead = 1,
+    /// 宽字符的右半：渲染时跳过，避免把同一个字形画两遍。
     WideTail = 2,
 }
 
@@ -121,8 +142,11 @@ pub enum CellKind {
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Cell {
+    /// 字符内容；`WideTail` 的 `ch` 无意义。
     pub ch: char,
+    /// 样式表下标（见 `StyleTable::intern`）。
     pub style: u16,
+    /// 宽度种类。
     pub kind: CellKind,
     _pad: u8,
 }
@@ -130,6 +154,7 @@ pub struct Cell {
 const _: () = assert!(std::mem::size_of::<Cell>() == 8);
 
 impl Cell {
+    /// 空白单元格（空格，窄）。
     pub const fn blank(style: u16) -> Self {
         Self {
             ch: ' ',
@@ -138,6 +163,7 @@ impl Cell {
             _pad: 0,
         }
     }
+    /// 构造一个窄字符单元格。
     pub const fn narrow(ch: char, style: u16) -> Self {
         Self {
             ch,
@@ -146,6 +172,7 @@ impl Cell {
             _pad: 0,
         }
     }
+    /// 构造宽字符的左半格。
     pub const fn wide_head(ch: char, style: u16) -> Self {
         Self {
             ch,
@@ -154,6 +181,7 @@ impl Cell {
             _pad: 0,
         }
     }
+    /// 构造宽字符的右半格（无字符，仅占位）。
     pub const fn wide_tail(style: u16) -> Self {
         Self {
             ch: ' ',
@@ -171,12 +199,14 @@ pub struct LineId(pub u32);
 /// 光标锚点：逻辑坐标，重排后仍然有效。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CursorAnchor {
+    /// 所属逻辑行。
     pub line: LineId,
     /// 逻辑行内的 cell 偏移（含 WideTail 占位格，末端 = 行长）。
     pub offset: u32,
 }
 
 #[derive(Clone, Debug)]
+/// 屏幕上一行。与"逻辑行"的区别：终端里一行长文本会软换行成多行 `Row`，它们共享 `LineId` 与 `line_start`，这样重排（reflow）时才能还原成一段。
 pub struct Row {
     /// 长度恒为 `cols`，尾部空白只是缓冲，不算内容。
     pub cells: Vec<Cell>,
@@ -184,12 +214,14 @@ pub struct Row {
     pub len: u16,
     /// true = 下一行首 cell 是本行的直接续写。
     pub wrapped: bool,
+    /// 所属逻辑行。
     pub line: LineId,
     /// 本行首 cell 在该逻辑行内的偏移。
     pub line_start: u32,
 }
 
 impl Row {
+    /// 建一个空行；`line_start` 是本行在逻辑行里的字符偏移。
     pub fn new(cols: u16, line: LineId, line_start: u32) -> Self {
         Self {
             cells: vec![Cell::blank(STYLE_DEFAULT); cols as usize],
@@ -210,18 +242,27 @@ impl Row {
     }
 }
 
+/// 终端网格：屏幕行 + 历史行 + 光标与选中锚点。
 pub struct Grid {
+    /// 列数。
     pub cols: u16,
+    /// 屏幕可见行数（不含历史）。
     pub rows: u16,
+    /// 当前屏幕的可见行。
     pub screen: Vec<Row>,
+    /// 光标所在屏幕行。
     pub cursor_row: usize,
+    /// 光标所在列。
     pub cursor_col: usize,
+    /// 是否处于"待换行"状态：写满最后一列后，光标停在行尾而不是立刻跳到下一行，等下一个字符到来才真正换行。否则行尾字符会提前把光标顶走。
     pub pending_wrap: bool,
+    /// 选区锚点（起始单元格）。
     pub anchor: CursorAnchor,
     next_line: u32,
 
     /// 滚出屏幕顶部的行（FIFO，容量 `history_limit`）。
     pub history: std::collections::VecDeque<Row>,
+    /// 历史行上限；超出时最早的行被丢弃，防止长时间运行内存无上限增长。
     pub history_limit: usize,
     /// 视口上滚的行数：0 = 贴底（实时），N = 往回看 N 行。
     pub scroll_offset: usize,
@@ -247,6 +288,7 @@ struct AltScreen {
 }
 
 impl Grid {
+    /// 建一个空网格；`cols`/`rows` 至少为 1。
     pub fn new(cols: u16, rows: u16) -> Self {
         assert!(cols > 0 && rows > 0, "grid must be non-empty");
         let screen = (0..rows)
@@ -338,6 +380,7 @@ impl Grid {
         self.scroll_offset = self.scroll_offset.saturating_sub(lines);
     }
 
+    /// 把视口滚到最底部（新输出到来时调用）。为什么单独一个函数：滚动位置与光标位置是两件事——用户向上翻历史时光标仍在最后一行。
     pub fn scroll_bottom(&mut self) {
         self.scroll_offset = 0;
     }

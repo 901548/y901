@@ -15,6 +15,7 @@ use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{BOOL, RECT};
 
+/// HRESULT；负值表示失败。
 pub type Hresult = i32;
 
 #[repr(C)]
@@ -468,21 +469,28 @@ impl FontEngine for TextEngine {
     }
 }
 
+/// DirectWrite 字形引擎（Windows 原生实现）。与自研 `MyFontEngine` 实现同一个 `FontEngine`，两者可互换而上层一行不改。
 pub struct TextEngine {
     factory: Factory,
     face: FontFace,
     font_size: f32,
     units_per_em: f32,
 
+    /// 字形图集像素（RGBA：`rgb` 存覆盖率，`a` 恒为 255）。
     pub atlas: Vec<u8>,
+    /// 图集边长（像素）。
     pub atlas_size: u32,
     packer: SkylinePacker,
 
+    /// 基线到行顶的距离；绘制时基线的位置由它决定。
     pub ascent: f32,
     #[allow(dead_code)]
+    /// 基线到行底的距离；与 `ascent` 一起决定行高。
     pub descent: f32,
+    /// 等宽单元格宽度（由字号推出，必须与布局用的一致）。
     pub cell_width: f32,
     #[allow(dead_code)] // 元数据：等宽字体的名义行高，目前用 ascent/descent
+    /// 等宽单元格高度。
     pub cell_height: f32,
 
     cache: HashMap<char, GlyphInfo>,
@@ -573,6 +581,7 @@ impl TextEngine {
     }
 
     #[allow(dead_code)] // 诊断：已缓存字形数
+    /// 已缓存字形数（诊断与内存估算用）。
     pub fn glyph_count(&self) -> usize {
         self.cache.len()
     }
@@ -620,6 +629,7 @@ impl TextEngine {
     }
 
     #[allow(dead_code)] // 诊断：是否有待上传的图集脏区
+    /// 是否有待上传的图集脏区；false 时后端可跳过整张图集上传。
     pub fn has_dirty(&self) -> bool {
         self.reset_pending || !self.dirty.is_empty()
     }

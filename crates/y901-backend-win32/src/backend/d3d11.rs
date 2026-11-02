@@ -40,9 +40,12 @@ use std::ptr::{null, null_mut, slice_from_raw_parts};
 
 use windows_sys::Win32::Foundation::HWND;
 
+/// HRESULT；负值表示失败。
 pub type Hresult = i32;
 
+/// 单实例字节数，**必须与 `create_pipeline` 里的 InputLayout 完全一致**：改一个字段而忘了改布局，整帧会变成乱码。
 pub const INSTANCE_SIZE: usize = 96;
+/// 单帧实例上限。超出时按此截断而不是扩缓冲——每帧重分配缓冲比少画几个元素更糟。
 pub const INSTANCE_CAPACITY: usize = 10_000;
 
 /// 一个绘制实例（轴对齐四边形）。
@@ -60,11 +63,17 @@ pub const INSTANCE_CAPACITY: usize = 10_000;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Instance {
+    /// 左上角像素坐标。
     pub pos: [f32; 2],
+    /// 像素尺寸。
     pub size: [f32; 2],
+    /// 图集 UV。`xy == zw` 表示纯色/渐变（不采样），这是纯色矩形走同一管线的关键：少一个分支就少一次状态切换。
     pub uv_rect: [f32; 4],
+    /// 主色（渐变起点、字形颜色）。
     pub color: [f32; 4],
+    /// 渐变终点色；纯色实例与 `color` 相同。
     pub color_end: [f32; 4],
+    /// `(方向 x, 方向 y, 是否渐变, 偏移)`。
     pub gradient: [f32; 4],
     /// `(radius, softness, reserved, reserved)`；`radius > 0` 时像素着色器
     /// 用 SDF 计算圆角覆盖率（`softness` 默认 1.0 = 1px 过渡）。
@@ -721,9 +730,13 @@ struct ContextVtbl {
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct RectI32 {
+    /// 矩形左边界（含）。
     pub left: i32,
+    /// 矩形上边界（含）。
     pub top: i32,
+    /// 矩形右边界（不含）——半开区间避免相邻脏区重复绘制同一列像素。
     pub right: i32,
+    /// 矩形下边界（不含）。
     pub bottom: i32,
 }
 
@@ -1695,6 +1708,7 @@ unsafe fn blit_cached(
     context.draw_instances(1, 0);
 }
 
+/// D3D11 管线集合：设备、上下文、交换链、自持渲染目标与字形图集。
 pub struct Gfx {
     atlas: Option<Atlas>,
     atlas_data: Vec<u8>,
@@ -2540,6 +2554,7 @@ impl Gfx {
         Ok(())
     }
 
+    /// 是否尚未初始化（创建失败或设备丢失后为 true，调用方据此走重建路径）。
     pub fn is_empty(&self) -> bool {
         self.device.is_none()
     }
@@ -2552,6 +2567,7 @@ impl Gfx {
         self.atlas.is_some()
     }
 
+    /// 失败的 HRESULT 是否表示设备被移除/重置。这类失败是**可恢复**的：重建后继续画；其它失败则应当上报。
     pub fn device_lost(hr: Hresult) -> bool {
         matches!(
             hr as u32,
@@ -2559,6 +2575,7 @@ impl Gfx {
         )
     }
 
+    /// `Present` 的返回是否表示窗口被遮挡。被遮挡时不必重画——这正是空闲时省 CPU 的一半来源。
     pub fn is_occluded(hr: Hresult) -> bool {
         hr as u32 == DXGI_STATUS_OCCLUDED
     }

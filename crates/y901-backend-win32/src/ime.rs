@@ -8,13 +8,19 @@ use std::ptr::null_mut;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 
+/// 开始组字（输入法开始拼一个候选串）。
 pub const WM_IME_STARTCOMPOSITION: u32 = 0x010D;
+/// 结束组字。
 pub const WM_IME_ENDCOMPOSITION: u32 = 0x010E;
+/// 组字更新；`lParam` 的 `GCS_*` 位标出本次携带了什么。
 pub const WM_IME_COMPOSITION: u32 = 0x010F;
 
+/// 本次携带的是"正在组字的中间串"（预编辑文本）。
 pub const GCS_COMPSTR: u32 = 0x0008;
+/// 本次携带的是"已确定的最终串"，应当作为 `UiEvent::Text` 提交。
 pub const GCS_RESULTSTR: u32 = 0x0800;
 #[allow(dead_code)] // 留作后续接线：组合串内的光标位置
+/// 本次携带了候选串里的光标位置（用于在预编辑串中画插入符）。
 pub const GCS_CURSORPOS: u32 = 0x0080;
 
 const CFS_POINT: u32 = 0x0002;
@@ -59,10 +65,12 @@ pub struct ImeState {
 }
 
 impl ImeState {
+    /// 当前预编辑串。为什么与"已提交文本"分开：预编辑只画在覆盖层，绝不进网格——否则撤销一次组字就要回滚整屏。
     pub fn composing_text(&self) -> String {
         String::from_utf16_lossy(&self.composing)
     }
 
+    /// 清空预编辑状态（组字被取消、或焦点离开输入框时调用）。
     pub fn clear(&mut self) {
         self.composing.clear();
         self.active = false;
