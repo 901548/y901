@@ -115,12 +115,28 @@ cargo run --example tree_view    -p y901-app   # TreeView + 虚拟化 + 键盘�
 
 完整纪律见 [docs/FRAMEWORK_GUIDE.md §0.1 / §42](docs/FRAMEWORK_GUIDE.md)。
 
-## 状态
+## 当前状态
 
-- 测试：**719 个**（含 `--include-ignored` 共 **757**），覆盖布局、渲染像素、字体、协议字节、
-  组件交互、面板语义、零 C 依赖守卫。
-- clippy：**0 warning / 0 error**。
-- 平台：Windows（D3D11 + 纯 CPU 回退）、Linux/X11（CPU 合成 + MIT-SHM）。macOS 未实现。
+| 项 | 状态 |
+|---|---|
+| 测试 | **722**（含 `--include-ignored` 共 **760**），0 失败 |
+| clippy | **0 warning / 0 error** |
+| 文档完整性 | **11 个 crate 全部 `#![deny(missing_docs)]`**，`RUSTFLAGS="-W missing_docs"` = 0 |
+| 像素哈希门禁 | 通过（`scripts/hash-gate.ps1`，同会话前后对比） |
+| Windows | D3D11 渲染 + GDI 纯 CPU 回退；真机 RTX 4060 @144Hz 空帧 6.885ms（= vsync 间隔） |
+| Linux/X11 | CPU 合成 + MIT-SHM（1920×1080 单帧 0.35ms）；WSL 上 Xvfb 验证通过 |
+| macOS | **未实现** |
+| 示例 | 4 个可运行（`hello` / `counter` / `tree_view` / `image_gallery`） |
+
+### 已知限制
+
+- 无合成粗体的轮廓加粗：CPU 后端用"向右 1px 涂抹"近似，非真粗体（见 `CROSS_PLATFORM_PLAN.md §8.5.1`）
+- 文本在变换栈下**只平移、不缩放**
+- Xvfb 下 `CreateGlyphCursor` 返回 `BadFont`，光标恒为默认箭头（真 Xorg 未验）
+- 图片每张纹理一次 draw call（图集化未做）
+- 图片纹理在窗口销毁路径不回收（进程退出无影响）
+- Grid 只做顺序排布，不支持 `grid_cell(col,row)` / 跨格 span
+
 
 ## 许可证
 
