@@ -12,6 +12,7 @@
 //! y901-app           -> y901-demos / y901-backend-win32
 //! ```
 
+#![warn(missing_docs)]
 use y901_agent::Policy;
 use y901_ui::{Command, EventResult, Key, Modifiers, MouseButton, Size, UiEvent, UiTree};
 
@@ -30,6 +31,7 @@ pub trait Waker: Send + Sync + 'static {
     fn wake(&self);
 }
 
+/// 应用层契约：平台运行时只负责窗口与事件，业务判断（命令、策略、快照去向）都由 Host 决定。
 pub trait Host {
     /// 每帧空闲：抽事件队列、驱动 Tick、推送订阅。
     fn idle(&mut self, tree: &mut UiTree);
@@ -175,8 +177,11 @@ pub trait Presenter {
 /// 窗口参数。
 #[derive(Clone, Debug)]
 pub struct Options {
+    /// 窗口标题。
     pub title: String,
+    /// **窗口**宽度（含边框），不是客户区宽度；客户区由平台减去边框与标题栏。
     pub width: u32,
+    /// **窗口**高度（含标题栏）。
     pub height: u32,
     /// 主题（`None` = [`y901_ui::theme::DARK_THEME`]）。
     ///
@@ -224,56 +229,92 @@ impl Default for Options {
 /// 平台原始事件：wndproc 只产出它，不认识 `UiTree`。
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawEvent {
+    /// 指针移动（客户区坐标，已按 DPI 换算成逻辑像素）。
     MouseMove {
+        /// `MouseMove` 的位置 X（客户区逻辑像素）。
         x: f32,
+        /// `MouseMove` 的位置 Y。
         y: f32,
     },
+    /// 按下鼠标。
     MouseDown {
+        /// `MouseDown` 的位置 X（客户区逻辑像素）。
         x: f32,
+        /// `MouseDown` 的位置 Y。
         y: f32,
+        /// `MouseDown` 的哪个鼠标键。
         button: MouseButton,
     },
+    /// 抬起鼠标。
     MouseUp {
+        /// `MouseUp` 的位置 X（客户区逻辑像素）。
         x: f32,
+        /// `MouseUp` 的位置 Y。
         y: f32,
+        /// `MouseUp` 的哪个鼠标键。
         button: MouseButton,
     },
+    /// 滚轮；带修饰键，因为 Ctrl+滚轮常用来缩放。
     Wheel {
+        /// 松手位置的 X（客户区坐标）。
         x: f32,
+        /// 松手位置的 Y。
         y: f32,
+        /// `Wheel` 的滚动量；正数向上。
         delta: f32,
+        /// `Wheel` 的当时的修饰键状态。
         mods: Modifiers,
     },
     /// 系统文件拖放（WM_DROPFILES）。
     FileDrop {
+        /// 拖入的文件绝对路径；框架只负责路由，不解释内容。
         paths: Vec<std::path::PathBuf>,
+        /// 松手位置的 X（客户区坐标）。
         x: f32,
+        /// 松手位置的 Y。
         y: f32,
     },
+    /// 按键按下。
     KeyDown {
+        /// 按下的键。
         key: Key,
+        /// 当时的修饰键状态。
         mods: Modifiers,
     },
     /// Alt+键（WM_SYSKEYDOWN）：系统键，不与普通 KeyDown 混用。
     SystemKeyDown {
+        /// 系统级按键（如 Alt 组合），与普通 `KeyDown` 分开是因为它不该被组件当成文本输入。
         key: Key,
+        /// `SystemKeyDown` 的当时的修饰键状态。
         mods: Modifiers,
     },
+    /// 字符输入（已过键盘布局/输入法翻译）。
     Char {
+        /// 字符。
         c: char,
     },
+    /// 输入法事件。`composition` 区分"正在组字"与"已提交"。
     Ime {
+        /// 组字中间串或最终串。
         text: String,
+        /// `true` = 预编辑（只画不提交）；`false` = 已提交（应当进入文本输入）。
         composition: bool,
     },
+    /// 客户区尺寸变化。
     Resize {
+        /// 新的客户区宽度。
         w: u32,
+        /// 新的客户区高度。
         h: u32,
     },
+    /// 请求把系统光标设成某个形状（由 `UiTree::cursor_at` 决定）。
     SetCursor {
+        /// 位置 X。
         x: f32,
+        /// 位置 Y。
         y: f32,
     },
+    /// 窗口关闭请求。
     Close,
 }
 

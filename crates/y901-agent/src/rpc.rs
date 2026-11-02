@@ -23,6 +23,7 @@ fn button_name(b: y901_ui::MouseButton) -> &'static str {
     }
 }
 
+/// 默认监听地址。只绑回环：这是本机 Agent 通道，不应暴露到网络。
 pub const DEFAULT_ADDR: &str = "127.0.0.1:9410";
 
 /// 解析后的请求（已去掉传输层细节）。
@@ -32,35 +33,47 @@ pub enum RpcRequest {
     GetTree,
     /// 向目标节点投递一条事件（事件类型由协议描述，框架不理解语义）。
     Dispatch {
+        /// 焦点所在节点 id。
         node: String,
+        /// 具体事件。
         event: RpcEvent,
     },
     /// 向目标节点投递一个动作（等价于一条 `UiEvent::Action`）。
     Invoke {
+        /// 触发动作的节点 id。
         node: String,
+        /// 动作名（组件自定义）。
         action: String,
+        /// 动作参数。
         args: Json,
     },
     /// 按查询语言筛选节点（与 MCP 的 ui_query 完全一致）。
     Query {
+        /// 检索串。
         q: String,
     },
     /// 切换焦点。
     Focus {
+        /// 订阅的根节点 id。
         node: String,
     },
     /// 订阅某个节点的状态变化（服务端主动推送 `state_changed`）。
     Subscribe {
+        /// 要退订的节点 id；与订阅时一致。
         node: String,
+        /// 最小推送间隔（毫秒）。为什么要节流：语义树变化可能每帧都发生，不节流会把订阅端淹掉。
         interval_ms: u64,
     },
     /// 取消订阅。
     Unsubscribe {
+        /// 目标节点 id。
         node: String,
     },
     /// 健康检查。
     Ping,
+    /// 无法识别的方法名。单独一个变体而不是直接报错：这样服务端能回标准的 "method not found"，而不是连接断开。
     Unknown {
+        /// 原始的未知方法名（回给调用方，便于排查）。
         method: String,
     },
 }
@@ -68,22 +81,36 @@ pub enum RpcRequest {
 /// RPC 可以构造的事件。刻意保持极简：只覆盖"外部真的会发"的那几种。
 #[derive(Clone, Debug, PartialEq)]
 pub enum RpcEvent {
+    /// 输入一段文本（等价于用户打字）：走 `UiEvent::Text`。
     Text(String),
+    /// 按一个键（无修饰键）：走 `UiEvent::Key`。
     Key(y901_ui::Key),
+    /// 输入法预编辑串：只走覆盖层，**不进网格**——提交与否由后续的 `Text` 决定。
     Compose(String),
+    /// 在指定位置按下鼠标。坐标是客户区逻辑像素。
     MouseDown {
+        /// 客户区坐标。
         pos: y901_ui::Pos,
+        /// 哪个键被按下。
         button: y901_ui::MouseButton,
     },
+    /// 抬起鼠标。
     MouseUp {
+        /// 客户区坐标。
         pos: y901_ui::Pos,
+        /// 哪个键被抬起。
         button: y901_ui::MouseButton,
     },
+    /// 移动鼠标（会驱动 hover 与拖拽）。
     MouseMove {
+        /// 客户区坐标。
         pos: y901_ui::Pos,
     },
+    /// 滚轮。
     Wheel {
+        /// 滚轮发生的位置（决定滚哪个容器）。
         pos: y901_ui::Pos,
+        /// 滚动量；正数向上。
         delta: f32,
     },
 }
@@ -294,7 +321,9 @@ impl RpcEvent {
 /// 早期实现里回包与推送由两个线程分别写 socket，先后顺序不受控，
 /// 曾导致客户端先收到 `state_changed`、后收到 `subscribe` 的 ack。
 pub struct Pending {
+    /// 已解析的请求。
     pub request: RpcRequest,
+    /// JSON-RPC 请求 id，原样回写响应，用于把响应与请求配对。
     pub id: Json,
     /// 该连接的写队列。
     pub writer_tx: std::sync::mpsc::SyncSender<WriteJob>,

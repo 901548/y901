@@ -63,16 +63,22 @@ const _: () = assert!(core::mem::size_of::<GfxInstance>() == 96);
 /// 图集脏矩形：本帧需要上传到 GPU 的区域。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AtlasUpdate {
+    /// 脏区左上角 X（像素）。
     pub x: u32,
+    /// 脏区左上角 Y。
     pub y: u32,
+    /// 脏区宽度。
     pub w: u32,
+    /// 脏区高度。
     pub h: u32,
 }
 
 /// 一帧的绘制提交。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Frame {
+    /// 本帧的实例列表；顺序即绘制顺序（后画的在上）。
     pub instances: Vec<GfxInstance>,
+    /// 本帧需要上传的字形图集脏区；空表示图集没变，可跳过上传。
     pub atlas_updates: Vec<AtlasUpdate>,
     /// 图集是否被整体重建（true 时忽略 `atlas_updates`，整张重传）。
     pub atlas_reset: bool,
@@ -114,21 +120,34 @@ pub trait RenderBackend {
 /// mock 后端的一次调用记录。
 #[derive(Clone, Debug, PartialEq)]
 pub enum BackendCall {
+    /// 首次创建资源。
     Create {
+        /// 创建时的宽度。
         width: u32,
+        /// 创建时的高度。
         height: u32,
     },
+    /// 设备丢失后重建（尺寸不变）。
     Rebuild {
+        /// 重建宽度。
         width: u32,
+        /// 重建高度。
         height: u32,
     },
+    /// 尺寸变化后的调整。
     Resize {
+        /// 新宽度。
         width: u32,
+        /// 新高度。
         height: u32,
     },
+    /// 一次提交。
     Present {
+        /// 本次提交的实例数。
         instances: usize,
+        /// 本次上传的图集脏区数。
         atlas_updates: usize,
+        /// 是否整张图集重传（图集重建后为 true）。
         atlas_reset: bool,
     },
 }
@@ -139,8 +158,11 @@ pub enum BackendCall {
 /// 它同时保存最近一帧的完整 `Frame`，便于逐实例比较。
 #[derive(Debug, Default)]
 pub struct RecordingBackend {
+    /// 按顺序记录的调用；测试用它断言"不该发生的调用确实没发生"（例如遮挡时不该有 Present）。
     pub calls: Vec<BackendCall>,
+    /// 最近一帧的内容（供断言检查实例数、脏区）。
     pub last_frame: Option<Frame>,
+    /// 上次提交是否因被遮挡而跳过；mock 用它模拟遮挡场景。
     pub occluded: bool,
     /// 强制 `present` 返回 Err，用于测试"设备丢失"分支。
     pub fail_present: bool,

@@ -18,12 +18,16 @@ pub const PROTOCOL_VERSION: &str = "2024-11-05";
 /// 握手状态机：未 initialize 之前，除 ping 外一律拒绝。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
+    /// 尚未完成 `initialize` 握手；此时除握手请求外的调用都应被拒绝。
     Uninitialized,
+    /// 握手完成，可以正常处理工具调用。
     Initialized,
 }
 
+/// MCP 协议状态机。只保存协议层状态，不持有 UI 树——树在每次请求时传入，这样服务端可以跨窗口复用。
 pub struct McpServer {
     policy: Policy,
+    /// 当前协议状态。
     pub state: State,
 }
 

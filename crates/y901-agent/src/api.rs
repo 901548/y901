@@ -14,26 +14,45 @@ pub enum ApiCall {
     /// 列出（过滤 + 脱敏后的）语义树。
     Tree,
     /// 按查询语言筛选，返回精简节点列表（id/role/label/rect/revision）。
-    Query { q: String },
+    Query {
+        /// 检索串（自然语言或关键词）。
+        q: String,
+    },
     /// 点击节点：网关自动换算中心点并伪造 MouseDown + MouseUp。
-    Click { id: String, if_rev: Option<u64> },
+    Click {
+        /// 目标节点 id。
+        id: String,
+        /// 版本校验：带上调用方看到的版本，期间变过则返回 `Conflict`，
+        /// 而不是在错的状态上继续操作。
+        if_rev: Option<u64>,
+    },
     /// 向节点输入文本（等价于聚焦后键入）。
     Type {
+        /// 目标节点 id。
         id: String,
+        /// 要写入的文本。
         text: String,
+        /// 版本校验：`None` 表示不校验。
         if_rev: Option<u64>,
     },
     /// 向节点滚动（正数向下）。
     Scroll {
+        /// 目标节点 id（滚动容器）。
         id: String,
+        /// 滚动增量（像素或行，由容器解释）；正负号决定方向。
         delta: f32,
+        /// 版本校验。
         if_rev: Option<u64>,
     },
     /// 触发组件声明的动作。
     Invoke {
+        /// 目标节点 id。
         id: String,
+        /// 动作名；框架不认识它的语义，原样投给组件。
         action: String,
+        /// 动作参数，原样传递。
         args: Json,
+        /// 版本校验。
         if_rev: Option<u64>,
     },
 }
@@ -75,11 +94,22 @@ pub enum ApiError {
     /// 401：缺 Token / Token 错
     Unauthorized,
     /// 403：节点存在但未对 AI 开放
-    Forbidden { id: String },
+    Forbidden {
+        /// 被拒绝的节点 id。
+        id: String,
+    },
     /// 404：节点不存在
-    NotFound { id: String },
+    NotFound {
+        /// 不存在的节点 id。
+        id: String,
+    },
     /// 409：状态已过期（人或别的 Agent 改过）
-    Conflict { expected: u64, actual: u64 },
+    Conflict {
+        /// 调用方以为的版本。
+        expected: u64,
+        /// 节点的当前版本。
+        actual: u64,
+    },
     /// 400：请求本身不合法（未知动作、参数缺失）
     BadRequest(String),
 }
