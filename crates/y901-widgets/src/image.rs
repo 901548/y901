@@ -21,9 +21,17 @@ pub struct Image {
     texture: Option<TextureId>,
     /// 布局矩形
     rect: Rect,
+    /// 在 Flex 中的尺寸约束
+    item: y901_ui::FlexItem,
 }
 
 impl Image {
+
+    /// 设置在 Flex 中的尺寸约束（链式）。
+    pub fn flex_item(mut self, item: y901_ui::FlexItem) -> Self {
+        self.item = item;
+        self
+    }
     /// 从原始 RGBA 数据创建。
     ///
     /// 输入：`id`、尺寸、`rgba`（长度必须 ≥ `w*h*4`）。
@@ -41,6 +49,7 @@ impl Image {
             style: ImageStyle::default(),
             texture: None,
             rect: Rect::ZERO,
+            item: y901_ui::FlexItem::default(),
         }
     }
 
@@ -126,6 +135,10 @@ impl Widget for Image {
         _cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
+    }
+
+    fn flex(&self) -> y901_ui::FlexItem {
+        self.item
     }
 
     fn rect(&self) -> Rect {

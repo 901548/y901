@@ -21,6 +21,8 @@ pub struct ProgressBar {
     /// 是否在轨道中间显示百分比文字
     show_text: bool,
     rect: Rect,
+    /// 在 Flex 中的尺寸约束
+    item: y901_ui::FlexItem,
 }
 
 impl ProgressBar {
@@ -31,7 +33,14 @@ impl ProgressBar {
             value: value.clamp(0.0, 1.0),
             show_text: false,
             rect: Rect::ZERO,
+            item: y901_ui::FlexItem::default(),
         }
+    }
+
+    /// 设置在 Flex 中的尺寸约束（链式）。
+    pub fn flex_item(mut self, item: y901_ui::FlexItem) -> Self {
+        self.item = item;
+        self
     }
 
     /// 是否显示百分比文字。
@@ -87,6 +96,10 @@ impl Widget for ProgressBar {
         _cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
+    }
+
+    fn flex(&self) -> y901_ui::FlexItem {
+        self.item
     }
 
     fn rect(&self) -> Rect {

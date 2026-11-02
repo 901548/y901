@@ -67,9 +67,17 @@ pub struct TreeView {
     rect: Rect,
     /// 扁平化结果：`(路径, 深度)`
     visible: Vec<(Vec<usize>, usize)>,
+    /// 在 Flex 中的尺寸约束
+    item: y901_ui::FlexItem,
 }
 
 impl TreeView {
+
+    /// 设置在 Flex 中的尺寸约束（链式）。
+    pub fn flex_item(mut self, item: y901_ui::FlexItem) -> Self {
+        self.item = item;
+        self
+    }
     /// 创建树视图。
     pub fn new(id: impl Into<String>, roots: Vec<TreeItem>) -> Self {
         let mut t = Self {
@@ -80,6 +88,7 @@ impl TreeView {
             row_h: ROW_H,
             rect: Rect::ZERO,
             visible: Vec::new(),
+            item: y901_ui::FlexItem::default(),
         };
         t.rebuild();
         t
@@ -259,6 +268,10 @@ impl Widget for TreeView {
         _cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
+    }
+
+    fn flex(&self) -> y901_ui::FlexItem {
+        self.item
     }
 
     fn rect(&self) -> Rect {

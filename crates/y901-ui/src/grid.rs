@@ -48,10 +48,18 @@ pub struct Grid {
     rect: Rect,
     /// `measure` 算出的轨道长度，供 `arrange` 复用
     col_widths: Vec<f32>,
+    /// 在 Flex 中的尺寸约束
+    item: crate::FlexItem,
     row_heights: Vec<f32>,
 }
 
 impl Grid {
+
+    /// 设置在 Flex 中的尺寸约束（链式）。
+    pub fn flex_item(mut self, item: crate::FlexItem) -> Self {
+        self.item = item;
+        self
+    }
     /// 创建网格。
     ///
     /// 输入：`id`、列轨道、行轨道。轨道为空时视为"单条弹性轨道"。
@@ -65,6 +73,7 @@ impl Grid {
             children: Vec::new(),
             rect: Rect::ZERO,
             col_widths: Vec::new(),
+            item: crate::FlexItem::default(),
             row_heights: Vec::new(),
         }
     }
@@ -267,6 +276,10 @@ impl Widget for Grid {
         for (child, r) in self.children.iter_mut().zip(rects) {
             child.arrange(r, metrics, cache);
         }
+    }
+
+    fn flex(&self) -> crate::FlexItem {
+        self.item
     }
 
     fn rect(&self) -> Rect {
