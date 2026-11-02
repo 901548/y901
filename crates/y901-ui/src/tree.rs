@@ -621,6 +621,15 @@ impl UiTree {
     }
 
     /// 关闭指定浮层（不存在返回 `false`）。
+    /// 取树内节点的可变引用（按具体类型）。
+    ///
+    /// 与 [`UiTree::popup_as_mut`] 同理：用于测试与诊断驱动具体控件；类型不对返回 `None`。
+    pub fn node_as_mut<T: 'static>(&mut self, id: &str) -> Option<&mut T> {
+        let path = self.find_path(id)?;
+        let node = self.node_at_mut(&path)?;
+        node.as_any_mut()?.downcast_mut::<T>()
+    }
+
     /// 取浮层里控件的可变引用（按具体类型）。
     ///
     /// 返回：`None` = 浮层不存在、或类型不对（**不 panic**）。

@@ -37,6 +37,7 @@ pub mod progress;
 pub mod radio;
 pub mod slider;
 pub mod tabs;
+pub mod tree_view;
 pub mod tooltip;
 pub mod text_input;
 
