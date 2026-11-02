@@ -13,11 +13,17 @@ use crate::widget::{EventCtx, RenderCtx, Role, Semantics, TextMetrics, Widget};
 /// 对外暴露的节点快照。RPC 的 `get_tree` 直接序列化它。
 #[derive(Clone, Debug)]
 pub struct NodeInfo {
+    /// 节点 id（树内唯一）。
     pub id: String,
+    /// 角色名；主题查表与语义过滤都用它。
     pub role: Role,
+    /// 布局后的屏幕矩形。
     pub rect: Rect,
+    /// 是否持有键盘焦点。
     pub focused: bool,
+    /// 语义信息（标签、值、动作）；这就是 Agent 看到的内容。
     pub semantics: Semantics,
+    /// 子节点。
     pub children: Vec<NodeInfo>,
 }
 
@@ -87,6 +93,7 @@ impl DirtyRegion {
         true
     }
 
+    /// 追加一块脏区。为什么不合并成包围盒：两块不相邻的脏区合并后，中间的空白也会被清屏——而 CPU 侧已跳过那些节点，结果就是一块黑。
     pub fn add(&mut self, rect: Rect) {
         if self.full || rect.is_empty() {
             return;
@@ -125,14 +132,17 @@ impl DirtyRegion {
         self.rects.push(rect);
     }
 
+    /// 是否整窗重绘（此时 `rects()` 无意义）。
     pub fn is_full(&self) -> bool {
         self.full
     }
 
+    /// 是否没有脏区（可以整帧跳过绘制）。
     pub fn is_empty(&self) -> bool {
         !self.full && self.rects.is_empty()
     }
 
+    /// 脏区块数。
     pub fn len(&self) -> usize {
         self.rects.len()
     }
@@ -145,6 +155,7 @@ impl DirtyRegion {
         self.rects.iter().any(|r| !r.intersect(rect).is_empty())
     }
 
+    /// 清空脏区（渲染完成后调用）。
     pub fn clear(&mut self) {
         self.full = false;
         self.rects.clear();
@@ -219,6 +230,7 @@ impl Popup {
     }
 }
 
+/// UI 树：持有根节点、索引、焦点、脏区、浮层与动画。**所有状态变更都从这里发起**，组件本身不持有跨帧状态。
 pub struct UiTree {
     /// 待释放的纹理（卸载时收集，下一帧渲染时交给后端）。
     pending_texture_releases: Vec<crate::image::TextureId>,
@@ -563,6 +575,7 @@ impl UiTree {
         self.invalidation_queue.clone()
     }
 
+    /// 声明一段随树存活的状态，返回可读写的句柄。为什么不用 `Rc<RefCell>`：句柄变更会登记到树，树据此标脏；手写 `Rc` 就绕过了这套通知。
     pub fn use_state<T: Clone + PartialEq + 'static>(
         &mut self,
         owner: impl Into<String>,
@@ -639,6 +652,7 @@ impl UiTree {
         popup.widget.as_any_mut()?.downcast_mut::<T>()
     }
 
+    /// 关闭指定浮层；不存在返回 `false`（不 panic）。控件应通过 `EventCtx::request_close_popup` 调用，让关闭发生在分发结束后。
     pub fn close_popup(&mut self, id: &str) -> bool {
         let Some(pos) = self.popups.iter().position(|p| p.id() == id) else {
             return false;
@@ -1093,6 +1107,7 @@ impl UiTree {
         }
     }
 
+    /// 移除节点及其子树。返回 `false` 表示根节点或节点不存在。注意：会触发卸载钩子（`release_textures` / `on_unmount`），纹理因此被回收。
     pub fn remove_node(&mut self, id: &str) -> bool {
         if id == self.root.id() {
             return false; // 根节点不可摘
@@ -1901,6 +1916,7 @@ impl UiTree {
         }
     }
 
+    /// 按 id 求从根到该节点的子索引路径。为什么用路径而不是指针：路径可跨帧保存，且能在重排后重新定位（指针在树变动后会失效）。
     pub fn find_path(&self, id: &str) -> Option<Vec<usize>> {
         fn walk(node: &dyn Widget, target: &str, acc: &mut Vec<usize>) -> bool {
             if node.id() == target {

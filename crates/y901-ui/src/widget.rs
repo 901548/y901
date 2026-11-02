@@ -27,6 +27,7 @@ pub struct PopupRequest {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Cursor {
     #[default]
+    /// 默认输入类型：只声明动作名，不约定参数形状。
     Default,
     /// 可点击（按钮、链接）
     Pointer,
@@ -49,6 +50,7 @@ pub struct MountCtx {
 }
 
 impl MountCtx {
+    /// 建立挂载上下文。`invalidation` 是后台任务请求重绘的通道——组件挂载时拿到它，就能在不持有 `UiTree` 的情况下通知界面刷新。
     pub fn new(id: impl Into<String>, invalidation: crate::signal::Invalidation) -> Self {
         Self {
             id: id.into(),
@@ -71,15 +73,24 @@ impl MountCtx {
 pub struct Role(pub &'static str);
 
 impl Role {
+    /// 容器面板；也是未知角色的回退槽位。
     pub const PANEL: Role = Role("panel");
+    /// 窗口背景（与面板分开：窗口色通常是整屏底色）。
     pub const WINDOW: Role = Role("window");
+    /// 普通文本。
     pub const TEXT: Role = Role("text");
+    /// 按钮；同时被用作"可交互块"的通用外观。
     pub const BUTTON: Role = Role("button");
+    /// 文本输入框。
     pub const TEXT_INPUT: Role = Role("text_input");
+    /// 列表容器。
     pub const LIST: Role = Role("list");
+    /// 列表项（与容器分开：选中态通常只作用于项）。
     pub const LIST_ITEM: Role = Role("list_item");
+    /// 滚动条。
     pub const SCROLLBAR: Role = Role("scrollbar");
 
+    /// 角色名；语义树与主题查表都用它作为稳定标识。
     pub const fn as_str(self) -> &'static str {
         self.0
     }
@@ -101,7 +112,9 @@ impl std::fmt::Display for Role {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Axis {
     #[default]
+    /// 水平主轴（子控件从左到右排列）。
     Horizontal,
+    /// 垂直主轴（从上到下）。
     Vertical,
 }
 
@@ -120,6 +133,7 @@ pub enum Dimension {
 }
 
 impl Dimension {
+    /// 把"可用空间 + 内容尺寸"解析成最终长度。为什么需要它：`Auto` 要知道内容多大、`Fill` 要吃掉剩余、`Fixed` 无视两者——三者必须用同一处逻辑，否则父容器各写一遍就会不一致。
     pub fn resolve(&self, available: f32, content: f32) -> f32 {
         match *self {
             Dimension::Auto => content,
@@ -129,6 +143,7 @@ impl Dimension {
         }
     }
 
+    /// 弹性权重（`Flex(f)` 返回 `Some(f)`，其余 `None`）。父容器据此分配剩余空间。
     pub fn flex_factor(&self) -> Option<f32> {
         match *self {
             Dimension::Flex(f) if f > 0.0 => Some(f),
@@ -136,6 +151,7 @@ impl Dimension {
         }
     }
 
+    /// 是否是弹性尺寸（`Fill` 或 `Flex`）。
     pub fn is_flex(&self) -> bool {
         matches!(self, Dimension::Flex(f) if *f > 0.0)
     }
@@ -144,11 +160,14 @@ impl Dimension {
 /// 组件在父容器里的伸缩参数。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FlexItem {
+    /// 宽度约束。
     pub width: Dimension,
+    /// 高度约束。
     pub height: Dimension,
 }
 
 impl FlexItem {
+    /// 两个方向都填满可用空间（最常用）。
     pub const fn fill() -> Self {
         Self {
             width: Dimension::Flex(1.0),
@@ -172,6 +191,7 @@ impl FlexItem {
         }
     }
 
+    /// 固定宽度，高度填满。
     pub const fn width(w: f32) -> Self {
         Self {
             width: Dimension::Px(w),
@@ -179,6 +199,7 @@ impl FlexItem {
         }
     }
 
+    /// 固定高度，宽度填满。
     pub const fn height(h: f32) -> Self {
         Self {
             width: Dimension::Auto,
@@ -186,6 +207,7 @@ impl FlexItem {
         }
     }
 
+    /// 按权重瓜分剩余空间（`factor` 越大占比越高）。
     pub const fn grow(factor: f32) -> Self {
         Self {
             width: Dimension::Flex(factor),
@@ -199,19 +221,26 @@ impl FlexItem {
 pub struct Axis2(u8);
 
 impl Axis2 {
+    /// 无轴。
     pub const NONE: Axis2 = Axis2(0);
+    /// 仅水平轴。
     pub const H: Axis2 = Axis2(1);
+    /// 仅垂直轴。
     pub const V: Axis2 = Axis2(2);
+    /// 两个轴。
     pub const BOTH: Axis2 = Axis2(3);
 
+    /// 是否包含某个轴（位运算，用于约束传播）。
     pub const fn contains(self, other: Axis2) -> bool {
         self.0 & other.0 != 0
     }
 
+    /// 合并两个轴集合。
     pub const fn union(self, other: Axis2) -> Axis2 {
         Axis2(self.0 | other.0)
     }
 
+    /// 是否至少含一个轴。
     pub const fn any(self) -> bool {
         self.0 != 0
     }
@@ -224,12 +253,16 @@ impl Axis2 {
 /// 只表示"你可以任意高/宽"，绝不允许出现在返回值里。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Constraints {
+    /// 尺寸上限。`f32::INFINITY` 表示该方向不设限（滚动内容常用）。
     pub max: Size,
+    /// 尺寸下限；布局不会把子控件压到比它更小。
     pub min: Size,
+    /// 哪些方向是无界的。为什么单独一个字段：`max` 里的 `INFINITY` 无法区分"父容器允许无限"与"测量时人为放开"，布局需要知道是哪种。
     pub unbounded: Axis2,
 }
 
 impl Constraints {
+    /// 宽松约束：上界给定，下界为 0（子控件可以更小）。
     pub const fn loose(max: Size) -> Self {
         Self {
             max,
@@ -238,6 +271,7 @@ impl Constraints {
         }
     }
 
+    /// 紧约束：上下界都是 `size`（子控件必须正好这么大）。
     pub const fn tight(size: Size) -> Self {
         Self {
             max: size,
@@ -265,6 +299,7 @@ impl Constraints {
         }
     }
 
+    /// 该方向是否无界（滚动容器据此决定要不要撑开）。
     pub fn is_unbounded(&self, axis: crate::Axis) -> bool {
         match axis {
             crate::Axis::Horizontal => self.unbounded.contains(Axis2::H),
@@ -345,6 +380,7 @@ pub const GRADIENT_STEPS: usize = 32;
 /// 圆角抗锯齿的竖直超采样数（每个像素行内部再切几份）。
 pub const AA_SAMPLES: usize = 4;
 
+/// 渲染上下文：框架唯一的出图接口。后端实现它（D3D11 / 软件 / 测试记录器），组件只往里画。为什么继承 `TextMetrics`：测量与绘制必须用**同一套字体度量**，否则文字会与布局错位。
 pub trait RenderCtx: TextMetrics {
     /// 某个动画 key 的当前进度（0..=1）。
     ///
@@ -418,8 +454,10 @@ pub trait RenderCtx: TextMetrics {
     /// 视口尺寸（逻辑像素）。
     fn size(&self) -> Size;
 
+    /// 填充一个轴对齐矩形（屏幕坐标，像素对齐）。alpha < 1 时与已有内容混合。
     fn fill_rect(&mut self, rect: Rect, color: Color);
 
+    /// 画矩形边框。`width` 向内收：边框完全落在 `rect` 内，不会撑大占位。
     fn stroke_rect(&mut self, rect: Rect, color: Color, width: f32);
 
     /// 在 `origin`（左上角）画一行文本，返回前进宽度。
@@ -688,6 +726,7 @@ pub trait RenderCtx: TextMetrics {
 
     /// 裁剪栈：滚动容器由框架自动压栈，组件不需要手动调用。
     fn push_clip(&mut self, rect: Rect);
+    /// 弹出最近一次 `push_clip`。必须与 push 严格配对——不配对会让后续绘制被错误裁剪。
     fn pop_clip(&mut self);
 
     /// 当前主题。默认返回内置暗色主题，应用可注入自己的。
@@ -708,6 +747,7 @@ pub struct EventCtx {
     pub redraw: bool,
     #[doc(hidden)]
     pub relayout: bool,
+    /// 本帧的视口尺寸；事件坐标换算与边界判断都用它。
     pub viewport: Size,
     /// 本次分发中组件产生的意图。框架只负责搬运，不解释。
     #[doc(hidden)]
@@ -744,6 +784,7 @@ pub struct EventCtx {
 }
 
 impl EventCtx {
+    /// 建立事件上下文。`focus` 是当前焦点节点（组件据此判断自己是否持有键盘），`viewport` 用于把点击位置换算成布局坐标。
     pub fn new(focus: Option<String>, viewport: Size) -> Self {
         Self {
             focus,
@@ -822,19 +863,23 @@ impl EventCtx {
         self.commands.push(cmd);
     }
 
+    /// 请求把键盘焦点交给某个节点。为什么要"请求"而不是直接改：焦点是**树的状态**，必须在分发结束后统一落实，否则同一次事件里两个组件会各自以为自己拿到了焦点。
     pub fn request_focus(&mut self, id: impl Into<String>) {
         self.focus_request = Some(id.into());
     }
 
+    /// 请求重绘（脏区由树在分发后统一标）。
     pub fn request_redraw(&mut self) {
         self.redraw = true;
     }
 
+    /// 请求重排。只有尺寸/结构真的变了才该用它——它会触发整棵子树的测量。
     pub fn request_relayout(&mut self) {
         self.relayout = true;
         self.redraw = true;
     }
 
+    /// 某个节点是否持有键盘焦点。
     pub fn is_focused(&self, id: &str) -> bool {
         self.focus.as_deref() == Some(id)
     }
@@ -881,6 +926,7 @@ impl EventCtx {
         self.redraw = true;
     }
 
+    /// 把组件返回值与本次累积的"请求重绘/重排"合并。组件不需要自己拼 `EventResult`。
     pub fn finish(&mut self, result: EventResult) -> EventResult {
         let mut out = result;
         if self.relayout {
@@ -895,9 +941,13 @@ impl EventCtx {
 /// 动作参数的形态。网关据此做类型校验，Agent 据此知道该传什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputKind {
+    /// 无参数（纯动作，例如"关闭"）。
     None,
+    /// 文本参数。
     Text,
+    /// 数值参数。
     Number,
+    /// 布尔参数。
     Bool,
 }
 
@@ -927,7 +977,9 @@ impl InputKind {
 /// 一个可被 Agent 调用的动作。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActionSpec {
+    /// 动作名。
     pub name: String,
+    /// 参数形状；网关据此做类型校验，避免把字符串传进数值参数。
     pub input: InputKind,
     /// 自定义参数名；`None` 时回退到 [`InputKind::arg_name`]（text/value/flag）。
     ///
@@ -984,7 +1036,9 @@ impl ActionSpec {
 /// 语义描述：给 Agent 读的节点信息。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Semantics {
+    /// 给人和 Agent 看的文字标签。
     pub label: String,
+    /// 当前值的字符串形式（Agent 直接消费，不做类型推断）。
     pub value: String,
     /// 角色（query 用；由框架在遍历时从 Widget::role() 自动注入）。
     pub role: Role,
@@ -1025,16 +1079,19 @@ impl Default for Semantics {
 }
 
 impl Semantics {
+    /// 设置标签。
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = label.into();
         self
     }
 
+    /// 设置当前值。
     pub fn value(mut self, value: impl Into<String>) -> Self {
         self.value = value.into();
         self
     }
 
+    /// 标记为禁用；网关据此拒绝在其上执行动作。
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -1087,6 +1144,7 @@ impl Semantics {
         self
     }
 
+    /// 追加一项自定义属性。为什么用扁平键值而不是结构体：组件自定义的属性无法事先枚举。
     pub fn prop(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.props.push((key.into(), value.into()));
         self
@@ -1241,6 +1299,7 @@ pub trait Widget {
         None
     }
 
+    /// 本节点及其子树的裁剪矩形（`None` = 不裁剪）。滚动容器用它把内容裁到视口内——与 `children_clip` 的区别是后者只作用于**子控件各自**的格子。
     fn clip(&self) -> Option<Rect> {
         None
     }
