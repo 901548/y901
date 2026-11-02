@@ -1149,6 +1149,9 @@ cbuffer Globals : register(b0)
 };
 
 Texture2D atlas_texture : register(t0);
+// 图片纹理（第 2 个描述符槽）。与图集分开绑定，
+// 因为两者的用法不同：图集的 RGB 是子像素覆盖度，图片的 RGB 是真实颜色。
+Texture2D image_texture : register(t1);
 SamplerState atlas_sampler : register(s0);
 
 struct VSInput
@@ -1269,6 +1272,17 @@ float4 ps_main(VSOutput input) : SV_Target
     // 空白区会被涂黑）——这是真实遇到过的 bug。
     float a = input.color.a * dot(cov, float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
     return float4(input.color.rgb * cov, a * sdf_cov);
+}
+
+// 图片纹理采样 + 着色（tint）。
+//
+// 注意预乘 alpha：混合状态是 SrcBlend=ONE，输出必须已乘过 alpha。
+// 漏乘会让图片在透明处发白。
+float4 ps_image(VSOutput input) : SV_Target
+{
+    float4 tex = image_texture.Sample(atlas_sampler, input.uv);
+    float a = input.color.a * tex.a;
+    return float4(input.color.rgb * tex.rgb * a, a);
 }
 
 // 全屏 blit：把自持 RT 原样搬到交换链后备缓冲（1:1，线性采样精确）。
@@ -1659,6 +1673,10 @@ pub struct Gfx {
     snapshot_requested: bool,
     /// 最近一次快照的像素（BGRA）与尺寸。
     snapshot: Option<(Vec<u8>, u32, u32)>,
+    /// 图片纹理表（按 `TextureId` 索引）。
+    images: std::collections::HashMap<u64, (Texture, ShaderResourceView, u32, u32)>,
+    /// 下一个图片索引（从 1 开始，0 = 无效）。
+    next_image: u64,
 }
 
 impl Gfx {
@@ -1692,6 +1710,8 @@ impl Gfx {
             force_full: true,
             snapshot_requested: false,
             snapshot: None,
+            images: std::collections::HashMap::new(),
+            next_image: 0,
         };
         gfx.rebuild(hwnd, width, height)?;
         Ok(gfx)
@@ -1874,6 +1894,86 @@ impl Gfx {
         // 否则没被脏区覆盖的区域保持 alpha=0 → blit 出纯黑。
         self.force_full = true;
         Ok(true)
+    }
+
+    /// 上传一张图片纹理，返回句柄（`0` = 失败）。
+    ///
+    /// # Safety
+    ///
+    /// 同 [`Gfx::create_image_texture`]。
+    pub unsafe fn upload_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> u64 {
+        match self.create_image_texture(width, height, rgba) {
+            Ok((texture, srv)) => {
+                self.next_image += 1;
+                let id = self.next_image;
+                self.images.insert(id, (texture, srv, width, height));
+                id
+            }
+            Err(err) => {
+                eprintln!("[y901] 图片纹理上传失败: {err}");
+                0
+            }
+        }
+    }
+
+    /// 释放一张图片纹理（未知 id 忽略）。
+    ///
+    /// 当前**没有调用点**：`RenderCtx` 没有 `release_texture`，
+    /// 控件也没有 unmount 钩子（拿不到 ctx）。界面先留着，
+    /// 等框架有了"组件销毁通知"再接。
+    pub fn release_image(&mut self, id: u64) {
+        self.images.remove(&id);
+    }
+
+    /// 取图片纹理的 SRV 与尺寸（供批次切换时绑定）。
+    pub fn image(&self, id: u64) -> Option<(&ShaderResourceView, u32, u32)> {
+        self.images.get(&id).map(|(_, srv, w, h)| (srv, *w, *h))
+    }
+
+    /// 创建一张图片纹理（`R8G8B8A8_UNORM`）并返回它与 SRV。
+    ///
+    /// 输入：尺寸与 RGBA 字节（长度必须 ≥ `w*h*4`）。
+    /// 输出：`(Texture, ShaderResourceView)`；Texture 必须保留，否则 SRV 背后的资源会被释放。
+    ///
+    /// 为什么 `row_pitch = width * 4` 就够：`R8G8B8A8` 每像素 4 字节，
+    /// D3D11 对 SubresourceData 的 row pitch 没有 "256 字节对齐"要求（那是 UpdateSubresource 的目标纹理层面的传说），
+    /// 实测上直接用 `w*4` 上传即可。
+    ///
+    /// # Safety
+    ///
+    /// 需要有效且未销毁的 D3D11 设备（即 `Gfx` 已初始化），且在创建窗口的线程上调用。
+    pub unsafe fn create_image_texture(
+        &self,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Result<(Texture, ShaderResourceView), String> {
+        let Some(device) = self.device.as_ref() else {
+            return Err("gfx is not initialized".to_string());
+        };
+        if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
+            return Err("invalid texture size or data".to_string());
+        }
+        let desc = Texture2DDesc {
+            width,
+            height,
+            mip_levels: 1,
+            array_size: 1,
+            format: 28, // DXGI_FORMAT_R8G8B8A8_UNORM
+            sample_desc: SampleDesc { count: 1, quality: 0 },
+            usage: 0,                          // D3D11_USAGE_DEFAULT
+            bind_flags: D3D11_BIND_SHADER_RESOURCE,
+            cpu_access_flags: 0,
+            misc_flags: 0,
+        };
+        let data = SubresourceData {
+            data: rgba.as_ptr() as *const c_void,
+            row_pitch: width * 4,
+            slice_pitch: width * height * 4,
+        };
+        let texture = device.create_texture_2d(&desc, &data)?;
+        let srv = device.create_shader_resource_view(&texture)?;
+        Ok((texture, srv))
     }
 
     /// 提交一帧：上传实例、画一次 `DrawInstanced`、`Present`。
