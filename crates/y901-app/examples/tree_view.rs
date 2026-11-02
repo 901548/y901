@@ -34,7 +34,21 @@ fn sample_tree() -> Vec<TreeItem> {
     ]
 }
 
-struct TreeDemo;
+struct TreeDemo {
+    /// `Y901_SNAPSHOT=<path>` 时：首帧渲染完自动截图并退出（用于生成文档截图）。
+    snapshot_to: Option<std::path::PathBuf>,
+    pending: bool,
+}
+
+impl TreeDemo {
+    fn new() -> Self {
+        let to = std::env::var_os("Y901_SNAPSHOT").map(std::path::PathBuf::from);
+        Self {
+            pending: to.is_some(),
+            snapshot_to: to,
+        }
+    }
+}
 
 impl Host for TreeDemo {
     fn idle(&mut self, tree: &mut UiTree) {
@@ -51,6 +65,27 @@ impl Host for TreeDemo {
 
     fn policy(&self) -> Policy {
         Policy::default()
+    }
+
+    fn take_snapshot_request(&mut self) -> bool {
+        // 消费式：只请求一次
+        std::mem::take(&mut self.pending)
+    }
+
+    fn on_snapshot(&mut self, pixels: &[u8], width: u32, height: u32) {
+        let Some(path) = self.snapshot_to.clone() else {
+            return;
+        };
+        match y901_shell::snapshot::write_bgra_png(&path, pixels, width, height) {
+            Ok(()) => {
+                eprintln!("[snapshot] 已写入 {} ({width}x{height})", path.display());
+                std::process::exit(0);
+            }
+            Err(err) => {
+                eprintln!("[snapshot] 失败: {err}");
+                std::process::exit(1);
+            }
+        }
     }
 }
 
@@ -75,5 +110,5 @@ fn main() -> Result<(), String> {
         height: 520,
         ..Default::default()
     };
-    create_runtime().run(Box::new(TreeDemo), Box::new(build), options)
+    create_runtime().run(Box::new(TreeDemo::new()), Box::new(build), options)
 }

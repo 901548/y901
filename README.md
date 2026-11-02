@@ -64,6 +64,14 @@ fn main() -> Result<(), String> {
 }
 ```
 
+## 界面
+
+![TreeView 示例截图](docs/screenshot.png)
+
+> 上图为 `tree_view` 示例的实际渲染结果（622×473，D3D11 后端）。
+> 重新生成：`Y901_SNAPSHOT=docs/screenshot.png cargo run --example tree_view -p y901-app`
+> （设置该环境变量后，示例在首帧渲染完成后自动截图并退出。）
+
 ## 可运行的示例
 
 ```bash

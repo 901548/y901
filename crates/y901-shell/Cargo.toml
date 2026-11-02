@@ -18,5 +18,7 @@ y901-backend-x11 = { path = "../y901-backend-x11" }
 
 [dependencies]
 y901-runtime = { path = "../y901-runtime" }
+# 截图编码（纯 Rust）
+png = "0.17"
 y901-ui = { path = "../y901-ui" }
 y901-widgets = { path = "../y901-widgets" }
