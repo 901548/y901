@@ -383,10 +383,7 @@ pub trait RenderCtx: TextMetrics {
     fn draw_image(&mut self, _rect: Rect, _texture: crate::image::TextureId, _style: crate::image::ImageStyle) {
     }
 
-    /// 增加一次引用计数（"我也要用这张纹理"）。
-    ///
-    /// 默认空实现：不支持纹理的后端本来就没东西可管。
-    fn retain_texture(&mut self, _id: crate::image::TextureId) {}
+
 
     /// 减少一次引用计数，归零时真正释放。
     ///

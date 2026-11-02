@@ -612,11 +612,6 @@ impl RenderCtx for D3dBackend {
         self.image_marks.push((start, 1, texture.0));
     }
 
-    fn retain_texture(&mut self, id: y901_ui::image::TextureId) {
-        if id.is_valid() {
-            self.gfx.retain_image(id.0);
-        }
-    }
 
     fn release_texture(&mut self, id: y901_ui::image::TextureId) {
         if id.is_valid() {

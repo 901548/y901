@@ -277,17 +277,10 @@ impl Widget for Grid {
         EventResult::Ignored
     }
 
-    fn render(&mut self, ctx: &mut dyn RenderCtx) {
-        // 子控件超出单元格时**裁剪**，不撑破布局。
-        // 反过来扩大单元格会让"固定列宽"失效，且一行里最宽的控件会挤掉其他控件的位置。
-        ctx.push_clip(self.rect);
-        let rects = self.child_rects();
-        for (child, r) in self.children.iter_mut().zip(rects) {
-            ctx.push_clip(r);
-            child.render(ctx);
-            ctx.pop_clip();
-        }
-        ctx.pop_clip();
+    fn render(&mut self, _ctx: &mut dyn RenderCtx) {
+        // **不画子控件**：框架的渲染模型是"树遍历每个节点各自画自己"
+        // （`render_pass` 递归）。容器若再遍历一遍，每个子控件会被**画两次**——
+        // 半透明元素会变深，且第二次不带任何剪裁。这是实测抓到的。
     }
 
     fn semantics(&self) -> Semantics {

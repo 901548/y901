@@ -55,19 +55,15 @@ fn upload_then_release_frees_the_texture() {
 }
 
 #[test]
-fn shared_texture_survives_until_the_last_release() {
+fn double_release_is_harmless() {
+    // retain_texture 已按 YAGNI 删除（当前没有任何公开入口能制造第二个引用）。
+    // 这里验证的是保留下来的那部分：计数归零后再 release 不会 panic。
     let mut s = soft();
     let id = solid(&mut s, 2, 2, (10, 20, 30));
-    // 第二个使用者 retain：模拟两个 Image 共享同一张纹理
-    s.retain_texture(id);
-    assert_eq!(s.texture_refcount(id), Some(2), "retain 后应有 2 个引用");
-
     s.release_texture(id);
-    assert_eq!(s.texture_count(), 1, "还有一个使用者，纹理不能被释放");
-    assert_eq!(s.texture_refcount(id), Some(1));
-
+    assert_eq!(s.texture_count(), 0);
     s.release_texture(id);
-    assert_eq!(s.texture_count(), 0, "最后一个引用释放后应回收");
+    assert_eq!(s.texture_count(), 0, "已释放的 id 再释放应无效但不崩");
 }
 
 #[test]

@@ -366,11 +366,6 @@ impl RenderCtx for SoftBackend {
         id
     }
 
-    fn retain_texture(&mut self, id: y901_ui::image::TextureId) {
-        if let Some(entry) = self.textures.get_mut(&id) {
-            entry.3 = entry.3.saturating_add(1);
-        }
-    }
 
     fn release_texture(&mut self, id: y901_ui::image::TextureId) {
         // 引用计数归零才真正释放：同一张纹理可能被多个控件共享。

@@ -1984,12 +1984,6 @@ impl Gfx {
         }
     }
 
-    /// 增加一次引用计数。
-    pub fn retain_image(&mut self, id: u64) {
-        if let Some(entry) = self.images.get_mut(&id) {
-            entry.4 = entry.4.saturating_add(1);
-        }
-    }
 
     /// 当前纹理表大小（测试/诊断用）。
     pub fn image_count(&self) -> usize {
