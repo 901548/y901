@@ -1201,6 +1201,16 @@ pub trait Widget {
     /// 返回：`Some(rect)` 表示裁剪到该矩形（滚动容器声明视口）；`None` 不裁剪。
     /// 副作用：无。框架在渲染时自动 `push_clip` / `pop_clip`，组件无需手写。
     /// 注意：命中测试用 `rect ∩ clip` —— 看不见的区域点不到。
+    /// 子控件的剪裁矩形（`Some` 时所有子控件的绘制被限制在其中）。
+    ///
+    /// 输入：该子控件的格子矩形。输出：`None` = 不剪裁（默认，现有控件零影响）。
+    ///
+    /// 为什么不能用 `clip()` 代替：`clip()` 是**节点自己及其子树** 的剪裁，
+    /// 而容器需要的是"每个子控件各自被裁到自己的格子里"（Grid）。
+    fn children_clip(&self, _cell_rect: Rect) -> Option<Rect> {
+        None
+    }
+
     fn clip(&self) -> Option<Rect> {
         None
     }

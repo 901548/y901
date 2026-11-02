@@ -1,4 +1,4 @@
-//! Grid 溢出的**实际行为**记录：目前不裁剪。
+//! Grid 溢出裁剪：子控件比单元格大时被裁到格子内。
 //!
 //! ## 这不是"验收通过"，而是把一个已知缺口写成可执行的记录
 //!
@@ -68,7 +68,7 @@ impl Widget for Overflow {
 }
 
 #[test]
-fn overflow_is_visible_today_because_containers_cannot_clip_children() {
+fn overflow_is_clipped_to_the_cell() {
     let mut soft = soft();
     soft.clear();
 
@@ -99,11 +99,11 @@ fn overflow_is_visible_today_because_containers_cannot_clip_children() {
     };
 
     assert!(white(25, 25), "单元格内应被内容覆盖");
-    // 记录真实行为：单元格高 50，但子控件画到 100，y=75 处仍然是白的。
+    // 单元格高 50，子控件画到 100：y=75 已在格子之外，必须被裁掉。
     assert!(
-        white(25, 75),
-        "若这里变成 false，说明框架已支持容器裁剪子控件，请把本测试改成断言下方应被裁剪"
+        !white(25, 75),
+        "格子之外的内容应被裁剪（children_clip）"
     );
 
-    eprintln!("[grid-clip] 记录：溢出内容当前不被裁剪（容器无法为子控件设置 clip）");
+    eprintln!("[grid-clip] 溢出内容已被裁到单元格内（children_clip）");
 }

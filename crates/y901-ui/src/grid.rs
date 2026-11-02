@@ -277,6 +277,14 @@ impl Widget for Grid {
         EventResult::Ignored
     }
 
+    /// 每个子控件裁到自己的格子里。
+    ///
+    /// 这是 Grid 存在的意义之一：固定列宽就应该是硬约束，
+    /// 内容太大就裁掉，而不是把整个布局撞开。
+    fn children_clip(&self, cell_rect: Rect) -> Option<Rect> {
+        Some(cell_rect)
+    }
+
     fn render(&mut self, _ctx: &mut dyn RenderCtx) {
         // **不画子控件**：框架的渲染模型是"树遍历每个节点各自画自己"
         // （`render_pass` 递归）。容器若再遍历一遍，每个子控件会被**画两次**——

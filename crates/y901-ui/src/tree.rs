@@ -2564,11 +2564,30 @@ fn render_pass(node: &mut dyn Widget, ctx: &mut dyn RenderCtx, dirty: &DirtyRegi
     if let Some(c) = clip {
         ctx.push_clip(c);
     }
+    // 逐子控件剪裁（如 Grid 的每个格子）。
+    //
+    // 为什么要先算好：`children_mut()` 已经短临借了 `node`，
+    // 循环里再调 `node.children_clip(..)` 会碰借用冲突。
+    let child_clips: Vec<Option<Rect>> = {
+        let rects: Vec<Rect> = node.children().iter().map(|c| c.rect()).collect();
+        rects
+            .into_iter()
+            .map(|r| node.children_clip(r).map(|c| c.intersect(node.rect())))
+            .collect()
+    };
     if let Some(children) = node.children_mut() {
         for (i, child) in children.iter_mut().enumerate() {
+            // push/pop 必须配对：下面的两条分支都会走到同一个 pop。
+            let child_clip = child_clips.get(i).copied().flatten();
+            if let Some(c) = child_clip {
+                ctx.push_clip(c);
+            }
             path.push(i);
             render_pass(child.as_mut(), ctx, dirty, path);
             path.pop();
+            if child_clip.is_some() {
+                ctx.pop_clip();
+            }
         }
     }
     if clip.is_some() {
