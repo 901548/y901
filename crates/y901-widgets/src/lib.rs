@@ -34,6 +34,7 @@ pub mod split;
 pub mod style;
 pub mod progress;
 pub mod radio;
+pub mod slider;
 pub mod tabs;
 pub mod text_input;
 
