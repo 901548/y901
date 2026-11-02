@@ -15,6 +15,12 @@
 use crate::color::TextStyle;
 use crate::widget::TextMetrics;
 
+/// 文本长度上限（字节）：16 MiB。
+///
+/// 为什么需要：粘贴、IME 提交、RPC 注入都汇到 `insert_str`——
+/// 没有上限时一次 10 MB 粘贴会让测量、布局、字形图集全部超线性变慢。
+pub const MAX_TEXT_LEN: usize = 16 * 1024 * 1024;
+
 /// 可编辑文本。
 #[derive(Clone, Debug, Default)]
 pub struct TextBuffer {
@@ -232,8 +238,17 @@ impl TextBuffer {
             return;
         }
         self.delete_selection();
-        self.text.insert_str(self.cursor, s);
-        self.cursor += s.len();
+        // 超限时截断到剩余容量（按字符边界切），**不 panic、不静默丢整段**。
+        let room = MAX_TEXT_LEN.saturating_sub(self.text.len());
+        let mut take = s.len().min(room);
+        while take > 0 && !s.is_char_boundary(take) {
+            take -= 1;
+        }
+        if take == 0 {
+            return;
+        }
+        self.text.insert_str(self.cursor, &s[..take]);
+        self.cursor += take;
         self.anchor = self.cursor;
     }
 

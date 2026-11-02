@@ -6,6 +6,25 @@ use y901_ui::{
     Widget,
 };
 
+/// 单边上限（像素）。
+///
+/// 为什么需要：`(w * h * 4)` 在 `usize` 上会溢出，而溢出后分配到的是
+/// 一个"看起来合法"的小缓冲，后续越界读写就是 UB 前的未定义行为。
+pub const MAX_IMAGE_SIDE: u32 = 16_384;
+/// 总字节上限（128 MiB）。
+pub const MAX_IMAGE_BYTES: usize = 128 * 1024 * 1024;
+
+/// 尺寸是否可接受（同时检查单边与乘法溢出）。
+fn is_supported_size(w: u32, h: u32) -> bool {
+    if w == 0 || h == 0 || w > MAX_IMAGE_SIDE || h > MAX_IMAGE_SIDE {
+        return false;
+    }
+    (w as usize)
+        .checked_mul(h as usize)
+        .and_then(|n| n.checked_mul(4))
+        .is_some_and(|bytes| bytes <= MAX_IMAGE_BYTES)
+}
+
 /// 图片控件。
 pub struct Image {
     id: String,
@@ -42,6 +61,12 @@ impl Image {
     /// 输入：`id`、尺寸、`rgba`（长度必须 ≥ `w*h*4`）。
     /// 行为：长度不足时**截断为黑底透明**，不 panic —— 调用方给错数据不该炸掉 UI。
     pub fn from_rgba(id: impl Into<String>, w: u32, h: u32, rgba: &[u8]) -> Self {
+        // 超限的图片不能进入渲染路径：先在这里截断（不 panic、不分配），
+        // 严格调用方请用 `try_from_rgba` 取得明确错误。
+        if !is_supported_size(w, h) {
+            eprintln!("[y901] Image::from_rgba 尺寸超限：{w}x{h}，已忽略");
+            return Self::empty(id);
+        }
         let need = (w as usize) * (h as usize) * 4;
         let mut data = Vec::with_capacity(need);
         data.extend_from_slice(&rgba[..rgba.len().min(need)]);
@@ -78,6 +103,49 @@ impl Image {
             rgba: Vec::new(),
             style: ImageStyle::default(),
             texture: Some(texture),
+            retained: false,
+            rect: Rect::ZERO,
+            item: y901_ui::FlexItem::default(),
+        }
+    }
+
+    /// 严格版：尺寸/字节数超限返回 `Err`，而不是静默失败。
+    ///
+    /// 输入：`id`、宽高、`rgba`（必须 ≥ `w*h*4`）。
+    /// 输出：`Err` 带可读原因（尺寸超限 / 字节数不足 / 乘法溢出）。
+    ///
+    /// 为什么要单独一个入口而不改 `from_rgba` 的签名：后者已被现有调用方使用，
+    /// 改成 `Result` 会破坏所有构造点；而“不 panic”本来就是它的契约。
+    pub fn try_from_rgba(
+        id: impl Into<String>,
+        w: u32,
+        h: u32,
+        rgba: &[u8],
+    ) -> Result<Self, String> {
+        if !is_supported_size(w, h) {
+            return Err(format!(
+                "尺寸超限：{w}x{h}（上限 {MAX_IMAGE_SIDE}，总字节上限 {MAX_IMAGE_BYTES}）"
+            ));
+        }
+        let need = (w as usize)
+            .checked_mul(h as usize)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or_else(|| format!("尺寸乘法溢出：{w}x{h}"))?;
+        if rgba.len() < need {
+            return Err(format!("字节数不足：需 {need}，实际 {}", rgba.len()));
+        }
+        Ok(Self::from_rgba(id, w, h, rgba))
+    }
+
+    /// 空图片（无位图、无纹理）——超限时的占位值。
+    fn empty(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 0, 0],
+            style: ImageStyle::default(),
+            texture: None,
             retained: false,
             rect: Rect::ZERO,
             item: y901_ui::FlexItem::default(),

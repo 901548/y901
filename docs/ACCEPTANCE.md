@@ -8,8 +8,8 @@
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **499 passed / 0 failed** |
-| 加上 `--include-ignored` | **523 passed / 0 failed**（含基准与 doc-test） |
+| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **722 passed / 0 failed** |
+| 加上 `--include-ignored` | **760 passed / 0 failed**（含基准与 doc-test） |
 
 差值 24 = 需要真机/耗时的 `#[ignore]` 用例：
 

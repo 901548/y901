@@ -712,7 +712,7 @@ ctx.draw_image(rect, id, style);            // 默认什么都不画
 ### §42.4 lint 未启用时的 0 警告不是绿灯
 
 `cargo doc --no-deps` 输出 **0 警告**，但 `RUSTFLAGS="-W missing_docs" cargo build` 一跑就是
-**482 个未文档化的公开项**。原因：`missing_docs` 默认是 allow，**没打开就不会报**。
+当时 482 个未文档化的公开项（**现已归零**）。原因：`missing_docs` 默认是 allow，**没打开就不会报**。
 
 规则：**任何"干净"的声明都必须附带"用什么命令验证的"。**
 
@@ -1062,7 +1062,7 @@ if !had_work && tree.dirty().is_empty() {
 
 **正确顺序：模块归零 → 开 lint → 跑门禁验证。**
 
-现在的状态（全部归零后升级为 `deny`）：11 个 crate 的 `lib.rs` 都是
+现在的状态（全部归零后升级为 `deny`）：12 个 crate 的 `lib.rs` 都是
 
 ```rust
 #![deny(missing_docs)]

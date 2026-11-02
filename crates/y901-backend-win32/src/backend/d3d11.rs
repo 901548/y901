@@ -38,6 +38,21 @@
 use std::ffi::{c_void, CString};
 use std::ptr::{null, null_mut, slice_from_raw_parts};
 
+// # 安全契约（本文件所有 `unsafe` 代码共同依赖）
+//
+// 这个文件手写 D3D11/DXGI 的 COM vtable（不引入 `windows` crate），
+// 所以每一次调用都是腔本的 FFI。全文件的 `unsafe` 都建立在四条不变量上：
+//
+// 1. **对象指针非空且未释放**：所有 COM 对象都被 `com_type!` 包成拥有型别名，
+//    释放只发生在 `Drop`（调 `Release`）；因此在 `self` 存活期间 vtable 指针恒为有效。
+// 2. **vtable 布局与头文件一致**：`vtbl::<T>()` 把对象开头的 vtable 指针当作 `&T`。
+//    每个 `*Vtbl` 结构都按 Windows SDK 的**声明顺序**逐个对齐，错一个方法就会调到错的函数。
+// 3. **鼓面数据只在有效期内使用**：`Map` 返回的指针只能用到对应 `Unmap` 为止；
+//    回读 staging 纹理时按 `row_pitch` 逐行取，不假设它等于 `width * 4`。
+// 4. **调用线程**：immediate context 不线程安全，所有 `unsafe fn` 必须在**拥有该 HWND 的线程**上调用。
+//
+// 每个 `unsafe fn` 的 `# Safety` 只写"该函数**额外**要求什么"，上面四条不重复。
+
 use windows_sys::Win32::Foundation::HWND;
 
 /// HRESULT；负值表示失败。
@@ -515,6 +530,10 @@ type QueryInterfaceFn =
 type AddRefFn = unsafe extern "system" fn(*mut c_void) -> u32;
 type ReleaseFn = unsafe extern "system" fn(*mut c_void) -> u32;
 
+    /// # Safety
+    ///
+    /// `object` 必须是**未释放的 COM 接口指针**，且它的 vtable 布局与 `T` 逐字段一致。
+    /// 传错类型不会崩（仍是合法指针），但会调到错的方法——那是本文件最危险的一类 bug。
 unsafe fn vtbl<T>(object: *mut c_void) -> &'static T {
     &*(*(object as *mut *const T))
 }
@@ -1027,7 +1046,11 @@ impl Context {
         );
     }
 
-    unsafe fn map_discard(&self, buffer: &Buffer) -> Option<MappedSubresource> {
+        /// # Safety
+    ///
+    /// `buffer` 必须由本设备创建且当前**未被 Map**（重复 Map 同一缓冲是未定义行为）。
+    /// 返回的指针只能用到配套的 `unmap` 为止。
+unsafe fn map_discard(&self, buffer: &Buffer) -> Option<MappedSubresource> {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         let mut mapped: MappedSubresource = std::mem::zeroed();
         let hr = (table.map)(
@@ -1041,7 +1064,10 @@ impl Context {
         (hr >= 0 && !mapped.data.is_null()).then_some(mapped)
     }
 
-    unsafe fn unmap(&self, buffer: &Buffer) {
+        /// # Safety
+    ///
+    /// `buffer` 必须**处于 Map 状态**（与 `map_discard` 成对）；重复 Unmap 会返回错误码而不会崩。
+unsafe fn unmap(&self, buffer: &Buffer) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.unmap)(self.as_ptr(), buffer.as_ptr(), 0);
     }
@@ -1108,7 +1134,10 @@ impl Context {
     /// 输入：`rect`（像素，右/下为**开区间**）。
     /// 副作用：之后所有 draw 只影响该矩形内的像素。
     #[allow(dead_code)]
-    unsafe fn set_scissor(&self, rect: RectI32) {
+        /// # Safety
+    ///
+    /// `rect` 必须在**当前 render target 范围内**（DXGI 对越界 scissor 的处理依设备而异）。
+unsafe fn set_scissor(&self, rect: RectI32) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.rsset_scissor_rects)(self.as_ptr(), 1, &rect);
     }
@@ -1169,7 +1198,10 @@ impl SwapChain {
         Ok(())
     }
 
-    unsafe fn present(&self, sync_interval: u32) -> Hresult {
+        /// # Safety
+    ///
+    /// 必须在**拥有该交换链窗口的线程**上调用；`sync_interval` 为 0 时不等待帧同步。
+unsafe fn present(&self, sync_interval: u32) -> Hresult {
         let table = vtbl::<SwapChainVtbl>(self.as_ptr());
         (table.present)(self.as_ptr(), sync_interval, 0)
     }
@@ -2144,7 +2176,7 @@ impl Gfx {
                     );
                     context.unmap(&pipeline.instance_buffer);
                 }
-                None => eprintln!("[dbg] map_discard failed"),
+                None => eprintln!("[y901] map_discard 失败：实例缓冲不可写（设备可能丢失，下一帧将重建）"),
             }
         }
 

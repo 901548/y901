@@ -16,6 +16,21 @@ use crate::{
     UiEvent, Widget,
 };
 
+/// 把轨道表里的非法值（NaN / ±∞ / 负数）收敛为 `Fixed(0)`。
+///
+/// 为什么在入口做：`Fixed(NaN)` 会让轨道长度与子控件矩形变成 NaN，
+/// 而 NaN 矩形在光栅化里是"不可见但不报错"——难排查。
+fn sanitize_tracks(tracks: Vec<GridTrack>) -> Vec<GridTrack> {
+    tracks
+        .into_iter()
+        .map(|t| match t {
+            GridTrack::Fixed(v) if !v.is_finite() || v < 0.0 => GridTrack::Fixed(0.0),
+            GridTrack::Fraction(f) if !f.is_finite() || f < 0.0 => GridTrack::Fraction(0.0),
+            other => other,
+        })
+        .collect()
+}
+
 /// 一条轨道的尺寸策略。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GridTrack {
@@ -64,6 +79,11 @@ impl Grid {
     ///
     /// 输入：`id`、列轨道、行轨道。轨道为空时视为"单条弹性轨道"。
     pub fn new(id: impl Into<String>, cols: Vec<GridTrack>, rows: Vec<GridTrack>) -> Self {
+        // 空轨道表本身已被 `resolve_tracks` 当作"单条弹性轨道"，
+        // 但调用方传入全 0 宽/高的轨道会让单元格退化成负数。
+        // 这里在入口就把"非正值"剔除，保证内部不会出现负尺寸。
+        let cols = sanitize_tracks(cols);
+        let rows = sanitize_tracks(rows);
         Self {
             id: id.into(),
             cols,

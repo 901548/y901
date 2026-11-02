@@ -121,7 +121,7 @@ cargo run --example tree_view    -p y901-app   # TreeView + 虚拟化 + 键盘�
 |---|---|
 | 测试 | **722**（含 `--include-ignored` 共 **760**），0 失败 |
 | clippy | **0 warning / 0 error** |
-| 文档完整性 | **11 个 crate 全部 `#![deny(missing_docs)]`**，`RUSTFLAGS="-W missing_docs"` = 0 |
+| 文档完整性 | **12 个 crate 全部 `#![deny(missing_docs)]`**，`RUSTFLAGS="-W missing_docs"` = 0 |
 | 像素哈希门禁 | 通过（`scripts/hash-gate.ps1`，同会话前后对比） |
 | Windows | D3D11 渲染 + GDI 纯 CPU 回退；真机 RTX 4060 @144Hz 空帧 6.885ms（= vsync 间隔） |
 | Linux/X11 | CPU 合成 + MIT-SHM（1920×1080 单帧 0.35ms）；WSL 上 Xvfb 验证通过 |

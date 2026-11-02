@@ -10,6 +10,20 @@ use y901_ui::{
 
 /// 轨道高度。
 const TRACK_H: f32 = 4.0;
+/// 把任意输入收敛到 `0..=1`，**非法值（NaN / ±∞）归 0**。
+///
+/// 为什么不能只用 `clamp`：`f32::clamp` 对 NaN 返回 NaN（IEEE 语义），
+/// 于是 NaN 会一路流进布局与提交，最后变成整帧不可见的黑屏。
+fn sane(v: f32) -> f32 {
+    if v.is_nan() {
+        // NaN 没有"大小"可言，只能退回 0
+        0.0
+    } else {
+        // ±∞ 本身有方向，clamp 会正确归到 0 或 1
+        v.clamp(0.0, 1.0)
+    }
+}
+
 /// 滑块直径。
 const THUMB: f32 = 16.0;
 /// 键盘步进。
@@ -33,7 +47,8 @@ impl Slider {
     pub fn new(id: impl Into<String>, value: f32) -> Self {
         Self {
             id: id.into(),
-            value: value.clamp(0.0, 1.0),
+            // clamp 对 NaN 返回 NaN（IEEE 语义），必须先排查非法值
+            value: sane(value),
             on_change: None,
             rect: Rect::ZERO,
             focused: false,
@@ -54,7 +69,7 @@ impl Slider {
 
     /// 设置值（clamp + 触发回调，仅当真的变化）。
     pub fn set_value(&mut self, v: f32) {
-        let v = v.clamp(0.0, 1.0);
+        let v = sane(v);
         if (v - self.value).abs() > f32::EPSILON {
             self.value = v;
             if let Some(cb) = self.on_change.as_ref() {

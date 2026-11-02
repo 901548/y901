@@ -9,6 +9,17 @@
 //! 布局约定：调用方给出引擎坐标系里的 (base_x, baseline)，
 //! 绘制时 pos = (base_x + bearing_x, baseline + bearing_y)。
 
+// # 安全契约
+//
+// 本文件直接调用 DirectWrite/Direct2D 的 COM 接口，`unsafe` 代码共同依赖三条不变量：
+//
+// 1. **COM 对象由 `Drop` 释放**：所有工厂/字体/布局对象都被拥有型别名包裹，
+//    `Release` 只在 `Drop` 里调用，因此对象存活期内 vtable 恒有效。
+// 2. **`*mut c_void` 参数均为存活对象**：`GetGlyphRunOutline`/`CreateTextLayout` 等的输出指针
+//    由调用方提供且保证非空、对齐；返回值负（HRESULT 失败）时不再读取该缓冲。
+// 3. **字体字节生命周期**：`MyFontEngine` 持有所需的字体数据副本，DirectWrite 侧不保留裸指针。
+
+
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
