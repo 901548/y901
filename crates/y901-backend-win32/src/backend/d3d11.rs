@@ -1553,7 +1553,7 @@ unsafe fn draw_scene(
     instances: &[Instance],
     count: usize,
     batches: &[Batch],
-    images: &std::collections::HashMap<u64, (Texture, ShaderResourceView, u32, u32)>,
+    images: &std::collections::HashMap<u64, (Texture, ShaderResourceView, u32, u32, u32)>,
     rect: RectI32,
     is_full: bool,
     w: f32,
@@ -1624,7 +1624,7 @@ unsafe fn draw_scene(
                 continue;
             }
             match b.image.and_then(|id| images.get(&id)) {
-                Some((_, srv, _, _)) => {
+                Some((_, srv, _, _, _)) => {
                     context.set_ps_shader(&pipeline.image_ps);
                     context.set_ps_image_texture(srv);
                     context.draw_instances(n, b.start);
@@ -1722,7 +1722,7 @@ pub struct Gfx {
     /// 最近一次快照的像素（BGRA）与尺寸。
     snapshot: Option<(Vec<u8>, u32, u32)>,
     /// 图片纹理表（按 `TextureId` 索引）。
-    images: std::collections::HashMap<u64, (Texture, ShaderResourceView, u32, u32)>,
+    images: std::collections::HashMap<u64, (Texture, ShaderResourceView, u32, u32, u32)>,
     /// 下一个图片索引（从 1 开始，0 = 无效）。
     next_image: u64,
 }
@@ -1954,7 +1954,8 @@ impl Gfx {
             Ok((texture, srv)) => {
                 self.next_image += 1;
                 let id = self.next_image;
-                self.images.insert(id, (texture, srv, width, height));
+                // 上传即拥有一次引用
+                self.images.insert(id, (texture, srv, width, height, 1));
                 id
             }
             Err(err) => {
@@ -1970,12 +1971,39 @@ impl Gfx {
     /// 控件也没有 unmount 钩子（拿不到 ctx）。界面先留着，
     /// 等框架有了"组件销毁通知"再接。
     pub fn release_image(&mut self, id: u64) {
-        self.images.remove(&id);
+        // 引用计数归零才释放：同一张纹理可能被多个控件共享。
+        let free = match self.images.get_mut(&id) {
+            Some(entry) => {
+                entry.4 = entry.4.saturating_sub(1);
+                entry.4 == 0
+            }
+            None => false,
+        };
+        if free {
+            self.images.remove(&id);
+        }
+    }
+
+    /// 增加一次引用计数。
+    pub fn retain_image(&mut self, id: u64) {
+        if let Some(entry) = self.images.get_mut(&id) {
+            entry.4 = entry.4.saturating_add(1);
+        }
+    }
+
+    /// 当前纹理表大小（测试/诊断用）。
+    pub fn image_count(&self) -> usize {
+        self.images.len()
+    }
+
+    /// 某张纹理的引用计数（测试用）。
+    pub fn image_refcount(&self, id: u64) -> Option<u32> {
+        self.images.get(&id).map(|e| e.4)
     }
 
     /// 取图片纹理的 SRV 与尺寸（供批次切换时绑定）。
     pub fn image(&self, id: u64) -> Option<(&ShaderResourceView, u32, u32)> {
-        self.images.get(&id).map(|(_, srv, w, h)| (srv, *w, *h))
+        self.images.get(&id).map(|(_, srv, w, h, _)| (srv, *w, *h))
     }
 
     /// 创建一张图片纹理（`R8G8B8A8_UNORM`）并返回它与 SRV。

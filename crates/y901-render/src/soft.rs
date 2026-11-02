@@ -67,7 +67,7 @@ pub struct SoftBackend {
     clips: Vec<Rect>,
     transforms: Vec<(y901_ui::Pos, f32)>,
     anims: y901_ui::animation::AnimSnapshot,
-    textures: std::collections::HashMap<y901_ui::image::TextureId, (u32, u32, Vec<u8>)>,
+    textures: std::collections::HashMap<y901_ui::image::TextureId, (u32, u32, Vec<u8>, u32)>,
     next_texture: u64,
     text: Box<dyn super::font::FontEngine>,
     cell: Size,
@@ -77,6 +77,16 @@ pub struct SoftBackend {
 }
 
 impl SoftBackend {
+    /// 当前纹理表大小（测试与诊断用）。
+    pub fn texture_count(&self) -> usize {
+        self.textures.len()
+    }
+
+    /// 某张纹理的引用计数（测试与诊断用）。
+    pub fn texture_refcount(&self, id: y901_ui::image::TextureId) -> Option<u32> {
+        self.textures.get(&id).map(|e| e.3)
+    }
+
     /// 创建软后端（同时创建 DirectWrite 字形引擎）。
     ///
     /// # Safety
@@ -351,8 +361,30 @@ impl RenderCtx for SoftBackend {
         let id = y901_ui::image::TextureId(self.next_texture);
         // 只保留需要的字节：调用方可能持有一个很大的缓冲
         let bytes = rgba[..(width * height * 4) as usize].to_vec();
-        self.textures.insert(id, (width, height, bytes));
+        // 上传即拥有一次引用（创建者）
+        self.textures.insert(id, (width, height, bytes, 1));
         id
+    }
+
+    fn retain_texture(&mut self, id: y901_ui::image::TextureId) {
+        if let Some(entry) = self.textures.get_mut(&id) {
+            entry.3 = entry.3.saturating_add(1);
+        }
+    }
+
+    fn release_texture(&mut self, id: y901_ui::image::TextureId) {
+        // 引用计数归零才真正释放：同一张纹理可能被多个控件共享。
+        // 为什么计数放在后端：`TextureId` 对控件是不透明的，控件不应该能知道"还有几个人在用"。
+        let free = match self.textures.get_mut(&id) {
+            Some(entry) => {
+                entry.3 = entry.3.saturating_sub(1);
+                entry.3 == 0
+            }
+            None => false,
+        };
+        if free {
+            self.textures.remove(&id);
+        }
     }
 
     fn draw_image(

@@ -220,6 +220,8 @@ impl Popup {
 }
 
 pub struct UiTree {
+    /// 待释放的纹理（卸载时收集，下一帧渲染时交给后端）。
+    pending_texture_releases: Vec<crate::image::TextureId>,
     /// 活动中的动画（key → 动画）。**同 key 重新设置即打断旧动画**。
     animations: Vec<ActiveAnim>,
     root: Box<dyn Widget>,
@@ -398,6 +400,7 @@ impl UiTree {
     pub fn new(root: Box<dyn Widget>) -> Self {
         let mut this = Self {
             animations: Vec::new(),
+            pending_texture_releases: Vec::new(),
             root,
             popups: Vec::new(),
             focus: None,
@@ -1062,6 +1065,16 @@ impl UiTree {
     /// 从树上摘掉一个节点（连同子树），返回是否成功。
     ///
     /// 会：调用 `on_unmount`（递归）→ 清理焦点/捕获 → 标记父节点失效。
+    /// 把一张纹理排入"下一帧释放"队列。
+    ///
+    /// 为什么需要公开：卸载路径不只 `remove_node`（整树替换、窗口关闭等），
+    /// 而后端取得纹理的时机只在渲染开头。
+    pub fn queue_texture_release(&mut self, id: crate::image::TextureId) {
+        if id.is_valid() {
+            self.pending_texture_releases.push(id);
+        }
+    }
+
     pub fn remove_node(&mut self, id: &str) -> bool {
         if id == self.root.id() {
             return false; // 根节点不可摘
@@ -1092,7 +1105,9 @@ impl UiTree {
         // 卸载钩子（整棵被摘掉的子树）
         // 同 id 将来若被复用，不能继承旧实例的哈希快照（否则会假 bump）
         forget_recursive(removed.as_ref(), self);
-        unmount_recursive(removed);
+        let mut releases = Vec::new();
+        unmount_recursive(removed, &mut releases);
+        self.pending_texture_releases.extend(releases);
 
         let parent_id = self
             .node_at_ref(&parent_path)
@@ -1627,6 +1642,16 @@ impl UiTree {
     /// Base 节点边遍历边画；Overlay / Modal 的子树先把路径记下来，
     /// 遍历结束后按层顺序回放。没有浮层时就是一次 O(n) 遍历。
     pub fn render(&mut self, ctx: &mut dyn RenderCtx) {
+        // 卸载时收集到的纹理在这里交给后端。
+        //
+        // 为什么不在卸载当定就释放：那时手里没有 `RenderCtx`，
+        // 而资源属于后端。延迟一帧释放是最小的语义代价。
+        if !self.pending_texture_releases.is_empty() {
+            let pending = std::mem::take(&mut self.pending_texture_releases);
+            for id in pending {
+                ctx.release_texture(id);
+            }
+        }
         if self.dirty.is_empty() {
             return;
         }
@@ -2630,13 +2655,15 @@ fn patch_is_empty(patch: &crate::json::Json) -> bool {
 }
 
 /// 递归调用卸载钩子：先释放子树资源，再释放自己。
-fn unmount_recursive(mut node: Box<dyn Widget>) {
+fn unmount_recursive(mut node: Box<dyn Widget>, releases: &mut Vec<crate::image::TextureId>) {
     if let Some(children) = node.children_mut() {
         let taken: Vec<Box<dyn Widget>> = std::mem::take(children);
         for child in taken {
-            unmount_recursive(child);
+            unmount_recursive(child, releases);
         }
     }
+    // 先收集纹理所有权，再走卸载钩子（资源回收要在对象消失前记下）
+    node.release_textures(releases);
     node.on_unmount();
 }
 

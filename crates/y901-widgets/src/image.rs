@@ -79,6 +79,12 @@ impl Image {
         self
     }
 
+    /// **仅测试用**：收养一张已有纹理（不上传自己的位图）。
+    #[doc(hidden)]
+    pub fn adopt_texture_for_test(&mut self, id: y901_ui::image::TextureId) {
+        self.texture = Some(id);
+    }
+
     /// 位图尺寸。
     pub fn image_size(&self) -> (u32, u32) {
         (self.width, self.height)
@@ -152,6 +158,18 @@ impl Widget for Image {
             return;
         }
         ctx.draw_image(self.rect, texture, self.style);
+    }
+
+    /// 告诉框架"我占用了哪张纹理"。
+    ///
+    /// 为什么不在 `Drop` 里释放：那时没有 `RenderCtx`，而纹理属于后端。
+    /// 框架会把这些 id 堆到下一帧渲染前统一交给 `RenderCtx::release_texture`。
+    fn release_textures(&mut self, out: &mut Vec<y901_ui::image::TextureId>) {
+        if let Some(id) = self.texture.take() {
+            if id.is_valid() {
+                out.push(id);
+            }
+        }
     }
 
     fn semantics(&self) -> Semantics {

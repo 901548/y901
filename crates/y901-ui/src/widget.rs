@@ -383,6 +383,16 @@ pub trait RenderCtx: TextMetrics {
     fn draw_image(&mut self, _rect: Rect, _texture: crate::image::TextureId, _style: crate::image::ImageStyle) {
     }
 
+    /// 增加一次引用计数（"我也要用这张纹理"）。
+    ///
+    /// 默认空实现：不支持纹理的后端本来就没东西可管。
+    fn retain_texture(&mut self, _id: crate::image::TextureId) {}
+
+    /// 减少一次引用计数，归零时真正释放。
+    ///
+    /// 默认空实现（与 [`RenderCtx::retain_texture`] 配套）。
+    fn release_texture(&mut self, _id: crate::image::TextureId) {}
+
     /// 当前背景色（用于淡入/淡出遮罩）。
     ///
     /// 默认黑色：没有主题信息时至少能给出可用的中性遮罩色。
@@ -1121,6 +1131,18 @@ pub trait Widget {
     /// 副作用：允许任意，但**不得**再访问树（此时树已不包含该节点）。
     /// 注意：关闭浮层（`is_open=false`）**不会**触发卸载——只是不画不命中。
     fn on_unmount(&mut self) {}
+
+    /// 在卸载前申报"我占用了哪些纹理"。
+    ///
+    /// 为什么单独一个钩子而不是在 `on_unmount` 里直接释放：
+    /// 卸载时**手里没有 `RenderCtx`**（资源在后端手里），
+    /// 所以只能先记下来，等下一帧渲染时由树统一转交后端。
+    fn release_textures(&mut self, _out: &mut Vec<crate::image::TextureId>) {}
+
+    /// 转移或释放"我从别处借用了一张已有纹理"的所有权。
+    ///
+    /// 邻居接口：控件自己上传的纹理不需要它；只有"多个控件共享同一 id"时才需要。
+    fn acquire_textures(&mut self, _out: &mut Vec<crate::image::TextureId>) {}
 
     /// 是否处于已打开状态。关闭的浮层不参与绘制、命中与索引。
     ///
