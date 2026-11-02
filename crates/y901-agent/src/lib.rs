@@ -7,7 +7,7 @@
 //!
 //! `y901-ui` 从此不再有网络代码。
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 pub mod api;
 pub mod mcp;
 pub mod rpc;

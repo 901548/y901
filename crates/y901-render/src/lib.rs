@@ -23,7 +23,7 @@
 //! \uff08D3D11 + GDI \u4e0a\u5c4f\uff09    \uff08X11 \u4e0a\u5c4f\uff09
 //! ```
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 pub mod atlas;
 pub mod font;
 pub mod font_engine;

@@ -77,6 +77,7 @@ impl Default for LayoutCache {
 }
 
 impl LayoutCache {
+    /// 建立空缓存。
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
@@ -87,6 +88,7 @@ impl LayoutCache {
         }
     }
 
+    /// 统计信息（命中/未命中/节点数），用于评估缓存是否有效。
     pub fn stats(&self) -> LayoutStats {
         self.stats
     }
@@ -113,6 +115,7 @@ impl LayoutCache {
         self.dirty.clear();
     }
 
+    /// 清空缓存；主题或字体变化后必须调用，否则旧度量会被复用。
     pub fn clear(&mut self) {
         self.entries.clear();
         self.dirty.clear();
@@ -124,6 +127,7 @@ impl LayoutCache {
         self.entries.get(&id_key(id)).map(|e| e.size)
     }
 
+    /// 某节点在本次布局里是否需要重新测量。
     pub fn is_dirty(&self, id: &str) -> bool {
         self.dirty.contains(&id_key(id))
     }
@@ -478,6 +482,7 @@ pub fn content_rect(viewport: Rect, content: Size, offset: f32) -> Rect {
 
 // ============================ Flex 容器 ============================
 
+/// 一维弹性容器：按主轴排列子控件，支持 padding、gap 与弹性分配。
 pub struct Flex {
     id: String,
     axis: Axis,
@@ -497,6 +502,7 @@ pub struct Flex {
 }
 
 impl Flex {
+    /// 按主轴方向创建。
     pub fn new(id: impl Into<String>, axis: Axis) -> Self {
         let id = id.into();
         let key = id_key(&id);
@@ -514,39 +520,47 @@ impl Flex {
         }
     }
 
+    /// 水平排列（从左到右）。
     pub fn row(id: impl Into<String>) -> Self {
         Self::new(id, Axis::Horizontal)
     }
 
+    /// 垂直排列（从上到下）。
     pub fn column(id: impl Into<String>) -> Self {
         Self::new(id, Axis::Vertical)
     }
 
+    /// 设置内边距；子控件可用空间相应减少。
     pub fn padding(mut self, padding: Edges) -> Self {
         self.padding = padding;
         self
     }
 
+    /// 设置子控件之间的间距。
     pub fn gap(mut self, gap: f32) -> Self {
         self.gap = gap;
         self
     }
 
+    /// 设置背景色；`None` 时不画，避免不必要的填充。
     pub fn background(mut self, color: Color) -> Self {
         self.background = Some(color);
         self
     }
 
+    /// 设置自己在父容器里的尺寸约束。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
     }
 
+    /// 追加子控件并返回自身（链式构造）。
     pub fn push(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
         self
     }
 
+    /// 追加子控件（就地修改，用于动态增删）。
     pub fn push_boxed(&mut self, child: Box<dyn Widget>) {
         self.children.push(child);
     }
@@ -672,6 +686,7 @@ pub struct Stack {
 }
 
 impl Stack {
+    /// 创建一个单子节点容器（用于把任意控件塞进需要容器的位置）。
     pub fn new(id: impl Into<String>) -> Self {
         let id: String = id.into();
         let key = id_key(&id);
@@ -684,11 +699,13 @@ impl Stack {
         }
     }
 
+    /// 设置唯一子节点。
     pub fn push(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
         self
     }
 
+    /// 设置自己在父容器里的尺寸约束。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self

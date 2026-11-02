@@ -1052,3 +1052,27 @@ if !had_work && tree.dirty().is_empty() {
 —— 左上、中间（**不受脏区覆盖**）、右下三个独立子控件，
 只标左上与右下两块 → 与整窗重绘逐字节相等。
 变异检验：改回包围盒方案 → 测试立刻在 `(200,80)`（中间块）报错。
+
+### §42.5 lint 是锁住成果，不是推动工作
+
+在模块**还没归零**时打开 `#![warn(missing_docs)]`，会让 clippy 直接红（`missing_docs` 同时是
+编译器 lint），四条门禁里的两条立刻失效。
+
+真实事故：在 `y901-ui` 还差 154 项时打开该 lint，`cargo clippy` 从 0 warn 变成 154 warn。
+
+**正确顺序：模块归零 → 开 lint → 跑门禁验证。**
+
+现在的状态（全部归零后升级为 `deny`）：11 个 crate 的 `lib.rs` 都是
+
+```rust
+#![deny(missing_docs)]
+```
+
+用 `deny` 而不是 `warn`：以后新增公开 API 忘写文档会**编译失败**，而不是淹没在警告里。
+
+验证命令（任选其一）：
+
+```powershell
+RUSTFLAGS="-W missing_docs" cargo build --workspace   # 应为 0
+cargo doc --no-deps                                    # 打开 API 参考
+```

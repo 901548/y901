@@ -3,7 +3,7 @@
 //! 内容零丢失的 reflow：行尾 padding 不计入逻辑流（用 `len` 区分），
 //! 宽字符只会整字下推，光标用 `CursorAnchor` 的逻辑坐标跨重排存活。
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 use unicode_width::UnicodeWidthChar;
 
 /// 默认样式的固定下标。为什么要有它：空格/空白单元格占绝大多数，如果每次都去 `intern` 一遍，样式表会在启动时就被撑大。

@@ -31,6 +31,7 @@
 //! // tree.render(&mut backend);
 //! ```
 
+#![deny(missing_docs)]
 pub mod color;
 pub mod command;
 pub mod animation;

@@ -11,10 +11,15 @@ use crate::widget::Role;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum State {
     #[default]
+    /// 常态。
     Normal,
+    /// 悬停态（鼠标在上）。
     Hovered,
+    /// 按下态。
     Pressed,
+    /// 键盘焦点态。
     Focused,
+    /// 禁用态；同时应拒绝动作。
     Disabled,
     /// 持久选中态（按钮组单选）。**没有独立主题列**——由 Normal 向 Pressed 混色派生。
     Selected,
@@ -40,16 +45,24 @@ impl State {
 /// 一套视觉属性。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Style {
+    /// 前景色（文字/图形）。
     pub fg: Color,
+    /// 背景色。
     pub bg: Color,
+    /// 边框色。
     pub border: Color,
+    /// 圆角半径（像素）。
     pub radius: f32,
+    /// 内边距。
     pub padding: Edges,
+    /// 选区高亮色。
     pub selection: Color,
+    /// 光标颜色。
     pub caret: Color,
 }
 
 impl Style {
+    /// 只给前景与背景，其余取中性默认值——最常用的构造入口。
     pub const fn new(fg: Color, bg: Color) -> Self {
         Self {
             fg,
@@ -84,11 +97,13 @@ impl Style {
         }
     }
 
+    /// 设置内边距并返回自身。
     pub const fn with_padding(mut self, padding: Edges) -> Self {
         self.padding = padding;
         self
     }
 
+    /// 设置圆角半径并返回自身。
     pub const fn with_radius(mut self, radius: f32) -> Self {
         self.radius = radius;
         self
@@ -103,6 +118,7 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// 槽位数。新增角色必须落在这几个槽里，否则会被折叠到 panel。
     pub const SLOTS: usize = 6;
 
     /// 把任意角色映射到槽位；未知角色落到 "panel"。
@@ -119,6 +135,7 @@ impl Theme {
         0
     }
 
+    /// 槽位名；主题文件与调试输出用它做稳定标识。
     pub const fn slot_name(i: usize) -> &'static str {
         match i {
             0 => "panel",

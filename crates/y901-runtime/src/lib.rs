@@ -12,7 +12,7 @@
 //! y901-app           -> y901-demos / y901-backend-win32
 //! ```
 
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 use y901_agent::Policy;
 use y901_ui::{Command, EventResult, Key, Modifiers, MouseButton, Size, UiEvent, UiTree};
 

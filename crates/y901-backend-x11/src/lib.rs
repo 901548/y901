@@ -19,6 +19,7 @@
 //! - 所有请求/响应都必须 4 字节对齐（不够就补 0）；
 //! - 事件固定 **32 字节**。
 
+#![deny(missing_docs)]
 pub mod decode;
 pub mod encode;
 pub mod keys;

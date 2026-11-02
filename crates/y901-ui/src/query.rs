@@ -23,6 +23,7 @@ enum Clause {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Query {
     clauses: Vec<Clause>,
+    /// 结果条数上限；`None` = 不限。上限存在的理由是 Agent 一次拿几千条没有意义。
     pub limit: Option<usize>,
 }
 

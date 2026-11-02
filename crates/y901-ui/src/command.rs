@@ -9,15 +9,24 @@
 use crate::json::Json;
 
 #[derive(Clone, Debug, PartialEq)]
+/// 组件与外界之间唯一的\「意图\「通道。框架只搬运、不解释语义。
 pub enum Command {
     /// 请某个节点执行一个动作。框架负责找到节点并投递 `UiEvent::Action`。
     Node {
+        /// 目标节点 id；`Node` 命令由树路由到该节点并转成 `UiEvent::Action`。
         target: String,
+        /// 动作名，由组件自己解释。
         action: String,
+        /// 动作参数。
         args: Json,
     },
     /// 请应用层处理。框架原样上抛，不理解语义。
-    App { name: String, args: Json },
+    App {
+        /// 应用级命令名；框架不理解它的含义，原样交给 `Host::command`。
+        name: String,
+        /// 命令参数。
+        args: Json,
+    },
 }
 
 impl Command {

@@ -5,17 +5,25 @@
 use std::fmt::Write as _;
 
 #[derive(Clone, Debug, PartialEq, Default)]
+/// 极简 JSON（只做序列化/反序列化，不做模式校验）。为什么不用 serde：框架要求零重量级依赖，而 Agent 协议用到的类型屈指可数。
 pub enum Json {
     #[default]
+    /// null。
     Null,
+    /// 布尔。
     Bool(bool),
+    /// 数值（统一 f64；整数在协议层再收敛）。
     Num(f64),
+    /// 字符串。
     Str(String),
+    /// 数组。
     Arr(Vec<Json>),
+    /// 对象；用有序 `Vec` 而不是 `HashMap` 是为了输出稳定（同输入必得同字节）。
     Obj(Vec<(String, Json)>),
 }
 
 impl Json {
+    /// 空对象；配合 `set` 链式构造。
     pub fn obj() -> Json {
         Json::Obj(Vec::new())
     }
@@ -32,6 +40,7 @@ impl Json {
         self
     }
 
+    /// 按 key 取值；不是对象或没有该键都返回 `None`。
     pub fn get(&self, key: &str) -> Option<&Json> {
         match self {
             Json::Obj(map) => map.iter().find(|(k, _)| k == key).map(|(_, v)| v),
@@ -39,6 +48,7 @@ impl Json {
         }
     }
 
+    /// 取字符串视图（不复制）。
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Json::Str(s) => Some(s),
@@ -46,6 +56,7 @@ impl Json {
         }
     }
 
+    /// 取布尔。
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Json::Bool(b) => Some(*b),
@@ -53,6 +64,7 @@ impl Json {
         }
     }
 
+    /// 取数值。
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Json::Num(n) => Some(*n),
@@ -67,6 +79,7 @@ impl Json {
         out
     }
 
+    /// 解析一段 JSON 文本。`Err` 带位置信息，便于定位协议错误。
     pub fn parse(text: &str) -> Result<Json, String> {
         let mut p = Parser {
             bytes: text.as_bytes(),

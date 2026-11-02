@@ -26,6 +26,7 @@ pub struct TextBuffer {
 }
 
 impl TextBuffer {
+    /// 建立空文本编辑缓冲。
     pub fn new() -> Self {
         Self::default()
     }
@@ -43,18 +44,22 @@ impl TextBuffer {
 
     // ---------- 只读 ----------
 
+    /// 当前文本。
     pub fn text(&self) -> &str {
         &self.text
     }
 
+    /// 字节长度（UTF-8）；分配缓冲时用它。
     pub fn len_bytes(&self) -> usize {
         self.text.len()
     }
 
+    /// 字符数（不是字节数）；光标移动与选区都按字符计。
     pub fn len_chars(&self) -> usize {
         self.text.chars().count()
     }
 
+    /// 是否为空。
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
@@ -80,6 +85,7 @@ impl TextBuffer {
         }
     }
 
+    /// 是否存在选区；Ctrl+C 据此决定\「复制还是把信号透给 shell\「。
     pub fn has_selection(&self) -> bool {
         self.anchor != self.cursor
     }
@@ -115,11 +121,13 @@ impl TextBuffer {
         self.cursor = self.snap(cursor);
     }
 
+    /// 全选。
     pub fn select_all(&mut self) {
         self.anchor = 0;
         self.cursor = self.text.len();
     }
 
+    /// 清除选区（保留文本）。
     pub fn clear_selection(&mut self) {
         self.anchor = self.cursor;
     }
