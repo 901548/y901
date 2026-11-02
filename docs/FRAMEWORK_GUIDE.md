@@ -576,6 +576,139 @@ if need_layout || external > 0 {
 - 重排后节点位置可能变化，只标旧矩形会漏画新位置的节点；
 - 整窗重绘是唯一能保证"重排后所有变化节点都被画到"的方式。
 
+## §40 交互能力清单（本轮新增）
+
+以下能力都是**默认空实现 / 默认 `None`** 的可选钩子：不实现就不受影响，实现即生效。
+
+### §40.1 容器裁剪子控件：`Widget::children_clip(cell_rect)`
+
+```rust
+fn children_clip(&self, cell_rect: Rect) -> Option<Rect> { None }  // 默认不裁剪
+```
+
+返回 `Some(r)` 时，**该子控件**的绘制被裁剪到 `r`。与 `clip()` 的区别：
+
+| 钩子 | 作用域 | 谁在用 |
+|---|---|---|
+| `clip()` | 节点自身 + 整棵子树 | ScrollView / ListView / Overlay（视口） |
+| `children_clip(cell)` | **每个子控件各自**的格子 | Grid（固定列宽是硬约束） |
+
+注意：容器**不要自己遍历子控件绘制** —— 树会逐个节点渲染，容器再画一遍会**双重绘制**
+（半透明变深、文字发虚）。`Grid` 曾因此被裁剪测试抓出 bug。
+
+### §40.2 控件关闭浮层：`EventCtx::request_close_popup(id)`
+
+```rust
+ctx.request_close_popup(format!("{id}__tooltip"));
+```
+
+控件能用 `request_popup` 开浮层，也必须能自己关（Tooltip 的"鼠标离开就消失"依赖它）。
+树在 `finish_dispatch` 里**先执行关闭、再执行打开**，避免同一次分发里"新浮层被旧请求关掉"。
+传入不存在的 id 不会 panic。
+
+### §40.3 测试访问浮层/节点：`popup_as_mut::<T>()` / `node_as_mut::<T>()`
+
+```rust
+let item = tree.popup_as_mut::<Menu>("ctx__menu")?.item_rect_at(0)?;
+```
+
+浮层不在主树上，`find_path` 找不到它。这两个方法按类型向下转型，**类型或 id 不对返回
+`None`**（不 panic）。控件需要实现 `Widget::as_any_mut` 才能被转。
+
+### §40.4 hover：`MouseEnter` / `MouseLeave` + 冒泡 + `is_hovered`
+
+- 树在命中目标变化时派发：**先给旧目标发 Leave，再给新目标发 Enter**；
+- 事件**冒泡到祖先**（目标 → 根，**含根节点**）。这是包装型控件（TooltipHost）能感知子控件
+  悬停的前提；跳过根（`k=0`）会让"包装器恰好是根"的情形永远收不到事件；
+- **指针捕获期间不更新 hover**：拖拽中划过别的控件不应弹 tooltip；
+- 渲染期查询：`ctx.is_hovered(id)`（由 `UiTree::render` 注入快照）。
+
+### §40.5 动画与变换
+
+```rust
+ctx.animation(key)                  // 0..=1 进度，默认 1.0（"没有动画"）
+ctx.push_transform(origin, scale);  // 以 origin 为中心的缩放
+ctx.pop_transform();
+```
+
+`UiTree::animate(key, Animate, node)` 同 key **打断**旧动画；`retarget` 从**当前值**续，
+避免中途改目标时回跳。`tick_animations(dt)` 返回"是否还有动画在跑"——`false` 时主循环
+可回休眠（空闲零 CPU）。
+
+已知限制：**文本只跟随平移、不缩放**（缩放需重光栅化或重采样）。
+
+### §40.6 纹理与图片
+
+```rust
+let id = ctx.upload_texture(w, h, &rgba);   // 默认返回 INVALID(0)
+ctx.draw_image(rect, id, style);            // 默认什么都不画
+```
+
+- `ImageStyle::layout(target, src_w, src_h)` 是**纯函数**，把 `Fill/Contain/Cover/None`
+  一次算成 `(目标子矩形, 源子矩形)`；后端只采样，不重复推导 fit 数学；
+- 采样用像素中心对齐（`sx - 0.5`），否则 2×2 纹理放大后四角颜色会偏；
+- 生命周期：控件在 `release_textures(&mut Vec<TextureId>)` 里上报，树在下一帧渲染开头
+  交给 `ctx.release_texture(id)`；后端按**引用计数**归零才真正释放。
+
+## §41 像素哈希门禁（`scripts/hash-gate.ps1`）
+
+### 为什么不再硬编码哈希常量
+
+`font_3c_pixels` 用 `CreateWindowExW(..., options.width, options.height, WS_OVERLAPPEDWINDOW)`
+创建窗口，而渲染用 `GetClientRect` 的**客户区**。两者不同：
+
+```
+窗口 400x220  →  客户区 378x164   （水平边框约 22px、标题栏约 56px）
+```
+
+边框厚度随 DPI / 主题 / DWM 状态变化，客户区尺寸随之变化，**像素哈希必然变**。
+项目早期观测到 `382x173 / 0xF38B9C1AB8A877E2`，本轮观测到 `378x164 / 0xF4C92C36969FEC48`。
+把旧值写死成门禁常量，只会在换环境时产生**假红灯**。
+
+### 现在的判据
+
+基线存在 `target/hash-baseline.txt`，内容形如 `hash=0x... size=WxH`：
+
+| 情况 | 退出码 | 含义 |
+|---|---|---|
+| 哈希相同 | 0 | 通过 |
+| 哈希不同、尺寸不同 | 2 | **可解释**：客户区变了，非渲染回归；确认无误后 `-Update` |
+| 哈希不同、尺寸相同 | 1 | **渲染回归**，必须排查 |
+
+`-Update` 刷新基线。脚本内**没有任何哈希字面量**。
+
+## §42 工程纪律补遗
+
+### §42.1 部分门禁 = 没有门禁
+
+门禁必须同时满足四项：**0 failed + clippy 0 warn + clippy 0 err + 哈希（同尺寸下）一致**。
+
+真实事故：提交 `bbdbd89` 时门禁只检查了 `clippy err`，于是带着 **5 个 warning** 提交了；
+另一提交 `746de7d` 在 `645 passed, 1 failed` 红灯下被提交（"再跑一次就好了"不是流程）。
+**只要漏掉一条判据，"验证后提交"就会变成看起来在执行的空动作。**
+
+### §42.2 度量方法本身可能是测试的 bug
+
+同一类错误在本项目中出现过 **6 次**，形态一致——**基准选错**：
+
+| 场景 | 错误基准 | 症状 |
+|---|---|---|
+| 粗体墨量 | 用全局 `DEFAULT_BG` 当背景 | 反色后背景像素被算成墨迹（234 vs 0） |
+| 选区反色 | 整块像素比较 | 字形下伸部溢出到相邻行 → "选区外也变了" |
+| 进度条宽度 | 扫描整幅画布"非轨道色" | 半条量出 150px（应为 50px） |
+| 弹层淡入 | 全屏非背景像素 | 测的是"画布被重刷"（0 → 45948），不是"气泡出现" |
+| 弹层气泡 | 在 (0,0) 取背景 | (0,0) 在气泡内部 → 计数恒为 0 |
+| 菜单像素 | 非背景像素 | Menu 覆盖 25% 黑色遮罩 → 弹出帧里没有可用背景基准 |
+
+**结论：像素断言失败时，先怀疑"基准对不对"，再怀疑实现。** 常用手法：
+把扫描限制在被测矩形内、从远离被测物的角落取背景、或在同一会话内做帧对比。
+
+### §42.3 "画了但看不见" ≡ "没画"
+
+`TextStyle` 曾 derive `Default`，于是 `fg = Color::TRANSPARENT` —— 用默认样式的文字
+**完全不可见**，从像素上看就像"后端不支持文字"。我据此误判 SoftBackend 不画字形。
+现在 `TextStyle::default()` 的前景是**白色**，并有回归测试（`soft_glyphs.rs`）盯着。
+
 **代价**：后台每帧标脏 = 每帧全窗重绘。如果未来出现"只重绘不重排"的高频场景
 （高频进度条、光标闪烁），可以引入 `PendingInvalidation::RedrawOnly(id)` 变体：
 只标该节点矩形、不触发 layout。**当前不加**——没有真实场景证明它必需。
