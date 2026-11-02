@@ -2078,11 +2078,24 @@ impl UiTree {
                 //
                 // 为什么用 `dispatch_to` 而不是在当前遍历里附带：
                 // Enter/Leave 是**定向**事件，它们不应该像 MouseMove 那样走命中链。
+                // **冒泡到祖先**：包装型控件（如 TooltipHost）的命中点在子控件上，
+                // 若只发给命中节点，它永远不知道自己被悬停。
+                // 顺序：目标 → 根（与 DOM 的 mouseover/mouseout 一致）。
                 if let Some(old_id) = old {
-                    let _ = self.dispatch_to(&old_id, &UiEvent::MouseLeave);
+                    if let Some(path) = self.find_path(&old_id) {
+                        // 从"**目标 → 根**" 逐层派发：`k=0` 就是根，不能省略，
+                        // 否则"包装型控件自己就是根"的情形永远收不到事件。
+                        for k in (0..=path.len()).rev() {
+                            let _ = self.dispatch_target_only(&path[..k], &UiEvent::MouseLeave);
+                        }
+                    }
                 }
                 if let Some(new_id) = new {
-                    let _ = self.dispatch_to(&new_id, &UiEvent::MouseEnter);
+                    if let Some(path) = self.find_path(&new_id) {
+                        for k in (0..=path.len()).rev() {
+                            let _ = self.dispatch_target_only(&path[..k], &UiEvent::MouseEnter);
+                        }
+                    }
                 }
             }
             }
@@ -2281,6 +2294,11 @@ impl UiTree {
 
         // 组件在事件里提交的浮层请求：到这里才真正构造 + 挂载。
         // 工厂已经拿到了需要的数据，此时再调用不会与 `&mut tree` 冲突。
+        // 先关、后开：同一次分发里同时要求关与开时，
+        // 先执行关能避免"新浮层被旧请求关掉"。
+        for id in std::mem::take(&mut ctx.close_popup_requests) {
+            self.close_popup(&id);
+        }
         for req in ctx.popup_requests.drain(..) {
             let widget = (req.factory)();
             if req.modal {

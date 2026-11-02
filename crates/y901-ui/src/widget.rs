@@ -732,6 +732,8 @@ pub struct EventCtx {
     /// 本次分发中组件提交的浮层请求（分发结束后由 `UiTree` 统一挂载）。
     #[doc(hidden)]
     pub popup_requests: Vec<PopupRequest>,
+    /// 请求关闭的浮层 id（分发结束后由树执行）。
+    pub close_popup_requests: Vec<String>,
 }
 
 impl EventCtx {
@@ -752,6 +754,7 @@ impl EventCtx {
             focus_vetoed: false,
             ime_candidate: None,
             popup_requests: Vec::new(),
+            close_popup_requests: Vec::new(),
         }
     }
 
@@ -844,6 +847,16 @@ impl EventCtx {
             anchor,
             modal: false,
         });
+        self.redraw = true;
+    }
+
+    /// 请求关闭一个浮层。
+    ///
+    /// 为什么需要它：控件可以通过 `request_popup` **开**浮层，
+    /// 但没有回手就只能等外部点击关闭——Tooltip 必须"鼠标离开就消失"。
+    /// 传入不存在的 id 不会 panic（树侧返回 false）。
+    pub fn request_close_popup(&mut self, id: impl Into<String>) {
+        self.close_popup_requests.push(id.into());
         self.redraw = true;
     }
 
