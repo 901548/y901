@@ -456,6 +456,84 @@ mod tests {
         n
     }
 
+    /// 贴近屏幕底部的锚点：Tooltip 应翻到**上方**。
+    ///
+    /// 复用 `open_popup` 的边界翻转逻辑（不是 Tooltip 自己的实现）——
+    /// 若这里失败，说明翻转逻辑有问题，应去查 `open_popup`/`push_popup` 的布局。
+    #[test]
+    fn tooltip_flips_above_when_there_is_no_room_below() {
+        // 把宿主放在视口最底部附近
+        struct BottomHost {
+            rect: Rect,
+            children: Vec<Box<dyn Widget>>,
+        }
+        impl Widget for BottomHost {
+            fn id(&self) -> &str {
+                "bottom"
+            }
+            fn measure(
+                &mut self,
+                _m: &dyn TextMetrics,
+                c: Constraints,
+                _cache: &mut LayoutCache,
+            ) -> Size {
+                c.constrain(Size::new(W as f32, H as f32))
+            }
+            fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut LayoutCache) {
+                self.rect = rect;
+                // 只给底部 20px 高的位置
+                let r = Rect::new(rect.x, rect.bottom() - 20.0, 40.0, 20.0);
+                for ch in self.children.iter_mut() {
+                    ch.arrange(r, m, cache);
+                }
+            }
+            fn rect(&self) -> Rect {
+                self.rect
+            }
+            fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult {
+                EventResult::Ignored
+            }
+            fn children(&self) -> &[Box<dyn Widget>] {
+                &self.children
+            }
+            fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+                Some(&mut self.children)
+            }
+            fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
+            fn semantics(&self) -> Semantics {
+                Semantics::default()
+            }
+        }
+
+        let mut tree = UiTree::new(Box::new(BottomHost {
+            rect: Rect::ZERO,
+            children: vec![Box::new(host(5))],
+        }));
+        tree.layout(Size::new(W as f32, H as f32), &soft());
+
+        // 悬停到底部那个宿主上
+        tree.dispatch(&UiEvent::MouseMove {
+            pos: Pos::new(20.0, H as f32 - 10.0),
+        });
+        assert!(
+            poll_until(&mut tree, 300, |t| !t.popups().is_empty()),
+            "底部锚点也应能弹出"
+        );
+        tree.layout(Size::new(W as f32, H as f32), &soft());
+
+        let tip = tree.popup_rect("h__tooltip").expect("浮层应有矩形");
+        let anchor_y = H as f32 - 20.0;
+        eprintln!(
+            "[tooltip] 锚点 y={anchor_y}，浮层 y={}，高={}",
+            tip.y, tip.h
+        );
+        assert!(
+            tip.y < anchor_y,
+            "底部空间不足时 Tooltip 应翻到上方：浮层 y={} 应小于锚点 y={anchor_y}",
+            tip.y
+        );
+    }
+
     #[test]
     fn mouse_down_does_not_open_anything() {
         let mut tree = UiTree::new(Box::new(host(5)));

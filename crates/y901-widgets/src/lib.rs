@@ -24,6 +24,7 @@
 pub mod button;
 pub mod label;
 pub mod checkbox;
+pub mod context_menu;
 pub mod image;
 pub mod list;
 pub mod list_view;

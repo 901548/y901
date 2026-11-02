@@ -13,6 +13,9 @@ const ITEM_H: f32 = 26.0;
 /// 菜单面板内边距。
 const PAD: f32 = 6.0;
 
+/// 选中回调类型。
+type SelectCallback = Box<dyn Fn(usize, &str)>;
+
 pub struct Menu {
     id: String,
     items: Vec<String>,
@@ -26,6 +29,8 @@ pub struct Menu {
     hover: Option<usize>,
     highlighted: usize,
     item: FlexItem,
+    /// 选中回调（与 `action` 并存：前者给应用层，后者给构造者）。
+    on_select: Option<SelectCallback>,
 }
 
 impl Menu {
@@ -44,6 +49,7 @@ impl Menu {
             hover: None,
             highlighted: 0,
             item: FlexItem::default(),
+            on_select: None,
         }
     }
 
@@ -63,6 +69,43 @@ impl Menu {
     pub fn action(mut self, name: impl Into<String>) -> Self {
         self.action = name.into();
         self
+    }
+
+    /// 选中某项时回调（参数：索引、标题）。
+    ///
+    /// 为什么需要它：`action` 把命令发给**应用层**，
+    /// 而“右键菜单”往往只想在构造处接一个回调，不得不去应用层转一圈。
+    pub fn on_select(mut self, f: impl Fn(usize, &str) + 'static) -> Self {
+        self.on_select = Some(Box::new(f));
+        self
+    }
+
+    /// 第 `i` 项的屏幕矩形（布局后有效）。
+    ///
+    /// 对外可见的理由：鼠标点选是菜单的主要交互，
+    /// 使用方与测试需要知道"点哪里能命中第 i 项"，不应去猜。
+    pub fn item_rect_at(&self, i: usize) -> Option<Rect> {
+        if i >= self.items.len() {
+            return None;
+        }
+        Some(self.item_rect(i))
+    }
+
+    /// 确认选中第 `i` 项：先回调、再发命令、最后关闭自己与它所在的浮层。
+    ///
+    /// 为什么要 `request_close_popup`：菜单作为**浮层内容**时，`self.close()`
+    /// 只改自己的 `open` 标志，浮层本身仍在树上——看起来就是"菜单没关掉"。
+    fn commit_selection(&mut self, ctx: &mut EventCtx, i: usize) {
+        let label = self.items.get(i).cloned().unwrap_or_default();
+        if let Some(cb) = self.on_select.as_ref() {
+            cb(i, &label);
+        }
+        ctx.emit_app(
+            self.action.clone(),
+            Json::obj().set("index", i as u32).set("label", label),
+        );
+        ctx.request_close_popup(self.id.clone());
+        self.close();
     }
 
     /// 打开菜单，并把高亮重置到第一项。
@@ -172,13 +215,7 @@ impl Widget for Menu {
                     return EventResult::Ignored;
                 }
                 let i = index as usize;
-                ctx.emit_app(
-                    self.action.clone(),
-                    Json::obj()
-                        .set("index", i as u32)
-                        .set("label", self.items[i].clone()),
-                );
-                self.close();
+                self.commit_selection(ctx, i);
                 // 关闭会改变 is_open：必须重建索引，否则该项仍留在 paint_order 里
                 EventResult::Relayout
             }
@@ -196,12 +233,7 @@ impl Widget for Menu {
                     if let Some(i) =
                         (0..self.items.len()).find(|i| self.item_rect(*i).contains(*pos))
                     {
-                        ctx.emit_app(
-                            self.action.clone(),
-                            Json::obj()
-                                .set("index", i as u32)
-                                .set("label", self.items[i].clone()),
-                        );
+                        self.commit_selection(ctx, i);
                     }
                 }
                 // 无论点哪里，菜单都关闭；并吞掉这次点击，避免穿透到底层
