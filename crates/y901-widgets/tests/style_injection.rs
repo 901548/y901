@@ -290,6 +290,7 @@ fn scrollbar_style_is_applied() {
 }
 
 /// 让 `EventCtx`/`EventResult` 等导入被使用（否则 clippy 报 unused）。
+// 测试 API：测试内的类型见证/未用常量，仅测试代码引用
 #[allow(dead_code)]
 fn _unused(_c: &mut EventCtx, _r: EventResult, _m: Modifiers, _c2: Constraints) {}
 

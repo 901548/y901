@@ -161,5 +161,6 @@ impl RenderCtx for Sink {
 }
 
 /// 让未使用的导入不告警。
+// 测试 API：测试内的类型见证/未用常量，仅测试代码引用
 #[allow(dead_code)]
 fn _unused(_f: FlexItem) {}

@@ -224,6 +224,7 @@ pub fn flatten_glyph(
 }
 
 /// 未使用的占位（保留 `Line` 的辅助方法以备扩展）。
+// 测试 API：`_unused`：类型见证，保证 `Line` 仍被引用
 #[allow(dead_code)]
 fn _unused(l: Line) -> bool {
     l.is_horizontal() || l.is_degenerate()

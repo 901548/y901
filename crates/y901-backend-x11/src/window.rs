@@ -54,6 +54,7 @@ struct Cursors {
     /// 为什么暂不 CloseFont：字体在**连接关闭时由服务端自动回收**，
     /// 而光标在窗口关闭前一直要用它（提前关会让光标变成 X 默认）。
     /// 保留字段供将来"字体切换"时复用。
+    // 诊断 API：字体 id 由 `XSetFont` 设置后保留，供 `TextItem` 排字使用
     #[allow(dead_code)]
     font: u32,
     /// 三个光标 ID，顺序：Default / Text / Pointer

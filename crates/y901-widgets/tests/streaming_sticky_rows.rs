@@ -326,5 +326,6 @@ fn invalidate_row_out_of_range_returns_none() {
 }
 
 /// 让未使用的导入不触发告警（约束/事件类型在部分测试里用不到）。
+// 测试 API：测试内的类型见证/未用常量，仅测试代码引用
 #[allow(dead_code)]
 fn _unused(_c: Constraints, _e: &mut EventCtx, _r: EventResult, _s: Semantics, _cell: &Cell<u32>) {}

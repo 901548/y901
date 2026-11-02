@@ -29,6 +29,8 @@ const THUMB: f32 = 16.0;
 /// 键盘步进。
 const STEP: f32 = 0.05;
 /// 命中滑块的水平容差（半径 + 2px）。
+// 真死代码：拖拽用整个轨道的 rect 判命中，不需要“带宽度的提帝区”；
+// 保留它仅为 `hits_thumb` 的测试可读性，下一轮一并删除。
 #[allow(dead_code)]
 const HIT_R: f32 = THUMB * 0.5 + 2.0;
 
@@ -112,6 +114,7 @@ impl Slider {
     ///
     /// 目前只在测试里用：鼠标按下时整个矩形都算命中（点轨道也要跳转），
     /// 但"点滑块只跟随拖拽、点轨道直接跳"这种更细的手感分支需要它。
+    // 测试 API：仅 slider 单元测试调用，作为“命中判定语义”的可执行文档。
     #[allow(dead_code)]
     fn hits_thumb(&self, x: f32, y: f32) -> bool {
         let t = self.thumb();

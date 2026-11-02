@@ -113,6 +113,7 @@ impl y901_ui::RenderCtx for Null {
 }
 
 /// 让 `Button` 的 `Widget` 导入被使用（否则 clippy 会报 unused import）。
+// 测试 API：测试内的类型见证/未用常量，仅测试代码引用
 #[allow(dead_code)]
 fn _assert_widget_object_safe(b: &mut Button) -> &mut dyn Widget {
     b

@@ -6,6 +6,7 @@
 //!
 //! 框架和组件都看不到 D3D11 类型，只看到 `RenderCtx`。
 
+// 诊断 API：`pub mod d3d11`：内部模块对外可见仅为测试访问 `Gfx` 诊断接口
 #[allow(dead_code)] // Atlas/Placement 是给多页图集预留的 API，暂由 SkylinePacker 先行使用
 pub mod d3d11;
 pub mod font;
@@ -309,11 +310,13 @@ impl D3dBackend {
     }
 
     /// 当前帧的实例数（诊断用）。
+    // 诊断 API：`instance_count()`：诊断，测试断言提交实例数
     #[allow(dead_code)] // 诊断接口，主循环不调用
     pub fn instance_count(&self) -> usize {
         self.instances.len()
     }
 
+    // 诊断 API：`live_objects()`：COM 泄漏诊断，测试断言"用完全部释放"
     #[allow(dead_code)] // 诊断接口，主循环不调用
     /// 当前存活的 COM 对象计数（只增不减说明有泄漏）。测试用它断言"用完全部释放"，比肉眼看画面可靠。
     pub fn live_objects() -> isize {

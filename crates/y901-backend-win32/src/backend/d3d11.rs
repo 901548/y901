@@ -538,6 +538,10 @@ unsafe fn vtbl<T>(object: *mut c_void) -> &'static T {
     &*(*(object as *mut *const T))
 }
 
+/// # Safety
+///
+/// `self.ptr` 要么为空、要么是一个**仍持有引用**的合法 COM 接口指针；本函数按 COM 规则调用
+/// `Release` 并把指针置空，因此同一对象不得被并发释放（`&mut self` 已保证串行）。
 unsafe fn release(object: *mut c_void) {
     if object.is_null() {
         return;
@@ -565,6 +569,10 @@ macro_rules! com_type {
         pub struct $name(*mut c_void);
 
         impl $name {
+            /// # Safety
+            ///
+            /// `raw` 必须是某次 `Create*`/`Query*` 返回、且**所有权尚未转交他人**的接口指针；
+            /// 本函数接管所有权（`Drop` 时释放）。传 null 返回 `None`，不会 panic。
             unsafe fn from_raw(ptr: *mut c_void) -> Option<Self> {
                 if ptr.is_null() {
                     return None;
@@ -784,6 +792,10 @@ struct BlobVtbl {
 }
 
 impl Blob {
+    /// # Safety
+    ///
+    /// `self` 必须是 `D3DCompile` 成功返回的 blob；blob 存活期间其缓冲只读有效，
+    /// 返回的切片不得越过 blob 的生命周期使用。
     unsafe fn bytes(&self) -> &[u8] {
         let table = vtbl::<BlobVtbl>(self.as_ptr());
         let ptr = (table.get_buffer_pointer)(self.as_ptr()) as *const u8;
@@ -797,6 +809,11 @@ impl Blob {
 }
 
 impl Device {
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_buffer(&self, desc: &BufferDesc) -> Result<Buffer, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -807,6 +824,11 @@ impl Device {
         Buffer::from_raw(raw).ok_or_else(|| "CreateBuffer returned null".into())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_render_target(&self, texture: &Texture) -> Result<RenderTarget, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -821,6 +843,11 @@ impl Device {
         RenderTarget::from_raw(raw).ok_or_else(|| "CreateRenderTargetView returned null".into())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_input_layout(
         &self,
         elements: &[InputElementDesc],
@@ -842,6 +869,11 @@ impl Device {
         InputLayout::from_raw(raw).ok_or_else(|| "CreateInputLayout returned null".into())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_vertex_shader(&self, code: &[u8]) -> Result<VertexShader, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -858,6 +890,11 @@ impl Device {
         VertexShader::from_raw(raw).ok_or_else(|| "CreateVertexShader returned null".into())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_pixel_shader(&self, code: &[u8]) -> Result<PixelShader, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -874,6 +911,11 @@ impl Device {
         PixelShader::from_raw(raw).ok_or_else(|| "CreatePixelShader returned null".into())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_blend_state(&self, desc: &BlendDesc) -> Result<BlendState, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -884,6 +926,11 @@ impl Device {
         BlendState::from_raw(raw).ok_or_else(|| "CreateBlendState returned null".into())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_rasterizer_state(
         &self,
         desc: &RasterizerDesc,
@@ -897,6 +944,11 @@ impl Device {
         RasterizerState::from_raw(raw).ok_or_else(|| "CreateRasterizerState returned null".into())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_texture_2d(
         &self,
         desc: &Texture2DDesc,
@@ -915,6 +967,11 @@ impl Device {
     ///
     /// 与 [`Device::create_texture_2d`] 的唯一区别：`pInitialData = null`。
     /// 自持 RT 每帧会被清屏覆盖，因此不需要初始内容。
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_texture_2d_empty(&self, desc: &Texture2DDesc) -> Result<Texture, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -925,6 +982,11 @@ impl Device {
         Texture::from_raw(raw).ok_or_else(|| "CreateTexture2D returned null".into())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_shader_resource_view(
         &self,
         texture: &Texture,
@@ -943,6 +1005,11 @@ impl Device {
             .ok_or_else(|| "CreateShaderResourceView returned null".into())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
+    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
+    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
     unsafe fn create_sampler_state(&self) -> Result<SamplerState, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let desc = SamplerDesc {
@@ -967,6 +1034,10 @@ impl Device {
 }
 
 impl Context {
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn set_render_target(&self, target: Option<&RenderTarget>) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         match target {
@@ -978,11 +1049,19 @@ impl Context {
         }
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn clear(&self, target: &RenderTarget, color: [f32; 4]) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.clear_render_target_view)(self.as_ptr(), target.as_ptr(), color.as_ptr());
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn set_viewport(&self, width: f32, height: f32) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         let viewport = Viewport {
@@ -996,12 +1075,20 @@ impl Context {
         (table.rsset_viewports)(self.as_ptr(), 1, &viewport);
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn update_constant_buffer(&self, buffer: &Buffer, data: *const c_void) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.update_subresource)(self.as_ptr(), buffer.as_ptr(), 0, null(), data, 0, 0);
     }
 
     /// 整张纹理更新（mip 0）。
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn update_subresource(&self, texture: &Texture, data: &SubresourceData) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.update_subresource)(
@@ -1017,6 +1104,10 @@ impl Context {
 
     /// 局部区域更新：用 D3D11_BOX 限定写入范围。
     #[allow(clippy::too_many_arguments)]
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn update_subresource_region(
         &self,
         texture: &Texture,
@@ -1073,11 +1164,19 @@ unsafe fn unmap(&self, buffer: &Buffer) {
     }
 
     /// 解除对一个**纹理**资源的 Map（`Unmap` 接受任意 `ID3D11Resource`）。
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn unmap_texture(&self, texture: &Texture) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.unmap)(self.as_ptr(), texture.as_ptr(), 0);
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn set_pipeline(&self, pipeline: &Pipeline) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
 
@@ -1109,18 +1208,30 @@ unsafe fn unmap(&self, buffer: &Buffer) {
         (table.rsset_state)(self.as_ptr(), pipeline.rasterizer.as_ptr());
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn draw_instances(&self, count: u32, start_offset: u32) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.draw_instanced)(self.as_ptr(), 6, count, start_offset, 0);
     }
 
     /// 把图片 SRV 绑到 t1（图集在 t0，互不影响）。
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn set_ps_image_texture(&self, srv: &ShaderResourceView) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         let views = [srv.as_ptr()];
         (table.psset_shader_resources)(self.as_ptr(), 1, 1, views.as_ptr());
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn set_ps_texture(&self, srv: &ShaderResourceView, sampler: &SamplerState) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         let views = [srv.as_ptr()];
@@ -1133,6 +1244,7 @@ unsafe fn unmap(&self, buffer: &Buffer) {
     ///
     /// 输入：`rect`（像素，右/下为**开区间**）。
     /// 副作用：之后所有 draw 只影响该矩形内的像素。
+    // 诊断 API：com_type! 生成的接口别名只在内部与测试里具名使用；删除会削弱类型检查
     #[allow(dead_code)]
         /// # Safety
     ///
@@ -1143,6 +1255,10 @@ unsafe fn set_scissor(&self, rect: RectI32) {
     }
 
     /// 整资源拷贝（`CopyResource`）：要求同格式、同尺寸、同 mip 数。
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn copy_resource(&self, dst: *mut c_void, src: *mut c_void) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.copy_resource)(self.as_ptr(), dst, src);
@@ -1151,6 +1267,10 @@ unsafe fn set_scissor(&self, rect: RectI32) {
     /// 以只读方式 Map 一个 staging 纹理。
     ///
     /// 返回：映射指针与行跨度（`row_pitch`）；失败返回 `None`。
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn map_read(&self, texture: &Texture) -> Option<MappedSubresource> {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         let mut mapped: MappedSubresource = std::mem::zeroed();
@@ -1172,6 +1292,10 @@ unsafe fn set_scissor(&self, rect: RectI32) {
     /// 只换像素着色器（保留 VS / InputLayout / 混合 / 光栅化状态）。
     ///
     /// 用途：blit 阶段复用同一套顶点管线，只把 `ps_main` 换成 `ps_blit`。
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn set_ps_shader(&self, ps: &PixelShader) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.psset_shader)(self.as_ptr(), ps.as_ptr(), null(), 0);
@@ -1179,6 +1303,10 @@ unsafe fn set_scissor(&self, rect: RectI32) {
 }
 
 impl SwapChain {
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn back_buffer(&self, index: u32) -> Result<Texture, String> {
         let table = vtbl::<SwapChainVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -1189,6 +1317,10 @@ impl SwapChain {
         Texture::from_raw(raw).ok_or_else(|| "GetBuffer returned null".into())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
+    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
     unsafe fn resize_buffers(&self, width: u32, height: u32) -> Result<(), String> {
         let table = vtbl::<SwapChainVtbl>(self.as_ptr());
         let hr = (table.resize_buffers)(self.as_ptr(), 0, width, height, 0, 0);
@@ -1359,6 +1491,10 @@ float4 ps_blit(VSOutput input) : SV_Target
 }
 "#;
 
+/// # Safety
+///
+/// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
+/// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
 unsafe fn compile_shader(entry: &str, target: &str) -> Result<Blob, String> {
     let entry = CString::new(entry).map_err(|_| "invalid entry point".to_string())?;
     let target = CString::new(target).map_err(|_| "invalid target".to_string())?;
@@ -1433,6 +1569,10 @@ struct Atlas {
 //   1. 项目 MSRV 未强制到引入 c-string 字面量的版本（1.77）；
 //   2. 语义名将来要按顶点属性表运行时拼接时，b"" 形式更容易与 fmt 组合。
 #[allow(clippy::manual_c_str_literals)]
+/// # Safety
+///
+/// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
+/// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
 unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
     let vs_blob = compile_shader("vs_main", "vs_5_0")?;
     let ps_blob = compile_shader("ps_main", "ps_5_0")?;
@@ -1590,6 +1730,10 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
 /// 局部时画一个同色背景 quad），并用 scissor 限制后续 draw。
 /// 失败：无返回值；scissor 必须提前开启（`scissor_enable = 1`）。
 #[allow(clippy::too_many_arguments)] // 纯内部函数，参数就是渲染所需的最小集合
+/// # Safety
+///
+/// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
+/// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
 unsafe fn draw_scene(
     context: &Context,
     pipeline: &Pipeline,
@@ -1689,6 +1833,10 @@ unsafe fn draw_scene(
 /// 说明：用**独立的** `blit_buffer`——复用 `instance_buffer` 会 `Map(DISCARD)`
 /// 掉 UI 实例，而 GPU 可能还没执行完 UI 那次 draw（实测表现为只剩背景色）。
 #[allow(clippy::too_many_arguments)]
+/// # Safety
+///
+/// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
+/// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
 unsafe fn blit_cached(
     context: &Context,
     pipeline: &Pipeline,
@@ -1847,6 +1995,10 @@ impl Gfx {
         Ok(())
     }
 
+    /// # Safety
+    ///
+    /// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
+    /// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
     unsafe fn create_atlas(&mut self) -> Result<(), String> {
         self.atlas = None;
         if self.atlas_data.is_empty() || self.atlas_size == 0 {
@@ -2396,6 +2548,10 @@ impl Gfx {
         self.read_back_frame()
     }
 
+    /// # Safety
+    ///
+    /// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
+    /// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
     unsafe fn read_back_frame(&self) -> Option<(Vec<u8>, u32, u32)> {
         let (Some(device), Some(context), Some(swap_chain)) = (
             self.device.as_ref(),
@@ -2549,6 +2705,10 @@ impl Gfx {
     ///
     /// 返回：`Ok(())` = 可用；`Err` = 设备未就绪或创建失败（调用方应放弃本帧）。
     /// 副作用：首次调用创建纹理 + RTV + SRV；`rebuild`/`resize` 会把它置空，下次自动重建。
+    /// # Safety
+    ///
+    /// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
+    /// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
     unsafe fn ensure_cached(&mut self) -> Result<(), String> {
         if self.cached.is_some() {
             return Ok(());
@@ -2613,6 +2773,7 @@ impl Gfx {
     }
 
     /// 调试诊断：当前存活的 COM 对象数（Release 构建恒为 0）。
+    // 诊断 API：COM 泄漏计数，仅 `live_objects()` 测试与人工排查调用
     #[allow(dead_code)] // 留给调试/诊断使用，主循环不调用
     pub fn live_objects() -> isize {
         #[cfg(debug_assertions)]
@@ -2626,6 +2787,10 @@ impl Gfx {
     }
 }
 
+/// # Safety
+///
+/// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
+/// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
 unsafe fn create_device_and_swap_chain(
     hwnd: HWND,
     width: u32,

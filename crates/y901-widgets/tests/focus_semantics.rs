@@ -386,5 +386,6 @@ fn subscribe_patches_focused_change() {
 }
 
 /// 防止未使用告警：`Cell`/`Command` 是探针将来扩展要用的。
+// 测试 API：测试内的类型见证/未用常量，仅测试代码引用
 #[allow(dead_code)]
 fn _unused(_: Rc<Cell<usize>>, _: Option<Command>) {}

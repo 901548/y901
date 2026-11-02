@@ -254,5 +254,6 @@ fn id_reuse_with_different_generation_does_not_false_bump() {
 }
 
 // 防止未使用告警的占位（Cell/Rc 用于未来扩展）
+// 测试 API：测试内的类型见证/未用常量，仅测试代码引用
 #[allow(dead_code)]
 fn _unused(_: Rc<Cell<usize>>) {}

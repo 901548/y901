@@ -75,10 +75,18 @@ type QueryInterfaceFn =
 type AddRefFn = unsafe extern "system" fn(*mut c_void) -> u32;
 type ReleaseFn = unsafe extern "system" fn(*mut c_void) -> u32;
 
+/// # Safety
+///
+/// `object` 必须是**未释放的 DirectWrite COM 接口指针**，且它的 vtable 布局与 `T` 逐字段一致
+/// （按 Windows SDK 声明顺序）。传错类型不会崩，但会调到错的方法。
 unsafe fn vtbl<T>(object: *mut c_void) -> &'static T {
     &*(*(object as *mut *const T))
 }
 
+/// # Safety
+///
+/// `self.ptr` 要么为空、要么是一个**仍持有引用**的合法 COM 接口指针；本函数按 COM 规则调用
+/// `Release` 并把指针置空，因此同一对象不得被并发释放（`&mut self` 已保证串行）。
 unsafe fn release(object: *mut c_void) {
     if object.is_null() {
         return;
@@ -103,6 +111,10 @@ macro_rules! com_type {
         struct $name(*mut c_void);
 
         impl $name {
+            /// # Safety
+            ///
+            /// `raw` 必须是某次 `Create*`/`Query*` 返回、且**所有权尚未转交他人**的接口指针；
+            /// 本函数接管所有权（`Drop` 时释放）。传 null 返回 `None`，不会 panic。
             unsafe fn from_raw(ptr: *mut c_void) -> Option<Self> {
                 (!ptr.is_null()).then_some(Self(ptr))
             }
@@ -267,6 +279,11 @@ struct GlyphRunAnalysisVtbl {
 // ============================ DirectWrite 方法 ============================
 
 impl Factory {
+    /// # Safety
+    ///
+    /// `self` 必须是**未释放**的 DirectWrite COM 对象（工厂/字体集合/字体/字形分析等），
+    /// 且通过本文件 `com_type!` 生成的拥有型别名持有；输出指针（`*mut *mut c_void` 或结构指针）
+    /// 由调用方提供、非空、按接口要求对齐。返回负 HRESULT 时不再读取输出缓冲。
     unsafe fn system_font_collection(&self) -> Result<FontCollection, String> {
         let table = vtbl::<FactoryVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -280,6 +297,11 @@ impl Factory {
         FontCollection::from_raw(raw).ok_or_else(|| "font collection is null".to_string())
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**未释放**的 DirectWrite COM 对象（工厂/字体集合/字体/字形分析等），
+    /// 且通过本文件 `com_type!` 生成的拥有型别名持有；输出指针（`*mut *mut c_void` 或结构指针）
+    /// 由调用方提供、非空、按接口要求对齐。返回负 HRESULT 时不再读取输出缓冲。
     unsafe fn glyph_run_analysis(
         &self,
         run: &GlyphRun,
@@ -309,6 +331,11 @@ impl Factory {
 }
 
 impl FontCollection {
+    /// # Safety
+    ///
+    /// `self` 必须是**未释放**的 DirectWrite COM 对象（工厂/字体集合/字体/字形分析等），
+    /// 且通过本文件 `com_type!` 生成的拥有型别名持有；输出指针（`*mut *mut c_void` 或结构指针）
+    /// 由调用方提供、非空、按接口要求对齐。返回负 HRESULT 时不再读取输出缓冲。
     unsafe fn find_family(&self, name: &[u16]) -> Result<FontFamily, String> {
         let table = vtbl::<FontCollectionVtbl>(self.as_ptr());
         let mut index = 0u32;
@@ -327,6 +354,11 @@ impl FontCollection {
 }
 
 impl FontFamily {
+    /// # Safety
+    ///
+    /// `self` 必须是**未释放**的 DirectWrite COM 对象（工厂/字体集合/字体/字形分析等），
+    /// 且通过本文件 `com_type!` 生成的拥有型别名持有；输出指针（`*mut *mut c_void` 或结构指针）
+    /// 由调用方提供、非空、按接口要求对齐。返回负 HRESULT 时不再读取输出缓冲。
     unsafe fn first_font(&self) -> Result<Font, String> {
         let table = vtbl::<FontFamilyVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -345,6 +377,11 @@ impl FontFamily {
 }
 
 impl Font {
+    /// # Safety
+    ///
+    /// `self` 必须是**未释放**的 DirectWrite COM 对象（工厂/字体集合/字体/字形分析等），
+    /// 且通过本文件 `com_type!` 生成的拥有型别名持有；输出指针（`*mut *mut c_void` 或结构指针）
+    /// 由调用方提供、非空、按接口要求对齐。返回负 HRESULT 时不再读取输出缓冲。
     unsafe fn create_face(&self) -> Result<FontFace, String> {
         let table = vtbl::<FontVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -357,6 +394,11 @@ impl Font {
 }
 
 impl FontFace {
+    /// # Safety
+    ///
+    /// `self` 必须是**未释放**的 DirectWrite COM 对象（工厂/字体集合/字体/字形分析等），
+    /// 且通过本文件 `com_type!` 生成的拥有型别名持有；输出指针（`*mut *mut c_void` 或结构指针）
+    /// 由调用方提供、非空、按接口要求对齐。返回负 HRESULT 时不再读取输出缓冲。
     unsafe fn metrics(&self) -> FontMetrics {
         let table = vtbl::<FontFaceVtbl>(self.as_ptr());
         let mut metrics = FontMetrics::default();
@@ -364,6 +406,11 @@ impl FontFace {
         metrics
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是**未释放**的 DirectWrite COM 对象（工厂/字体集合/字体/字形分析等），
+    /// 且通过本文件 `com_type!` 生成的拥有型别名持有；输出指针（`*mut *mut c_void` 或结构指针）
+    /// 由调用方提供、非空、按接口要求对齐。返回负 HRESULT 时不再读取输出缓冲。
     unsafe fn design_metrics(&self, glyph: u16) -> GlyphMetrics {
         let table = vtbl::<FontFaceVtbl>(self.as_ptr());
         let mut metrics = GlyphMetrics::default();
@@ -377,6 +424,11 @@ impl FontFace {
     /// 返回：`Ok(glyph)`；`Ok(0)` 表示字体里没有这个字形（`.notdef`）。
     /// 失败：`GetGlyphIndices` 返回负 HRESULT 时给 `Err`（含码点与 HRESULT），
     /// **不静默返回 0**——否则上层只会看到 "glyph missing"，查不到真正原因。
+    /// # Safety
+    ///
+    /// `self` 必须是**未释放**的 DirectWrite COM 对象（工厂/字体集合/字体/字形分析等），
+    /// 且通过本文件 `com_type!` 生成的拥有型别名持有；输出指针（`*mut *mut c_void` 或结构指针）
+    /// 由调用方提供、非空、按接口要求对齐。返回负 HRESULT 时不再读取输出缓冲。
     unsafe fn glyph_index(&self, codepoint: u32) -> Result<u16, String> {
         let table = vtbl::<FontFaceVtbl>(self.as_ptr());
         let mut glyph = 0u16;
@@ -392,6 +444,11 @@ impl FontFace {
 }
 
 impl GlyphRunAnalysis {
+    /// # Safety
+    ///
+    /// `self` 必须是**未释放**的 DirectWrite COM 对象（工厂/字体集合/字体/字形分析等），
+    /// 且通过本文件 `com_type!` 生成的拥有型别名持有；输出指针（`*mut *mut c_void` 或结构指针）
+    /// 由调用方提供、非空、按接口要求对齐。返回负 HRESULT 时不再读取输出缓冲。
     unsafe fn alpha_bounds(&self, texture_type: u32) -> RECT {
         let table = vtbl::<GlyphRunAnalysisVtbl>(self.as_ptr());
         let mut rect: RECT = std::mem::zeroed();
@@ -400,6 +457,11 @@ impl GlyphRunAnalysis {
     }
 
     /// 取 8-bit 覆盖率。ClearType(3x1) 输入时只保留绿通道。
+    /// # Safety
+    ///
+    /// `self` 必须是**未释放**的 DirectWrite COM 对象（工厂/字体集合/字体/字形分析等），
+    /// 且通过本文件 `com_type!` 生成的拥有型别名持有；输出指针（`*mut *mut c_void` 或结构指针）
+    /// 由调用方提供、非空、按接口要求对齐。返回负 HRESULT 时不再读取输出缓冲。
     unsafe fn coverage(&self, bounds: &RECT, texture_type: u32) -> Vec<u8> {
         let width = (bounds.right - bounds.left).max(0) as u32;
         let height = (bounds.bottom - bounds.top).max(0) as u32;
@@ -495,11 +557,14 @@ pub struct TextEngine {
 
     /// 基线到行顶的距离；绘制时基线的位置由它决定。
     pub ascent: f32,
+    // 诊断 API：`ascent` 字段：自研引擎用它算基线，DirectWrite 路径由 `metrics()` 读
+    // 诊断 API：`has_dirty()` 与图集统计：后端据此跳过整张上传，`font_m3_atlas` 测试直接断言
     #[allow(dead_code)]
     /// 基线到行底的距离；与 `ascent` 一起决定行高。
     pub descent: f32,
     /// 等宽单元格宽度（由字号推出，必须与布局用的一致）。
     pub cell_width: f32,
+    // 诊断 API：`descent` 字段：同上，行高计算的一部分
     #[allow(dead_code)] // 元数据：等宽字体的名义行高，目前用 ascent/descent
     /// 等宽单元格高度。
     pub cell_height: f32,
@@ -591,6 +656,7 @@ impl TextEngine {
         }
     }
 
+    // 诊断 API：`glyph_count()`：图集占用诊断，`font_m3_atlas` 测试读取
     #[allow(dead_code)] // 诊断：已缓存字形数
     /// 已缓存字形数（诊断与内存估算用）。
     pub fn glyph_count(&self) -> usize {
@@ -645,6 +711,10 @@ impl TextEngine {
         self.reset_pending || !self.dirty.is_empty()
     }
 
+    /// # Safety
+    ///
+    /// `self` 必须是未释放的字形分析器；`advance_pen`/`origin` 必须指向调用方持有的有效内存，
+    /// `outline` 的容量必须足以容纳 `GetGlyphRunOutline` 写出的轮廓点数（本文件按 4096 点预留）。
     unsafe fn rasterize(&mut self, ch: char) -> Result<GlyphInfo, String> {
         // **不要用 `encode_utf16()[0]`**：非 BMP 字符（emoji 等）会得到代理项，
         // 查不到字形；DWrite 的 GetGlyphIndices 本来就要 32 位码点。

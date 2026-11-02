@@ -769,5 +769,6 @@ impl RenderCtx for SoftBackend {
 }
 
 /// 未使用的导入占位（`Edges` 在未来的文本布局里会用到）。
+// 测试 API：`_unused`：类型见证，保证 `Edges` 仍被引用
 #[allow(dead_code)]
 fn _unused(_e: Edges) {}

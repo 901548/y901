@@ -333,6 +333,7 @@ impl Widget for ScrollView {
 /// 竖向滚动条。拖拽时把自己换算成比例交给目标滚动视图。
 pub struct Scrollbar {
     pub(crate) id: String,
+    // 诊断 API：`target`：ScrollCommand 的目标容器名，仅记录（拆成独立组件前保留）
     #[allow(dead_code)] // 留作把滚动条拆成独立组件时用
     target: String,
     pub(crate) rect: Rect,
@@ -466,6 +467,7 @@ pub fn rows(metrics: &dyn TextMetrics, count: usize) -> f32 {
 pub const NO_PADDING: Edges = Edges::ZERO;
 
 /// 兼容 `Pos` 的显式导入（某些平台构建需要）。
+// 测试 API：`_pos`：类型见证，保证 `Pos` 仍被引用
 #[allow(dead_code)]
 fn _pos(_: Pos) {}
 

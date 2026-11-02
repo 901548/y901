@@ -12,11 +12,13 @@ const WM_KEYDOWN: u32 = 0x0100;
 const WM_CHAR: u32 = 0x0102;
 const WM_SYSKEYDOWN: u32 = 0x0104;
 const WM_LBUTTONDOWN: u32 = 0x0201;
+// 测试 API：测试内的类型见证/未用常量，仅测试代码引用
 #[allow(dead_code)] // 完整消息集的一部分（用例不覆盖松开左键）
 const WM_LBUTTONUP: u32 = 0x0202;
 const WM_RBUTTONDOWN: u32 = 0x0204;
 const WM_RBUTTONUP: u32 = 0x0205;
 const WM_MBUTTONDOWN: u32 = 0x0207;
+// 测试 API：测试内的类型见证/未用常量，仅测试代码引用
 #[allow(dead_code)] // 同上
 const WM_MBUTTONUP: u32 = 0x0208;
 

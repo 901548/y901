@@ -363,6 +363,7 @@ fn cursor_at_later_sibling_wins_same_layer() {
 }
 
 // 占位：确认 Flex 仍可导入（后续测试会用）
+// 测试 API：测试内的类型见证/未用常量，仅测试代码引用
 #[allow(dead_code)]
 fn _unused() -> Flex {
     Flex::column("x")
