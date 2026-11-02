@@ -145,8 +145,10 @@ impl Widget for Image {
             }
         };
         if !texture.is_valid() {
-            // 后端不支持纹理：画一个占位边框，让"这里本该有图"可见，而不是静默空白
-            ctx.stroke_rect(self.rect, ctx.theme().style(y901_ui::Role::PANEL, y901_ui::theme::State::Normal).border, 1.0);
+            // 后端不支持纹理（如还未实现 `upload_texture` 的旧版后端）。
+            //
+            // 这里**什么都不画**：既然能拿到有效句柄就一定会走 `draw_image`，
+            // 不支持的后端会让它变成空白区域 —— 这是合理降级，不要画带误导性的框。
             return;
         }
         ctx.draw_image(self.rect, texture, self.style);

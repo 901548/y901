@@ -2036,6 +2036,22 @@ impl Gfx {
     /// `instances` 长度任意：内部按 `INSTANCE_CAPACITY` 截断，不会越界。
     /// 违反前述任一条不会造成内存不安全，但会得到未定义的画面或设备错误码。
     pub unsafe fn render(&mut self, instances: &[Instance], sync_interval: u32) -> Hresult {
+        // 没有图片时走这条：等价于改动前的单次 draw。
+        self.render_batched(instances, &[], sync_interval)
+    }
+
+    /// 带批次的提交：同一帧内按 `batches` 逐段绑纹理并绘制。
+    ///
+    /// # Safety
+    ///
+    /// 与 [`Gfx::render`] 相同；额外要求：`batches` 的区间必须在
+    /// `instances` 范围内，且**按 start 升序且不重叠**（重叠会重复画）。
+    pub unsafe fn render_batched(
+        &mut self,
+        instances: &[Instance],
+        batches: &[Batch],
+        sync_interval: u32,
+    ) -> Hresult {
         // 把 # Safety 里"图集已同步"的承诺在 debug 构建下变成可执行断言。
         debug_assert!(
             render_preconditions_ok(
@@ -2122,7 +2138,7 @@ impl Gfx {
                 cached,
                 instances,
                 count,
-                &[],
+                batches,
                 &self.images, rect, is_full, w, h,
             );
         }
@@ -2144,7 +2160,7 @@ impl Gfx {
                     globals.as_ptr() as *const c_void,
                 );
                 draw_scene(
-                    context, pipeline, atlas, cached, instances, count, &[], &self.images, full, true, w, h,
+                    context, pipeline, atlas, cached, instances, count, batches, &self.images, full, true, w, h,
                 );
                 blit_cached(context, pipeline, cached, atlas, rtv, w, h);
                 if let Some((mean, bright)) = self.read_back_stats() {
@@ -2164,7 +2180,7 @@ impl Gfx {
                 cached,
                 instances,
                 count,
-                &[],
+                batches,
                 &self.images,
                 full,
                 true,
@@ -2193,7 +2209,7 @@ impl Gfx {
                 cached,
                 instances,
                 count,
-                &[],
+                batches,
                 &self.images, small, false, w, h,
             );
             blit_cached(context, pipeline, cached, atlas, rtv, w, h);
@@ -2213,7 +2229,7 @@ impl Gfx {
                 cached,
                 instances,
                 count,
-                &[],
+                batches,
                 &self.images, full, true, w, h,
             );
             blit_cached(context, pipeline, cached, atlas, rtv, w, h);

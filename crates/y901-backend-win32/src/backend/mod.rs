@@ -54,6 +54,11 @@ pub struct D3dBackend {
     last_occluded: bool,
     /// 渲染主题（启动时由 Options.theme 注入，None 时用 DARK）。
     theme: y901_ui::theme::Theme,
+    /// 图片实例的位置记录：`(start, count, texture_id)`。
+    ///
+    /// 为什么用"记录区间"而不是逐实例标记：图集实例的顺序就是 Z 序，
+    /// 只需在帧末把这些区间与中间的图集段交替排开即可，实例数组本身不动。
+    image_marks: Vec<(usize, usize, u64)>,
     /// 当前单元格尺寸（由字号推出；set_font 会更新它）。
     ///
     /// **必须与 TextEngine 使用的 cell 尺寸一致**：measure_text/line_height/glyph_offset/draw_text 都读它。
@@ -83,6 +88,7 @@ impl D3dBackend {
         d3d11::verify_instance_layout()?;
 
         let gfx = Gfx::new(hwnd, width, height)?;
+        let image_marks: Vec<(usize, usize, u64)> = Vec::new();
         // 字号是全局的（不支持富文本）：cell 尺寸由字号推出，见 cell_metrics_for。
         let (cell_w, cell_h) = crate::backend::font::cell_metrics_for(font.size);
         // 字形引擎选择：`Y901_FONT=self` 用自研，否则 DirectWrite（默认）。
@@ -115,6 +121,7 @@ impl D3dBackend {
 
         let mut backend = Self {
             gfx,
+            image_marks,
             text,
             instances: Vec::with_capacity(4096),
             viewport: Size::new(width as f32, height as f32),
@@ -167,6 +174,7 @@ impl D3dBackend {
     /// 每帧开始：清空实例数组，并推进图集帧号（LRU 用）。
     pub fn begin(&mut self) {
         self.instances.clear();
+        self.image_marks.clear();
         // **基座裁剪 = 客户区**：之后所有 fill_rect / 字形都必须落在窗口内。
         // 少了这一层，组件只要把内容画到负坐标（例如终端多算了一行），
         // 就会画到窗口标题栏缝隙里。
@@ -243,7 +251,10 @@ impl D3dBackend {
         // sync_interval = 0：不阻塞在 vsync 上。
         // 我们是按需重绘（invalidate 驱动），不需要垂直同步；
         // 用 1 时窗口被遮挡会让 Present 永久阻塞，把消息循环卡死。
-        let mut hr = self.gfx.render(&self.instances, 0);
+        // 帧末把"图片区间"与"图集区间"交替排开。
+        // 没有图片时 `batches` 为空 → `render_batched` 退化为单次 draw，与改动前一致。
+        let batches = self.build_batches();
+        let mut hr = self.gfx.render_batched(&self.instances, &batches, 0);
 
         if Gfx::device_lost(hr) {
             eprintln!("[y901] device lost: 0x{:08X}, rebuilding", hr as u32);
@@ -258,7 +269,7 @@ impl D3dBackend {
             {
                 eprintln!("[y901] atlas re-upload failed: {err}");
             }
-            hr = self.gfx.render(&self.instances, 0);
+            hr = self.gfx.render_batched(&self.instances, &batches, 0);
         }
 
         if hr < 0 {
@@ -459,6 +470,7 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
     fn present(&mut self, frame: &y901_runtime::gfx::Frame) -> Result<(), String> {
         // 1) 用本帧实例替换内部缓冲（D3D11 的 present 从 self.instances 取数据）
         self.instances.clear();
+        self.image_marks.clear();
         self.instances
             .extend(frame.instances.iter().map(to_gpu_instance));
 
@@ -514,7 +526,92 @@ impl TextMetrics for D3dBackend {
     }
 }
 
+impl D3dBackend {
+    /// 把 `image_marks` 转成按顺序的批次列表。
+    ///
+    /// 图集段与图片段交替排开，**不重排**实例：重排会改变重叠元素的层次。
+    fn build_batches(&self) -> Vec<crate::backend::d3d11::Batch> {
+        use crate::backend::d3d11::Batch;
+        let mut out = Vec::new();
+        let mut cursor = 0usize;
+        for &(start, count, id) in &self.image_marks {
+            if start > cursor {
+                out.push(Batch {
+                    start: cursor as u32,
+                    count: (start - cursor) as u32,
+                    image: None,
+                });
+            }
+            if count > 0 {
+                out.push(Batch {
+                    start: start as u32,
+                    count: count as u32,
+                    image: Some(id),
+                });
+            }
+            cursor = (start + count).max(cursor);
+        }
+        if cursor < self.instances.len() {
+            out.push(Batch {
+                start: cursor as u32,
+                count: (self.instances.len() - cursor) as u32,
+                image: None,
+            });
+        }
+        out
+    }
+}
+
 impl RenderCtx for D3dBackend {
+    fn upload_texture(
+        &mut self,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> y901_ui::image::TextureId {
+        // Safety: 与其余显示路径同一线程、且 Gfx 已初始化（未初始化时返回 0）。
+        let id = unsafe { self.gfx.upload_image(width, height, rgba) };
+        y901_ui::image::TextureId(id)
+    }
+
+    fn draw_image(
+        &mut self,
+        rect: Rect,
+        texture: y901_ui::image::TextureId,
+        style: y901_ui::image::ImageStyle,
+    ) {
+        if !texture.is_valid() {
+            return;
+        }
+        let Some((_, tw, th)) = self.gfx.image(texture.0) else {
+            return;
+        };
+        let Some(r) = self.clip_of(rect) else {
+            return;
+        };
+        // 适配模式复用纯函数：后端不重推 fit 数学，避免两个后端行为不一致。
+        let (dst, src) = style.layout(r, tw, th);
+        if dst.w <= 0.0 || dst.h <= 0.0 || src.w <= 0.0 || src.h <= 0.0 {
+            return;
+        }
+        let (fw, fh) = (tw.max(1) as f32, th.max(1) as f32);
+        let uv = [
+            src.x / fw,
+            src.y / fh,
+            (src.x + src.w) / fw,
+            (src.y + src.h) / fh,
+        ];
+        let tint = style.tint.unwrap_or(Color::WHITE);
+        let start = self.instances.len();
+        self.instances.push(Instance::solid(
+            [dst.x, dst.y],
+            [dst.w, dst.h],
+            uv,
+            [tint.r, tint.g, tint.b, tint.a],
+        ));
+        self.image_marks.push((start, 1, texture.0));
+    }
+
     fn size(&self) -> Size {
         self.viewport
     }
