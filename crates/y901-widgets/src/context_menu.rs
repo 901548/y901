@@ -220,24 +220,39 @@ mod tests {
     }
 
     #[test]
-    fn callback_is_wired_into_the_menu() {
-        // 回调链路是：ContextMenu::on_select → Menu::on_select → Menu::commit_selection。
-        // 注意：本测试**不**驱动指针点击——浮层里的 Menu 实例拿不到
-        // （`UiTree` 没有向下转型 API），而直接构造 `EventCtx` 也不可行。
-        // 因此"点菜单项触发回调"在本组件测试里是**已知未覆盖**，
-        // 只能验证到"回调被装进菜单生成器"。
+    fn clicking_a_menu_item_fires_the_callback_and_closes_the_popup() {
+        let hits = StdRc::new(Cell::new(0));
+        let mut tree = tree_with(hits.clone());
+        let soft = soft();
+        tree.dispatch(&right_click(Pos::new(40.0, 40.0)));
+        tree.layout(Size::new(W as f32, H as f32), &soft);
+
+        // 用新增的 `popup_as_mut` 拿到浮层里的具体类型，从而知道"点哪里命中第 0 项"
+        let item = tree
+            .popup_as_mut::<Menu>("ctx__menu")
+            .and_then(|m| m.item_rect_at(0))
+            .expect("应能拿到菜单的第 0 项矩形");
+
+        tree.dispatch(&UiEvent::MouseDown {
+            pos: Pos::new(item.x + item.w * 0.5, item.y + item.h * 0.5),
+            button: MouseButton::Left,
+        });
+
+        assert_eq!(hits.get(), 1, "点菜单项应触发一次回调");
+        assert_eq!(tree.popups().len(), 0, "点菜单项后浮层应关闭");
+    }
+
+    #[test]
+    fn popup_as_mut_returns_none_for_the_wrong_type() {
         let hits = StdRc::new(Cell::new(0));
         let mut tree = tree_with(hits);
         tree.dispatch(&right_click(Pos::new(40.0, 40.0)));
-        assert_eq!(tree.popups().len(), 1, "右键应弹出菜单");
-
-        // 菜单应携带我们给的三个项
-        let seeded = tree
-            .popups()
-            .first()
-            .map(|_| true)
-            .unwrap_or(false);
-        assert!(seeded);
+        // 类型不对 → None（不 panic）
+        assert!(tree.popup_as_mut::<crate::button::Button>("ctx__menu").is_none());
+        // id 不对 → None
+        assert!(tree.popup_as_mut::<Menu>("nope").is_none());
+        // 正确类型 → Some
+        assert!(tree.popup_as_mut::<Menu>("ctx__menu").is_some());
     }
 
     #[test]

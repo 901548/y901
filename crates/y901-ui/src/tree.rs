@@ -621,6 +621,15 @@ impl UiTree {
     }
 
     /// 关闭指定浮层（不存在返回 `false`）。
+    /// 取浮层里控件的可变引用（按具体类型）。
+    ///
+    /// 返回：`None` = 浮层不存在、或类型不对（**不 panic**）。
+    /// 用途：浮层不在主树上，测试与诊断需要拿到它才能驱动。
+    pub fn popup_as_mut<T: 'static>(&mut self, id: &str) -> Option<&mut T> {
+        let popup = self.popups.iter_mut().find(|p| p.id() == id)?;
+        popup.widget.as_any_mut()?.downcast_mut::<T>()
+    }
+
     pub fn close_popup(&mut self, id: &str) -> bool {
         let Some(pos) = self.popups.iter().position(|p| p.id() == id) else {
             return false;
