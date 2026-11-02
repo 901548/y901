@@ -19,6 +19,11 @@ pub struct Image {
     style: ImageStyle,
     /// 惰性上传后的纹理句柄（`None` = 还没上传）
     texture: Option<TextureId>,
+    /// 是否已为收养的纹理做过一次 `retain`。
+    ///
+    /// 为什么记张标志：`retain` 需要 `RenderCtx`，而它只在渲染阶段存在；
+    /// 重复 retain 会让计数偏高 → 纹理永不释放。
+    retained: bool,
     /// 布局矩形
     rect: Rect,
     /// 在 Flex 中的尺寸约束
@@ -48,6 +53,32 @@ impl Image {
             rgba: data,
             style: ImageStyle::default(),
             texture: None,
+            retained: false,
+            rect: Rect::ZERO,
+            item: y901_ui::FlexItem::default(),
+        }
+    }
+
+    /// 从**已有纹理**创建（图标复用）。
+    ///
+    /// 输入：`id`、纹理句柄、原始尺寸（布局与 `ImageStyle::layout` 要用）。
+    /// 行为：控件**不拥有**这张纹理，首次渲染时 `retain` 一次，卸载时 `release` 一次。
+    /// 于是：多个 Image 可以共享同一张纹理，**最后一个卸载时才真正释放**。
+    pub fn from_texture(
+        id: impl Into<String>,
+        texture: TextureId,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            width: width.max(1),
+            height: height.max(1),
+            // 不需要自己的位图；纹理已存在
+            rgba: Vec::new(),
+            style: ImageStyle::default(),
+            texture: Some(texture),
+            retained: false,
             rect: Rect::ZERO,
             item: y901_ui::FlexItem::default(),
         }
@@ -156,7 +187,14 @@ impl Widget for Image {
         // 惰性上传：纹理属于后端，控件只在第一次渲染时创建它。
         // 为什么不在构造时上传：构造时手里没有 `RenderCtx`（它只存在于渲染阶段）。
         let texture = match self.texture {
-            Some(t) if t.is_valid() => t,
+            Some(t) if t.is_valid() => {
+                // 收养的纹理：第一次真正用到它时才 retain，而不是构造时（那时拿不到 ctx）。
+                if !self.retained {
+                    ctx.retain_texture(t);
+                    self.retained = true;
+                }
+                t
+            }
             _ => {
                 let t = ctx.upload_texture(self.width, self.height, &self.rgba);
                 self.texture = Some(t);

@@ -385,6 +385,13 @@ pub trait RenderCtx: TextMetrics {
 
 
 
+    /// 增加一次引用计数。
+    ///
+    /// 配套 [`crate::image::TextureId`] 的共享场景：`Image::from_texture` 收养一张**已存在**的纹理时，
+    /// 必须先 retain 一次，否则它卸载时会把别人还在用的纹理释放掉。
+    /// 默认空实现（不支持纹理的后端无需实现）。
+    fn retain_texture(&mut self, _id: crate::image::TextureId) {}
+
     /// 减少一次引用计数，归零时真正释放。
     ///
     /// 默认空实现（与 [`RenderCtx::retain_texture`] 配套）。

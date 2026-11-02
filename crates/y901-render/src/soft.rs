@@ -378,6 +378,14 @@ impl RenderCtx for SoftBackend {
     }
 
 
+    fn retain_texture(&mut self, id: y901_ui::image::TextureId) {
+        // 共享纹理（如图标复用）必须先加一次计数，
+        // 否则第一个卸载的使用者会把别人还在用的纹理释放掉。
+        if let Some(entry) = self.textures.get_mut(&id) {
+            entry.3 = entry.3.saturating_add(1);
+        }
+    }
+
     fn release_texture(&mut self, id: y901_ui::image::TextureId) {
         // 引用计数归零才真正释放：同一张纹理可能被多个控件共享。
         // 为什么计数放在后端：`TextureId` 对控件是不透明的，控件不应该能知道"还有几个人在用"。
