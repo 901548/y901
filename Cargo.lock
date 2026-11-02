@@ -488,5 +488,6 @@ version = "0.1.0"
 dependencies = [
  "y901-agent",
  "y901-core",
+ "y901-render",
  "y901-ui",
 ]

@@ -30,6 +30,7 @@ pub mod rich_text;
 pub mod scroll;
 pub mod split;
 pub mod style;
+pub mod tabs;
 pub mod text_input;
 
 pub use button::Button;

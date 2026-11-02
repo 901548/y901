@@ -9,3 +9,4 @@ y901-ui = { path = "../y901-ui" }
 
 [dev-dependencies]
 y901-agent = { path = "../y901-agent" }
+y901-render = { path = "../y901-render" }
