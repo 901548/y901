@@ -35,6 +35,7 @@ pub mod color;
 pub mod command;
 pub mod animation;
 pub mod event;
+pub mod grid;
 pub mod image;
 pub mod geometry;
 pub mod invalidate;

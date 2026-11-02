@@ -1139,10 +1139,7 @@ pub trait Widget {
     /// 所以只能先记下来，等下一帧渲染时由树统一转交后端。
     fn release_textures(&mut self, _out: &mut Vec<crate::image::TextureId>) {}
 
-    /// 转移或释放"我从别处借用了一张已有纹理"的所有权。
-    ///
-    /// 邻居接口：控件自己上传的纹理不需要它；只有"多个控件共享同一 id"时才需要。
-    fn acquire_textures(&mut self, _out: &mut Vec<crate::image::TextureId>) {}
+
 
     /// 是否处于已打开状态。关闭的浮层不参与绘制、命中与索引。
     ///
