@@ -71,6 +71,20 @@ pub struct Instance {
     pub params: [f32; 4],
 }
 
+/// 一个绘制批次：实例区间 + 用哪张纹理。
+///
+/// 为什么用"区间"而不是重新排序：图集实例的 Z 序就是数组顺序，
+/// 排序会破坏重叠元素的叠放关系。切段只能"就近合并"。
+#[derive(Clone, Copy, Debug)]
+pub struct Batch {
+    /// 起始实例下标
+    pub start: u32,
+    /// 实例数量
+    pub count: u32,
+    /// `None` = 图集；`Some(id)` = 图片纹理
+    pub image: Option<u64>,
+}
+
 impl Instance {
     /// 纯色/字形实例：`color_end` 与 `color` 相同，渐变模式 0。
     ///
@@ -1056,9 +1070,16 @@ impl Context {
         (table.rsset_state)(self.as_ptr(), pipeline.rasterizer.as_ptr());
     }
 
-    unsafe fn draw_instances(&self, count: u32) {
+    unsafe fn draw_instances(&self, count: u32, start_offset: u32) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
-        (table.draw_instanced)(self.as_ptr(), 6, count, 0, 0);
+        (table.draw_instanced)(self.as_ptr(), 6, count, start_offset, 0);
+    }
+
+    /// 把图片 SRV 绑到 t1（图集在 t0，互不影响）。
+    unsafe fn set_ps_image_texture(&self, srv: &ShaderResourceView) {
+        let table = vtbl::<ContextVtbl>(self.as_ptr());
+        let views = [srv.as_ptr()];
+        (table.psset_shader_resources)(self.as_ptr(), 1, 1, views.as_ptr());
     }
 
     unsafe fn set_ps_texture(&self, srv: &ShaderResourceView, sampler: &SamplerState) {
@@ -1331,6 +1352,8 @@ struct Pipeline {
     pixel_shader: PixelShader,
     /// 全屏 blit 用的像素着色器（把自持 RT 搬到后备缓冲）。
     blit_ps: PixelShader,
+    /// 图片纹理着色器（`ps_image`）
+    image_ps: PixelShader,
     input_layout: InputLayout,
     blend: BlendState,
     rasterizer: RasterizerState,
@@ -1369,10 +1392,12 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
     let vs_blob = compile_shader("vs_main", "vs_5_0")?;
     let ps_blob = compile_shader("ps_main", "ps_5_0")?;
     let blit_blob = compile_shader("ps_blit", "ps_5_0")?;
+    let image_blob = compile_shader("ps_image", "ps_5_0")?;
 
     let vertex_shader = device.create_vertex_shader(vs_blob.bytes())?;
     let pixel_shader = device.create_pixel_shader(ps_blob.bytes())?;
     let blit_ps = device.create_pixel_shader(blit_blob.bytes())?;
+    let image_ps = device.create_pixel_shader(image_blob.bytes())?;
 
     let elements = [
         InputElementDesc {
@@ -1501,6 +1526,7 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
         vertex_shader,
         pixel_shader,
         blit_ps,
+        image_ps,
         input_layout,
         blend,
         rasterizer,
@@ -1526,6 +1552,8 @@ unsafe fn draw_scene(
     cached: &CachedTarget,
     instances: &[Instance],
     count: usize,
+    batches: &[Batch],
+    images: &std::collections::HashMap<u64, (Texture, ShaderResourceView, u32, u32)>,
     rect: RectI32,
     is_full: bool,
     w: f32,
@@ -1573,7 +1601,7 @@ unsafe fn draw_scene(
             strides.as_ptr(),
             offsets.as_ptr(),
         );
-        context.draw_instances(1);
+        context.draw_instances(1, 0);
         // 切回 UI 实例缓冲
         let buffers = [pipeline.instance_buffer.as_ptr()];
         (table.iaset_vertex_buffers)(
@@ -1586,7 +1614,27 @@ unsafe fn draw_scene(
         );
     }
 
-    context.draw_instances(count as u32);
+    // 批次循环：没有批次信息时行为与改动前**完全一致**（单次 draw）。
+    if batches.is_empty() {
+        context.draw_instances(count as u32, 0);
+    } else {
+        for b in batches {
+            let n = b.count.min((count as u32).saturating_sub(b.start));
+            if n == 0 {
+                continue;
+            }
+            match b.image.and_then(|id| images.get(&id)) {
+                Some((_, srv, _, _)) => {
+                    context.set_ps_shader(&pipeline.image_ps);
+                    context.set_ps_image_texture(srv);
+                    context.draw_instances(n, b.start);
+                    // 恢复图集着色器：后续批次可能还是图集
+                    context.set_ps_shader(&pipeline.pixel_shader);
+                }
+                None => context.draw_instances(n, b.start),
+            }
+        }
+    }
     let _ = instances;
 }
 
@@ -1644,7 +1692,7 @@ unsafe fn blit_cached(
     );
     context.set_ps_texture(&cached.srv, &atlas.sampler);
     context.set_ps_shader(&pipeline.blit_ps);
-    context.draw_instances(1);
+    context.draw_instances(1, 0);
 }
 
 pub struct Gfx {
@@ -2068,7 +2116,14 @@ impl Gfx {
                 && rect.right >= w as i32
                 && rect.bottom >= h as i32;
             draw_scene(
-                context, pipeline, atlas, cached, instances, count, rect, is_full, w, h,
+                context,
+                pipeline,
+                atlas,
+                cached,
+                instances,
+                count,
+                &[],
+                &self.images, rect, is_full, w, h,
             );
         }
 
@@ -2089,7 +2144,7 @@ impl Gfx {
                     globals.as_ptr() as *const c_void,
                 );
                 draw_scene(
-                    context, pipeline, atlas, cached, instances, count, full, true, w, h,
+                    context, pipeline, atlas, cached, instances, count, &[], &self.images, full, true, w, h,
                 );
                 blit_cached(context, pipeline, cached, atlas, rtv, w, h);
                 if let Some((mean, bright)) = self.read_back_stats() {
@@ -2103,7 +2158,18 @@ impl Gfx {
                 globals.as_ptr() as *const c_void,
             );
             draw_scene(
-                context, pipeline, atlas, cached, instances, count, full, true, w, h,
+                context,
+                pipeline,
+                atlas,
+                cached,
+                instances,
+                count,
+                &[],
+                &self.images,
+                full,
+                true,
+                w,
+                h,
             );
             blit_cached(context, pipeline, cached, atlas, rtv, w, h);
         }
@@ -2121,7 +2187,14 @@ impl Gfx {
                 bottom: (h as i32 / 4).max(1),
             };
             draw_scene(
-                context, pipeline, atlas, cached, instances, count, small, false, w, h,
+                context,
+                pipeline,
+                atlas,
+                cached,
+                instances,
+                count,
+                &[],
+                &self.images, small, false, w, h,
             );
             blit_cached(context, pipeline, cached, atlas, rtv, w, h);
             let after = self.read_back_hash();
@@ -2134,7 +2207,14 @@ impl Gfx {
             }
             // 自检会破坏画面：立刻用整帧重画一次恢复
             draw_scene(
-                context, pipeline, atlas, cached, instances, count, full, true, w, h,
+                context,
+                pipeline,
+                atlas,
+                cached,
+                instances,
+                count,
+                &[],
+                &self.images, full, true, w, h,
             );
             blit_cached(context, pipeline, cached, atlas, rtv, w, h);
         }
@@ -2151,7 +2231,7 @@ impl Gfx {
             context.clear(&cached.rtv, [0.02, 0.02, 0.03, 1.0]);
             context.set_pipeline(pipeline);
             context.set_ps_texture(&atlas.srv, &atlas.sampler);
-            context.draw_instances(count as u32);
+            context.draw_instances(count as u32, 0);
             context.set_render_target(Some(rtv));
             if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
                 let blit = Instance::solid(
@@ -2181,7 +2261,7 @@ impl Gfx {
             );
             context.set_ps_texture(&cached.srv, &atlas.sampler);
             context.set_ps_shader(&pipeline.blit_ps);
-            context.draw_instances(1);
+            context.draw_instances(1, 0);
             let h2 = self.read_back_hash();
             match (h1, h2) {
                 (Some(a), Some(b)) => eprintln!(
