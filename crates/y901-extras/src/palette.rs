@@ -74,10 +74,15 @@ struct Extended {
 /// SGR 累积器：把 `CSI ... m` 变成 `CellStyle`。
 #[derive(Clone, Copy, Debug)]
 pub struct SgrState {
+    /// 默认前景色。`SGR 39` 恢复到它。
     pub fg: ColorSpec,
+    /// 默认背景色。`SGR 49` 恢复到它。
     pub bg: ColorSpec,
+    /// 粗体标志（`SGR 1` / `22`）。
     pub bold: bool,
+    /// 下划线标志（`SGR 4` / `24`）。
     pub underline: bool,
+    /// 反色标志（`SGR 7` / `27`）。与选区反色共用同一次交换，两者叠加会翻回原色。
     pub reverse: bool,
     pending: Option<Extended>,
 }

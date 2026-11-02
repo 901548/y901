@@ -14,6 +14,7 @@ use y901_ui::{
 const DIVIDER: f32 = 1.0;
 const HIT_SLOP: f32 = 4.0;
 
+/// 两栏分隔容器：可拖动分隔条，两侧各有最小尺寸。
 pub struct SplitView {
     id: String,
     /// 两栏，顺序固定：first 在左/上。

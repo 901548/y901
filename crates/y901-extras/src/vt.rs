@@ -19,6 +19,8 @@ enum VtState {
 }
 
 #[derive(Default)]
+/// 增量 VT 解析器：把 PTY 字节流翻译成网格操作。
+/// 为什么是增量的：转义序列可能被拆在两次 read 之间，状态必须跨调用保留。
 pub struct VtFilter {
     state: VtState,
     params: Vec<u8>,

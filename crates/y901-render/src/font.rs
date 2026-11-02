@@ -4,29 +4,43 @@
 //! - `MyFontEngine`（自研 TTF）在本 crate 的 [`crate::font_engine`]；
 //! - `TextEngine`（DirectWrite）在 `y901-backend-win32`（它依赖 windows-sys）。
 
+/// 图集脏矩形：告诉后端这一块像素变了，需要重新上传。
 pub struct DirtyRect {
+    /// 矩形左上角 X（图集像素）。
     pub x: u32,
+    /// 矩形左上角 Y（图集像素）。
     pub y: u32,
+    /// 墨迹宽度（像素）。
     pub width: u32,
+    /// 墨迹高度（像素）。
     pub height: u32,
 }
 
 #[derive(Clone, Debug)]
+/// 一个已光栅化字形的度量与图集位置。
+/// 为什么带 `bearing`：字形墨迹不一定从原点开始，绘制时要按 bearing 偏移，
+/// 否则字符间距会忽大忽小。
 pub struct GlyphInfo {
+    /// 墨迹宽度（像素）。
     pub width: u32,
+    /// 墨迹高度（像素）。
     pub height: u32,
     /// 相对基线原点（pen position）的墨迹偏移。
     pub bearing_x: i32,
+    /// 墨迹相对基线的垂直偏移（向上为正）。
     pub bearing_y: i32,
+    /// 前进量（像素）；等宽网格里用于居中补偿。
     pub advance: f32,
     /// 图集内像素坐标。
     pub atlas_x: u32,
+    /// 图集内 Y 坐标。
     pub atlas_y: u32,
     /// 最近一次使用帧（LRU）。
     pub last_used: u64,
 }
 
 impl GlyphInfo {
+    /// 是否为空字形（空格等无墨迹字符）。空字形不该写图集，也不该画。
     pub fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
     }
@@ -62,6 +76,8 @@ pub trait FontEngine {
 }
 
 
+/// 由字号推出等宽单元格尺寸 `(宽, 高)`。
+/// 为什么要独立函数：布局、字形引擎、后端必须用同一套格尺寸，否则文字与光标会错位。
 pub fn cell_metrics_for(font_size: f32) -> (f32, f32) {
     let size = if font_size.is_finite() && font_size > 0.0 {
         font_size

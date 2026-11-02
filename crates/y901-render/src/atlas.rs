@@ -14,20 +14,28 @@ use std::collections::HashMap;
 /// 图集里一个字形的位置。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Slot {
+    /// 矩形左上角 X（图集像素）。
     pub x: u32,
+    /// 矩形左上角 Y（图集像素）。
     pub y: u32,
+    /// 矩形宽度（像素）。
     pub w: u32,
+    /// 矩形高度（像素）。
     pub h: u32,
+    /// 最近一次使用的帧号；LRU 驱逐按它排序。
     pub last_used: u64,
 }
 
 impl Slot {
+    /// 含 1px 间隙的宽度。间隙是为了防止相邻字形采样时互相渗色。
     pub fn padded_w(&self) -> u32 {
         self.w + 1
     }
+    /// 含 1px 间隙的高度。
     pub fn padded_h(&self) -> u32 {
         self.h + 1
     }
+    /// 含间隙面积；打包器用它比较候选位置。
     pub fn area(&self) -> u32 {
         self.padded_w() * self.padded_h()
     }
@@ -54,6 +62,7 @@ pub struct SkylinePacker {
 }
 
 impl SkylinePacker {
+    /// 建一个边长为 `size` 的空图集打包器（初始只有一个整宽平台）。
     pub fn new(size: u32) -> Self {
         Self {
             size,
@@ -65,6 +74,7 @@ impl SkylinePacker {
         }
     }
 
+    /// 清空所有平台并恢复到初始状态（整张图集重新可用）。
     pub fn reset(&mut self) {
         self.nodes.clear();
         self.nodes.push(SkyNode {
@@ -166,13 +176,18 @@ pub struct Atlas {
 /// 一次分配的结果。
 #[derive(Clone, Copy, Debug)]
 pub struct Placement {
+    /// 矩形左上角 X（图集像素）。
     pub x: u32,
+    /// 矩形左上角 Y（图集像素）。
     pub y: u32,
+    /// 矩形宽度（像素）。
     pub w: u32,
+    /// 矩形高度（像素）。
     pub h: u32,
 }
 
 impl Atlas {
+    /// 建一个边长为 `size` 的空图集打包器（初始只有一个整宽平台）。
     pub fn new(size: u32) -> Self {
         let size = size.max(64);
         Self {
@@ -189,10 +204,12 @@ impl Atlas {
         }
     }
 
+    /// 图集边长（像素）。
     pub fn size(&self) -> u32 {
         self.size
     }
 
+    /// 图集像素（RGBA；`rgb` 存覆盖率，`a` 恒为 255）。
     pub fn data(&self) -> &[u8] {
         &self.data
     }
@@ -203,18 +220,22 @@ impl Atlas {
         self.frame
     }
 
+    /// 当前帧号；每 `begin_frame` 递增，供 LRU 使用。
     pub fn frame(&self) -> u64 {
         self.frame
     }
 
+    /// 查某个字符的占位（没打包过返回 `None`）。
     pub fn slot(&self, ch: char) -> Option<&Slot> {
         self.slots.get(&ch)
     }
 
+    /// 已打包的字符数（诊断与内存估算用）。
     pub fn slot_count(&self) -> usize {
         self.slots.len()
     }
 
+    /// 发生过的整图重建次数。频繁重建说明图集太小或 LRU 太激进。
     pub fn compact_count(&self) -> u64 {
         self.compact_count
     }

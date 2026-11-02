@@ -16,6 +16,7 @@ const PAD: f32 = 6.0;
 /// 选中回调类型。
 type SelectCallback = Box<dyn Fn(usize, &str)>;
 
+/// 下拉/右键菜单。作为浮层内容时需先调 `open()`——`render`/`event` 都以它为门。
 pub struct Menu {
     id: String,
     items: Vec<String>,
@@ -486,6 +487,7 @@ impl Dialog {
         true
     }
 
+    /// 直接设置开启状态（不重置高亮）；用于由宿主控制弹层生命周期。
     pub fn set_open(&mut self, open: bool) {
         self.open = open;
     }

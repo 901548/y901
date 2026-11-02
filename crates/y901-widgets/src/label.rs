@@ -7,6 +7,7 @@ use y901_ui::{
     Semantics, Size, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
+/// 静态文本；挂上 `Signal` 后由数据源驱动更新。
 pub struct TextLabel {
     id: String,
     /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。

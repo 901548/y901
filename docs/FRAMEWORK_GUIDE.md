@@ -709,6 +709,26 @@ ctx.draw_image(rect, id, style);            // 默认什么都不画
 **完全不可见**，从像素上看就像"后端不支持文字"。我据此误判 SoftBackend 不画字形。
 现在 `TextStyle::default()` 的前景是**白色**，并有回归测试（`soft_glyphs.rs`）盯着。
 
+### §42.4 lint 未启用时的 0 警告不是绿灯
+
+`cargo doc --no-deps` 输出 **0 警告**，但 `RUSTFLAGS="-W missing_docs" cargo build` 一跑就是
+**482 个未文档化的公开项**。原因：`missing_docs` 默认是 allow，**没打开就不会报**。
+
+规则：**任何"干净"的声明都必须附带"用什么命令验证的"。**
+
+| 想声明 | 必须跑的命令 |
+|---|---|
+| 编译通过 | `cargo build --workspace` |
+| 测试全绿 | `powershell -File scripts/test-count.ps1`（含 doc-test） |
+| 无 lint 问题 | `cargo clippy --workspace --all-targets` |
+| 文档完整 | `RUSTFLAGS="-W missing_docs" cargo build --workspace` |
+| 渲染未回归 | `powershell -File scripts/hash-gate.ps1` |
+
+已完成的 crate 在 `lib.rs` 顶部启用 `#![warn(missing_docs)]`，缺口只能降不能升：
+`y901-mcp` / `y901-extras` / `y901-widgets` / `y901-render` 已归零；
+剩余 `y901-ui`(229) / `y901-runtime`(62) / `y901-agent`(50) / `y901-core`(42) / `y901-backend-win32`(41)。
+
+
 **代价**：后台每帧标脏 = 每帧全窗重绘。如果未来出现"只重绘不重排"的高频场景
 （高频进度条、光标闪烁），可以引入 `PendingInvalidation::RedrawOnly(id)` 变体：
 只标该节点矩形、不触发 layout。**当前不加**——没有真实场景证明它必需。

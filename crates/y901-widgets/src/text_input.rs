@@ -22,7 +22,9 @@ const CARET_W: f32 = 1.5;
 
 /// 剪贴板：组件只认这个接口，具体实现由应用层注入。
 pub trait Clipboard {
+    /// 读取剪贴板文本；`None` 表示不可用或为空（控件只需安静地不粘）。
     fn get(&mut self) -> Option<String>;
+    /// 写入剪贴板；失败被忽略——剪贴板不可用不应阻断 UI。
     fn set(&mut self, text: &str);
 }
 
@@ -64,6 +66,7 @@ struct GlyphX {
     w: f32,
 }
 
+/// 单行文本输入框：光标、选区、滚动、剪贴板、IME。
 pub struct TextInput {
     id: String,
     /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。

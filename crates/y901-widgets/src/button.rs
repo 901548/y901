@@ -9,6 +9,7 @@ use y901_ui::{
     Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
+/// 可点击按钮。点击不直接改状态，而是发一条应用命令——组件互不认识。
 pub struct Button {
     id: String,
     /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。

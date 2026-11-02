@@ -21,6 +21,7 @@
 //! [`Flex`]: y901_ui::Flex
 //! [`Stack`]: y901_ui::Stack
 
+#![warn(missing_docs)]
 pub mod button;
 pub mod label;
 pub mod checkbox;

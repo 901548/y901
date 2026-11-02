@@ -9,6 +9,7 @@ use y901_ui::{
     Size, TextMetrics, UiEvent, Widget,
 };
 
+/// 垂直列表容器：等宽、依次排列、支持 gap 与 padding。
 pub struct VerticalList {
     id: String,
     children: Vec<Box<dyn Widget>>,

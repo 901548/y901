@@ -15,8 +15,11 @@ use y901_ui::{
 /// 行内样式（缺省 = 继承主题正文色、常规字重）。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct InlineStyle {
+    /// 粗体标志（`SGR 1` / `22`）。
     pub bold: bool,
+    /// 斜体标志。
     pub italic: bool,
+    /// 覆盖颜色；`None` = 用主题色。
     pub color: Option<Color>,
 }
 
@@ -56,7 +59,9 @@ impl InlineStyle {
 /// 一段带样式的文本。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Span {
+    /// 本段文本。
     pub text: String,
+    /// 本段样式（与文本一起构成 `Span`）。
     pub style: InlineStyle,
 }
 
@@ -85,7 +90,9 @@ pub enum Block {
     Paragraph(Vec<Span>),
     /// 代码块：等宽、带背景、保留原始换行。
     Code {
+        /// 代码块的语言名（仅作标识，不做高亮）。
         lang: String,
+        /// 预切好的行；避免每帧重新切分。
         lines: Vec<String>,
     },
 }

@@ -16,7 +16,9 @@ use y901_ui::UiTree;
 
 /// 一次请求：原始行 + 回传通道。
 pub struct Job {
+    /// 一条 JSON-RPC 原始行（行分隔协议，不做预解析）。
     pub line: String,
+    /// 回传通道；`Some` 是响应行，`None` 表示本次请求不需要回包。
     pub reply: Sender<Option<String>>,
 }
 
