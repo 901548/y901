@@ -66,13 +66,29 @@ impl Default for Color {
 }
 
 /// 文本样式。框架层只表达语义，字形如何光栅化由后端决定。
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+///
+/// **`Default` 的前景是白色**，不是 `Color::default()`（透明）。
+/// 实测教训：之前直接 derive `Default`，于是 `TextStyle::default()` 写出的文字**完全不可见**，
+/// 而且从像素上看就像"后端没画字"——我曾经因此误判 SoftBackend 不支持字形。
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextStyle {
     pub fg: Color,
     pub bg: Color,
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
+}
+
+impl Default for TextStyle {
+    fn default() -> Self {
+        Self {
+            fg: Color::WHITE,
+            bg: Color::TRANSPARENT,
+            bold: false,
+            italic: false,
+            underline: false,
+        }
+    }
 }
 
 impl TextStyle {
