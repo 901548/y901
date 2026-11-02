@@ -15,6 +15,7 @@ const THUMB: f32 = 16.0;
 /// 键盘步进。
 const STEP: f32 = 0.05;
 /// 命中滑块的水平容差（半径 + 2px）。
+#[allow(dead_code)]
 const HIT_R: f32 = THUMB * 0.5 + 2.0;
 
 /// 水平滑块。
@@ -93,6 +94,10 @@ impl Slider {
     }
 
     /// 指针是否命中滑块。
+    ///
+    /// 目前只在测试里用：鼠标按下时整个矩形都算命中（点轨道也要跳转），
+    /// 但"点滑块只跟随拖拽、点轨道直接跳"这种更细的手感分支需要它。
+    #[allow(dead_code)]
     fn hits_thumb(&self, x: f32, y: f32) -> bool {
         let t = self.thumb();
         x >= t.x - 2.0
@@ -266,9 +271,9 @@ mod tests {
             let mut sum = 0u32;
             for y in 0..H {
                 let p = s.pixel(x, y).expect("像素");
-                let r = ((p >> 16) & 0xFF) as u32;
-                let g = ((p >> 8) & 0xFF) as u32;
-                let b = (p & 0xFF) as u32;
+                let r = (p >> 16) & 0xFF;
+                let g = (p >> 8) & 0xFF;
+                let b = p & 0xFF;
                 sum += (r + g + b) / 3;
             }
             let avg = (sum / H) as u8;
