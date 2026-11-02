@@ -184,6 +184,12 @@ fn pixel_statistics_and_png_baseline() {
         font: None,
     };
     let t0 = Instant::now();
+    // 注意：`Options.width/height` 是**窗口尺寸**（含边框与标题栏），
+    // 而下面回读的 `w`/`h` 是 `GetClientRect` 的**客户区**尺寸。
+    // 实测：400x220 的窗口 → 378x164 的客户区（水平边框约 22px、垂直约 56px）。
+    // 边框尺寸随 DPI / 主题 / DWM 状态变化，所以像素哈希**不能当跨会话常量**：
+    // 项目早期观测到 382x173 / 0xF38B9C1AB8A877E2，本轮观测到 378x164 / 0xF4C92C36969FEC48。
+    // 门禁脚本 `scripts/hash-gate.ps1` 改为"同会话前后对比 + 记录客户区尺寸"，不再硬编码常量。
     let mut window = Window::create(&options).expect("需要 D3D11");
     let mut tree = UiTree::new(Box::new(Scene { rect: Rect::ZERO }));
     window.resize(&mut tree);
