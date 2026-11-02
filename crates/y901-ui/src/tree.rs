@@ -1658,6 +1658,8 @@ impl UiTree {
         // 把本帧动画快照交给后端：控件在 render 里用 `ctx.animation(key)` 取进度。
         // 为什么不给每个控件塞一个 `Animate`：动画是「展示层事实」，控件只该问"我现在该是几"，
         // 不该自己管时间；而这正是控件拿不到 dt 的唯一解法。
+        // 悬停快照：控件在 render 里用 `ctx.is_hovered(id)` 判断自己是否被悬停。
+        ctx.set_hovered(self.hovered.as_deref());
         let snapshot = crate::animation::AnimSnapshot::new(
             self.animations
                 .iter()
@@ -2051,6 +2053,10 @@ impl UiTree {
 
         // 悬停追踪：只让"旧节点 + 新节点"两块区域变脏。
         if let UiEvent::MouseMove { pos } = event {
+            // 指针被捕获时不更新悬停：拖拽中鼠标会划过别的控件，
+            // 若那时切换悬停目标，工具提示会在拖拽中闪现，且与
+            // "按住期间所有移动都给捕获者"的语义矛盾。
+            if self.captured_pointer.is_none() {
             let new = self
                 .hit_index(*pos)
                 .and_then(|i| {
@@ -2059,13 +2065,26 @@ impl UiTree {
             })
                 .map(|n| n.id().to_string());
             if new != self.hovered {
-                if let Some(old) = self.hovered.clone() {
-                    self.invalidate(&old);
+                let old = self.hovered.clone();
+                if let Some(ref old_id) = old {
+                    self.invalidate(old_id);
                 }
-                if let Some(next) = new.clone() {
-                    self.invalidate(&next);
+                if let Some(ref next) = new {
+                    self.invalidate(next);
                 }
-                self.hovered = new;
+                self.hovered = new.clone();
+
+                // 先发 Leave（旧节点）再发 Enter（新节点）。
+                //
+                // 为什么用 `dispatch_to` 而不是在当前遍历里附带：
+                // Enter/Leave 是**定向**事件，它们不应该像 MouseMove 那样走命中链。
+                if let Some(old_id) = old {
+                    let _ = self.dispatch_to(&old_id, &UiEvent::MouseLeave);
+                }
+                if let Some(new_id) = new {
+                    let _ = self.dispatch_to(&new_id, &UiEvent::MouseEnter);
+                }
+            }
             }
         }
 

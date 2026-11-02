@@ -71,6 +71,14 @@ pub enum UiEvent {
         pos: Pos,
         button: MouseButton,
     },
+    /// 鼠标进入节点（由树在命中目标变化时派发）。
+    ///
+    /// 为什么单独成事件而不是让控件自己比 `is_hovered`：
+    /// 控件需要在**进入的瞬间**做一次动作（启动延时、播放动画），
+    /// 那是个瞬时事实，不是可轮询的状态。
+    MouseEnter,
+    /// 鼠标离开节点（由树在命中目标变化时派发）。
+    MouseLeave,
     MouseUp {
         pos: Pos,
         button: MouseButton,

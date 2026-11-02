@@ -390,6 +390,16 @@ pub trait RenderCtx: TextMetrics {
     /// 默认空实现（与 [`RenderCtx::retain_texture`] 配套）。
     fn release_texture(&mut self, _id: crate::image::TextureId) {}
 
+    /// 某个节点当前是否被鼠标悬停。
+    ///
+    /// 默认 `false`：不支持悬停的后端（与测试 mock）不受影响。
+    fn is_hovered(&self, _id: &str) -> bool {
+        false
+    }
+
+    /// 注入本帧的悬停目标（由 `UiTree::render` 调用）。
+    fn set_hovered(&mut self, _id: Option<&str>) {}
+
     /// 当前背景色（用于淡入/淡出遮罩）。
     ///
     /// 默认黑色：没有主题信息时至少能给出可用的中性遮罩色。

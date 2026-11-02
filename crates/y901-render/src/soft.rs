@@ -67,6 +67,7 @@ pub struct SoftBackend {
     clips: Vec<Rect>,
     transforms: Vec<(y901_ui::Pos, f32)>,
     anims: y901_ui::animation::AnimSnapshot,
+    hovered: Option<String>,
     textures: std::collections::HashMap<y901_ui::image::TextureId, (u32, u32, Vec<u8>, u32)>,
     next_texture: u64,
     text: Box<dyn super::font::FontEngine>,
@@ -107,6 +108,7 @@ impl SoftBackend {
             clips: Vec::new(),
             transforms: Vec::new(),
             anims: y901_ui::animation::AnimSnapshot::default(),
+            hovered: None,
             textures: std::collections::HashMap::new(),
             next_texture: 0,
             text: font,
@@ -132,6 +134,7 @@ impl SoftBackend {
             clips: Vec::new(),
             transforms: Vec::new(),
             anims: y901_ui::animation::AnimSnapshot::default(),
+            hovered: None,
             textures: std::collections::HashMap::new(),
             next_texture: 0,
             text: font,
@@ -343,6 +346,14 @@ impl RenderCtx for SoftBackend {
 
     fn pop_transform(&mut self) {
         self.transforms.pop();
+    }
+
+    fn is_hovered(&self, id: &str) -> bool {
+        self.hovered.as_deref() == Some(id)
+    }
+
+    fn set_hovered(&mut self, id: Option<&str>) {
+        self.hovered = id.map(|s| s.to_string());
     }
 
     fn animation(&self, key: u64) -> f32 {

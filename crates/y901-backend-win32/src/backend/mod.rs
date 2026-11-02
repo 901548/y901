@@ -59,6 +59,7 @@ pub struct D3dBackend {
     /// 为什么用"记录区间"而不是逐实例标记：图集实例的顺序就是 Z 序，
     /// 只需在帧末把这些区间与中间的图集段交替排开即可，实例数组本身不动。
     image_marks: Vec<(usize, usize, u64)>,
+    hovered: Option<String>,
     /// 当前单元格尺寸（由字号推出；set_font 会更新它）。
     ///
     /// **必须与 TextEngine 使用的 cell 尺寸一致**：measure_text/line_height/glyph_offset/draw_text 都读它。
@@ -122,6 +123,7 @@ impl D3dBackend {
         let mut backend = Self {
             gfx,
             image_marks,
+            hovered: None,
             text,
             instances: Vec::with_capacity(4096),
             viewport: Size::new(width as f32, height as f32),
@@ -617,6 +619,14 @@ impl RenderCtx for D3dBackend {
         if id.is_valid() {
             self.gfx.release_image(id.0);
         }
+    }
+
+    fn is_hovered(&self, id: &str) -> bool {
+        self.hovered.as_deref() == Some(id)
+    }
+
+    fn set_hovered(&mut self, id: Option<&str>) {
+        self.hovered = id.map(|s| s.to_string());
     }
 
     fn size(&self) -> Size {
