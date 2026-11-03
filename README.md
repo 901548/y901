@@ -64,6 +64,9 @@ fn main() -> Result<(), String> {
 }
 ```
 
+> 上例已在**干净目录**（仅 5 个路径依赖、无工作区继承）实际编译并运行验证：
+> 首帧 9.1ms，窗口常驻正常。
+
 ## 界面
 
 ![TreeView 示例截图](docs/screenshot.png)

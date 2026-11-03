@@ -18,10 +18,47 @@ fn send_ping(w: &mut TcpStream, id: u32) -> std::io::Result<()> {
 }
 
 /// 测试 1：客户端连上不读，灌满写队列 → 连接被断开，客户端读到 EOF。
+/// `bind` 在套接字资源紧张时会返回 **WSAENOBUFS (10055)**（Windows）或 `EADDRNOTAVAIL`（Linux）。
+///
+/// 这是**环境性的瞬时压力**，不是代码缺陷：本文件已经用 `127.0.0.1:0` 动态取端口，
+/// 所以不可能是端口冲突。直接 `expect` 会让整个测试在机器繁忙时假红（实际发生过）。
+///
+/// 重试 3 次、间隔 50ms；仍失败才报错，并带上最后一次的完整错误。
+fn spawn_retrying(addr: &str, tx: std::sync::mpsc::Sender<Pending>) -> (std::net::SocketAddr, y901_agent::Broadcaster) {
+    let mut last = None;
+    for attempt in 0..3 {
+        match spawn(addr, tx.clone()) {
+            Ok(v) => return v,
+            Err(e) => {
+                eprintln!("[test] spawn 第 {} 次失败：{e}", attempt + 1);
+                last = Some(e);
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+    panic!("连续 3 次 bind 失败：{}", last.expect("至少尝试过一次"));
+}
+
+/// 同上，用于直接建 `TcpListener` 的用例。
+fn listen_retrying() -> std::net::TcpListener {
+    let mut last = None;
+    for attempt in 0..3 {
+        match std::net::TcpListener::bind("127.0.0.1:0") {
+            Ok(l) => return l,
+            Err(e) => {
+                eprintln!("[test] bind 第 {} 次失败：{e}", attempt + 1);
+                last = Some(e);
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+    panic!("连续 3 次 bind 失败：{}", last.expect("至少尝试过一次"));
+}
+
 #[test]
 fn stalled_client_gets_disconnected() {
     let (tx, rx) = std::sync::mpsc::channel();
-    let (addr, hub) = spawn("127.0.0.1:0", tx).expect("bind");
+    let (addr, hub) = spawn_retrying("127.0.0.1:0", tx);
 
     let client = TcpStream::connect(addr).expect("connect");
     let mut reader = BufReader::new(client.try_clone().expect("clone"));
@@ -84,7 +121,7 @@ fn stalled_client_gets_disconnected() {
 #[test]
 fn dead_flag_prevents_further_try_send() {
     let (tx, _rx) = std::sync::mpsc::channel();
-    let (_addr, _hub) = spawn("127.0.0.1:0", tx).expect("bind");
+    let (_addr, _hub) = spawn_retrying("127.0.0.1:0", tx);
 
     // 构造一个已判死的 Pending：队列容量 1 且塞满
     let (job_tx, _job_rx) = std::sync::mpsc::sync_channel(1);
@@ -115,7 +152,7 @@ fn dead_flag_prevents_further_try_send() {
 #[test]
 fn slow_client_still_gets_replies_until_dead() {
     let (tx, rx) = std::sync::mpsc::channel();
-    let (addr, _hub) = spawn("127.0.0.1:0", tx).expect("bind");
+    let (addr, _hub) = spawn_retrying("127.0.0.1:0", tx);
 
     let client = TcpStream::connect(addr).expect("connect");
     client.set_read_timeout(Some(Duration::from_secs(3))).ok();
@@ -163,9 +200,8 @@ fn slow_client_still_gets_replies_until_dead() {
 /// 没设 → 返回 `None`，测试立刻红。
 #[test]
 fn write_timeout_is_set_on_connection() {
-    use std::net::TcpListener;
 
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let listener = listen_retrying();
     let addr = listener.local_addr().expect("addr");
     let _client = TcpStream::connect(addr).expect("connect");
     let (server, _) = listener.accept().expect("accept");
