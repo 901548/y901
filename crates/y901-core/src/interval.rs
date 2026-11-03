@@ -181,6 +181,19 @@ impl IntervalSet {
         }
     }
 
+    /// 是否与 `[start, end)` 重叠；**不修改集合**。
+    ///
+    /// 为什么需要它：二维（行 × 列）冲突检测要先**查完所有相关行**再决定是否写入，
+    /// 否则一旦中间某行冲突，前面已写入的行就需要回滚。
+    pub fn overlaps(&self, start: u32, end: u32) -> bool {
+        if start >= end {
+            return false;
+        }
+        self.spans
+            .iter()
+            .any(|s| s.start < end && start < s.end)
+    }
+
     /// 已占用的总长度（各段长度之和）。
     pub fn covered_len(&self) -> u32 {
         self.spans
@@ -333,6 +346,25 @@ mod tests {
         assert_eq!(set.first_gap_within(4, 6, 1), None, "起点已被占用");
         assert_eq!(set.first_gap_within(9, 9, 1), None, "空区间");
         assert_eq!(set.first_gap_within(0, 6, 0), Some(0), "零长度 → from");
+    }
+
+    #[test]
+    fn overlaps_detects_half_open_intersections() {
+        let mut set = IntervalSet::new();
+        set.insert(2, 5).expect("a");
+
+        // 与相邻但不相交：[0,2) 与 [2,5) 只碰边
+        assert!(!set.overlaps(0, 2), "相邻不算重叠");
+        assert!(!set.overlaps(5, 7), "相邻不算重叠");
+        // 真正相交
+        assert!(set.overlaps(1, 3));
+        assert!(set.overlaps(4, 6));
+        assert!(set.overlaps(2, 5));
+        assert!(set.overlaps(0, 9), "包住既有段");
+        // 空区间不与任何东西重叠
+        assert!(!set.overlaps(3, 3));
+        // 查询不改集合
+        assert_eq!(set.spans(), vec![(2, 5)]);
     }
 
     #[test]

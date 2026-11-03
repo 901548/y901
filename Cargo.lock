@@ -555,6 +555,7 @@ name = "y901-ui"
 version = "0.1.0"
 dependencies = [
  "y901-agent",
+ "y901-core",
  "y901-render",
 ]
 
