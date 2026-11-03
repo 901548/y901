@@ -233,3 +233,73 @@ fn latin_l1_which_method_is_closer_to_ideal() {
         re_wins, n
     );
 }
+
+/// L2 的字号：四分之一。
+const QUARTER_PX: f32 = BASE_PX / 4.0;
+
+#[test]
+#[ignore = "质量对比基准：--ignored --nocapture 手动跑"]
+fn latin_l2_rasterize_vs_box() {
+    let mut base = engine(BASE_PX, 2048);
+    let mut quarter = engine(QUARTER_PX, 1024);
+
+    let classes: [(&str, Vec<char>); 3] = [
+        ("大写字母", ('A'..='Z').collect()),
+        ("小写字母", ('a'..='z').collect()),
+        ("数字", ('0'..='9').collect()),
+    ];
+
+    let t0 = std::time::Instant::now();
+    let mut total = 0usize;
+    let mut bytes_l2 = 0usize;
+    let mut bytes_l0 = 0usize;
+
+    eprintln!("[latin-l2] | 字形类别 | 样本 | MAD 均值 | 最大 | 最小 | L2 字节 |");
+    for (name, chars) in &classes {
+        let mut sum = 0.0f64;
+        let mut max = 0.0f32;
+        let mut min = 1.0f32;
+        let mut n = 0usize;
+        let mut b2 = 0usize;
+
+        for &ch in chars {
+            let l0 = match extract(&mut base, ch) { Some(l) => l, None => continue };
+            let l2_re = match extract(&mut quarter, ch) { Some(l) => l, None => continue };
+            // 盒式对照组：L0 → 降 1 次 → 降 2 次
+            let l2_box = l0.downsample_box().downsample_box();
+
+            let mad = match mad_cropped(&l2_re, &l2_box) { Some(m) => m, None => continue };
+            sum += mad as f64;
+            max = max.max(mad);
+            min = min.min(mad);
+            n += 1;
+            b2 += l2_re.coverage.len();
+            total += 1;
+            bytes_l2 += l2_re.coverage.len();
+            bytes_l0 += l0.coverage.len();
+        }
+        let mean = if n == 0 { 0.0 } else { sum / n as f64 };
+        eprintln!(
+            "[latin-l2] | {} | {} | {:.4} | {:.4} | {:.4} | {} |",
+            name, n, mean, max, min, b2
+        );
+        assert!(n > 0, "{} 类应有样本", name);
+    }
+    let elapsed = t0.elapsed();
+    eprintln!(
+        "[latin-l2] {} 个字符（字号 {} → {}），耗时 {:?}，L2 总字节 {} / L0 {} = {:.1}%（理论 6.25%）",
+        total, BASE_PX, QUARTER_PX, elapsed, bytes_l2, bytes_l0,
+        100.0 * bytes_l2 as f64 / bytes_l0 as f64
+    );
+
+    // 变异对照：至少一个字形上两条路径不能完全相同
+    let mut b = engine(BASE_PX, 2048);
+    let mut q = engine(QUARTER_PX, 1024);
+    let l0 = extract(&mut b, 'm').expect("m");
+    let l2_box = l0.downsample_box().downsample_box();
+    let _ = q.glyph('m');
+    let l2_re = extract(&mut q, 'm').expect("m re");
+    let mad_m = mad_cropped(&l2_re, &l2_box).expect("可比");
+    eprintln!("[latin-l2] 变异对照 'm'：MAD = {mad_m:.4}");
+    assert!(mad_m > 0.0, "L2 两条路径结果完全相同 → 测量没有区分力");
+}
