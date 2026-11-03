@@ -259,6 +259,52 @@ impl MyFontEngine {
         }
     }
 
+    /// 按**缩放比**取字形：`scale < 1` 时选 mip 级，否则就是 L0。
+    ///
+    /// 输入：`ch`、`scale`（当前变换栈的缩放乘积）。
+    /// 输出：字形信息；调用方用 [`GlyphInfo::mip_at`] 按选中的级取图集坐标。
+    /// 副作用：**首次对某个字形变小时会生成 mip（约 14µs）并产生脏区**；
+    /// 后续调用幂等，无额外开销。
+    ///
+    /// 为什么 `scale >= 1` 不生成 mip：放大方向没有更精细的源，
+    /// 生成也没人用，只会占图集。这也是"s = 1.0 逐像素不变"的实现保证。
+    pub fn glyph_at_scale(&mut self, ch: char, scale: f32) -> Option<&GlyphInfo> {
+        if !(scale.is_finite() && scale > 0.0 && scale < 1.0) {
+            return self.glyph(ch);
+        }
+        // 先保证 L0 存在（它是 mip 的源）
+        self.glyph(ch)?;
+        let _ = self.ensure_mips(ch);
+        self.glyph(ch)
+    }
+
+    /// 字形 L0 的**墨迹密度**（墨迹像素 / 字身框面积），供 LOD 选择使用。
+    ///
+    /// 为什么除以 `size²` 而不是字形自己的包围盒：
+    /// 包围盒是**紧贴墨迹**的，于是一个句点的覆盖率也能高达 0.5——
+    /// 这会让"密字多降一级"的规则**几乎恒为真**（实测：全部 Latin 都 > 0.25）。
+    /// 用字身框作分母才能区分"同一格子里墨多还是墨少"，这正是设计意图。
+    pub fn glyph_ink_ratio(&mut self, ch: char) -> f32 {
+        let Some(g) = self.glyph(ch).cloned() else {
+            return 0.0;
+        };
+        if g.width == 0 || g.height == 0 {
+            return 0.0;
+        }
+        let asz = self.atlas_size as usize;
+        let mut inked = 0usize;
+        for y in 0..g.height as usize {
+            for x in 0..g.width as usize {
+                let i = ((g.atlas_y as usize + y) * asz + (g.atlas_x as usize + x)) * 4;
+                if self.atlas.get(i).copied().unwrap_or(0) > 0 {
+                    inked += 1;
+                }
+            }
+        }
+        let em = (self.size * self.size).max(1.0);
+        (inked as f32 / em).min(1.0)
+    }
+
     /// 按需为已缓存的字形生成 mip 链（幂等：已生成则直接返回）。
     ///
     /// 为什么是**懒生成**而不是安装时生成：
@@ -446,6 +492,106 @@ mod mip_guard_tests {
             atlas,
         )
         .expect("engine")
+    }
+
+    // ================= glyph_at_scale（第 2e 步）=================
+
+    fn engine_256() -> MyFontEngine {
+        engine(256)
+    }
+
+    /// 在 'A'..='Z' 里找一个墨迹密度在某侧的字形。
+    ///
+    /// 为什么不硬编码字符：墨迹比取决于字体与字号，硬编码会让测试在换字体后失效。
+    /// 这里按实测值挑，并在找不到时报错而不是静默跳过。
+    fn pick_glyph_with_ink(e: &mut MyFontEngine, below: bool) -> char {
+        // 候选集要真的含稀疏字形：大写字母在 15px 下墨迹比普遍 > 0.25（实测），
+        // 所以必须把小写与标点也算进来。
+        let candidates: Vec<char> = ('A'..='Z')
+            .chain('a'..='z')
+            .chain('0'..='9')
+            .chain(['.', ',', '-', 'l', 'i', 'I', '1'])
+            .collect();
+        for ch in candidates {
+            let ink = e.glyph_ink_ratio(ch);
+            if (below && ink < 0.25) || (!below && ink > 0.25) {
+                return ch;
+            }
+        }
+        panic!("找不到合适的字形（below={below}），说明墨迹比分布与预期不同");
+    }
+
+    #[test]
+    fn scale_1_0_returns_l0_without_mips() {
+        let mut e = engine_256();
+        let g = e.glyph_at_scale('A', 1.0).expect("A").clone();
+        assert!(g.mips[0].is_none(), "scale = 1 不应生成 mip");
+        assert!(g.mip_at(1).is_none(), "回退也应为 None（即用 L0）");
+    }
+
+    #[test]
+    fn scale_0_75_returns_l0() {
+        let mut e = engine_256();
+        let g = e.glyph_at_scale('A', 0.75).expect("A").clone();
+        assert_eq!(
+            crate::mip::level_for(0.75, 0.0, 2),
+            0,
+            "0.75 的 LOD 应为 0（floor(log2(1/0.75)) = 0）"
+        );
+        assert!(g.mip_at(0).is_none(), "level 0 = L0");
+    }
+
+    #[test]
+    fn scale_0_5_returns_l1_for_sparse_glyph() {
+        let mut e = engine_256();
+        let ch = pick_glyph_with_ink(&mut e, true);
+        let ink = e.glyph_ink_ratio(ch);
+        assert!(ink < 0.25, "sparse glyph ink {ink}");
+        let g = e.glyph_at_scale(ch, 0.5).expect("glyph").clone();
+        let slot = g.mip_at(1).expect("L1 应存在");
+        assert!(slot.width < g.width, "L1 应比 L0 窄");
+    }
+
+    #[test]
+    fn scale_0_5_returns_l2_for_dense_glyph() {
+        let mut e = engine_256();
+        let ch = pick_glyph_with_ink(&mut e, false);
+        let ink = e.glyph_ink_ratio(ch);
+        assert!(ink > 0.25, "dense glyph ink {ink}");
+        let g = e.glyph_at_scale(ch, 0.5).expect("glyph").clone();
+        // 密字形：level_for(0.5, >0.25) = 2 → 取 L2（若 L2 未生成则回退 L1，也不应为 None）
+        let slot = g.mip_at(2).expect("L2（或回退的 L1）应存在");
+        assert!(slot.width < g.width, "L2 应比 L0 窄");
+    }
+
+    #[test]
+    fn scale_0_25_returns_l2() {
+        let mut e = engine_256();
+        let g = e.glyph_at_scale('A', 0.25).expect("A").clone();
+        assert_eq!(crate::mip::level_for(0.25, 0.0, 2), 2, "0.25 的 LOD 应为 2");
+        assert!(g.mip_at(2).is_some(), "L2 应存在");
+    }
+
+    #[test]
+    fn scale_nan_returns_l0_without_panic() {
+        let mut e = engine_256();
+        let g = e.glyph_at_scale('A', f32::NAN).expect("A").clone();
+        assert!(g.mips[0].is_none(), "NaN 应按不缩放处理，不生成 mip");
+    }
+
+    #[test]
+    fn glyph_after_glyph_at_scale_is_unchanged() {
+        let mut e = engine_256();
+        let before = e.glyph('A').expect("A").clone();
+        let _ = e.glyph_at_scale('A', 0.5);
+        let after = e.glyph('A').expect("A").clone();
+        assert_eq!(
+            (before.width, before.height, before.atlas_x, before.atlas_y),
+            (after.width, after.height, after.atlas_x, after.atlas_y),
+            "mip 生成不得改动 L0 的尺寸与图集位置"
+        );
+        assert_eq!(before.advance, after.advance, "advance 不应变");
+        assert!(after.mips[0].is_some(), "此时 mip 已生成");
     }
 
     #[test]

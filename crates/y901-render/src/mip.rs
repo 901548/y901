@@ -138,6 +138,11 @@ impl MipChain {
     /// 非有限或非正的 `scale` 一律当作 1.0 处理（返回 0），因为那是调用方的错误，
     /// 按"不缩放"处理最安全。
     pub fn level_for(&self, scale: f32, ink: f32) -> usize {
+        level_for(scale, ink, self.max_level())
+    }
+
+    #[allow(dead_code)]
+    fn level_for_old(&self, scale: f32, ink: f32) -> usize {
         let max = self.max_level();
         if !(scale.is_finite() && scale > 0.0) || scale >= 1.0 {
             return 0;
@@ -190,6 +195,30 @@ impl MipChain {
             .sum();
         Some(sum as f32 / (255.0 * a.coverage.len() as f32))
     }
+}
+
+
+/// 按缩放比与墨迹密度选级（自由函数版，不需要构造链）。
+///
+/// `max_level` 是**可用的最粗一级**（链上已有的级数 - 1）。返回值保证 `<= max_level`，
+/// 因此调用方可以安全地用它索引 `mips[max_level]`。
+///
+/// 规则与 [`MipChain::level_for`] 完全一致，此处不重复解释，只给边界速查：
+/// `1.0 -> 0`、`0.75 -> 0`、`0.5 -> 1`（密字形 2）、`0.25 -> 2`、`NaN -> 0`。
+pub fn level_for(scale: f32, ink: f32, max_level: usize) -> usize {
+    if !(scale.is_finite() && scale > 0.0) || scale >= 1.0 {
+        return 0;
+    }
+    let halvings = (1.0 / scale).log2().floor();
+    let mut level = if halvings.is_finite() && halvings > 0.0 {
+        halvings as usize
+    } else {
+        0
+    };
+    if ink > 0.25 {
+        level += 1;
+    }
+    level.min(max_level)
 }
 
 #[cfg(test)]

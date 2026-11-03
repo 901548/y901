@@ -74,6 +74,26 @@ impl GlyphInfo {
     pub fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
     }
+
+    /// 取第 `level` 级的图集位置；**缺级时向上回退到最近的可用级**，
+    /// 最终回退到 L0（即 `None` = 用 L0 字段）。
+    ///
+    /// 为什么要回退而不是返回 `None`：缺级是**正常状态**（懒生成没触发、
+    /// 或图集过满被保护跳过 L2），此时用更细的级只是"多采样一点"，
+    /// 而返回 `None` 会让调用方误以为"字形不存在"。
+    pub fn mip_at(&self, level: usize) -> Option<MipSlot> {
+        if level == 0 {
+            return None;
+        }
+        for l in (1..=level.min(3)).rev() {
+            if let Some(slot) = self.mips.get(l - 1).copied().flatten() {
+                if !slot.is_empty() {
+                    return Some(slot);
+                }
+            }
+        }
+        None
+    }
 }
 
 /// 字形引擎的统一接口。
