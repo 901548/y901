@@ -195,6 +195,8 @@ impl MyFontEngine {
             atlas_x: ax,
             atlas_y: ay,
             last_used: self.frame,
+            // mip 链在 `insert_mips` 里填充；这里先置空
+            mips: [None, None, None],
         })
     }
 

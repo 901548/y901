@@ -16,6 +16,31 @@ pub struct DirtyRect {
     pub height: u32,
 }
 
+
+/// 一级 mip 在**图集里的位置**。
+///
+/// 为什么不直接存 [`crate::mip::MipLevel`]：那会把覆盖率像素复制一份进 `GlyphInfo`，
+/// 与"图集是唯一存储"的设计冲突（内存直接翻倍）。mip 的像素住在图集里，
+/// `GlyphInfo` 只记坐标。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MipSlot {
+    /// 图集内 X（左上角）。
+    pub atlas_x: u32,
+    /// 图集内 Y（左上角）。
+    pub atlas_y: u32,
+    /// 墨迹宽度（像素）。
+    pub width: u32,
+    /// 墨迹高度（像素）。
+    pub height: u32,
+}
+
+impl MipSlot {
+    /// 是否为空槽（未生成）。
+    pub fn is_empty(&self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+}
+
 #[derive(Clone, Debug)]
 /// 一个已光栅化字形的度量与图集位置。
 /// 为什么带 `bearing`：字形墨迹不一定从原点开始，绘制时要按 bearing 偏移，
@@ -37,6 +62,11 @@ pub struct GlyphInfo {
     pub atlas_y: u32,
     /// 最近一次使用帧（LRU）。
     pub last_used: u64,
+    /// mip 链：`mips[0]` = 1/2 尺寸，`mips[1]` = 1/4，`mips[2]` = 1/8。
+    ///
+    /// 只对**缩小方向**生成；`None` 表示该级还没生成或生成失败，
+    /// 选择器会回退到最近的可用级（最终回退到 L0）。
+    pub mips: [Option<MipSlot>; 3],
 }
 
 impl GlyphInfo {

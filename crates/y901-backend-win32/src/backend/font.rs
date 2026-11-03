@@ -763,6 +763,7 @@ impl TextEngine {
                 atlas_x: 0,
                 atlas_y: 0,
                 last_used: self.frame,
+                mips: [None, None, None],
             });
         };
 
@@ -844,6 +845,7 @@ impl TextEngine {
             atlas_x,
             atlas_y,
             last_used: self.frame,
+            mips: [None, None, None],
         })
     }
 
