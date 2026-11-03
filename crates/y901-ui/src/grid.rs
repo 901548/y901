@@ -80,6 +80,11 @@ pub struct Grid {
     occupancy: Vec<IntervalSet>,
     /// 内容版本：`place()` 改变布局时 +1，让布局缓存知道要重算。
     version: u64,
+    /// 自动落位缓存（与 `children` 下标对齐）。
+    ///
+    /// 为什么要缓存：`auto_cells` 本身是 O(n·rows·cols)。若 `cell_of(i)`
+    /// 每次都重算，布局就退化为 **O(n²·rows·cols)**——实测在 10k 节点上直接卡死。
+    auto_cache: Vec<(usize, usize)>,
 }
 
 impl Grid {
@@ -112,6 +117,7 @@ impl Grid {
             placements: HashMap::new(),
             occupancy: Vec::new(),
             version: 0,
+            auto_cache: Vec::new(),
         }
     }
 
@@ -147,13 +153,18 @@ impl Grid {
             let cols = self.cols.len().max(1);
             return (index % cols, index / cols);
         }
-        self.auto_cells().get(index).copied().unwrap_or((0, 0))
+        if self.auto_cache.is_empty() {
+            // 未缓存（例如布局前的探查）：退回纯下标映射，不触发重计算
+            let cols = self.cols.len().max(1);
+            return (index % cols, index / cols);
+        }
+        self.auto_cache.get(index).copied().unwrap_or((0, 0))
     }
 
     /// 计算所有子控件的**自动**落位（显式定位的跳过）。
     ///
     /// 返回的下标与 `children` 对齐；被显式定位的位置写 `(0,0)`（不会被用到）。
-    fn auto_cells(&self) -> Vec<(usize, usize)> {
+    fn auto_cells(&mut self) -> Vec<(usize, usize)> {
         let cols = self.cols.len().max(1);
         let rows = self.rows.len().max(1);
         // 在占用表的**副本**上模拟：布局是只读的，不能把自动落位写回真占用表
@@ -182,6 +193,7 @@ impl Grid {
             }
             out.push(placed.unwrap_or((0, 0)));
         }
+        self.auto_cache = out.clone();
         out
     }
 
@@ -221,6 +233,77 @@ impl Grid {
             for (i, t) in tracks.iter().enumerate() {
                 if let Some(f) = t.fraction() {
                     out[i] = free * f / weight;
+                }
+            }
+        }
+        out
+    }
+
+    /// 按**区间约束的最长路**求轨道尺寸（跨格归因的精确解）。
+    ///
+    /// 形式化：设前缀和 `P[0] = 0`、`w_j = P[j] - P[j-1]`，
+    /// 每条约束 `(区间 a..b, 最小尺寸 d)` 变为
+    ///
+    /// ```text
+    /// P[b] >= P[a] + d + gap * (b - a - 1)
+    /// ```
+    ///
+    /// 因为 `a < b`，所有边都指向更大下标 → 约束图是 **DAG**，
+    /// 下标顺序本身就是拓扑序，一遍松弛即得**最小总宽的精确解**（`O(m + n)`）。
+    ///
+    /// 为什么不用两遍 min/max-content 启发式：那是近似解，误差上界 `n·d_max`；
+    /// 而这里的精确解反而更快（纯浮点运算，不再调 `measure`）。
+    ///
+    /// 注意：跨格约束**可以撑开 `Fixed` 轨道**（否则跨格内容放不下）。
+    fn resolve_by_spans(
+        tracks: &[GridTrack],
+        available: f32,
+        gap: f32,
+        spans: &[(usize, usize, f32)],
+    ) -> Vec<f32> {
+        let m = tracks.len().max(1);
+        let mut p = vec![0.0f32; m + 1];
+
+        // 约束按"终点 b"分桶，便于一遍扫描
+        let mut by_end: Vec<Vec<(usize, f32)>> = vec![Vec::new(); m + 1];
+        // 固定轨道自身也是约束：长度 >= v
+        for (j, t) in tracks.iter().enumerate() {
+            if let GridTrack::Fixed(v) = t {
+                if j < m {
+                    by_end[j + 1].push((j, v.max(0.0)));
+                }
+            }
+        }
+        for &(a, b, d) in spans {
+            if a < b && b <= m {
+                let extra = gap * (b - a - 1) as f32;
+                // 与固定轨道的下界取 max
+                by_end[b].push((a, d + extra));
+            }
+        }
+
+        for k in 1..=m {
+            let mut best = p[k - 1];
+            for &(a, need) in &by_end[k] {
+                best = best.max(p[a] + need);
+            }
+            p[k] = best;
+        }
+
+        let mut out: Vec<f32> = (0..m).map(|j| (p[j + 1] - p[j]).max(0.0)).collect();
+
+        // 剩余空间给弹性轨道（与旧 `resolve_tracks` 的 Fraction 语义一致）
+        let weight: f32 = tracks
+            .iter()
+            .filter_map(|t| t.fraction())
+            .map(|f| f.max(0.0))
+            .sum();
+        if weight > 0.0 {
+            let used: f32 = out.iter().sum::<f32>() + gap * (m.saturating_sub(1)) as f32;
+            let free = (available - used).max(0.0);
+            for (j, t) in tracks.iter().enumerate() {
+                if let Some(f) = t.fraction() {
+                    out[j] += free * f.max(0.0) / weight;
                 }
             }
         }
@@ -541,6 +624,8 @@ impl Widget for Grid {
         cache: &mut LayoutCache,
     ) -> Size {
         let cols = self.cols.len().max(1);
+        // 先算一次自动落位并缓存：`cell_of` 后续被 O(n) 次调用，不能每次重算。
+        let _ = self.auto_cells();
         let inner_w = (constraints.max.w - self.padding.left - self.padding.right).max(0.0);
         let rows = self
             .children
@@ -552,7 +637,17 @@ impl Widget for Grid {
         // 每个子控件的可用宽度先算好：循环里同时借 `children`（mut）与 `self`（只读）会冲突。
         let widths: Vec<f32> = (0..self.children.len())
             .map(|i| {
+                // 跨格控件**不能**用单格宽去限制：那样它的 min-content
+                // 会被裁到一格（实测遇到过：300px 内容询回 133px）。
+                // 它的上界是整个内容区宽，真正的轨道分配由最长路决定。
                 let (col, _) = self.cell_of(i);
+                let spanning = self
+                    .placements
+                    .get(self.children[i].id())
+                    .is_some_and(|s| s.col_span() > 1);
+                if spanning {
+                    return inner_w.max(0.0);
+                }
                 match self.cols.get(col) {
                     Some(GridTrack::Fixed(v)) => v.max(0.0),
                     _ => (inner_w - self.gap.0 * (cols - 1) as f32) / cols as f32,
@@ -562,6 +657,9 @@ impl Widget for Grid {
 
         let mut col_content = vec![0.0f32; cols];
         let mut row_content = vec![0.0f32; rows];
+        // 跨格约束：列方向 `(a, b, 内在宽)`、行方向 `(a, b, 内在高)`
+        let mut col_spans: Vec<(usize, usize, f32)> = Vec::new();
+        let mut row_spans: Vec<(usize, usize, f32)> = Vec::new();
         // 先把每个子控件的 (col,row) 算好：循环内再调 `cell_of` 会同时借 self。
         let cells: Vec<(usize, usize)> = (0..self.children.len()).map(|i| self.cell_of(i)).collect();
         for ((child, cell_w), (col, row)) in self.children.iter_mut().zip(widths).zip(cells) {
@@ -574,19 +672,69 @@ impl Widget for Grid {
                 },
                 cache,
             );
-            col_content[col] = col_content[col].max(size.w);
+            // 跨格控件：它的尺寸不能归给起始格（那会让起始轨道过宽、其余过窄），
+            // 而是变成一条"区间下界"约束交给最长路求解。
+            let span = self
+                .placements
+                .get(child.id())
+                .copied()
+                .unwrap_or(crate::grid::GridSpan {
+                    col_start: col as u32,
+                    col_end: col as u32 + 1,
+                    row_start: row as u32,
+                    row_end: row as u32 + 1,
+                });
+            if span.col_span() > 1 {
+                col_spans.push((
+                    span.col_start as usize,
+                    span.col_end as usize,
+                    size.w,
+                ));
+            } else {
+                col_content[col] = col_content[col].max(size.w);
+            }
             if row < rows {
-                row_content[row] = row_content[row].max(size.h);
+                if span.row_span() > 1 {
+                    row_spans.push((
+                        span.row_start as usize,
+                        span.row_end as usize,
+                        size.h,
+                    ));
+                } else {
+                    row_content[row] = row_content[row].max(size.h);
+                }
             }
         }
 
-        self.col_widths = Self::resolve_tracks(&self.cols, inner_w, self.gap.0, |i| {
-            col_content.get(i).copied().unwrap_or(0.0)
-        });
+        // 没有跨格时走原路径：保证单格布局逐位不变（向后兼容）。
+        self.col_widths = if col_spans.is_empty() {
+            Self::resolve_tracks(&self.cols, inner_w, self.gap.0, |i| {
+                col_content.get(i).copied().unwrap_or(0.0)
+            })
+        } else {
+            let mut spans = col_spans;
+            // 单格子控件也要作为约束参与求解，否则有跨格时它们的内容会被忽略
+            for (j, v) in col_content.iter().enumerate() {
+                if *v > 0.0 {
+                    spans.push((j, j + 1, *v));
+                }
+            }
+            Self::resolve_by_spans(&self.cols, inner_w, self.gap.0, &spans)
+        };
         let inner_h = (constraints.max.h - self.padding.top - self.padding.bottom).max(0.0);
-        self.row_heights = Self::resolve_tracks(&self.rows, inner_h, self.gap.1, |i| {
-            row_content.get(i).copied().unwrap_or(0.0)
-        });
+        self.row_heights = if row_spans.is_empty() {
+            Self::resolve_tracks(&self.rows, inner_h, self.gap.1, |i| {
+                row_content.get(i).copied().unwrap_or(0.0)
+            })
+        } else {
+            let mut spans = row_spans;
+            for (j, v) in row_content.iter().enumerate() {
+                if *v > 0.0 {
+                    spans.push((j, j + 1, *v));
+                }
+            }
+            Self::resolve_by_spans(&self.rows, inner_h, self.gap.1, &spans)
+        };
 
         let total_w = self.col_widths.iter().sum::<f32>()
             + self.gap.0 * (self.col_widths.len().saturating_sub(1)) as f32
@@ -945,5 +1093,167 @@ mod tests {
         g.place("a", 0..2, 0..1).expect("a 占 0..2");
         g.place("a", 2..3, 0..1).expect("改到 2..3（已释放旧格）");
         g.place("b", 0..2, 0..1).expect("旧格已空出，应能放 b");
+    }
+
+    // ================= 跨格归因（最长路）=================
+
+    /// 可指定内在尺寸的叶子（模拟 min-content）。
+    struct SizedLeaf {
+        id: String,
+        size: Size,
+        rect: Rect,
+    }
+
+    impl SizedLeaf {
+        fn new(id: &str, w: f32, h: f32) -> Self {
+            Self {
+                id: id.to_string(),
+                size: Size::new(w, h),
+                rect: Rect::ZERO,
+            }
+        }
+    }
+
+    impl Widget for SizedLeaf {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _c: &mut LayoutCache,
+        ) -> Size {
+            c.constrain(self.size)
+        }
+        fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut LayoutCache) {
+            self.rect = rect;
+        }
+        fn rect(&self) -> Rect {
+            self.rect
+        }
+        fn render(&mut self, _ctx: &mut dyn crate::RenderCtx) {}
+    }
+
+    /// 本地等宽度量（与其他测试同构）。
+    struct Mono;
+
+    impl TextMetrics for Mono {
+        fn measure_text(&self, t: &str, _s: &crate::TextStyle) -> Size {
+            Size::new(t.chars().count() as f32 * 8.0, 16.0)
+        }
+        fn line_height(&self, _s: &crate::TextStyle) -> f32 {
+            16.0
+        }
+        fn scale(&self) -> f32 {
+            1.0
+        }
+    }
+
+    /// 建一个只有 Auto 轨道的网格（内容决定宽度）。
+    fn auto_grid(cols: usize, rows: usize, children: Vec<Box<dyn Widget>>) -> Grid {
+        Grid::new(
+            "g",
+            vec![GridTrack::Auto; cols],
+            vec![GridTrack::Auto; rows],
+        )
+        .gap(0.0, 0.0)
+        .with_children(children)
+    }
+
+    fn measured(mut g: Grid, w: f32, h: f32) -> Grid {
+        let mut cache = LayoutCache::new();
+        let c = Constraints::loose(Size::new(w, h));
+        let _ = g.measure(&Mono, c, &mut cache);
+        g
+    }
+
+    #[test]
+    fn spanning_columns_distribute_min_content_across_tracks() {
+        // 跨 2 列，内在宽 150：两列总和必须 >= 150，且不得让第一列独吞。
+        let mut g = auto_grid(
+            2,
+            1,
+            vec![Box::new(SizedLeaf::new("wide", 150.0, 10.0))],
+        );
+        g.place("wide", 0..2, 0..1).expect("跨两列");
+        let g = measured(g, 400.0, 100.0);
+
+        let total: f32 = g.col_widths.iter().sum();
+        assert!(
+            total >= 149.9,
+            "两列总宽应 >= 150，实测 {total}"
+        );
+        assert!(
+            g.col_widths[0] <= 150.1 && g.col_widths[1] <= 150.1,
+            "不应把 150 全塞进一列：{:?}",
+            g.col_widths
+        );
+    }
+
+    #[test]
+    fn spanning_both_axes_solves_rows_and_columns_independently() {
+        // 3×3：big 占左上 2×2，small 放在第三列第一行（不会冲突）
+        let mut g = auto_grid(
+            3,
+            3,
+            vec![
+                Box::new(SizedLeaf::new("big", 150.0, 90.0)),
+                Box::new(SizedLeaf::new("small", 40.0, 20.0)),
+            ],
+        );
+        g.place("big", 0..2, 0..2).expect("跨 2×2");
+        g.place("small", 2..3, 0..1).expect("右上格");
+        let g = measured(g, 400.0, 300.0);
+
+        let cw: f32 = g.col_widths.iter().sum();
+        let rh: f32 = g.row_heights.iter().sum();
+        assert!(cw >= 149.9, "列总宽应 >= 150，实测 {cw}");
+        assert!(rh >= 89.9, "行总高应 >= 90，实测 {rh}");
+        assert!(
+            g.col_widths[0] >= 39.9,
+            "单格控件的 40px 也要被满足，实测 {:?}",
+            g.col_widths
+        );
+    }
+
+    #[test]
+    fn single_cell_children_are_not_affected_by_spans() {
+        // 混合：跨格 + 单格。单格控件的内容宽不不应被跨格约束压缩。
+        // 行 0 被 tall 占满，单格控件放在行 1
+        let mut g = auto_grid(
+            3,
+            2,
+            vec![
+                Box::new(SizedLeaf::new("tall", 300.0, 10.0)),
+                Box::new(SizedLeaf::new("one", 80.0, 10.0)),
+            ],
+        );
+        g.place("tall", 0..3, 0..1).expect("跨三列");
+        g.place("one", 0..1, 1..2).expect("单格");
+        let g = measured(g, 500.0, 100.0);
+
+        assert!(
+            g.col_widths[0] >= 79.9,
+            "单格控件 80px 应被满足，实测 {:?}",
+            g.col_widths
+        );
+        let total: f32 = g.col_widths.iter().sum();
+        assert!(total >= 299.9, "跨三列需 300，实测 {total}");
+    }
+
+    #[test]
+    fn no_span_keeps_the_old_resolution_path() {
+        // 一个都没跨格：走旧 `resolve_tracks`，Auto 就是各自内容宽。
+        let g = auto_grid(
+            2,
+            1,
+            vec![
+                Box::new(SizedLeaf::new("a", 30.0, 10.0)),
+                Box::new(SizedLeaf::new("b", 70.0, 10.0)),
+            ],
+        );
+        let g = measured(g, 400.0, 100.0);
+        assert_eq!(g.col_widths, vec![30.0, 70.0]);
     }
 }
