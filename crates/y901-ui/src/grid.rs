@@ -13,7 +13,7 @@
 use y901_core::interval::IntervalSet;
 
 use crate::layout::LayoutCache;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use crate::{
@@ -87,6 +87,20 @@ pub struct Grid {
     id_index: HashMap<String, usize>,
     /// 索引是否可能已失效（`children_mut()` 被调用过）。
     index_dirty: bool,
+    /// 自动流子控件声明的跨格尺寸：`id → (列数, 行数)`。
+    ///
+    /// 与 `placements` **互斥**：`place` 定"在哪"，`span` 只定"多大"，
+    /// 位置由自动流找。两者都没调 = 自动流 1×1。
+    auto_spans: HashMap<String, (u32, u32)>,
+    /// 已经警告过"放不下退化 1×1"的 id。
+    ///
+    /// 为什么去重：布局每帧都跑，不去重的话一个错误布局会刷屏。
+    warned_span_ids: HashSet<String>,
+    /// 每个子控件**实际生效**的跨格尺寸（与 `children` 下标对齐）。
+    ///
+    /// 为什么不直接读 `auto_spans`：声明了 2×1 但放不下时会**退化为 1×1**，
+    /// 渲染必须用退化后的尺寸，否则会画出一个不存在的跨格区。
+    auto_effective: Vec<(u32, u32)>,
     /// 自动落位缓存（与 `children` 下标对齐）。
     ///
     /// 为什么要缓存：`auto_cells` 本身是 O(n·rows·cols)。若 `cell_of(i)`
@@ -126,6 +140,9 @@ impl Grid {
             version: 0,
             id_index: HashMap::new(),
             index_dirty: false,
+            auto_spans: HashMap::new(),
+            warned_span_ids: HashSet::new(),
+            auto_effective: Vec::new(),
             auto_cache: Vec::new(),
         }
     }
@@ -187,9 +204,7 @@ impl Grid {
         let cols = self.cols.len().max(1);
         let rows = self.rows.len().max(1);
 
-        // 每行一个**占用位图**：点查询 O(1)。
-        // 为什么不用 `IntervalSet::contains`：它是**线性扫描**区间列表，
-        // 适合插入/合并/查空位，不适合"逐格点查"——实测让 10k 网格多了 40ms。
+        // 每行一个占用位图：点查询 O(1)（不用 `IntervalSet::contains`——它是线性扫描）。
         let mut taken: Vec<Vec<bool>> = vec![vec![false; cols]; rows];
         for (r, set) in self.occupancy.iter().enumerate().take(rows) {
             for (a, b) in set.spans() {
@@ -201,30 +216,84 @@ impl Grid {
             }
         }
 
-        // 每行一个游标：列只会单调增长，不必每次从 0 扫。
         let mut cursor = vec![0usize; rows];
         let mut out = Vec::with_capacity(self.children.len());
+        let mut effective: Vec<(u32, u32)> = Vec::with_capacity(self.children.len());
+        // 警告先收集，循环结束后再写（否则与 `&self.children` 的借用冲突）
+        let mut to_warn: Vec<String> = Vec::new();
+
         for child in &self.children {
             if self.placements.contains_key(child.id()) {
                 out.push((0, 0));
+                effective.push((1, 1));
                 continue;
             }
+            let (w, h) = self.auto_spans.get(child.id()).copied().unwrap_or((1, 1));
+            let (w, h) = (w.max(1) as usize, h.max(1) as usize);
+
             let mut placed = None;
-            for r in 0..rows {
-                let mut c = cursor[r];
-                while c < cols && taken[r][c] {
-                    c += 1;
+            if w == 1 && h == 1 {
+                // 快路：单格用游标，列只增不减
+                for r in 0..rows {
+                    let mut c = cursor[r];
+                    while c < cols && taken[r][c] {
+                        c += 1;
+                    }
+                    cursor[r] = c;
+                    if c < cols {
+                        taken[r][c] = true;
+                        placed = Some((c, r));
+                        break;
+                    }
                 }
-                cursor[r] = c;
-                if c < cols {
-                    taken[r][c] = true;
-                    placed = Some((c, r));
-                    break;
+            } else {
+                // 跨格：找"连续 w 列 × h 行全空"的起点（行优先）
+                'search: for r in 0..=rows.saturating_sub(h) {
+                    for c in 0..=cols.saturating_sub(w) {
+                        let free = taken[r..r + h]
+                            .iter()
+                            .all(|row| !row[c..c + w].iter().any(|x| *x));
+                        if free {
+                            for row in taken[r..r + h].iter_mut() {
+                                row[c..c + w].fill(true);
+                            }
+                            placed = Some((c, r));
+                            break 'search;
+                        }
+                    }
+                }
+                if placed.is_none() {
+                    // 放不下：退化 1×1（不动态加行），并警告一次
+                    to_warn.push(child.id().to_string());
+                    for r in 0..rows {
+                        let mut c = cursor[r];
+                        while c < cols && taken[r][c] {
+                            c += 1;
+                        }
+                        cursor[r] = c;
+                        if c < cols {
+                            taken[r][c] = true;
+                            placed = Some((c, r));
+                            break;
+                        }
+                    }
                 }
             }
+            let got_span = placed.is_some() && (w > 1 || h > 1);
+            effective.push(if got_span { (w as u32, h as u32) } else { (1, 1) });
             out.push(placed.unwrap_or((0, 0)));
         }
+
+        for id in to_warn {
+            if self.warned_span_ids.insert(id.clone()) {
+                eprintln!(
+                    "[y901] Grid::span 放不下：{id} 需要的连续格子在声明的行列内不存在，已退化为 1×1"
+                );
+            }
+        }
+
         self.auto_cache = out.clone();
+        self.auto_effective = effective;
         out
     }
 
@@ -343,6 +412,8 @@ impl Grid {
 
     /// 每个子控件的目标矩形（解析后的结果，供测试与调试直接断言）。
     ///
+    /// 前提：需要先跑过一次 `measure`（它会缓存自动落位），否则自动流子控件退回纯下标映射。
+    ///
     /// 为什么公开：它是纯函数（输入轨道尺寸 + 定位，输出矩形），
     /// 几何断言比像素断言精确得多，错了能直接报出哪个数字不对。
     pub fn child_rects(&self) -> Vec<Rect> {
@@ -352,6 +423,17 @@ impl Grid {
                     return self.rect_for_span(*span);
                 }
                 let (col, row) = self.cell_of(i);
+                // 自动流但声明了跨格：用"**生效**"尺寸算并集
+                if let Some((w, h)) = self.auto_effective.get(i).copied() {
+                    if w > 1 || h > 1 {
+                        return self.rect_for_span(GridSpan {
+                            col_start: col as u32,
+                            col_end: col as u32 + w,
+                            row_start: row as u32,
+                            row_end: row as u32 + h,
+                        });
+                    }
+                }
                 let x = self.rect.x
                     + self.padding.left
                     + self.col_widths.iter().take(col).sum::<f32>()
@@ -580,6 +662,73 @@ impl Grid {
         self.placements.insert(id, span);
         self.version = self.version.wrapping_add(1);
         Ok(())
+    }
+
+    /// 声明**自动流子控件**的跨格尺寸（不指定位置）。
+    ///
+    /// 输入：`id`、列数、行数。
+    /// 输出：`Ok` = 已记录；`Err` = 未知 id / 零尺寸 / 超出声明的行列数。
+    /// 副作用：成功时 bump `layout_version`（与 `place` 一致）。
+    ///
+    /// 与 `place` 的关系：`place` 定"在哪"，`span` 只定"多大"，
+    /// 两者**互斥**。对同一个 id 先 `place` 后 `span`：**以 `place` 为准**并警告一次（不报错，
+    /// 因为这是"多写了一句"而不是"请求无法满足"）。
+    ///
+    /// 放不下时的行为（布局阶段，无法返回 `Err`）：**退化为 1×1 并警告一次**。
+    /// 不动态加行——那会让声明式布局的结果不可预测。
+    pub fn span(&mut self, id: impl Into<String>, cols: u32, rows: u32) -> Result<(), PlacementError> {
+        let id = id.into();
+        if cols == 0 {
+            return Err(PlacementError::EmptyRange {
+                axis: "cols",
+                start: 0,
+                end: cols,
+            });
+        }
+        if rows == 0 {
+            return Err(PlacementError::EmptyRange {
+                axis: "rows",
+                start: 0,
+                end: rows,
+            });
+        }
+        let col_limit = self.cols.len().max(1) as u32;
+        let row_limit = self.rows.len().max(1) as u32;
+        if cols > col_limit {
+            return Err(PlacementError::OutOfBounds {
+                axis: "cols",
+                end: cols,
+                limit: col_limit,
+            });
+        }
+        if rows > row_limit {
+            return Err(PlacementError::OutOfBounds {
+                axis: "rows",
+                end: rows,
+                limit: row_limit,
+            });
+        }
+        if self.index_dirty || self.id_index.len() != self.children.len() {
+            self.rebuild_index();
+        }
+        if !self.id_index.contains_key(&id) {
+            return Err(PlacementError::UnknownChild { id });
+        }
+        if self.placements.contains_key(&id) {
+            // 以 `place` 为准：不覆盖已定位的控件，但要告诉用户"你这句没生效"
+            if self.warned_span_ids.insert(id.clone()) {
+                eprintln!("[y901] Grid::span 忽略：{id} 已通过 place() 显式定位");
+            }
+            return Ok(());
+        }
+        self.auto_spans.insert(id, (cols, rows));
+        self.version = self.version.wrapping_add(1);
+        Ok(())
+    }
+
+    /// 自动流子控件声明的跨格尺寸（未声明则 `None`）。
+    pub fn span_of(&self, id: &str) -> Option<(u32, u32)> {
+        self.auto_spans.get(id).copied()
     }
 
     /// 子控件是否有显式定位。
@@ -1320,5 +1469,136 @@ mod tests {
         g.arrange(Rect::new(0.0, 0.0, 100.0, 50.0), &Mono, &mut cache);
         let r = g.child_rects()[0];
         assert_eq!(r, Rect::new(10.0, 10.0, 80.0, 30.0), "应占满内容区");
+    }
+
+    // ================= 自动流 + 跨格（span）=================
+
+    #[test]
+    fn span_places_auto_flow_child_in_next_free_slot() {
+        // 4 列：a 显式占 0..2；b 要 2 列 → 下一个连续空位是 (2,0)
+        let mut g = Grid::new(
+            "g",
+            vec![GridTrack::Fixed(50.0); 4],
+            vec![GridTrack::Fixed(20.0); 2],
+        )
+        .gap(10.0, 5.0)
+        .with_children(vec![
+            Box::new(TestLeaf::new("a")),
+            Box::new(TestLeaf::new("b")),
+        ]);
+        g.rect = Rect::new(0.0, 0.0, 400.0, 100.0);
+        g.col_widths = vec![50.0; 4];
+        g.row_heights = vec![20.0, 20.0];
+        g.place("a", 0..2, 0..1).expect("a");
+        g.span("b", 2, 1).expect("b 要 2 列");
+        let _ = g.auto_cells(); // 生产中由 measure 调用；单元测试需显式跑一次
+        let rects = g.child_rects();
+        // x = 0 + (50+10)*2 = 120
+        assert_eq!(rects[1], Rect::new(120.0, 0.0, 110.0, 20.0), "b 应落在 (2,0)");
+    }
+
+    #[test]
+    fn span_wraps_to_next_row_when_no_fit() {
+        // 3 列：a 占 0..2；b 要 2 列 → 行 0 剩下只有 1 列，应换到行 1 的 (0,1)
+        let mut g = Grid::new(
+            "g",
+            vec![GridTrack::Fixed(50.0); 3],
+            vec![GridTrack::Fixed(20.0); 2],
+        )
+        .with_children(vec![
+            Box::new(TestLeaf::new("a")),
+            Box::new(TestLeaf::new("b")),
+        ]);
+        g.rect = Rect::ZERO;
+        g.col_widths = vec![50.0; 3];
+        g.row_heights = vec![20.0, 20.0];
+        g.place("a", 0..2, 0..1).expect("a");
+        g.span("b", 2, 1).expect("b 要 2 列");
+        let _ = g.auto_cells();
+        let rects = g.child_rects();
+        assert_eq!(rects[1], Rect::new(0.0, 20.0, 100.0, 20.0), "b 应换行到 (0,1)");
+    }
+
+    #[test]
+    fn span_falls_back_to_1x1_when_the_grid_is_full() {
+        // 场景设计（2x1 网格）：a 声明 2x1 占满两列；b 也要 2x1，但已无连续空位 →
+        // 退化 1x1；而 1x1 也已没空格 → 按现有兜底落在 (0,0)。
+        let mut g = Grid::new("g", vec![GridTrack::Fixed(50.0); 2], vec![GridTrack::Fixed(20.0); 1])
+            .with_children(vec![
+                Box::new(TestLeaf::new("a")),
+                Box::new(TestLeaf::new("b")),
+            ]);
+        g.rect = Rect::ZERO;
+        g.col_widths = vec![50.0, 50.0];
+        g.row_heights = vec![20.0];
+        g.span("a", 2, 1).expect("a 占满两列");
+        g.span("b", 2, 1).expect("b 也要两列，应退化");
+        let _ = g.auto_cells();
+        let rects = g.child_rects();
+        assert_eq!(rects[0], Rect::new(0.0, 0.0, 100.0, 20.0), "a 应占满");
+        assert_eq!(rects[1], Rect::new(0.0, 0.0, 50.0, 20.0), "b 退化为 1×1 并兜底到 (0,0)");
+    }
+
+    #[test]
+    fn span_warns_only_once_per_id() {
+        let mut g = Grid::new("g", vec![GridTrack::Fixed(50.0); 2], vec![GridTrack::Fixed(20.0); 1])
+            .with_children(vec![Box::new(TestLeaf::new("a"))]);
+        g.col_widths = vec![50.0, 50.0];
+        g.row_heights = vec![20.0];
+        g.span("a", 2, 1).expect("ok");
+        let _ = g.auto_cells();
+        assert!(g.warned_span_ids.is_empty(), "能放下时不应警告");
+
+        // 再放一个放不下的
+        let mut g2 = Grid::new("g", vec![GridTrack::Fixed(50.0); 2], vec![GridTrack::Fixed(20.0); 1])
+            .with_children(vec![
+                Box::new(TestLeaf::new("a")),
+                Box::new(TestLeaf::new("b")),
+            ]);
+        g2.col_widths = vec![50.0, 50.0];
+        g2.row_heights = vec![20.0];
+        g2.span("a", 2, 1).expect("ok");
+        g2.span("b", 2, 1).expect("ok");
+        let _ = g2.auto_cells();
+        let _ = g2.auto_cells();
+        let _ = g2.auto_cells();
+        assert_eq!(g2.warned_span_ids.len(), 1, "同一 id 只警告一次");
+    }
+
+    #[test]
+    fn span_unknown_id_returns_err() {
+        let mut g = grid_3x3();
+        assert_eq!(
+            g.span("nope", 2, 1),
+            Err(PlacementError::UnknownChild {
+                id: "nope".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn span_zero_returns_err() {
+        let mut g = grid_3x3();
+        assert!(matches!(
+            g.span("a", 0, 1),
+            Err(PlacementError::EmptyRange { axis: "cols", .. })
+        ));
+        assert!(matches!(
+            g.span("a", 1, 0),
+            Err(PlacementError::EmptyRange { axis: "rows", .. })
+        ));
+        assert!(matches!(
+            g.span("a", 9, 1),
+            Err(PlacementError::OutOfBounds { axis: "cols", .. })
+        ));
+    }
+
+    #[test]
+    fn span_with_existing_place_keeps_the_placement() {
+        let mut g = grid_3x3();
+        g.place("a", 1..2, 0..1).expect("a 在 (1,0)");
+        g.span("a", 2, 1).expect("span 不报错，但被忽略");
+        assert_eq!(g.span_of("a"), None, "place 优先，span 不生效");
+        assert_eq!(rect_of(&g, "a"), Rect::new(160.0, 200.0, 50.0, 20.0), "a 位置不变");
     }
 }
