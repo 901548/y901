@@ -59,6 +59,24 @@ struct SkyNode {
 pub struct SkylinePacker {
     size: u32,
     nodes: Vec<SkyNode>,
+    /// 已分配的像素面积（计数器，不参与打包决策）。
+    used_area: u64,
+}
+
+/// 打包器的统计快照（只读，不影响打包）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PackerStats {
+    /// 已分配面积（含调用方自带的 padding）。
+    pub used_area: u64,
+    /// 剩余面积（总面积 - 已用）。
+    pub free_area: u64,
+    /// 在当前 skyline 上、沿任一峰能放下的最大矩形 `(w, h)`。
+    ///
+    /// 注意这是**上界而非最大空闲矩形**：它只考虑"从该峰顶往上到图集顶部"的竖直剩余，
+    /// 不做跨峰搜索。足以回答"还能放多大的字形"。
+    pub largest_free_rect: Option<(u32, u32)>,
+    /// 占用率 = `used_area / size²`（0..1）。
+    pub occupancy: f32,
 }
 
 impl SkylinePacker {
@@ -71,11 +89,40 @@ impl SkylinePacker {
                 y: 0,
                 w: size,
             }],
+            used_area: 0,
         }
     }
 
     /// 清空所有平台并恢复到初始状态（整张图集重新可用）。
+    /// 只读统计：已用面积 / 剩余面积 / 最大可放矩形 / 占用率。
+    ///
+    /// 为什么需要它：之前只能用"已用包围盒"代理碎片率，
+    /// 而那个代理把"单行打包时带上下的空白"也算成碎片，
+    /// 在占用率 0.3% 时会报出 39% 的虚假值。真实分子只有一个：分配面积。
+    pub fn stats(&self) -> PackerStats {
+        let total = (self.size as u64) * (self.size as u64);
+        let used = self.used_area.min(total);
+        let largest = self
+            .nodes
+            .iter()
+            .filter(|n| n.w > 0 && n.y < self.size)
+            .map(|n| (n.w, self.size - n.y))
+            .max_by_key(|(w, h)| (*w as u64) * (*h as u64));
+        PackerStats {
+            used_area: used,
+            free_area: total - used,
+            largest_free_rect: largest,
+            occupancy: if total == 0 {
+                0.0
+            } else {
+                used as f32 / total as f32
+            },
+        }
+    }
+
+    /// 清空所有平台并恢复初始状态（整张图集重新可用）。
     pub fn reset(&mut self) {
+        self.used_area = 0;
         self.nodes.clear();
         self.nodes.push(SkyNode {
             x: 0,
@@ -115,6 +162,7 @@ impl SkylinePacker {
         }
 
         let (idx, y, x) = best?;
+        self.used_area += (w as u64) * (h as u64);
 
         // 2) 分割：原平台变成"已用宽度 w"，右侧剩余另起一段
         let node = self.nodes[idx];
@@ -569,5 +617,37 @@ mod tests {
         let b = atlas.place('b', 8, 8).unwrap();
         assert_eq!(b.x, 9, "右 padding 应为 1px");
         assert_eq!(b.y, 0);
+    }
+
+    #[test]
+    fn stats_reports_about_half_when_half_filled() {
+        // 1024² 图集：填 512×1024 的一半就是 50%
+        let mut p = SkylinePacker::new(1024);
+        let before = p.stats();
+        assert_eq!(before.used_area, 0);
+        assert!((before.occupancy - 0.0).abs() < 1e-6);
+
+        // 两块 512×512 叠起来 = 512×1024 = 50%
+        p.insert(512, 512).expect("第一块");
+        p.insert(512, 512).expect("第二块");
+        let mid = p.stats();
+        assert!(
+            (mid.occupancy - 0.5).abs() < 0.1,
+            "占用率应接近 0.5，实测 {}",
+            mid.occupancy
+        );
+        assert_eq!(mid.used_area, 512 * 512 * 2);
+        assert_eq!(mid.free_area, 1024 * 1024 - mid.used_area);
+        assert!(mid.largest_free_rect.is_some());
+    }
+
+    #[test]
+    fn stats_reset_clears_the_counter() {
+        let mut p = SkylinePacker::new(256);
+        p.insert(100, 100).expect("a");
+        assert!(p.stats().used_area > 0);
+        p.reset();
+        assert_eq!(p.stats().used_area, 0);
+        assert!((p.stats().occupancy - 0.0).abs() < 1e-6);
     }
 }
