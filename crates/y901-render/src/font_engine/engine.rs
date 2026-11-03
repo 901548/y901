@@ -200,6 +200,80 @@ impl MyFontEngine {
         })
     }
 
+    /// 把一张覆盖率位图写入图集（RGB = 覆盖率，A = 255）并标脏。
+    fn blit_into_atlas(&mut self, bmp: &GlyphBitmap, ax: u32, ay: u32) {
+        let (w, h) = (bmp.width.max(1), bmp.height.max(1));
+        let asz = self.atlas_size as usize;
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let cov = bmp.coverage.get(y * w as usize + x).copied().unwrap_or(0);
+                let i = ((ay as usize + y) * asz + (ax as usize + x)) * 4;
+                self.atlas[i] = cov;
+                self.atlas[i + 1] = cov;
+                self.atlas[i + 2] = cov;
+                self.atlas[i + 3] = 255;
+            }
+        }
+        self.dirty.push(DirtyRect {
+            x: ax,
+            y: ay,
+            width: w,
+            height: h,
+        });
+    }
+
+    /// 为一个字形生成 L1（1/2）与 L2（1/4）并写入图集。
+    ///
+    /// 为什么每级**重新光栅化**而不是从 L0 降采样：实测结论（见
+    /// `docs/design/text-scaling.md` §4.5）—— 4×4 超采样作为无偏真值时，
+    /// 重光栅化的 MAD 为 0.0194，盒式滤波为 0.1404（**5× 更近**）。
+    ///
+    /// 只用 phase 0：缩小后亚像素差异不可见，存 4 个相位只是浪费图集。
+    fn insert_mips(&mut self, ch: char, info: &mut GlyphInfo) {
+        for level in 0..2usize {
+            let size = self.size / (2.0f32.powi(level as i32 + 1));
+            if size < 1.0 {
+                break;
+            }
+            let Some(bmp) = rasterize_glyph_phased(&self.data, ch, size, 0) else {
+                continue;
+            };
+            let (w, h) = (bmp.width.max(1), bmp.height.max(1));
+            let Some((ax, ay)) = self.packer.insert(w + PADDING, h + PADDING) else {
+                // 图集满了：**不驱逐**—— mip 是"有更好，没也能用"的东西，
+                // 为它赶走真正需要的字形是不划算的。退回 L0 即可。
+                break;
+            };
+            self.blit_into_atlas(&bmp, ax, ay);
+            info.mips[level] = Some(crate::font::MipSlot {
+                atlas_x: ax,
+                atlas_y: ay,
+                width: w,
+                height: h,
+            });
+        }
+    }
+
+    /// 按需为已缓存的字形生成 mip 链（幂等：已生成则直接返回）。
+    ///
+    /// 为什么是**懒生成**而不是安装时生成：
+    /// mip 使单字形图集占用从 1× 变成 ~1.6×，直接把
+    /// "2048² 装得下 1200 个 CJK × 4 相位"的容量承诺破掉（实测：测试直接取不到字形）。
+    /// 而 mip 只在**真的缩小渲染**时才有用，所以把成本推到首次需要它的时候。
+    pub fn ensure_mips(&mut self, ch: char) -> bool {
+        let key = (ch, 0u8);
+        let Some(info) = self.cache.get(&key) else {
+            return false;
+        };
+        if info.mips.iter().all(|m| m.is_some()) {
+            return true;
+        }
+        let mut info = info.clone();
+        self.insert_mips(ch, &mut info);
+        self.cache.insert(key, info);
+        true
+    }
+
     /// 驱逐**一个**最久未用的字形（保留热集）。
     ///
     /// 返回：`false` = 没有可驱逐的候选（全在热集保护期内）。
@@ -228,6 +302,21 @@ impl MyFontEngine {
                 width: g.width,
                 height: g.height,
             });
+            // mip 区域同样要清零并标脏，否则阴影会永久留在图集里
+            for slot in g.mips.iter().flatten() {
+                for y in slot.atlas_y..slot.atlas_y + slot.height {
+                    for x in slot.atlas_x..slot.atlas_x + slot.width {
+                        let i = ((y as usize) * asz + x as usize) * 4;
+                        self.atlas[i..i + 4].fill(0);
+                    }
+                }
+                self.dirty.push(DirtyRect {
+                    x: slot.atlas_x,
+                    y: slot.atlas_y,
+                    width: slot.width,
+                    height: slot.height,
+                });
+            }
             self.evicted_last_frame += 1;
             return true;
         }

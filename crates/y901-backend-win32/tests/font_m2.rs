@@ -120,9 +120,17 @@ fn take_dirty_is_consuming_like_legacy() {
     let _ = e.glyph('A');
     let (r2, d2) = e.take_dirty();
     assert!(!r2, "新字形不应报 reset（只是局部脏区）");
-    assert_eq!(d2.len(), 1, "写了一个字形，应有一个脏区，实际 {:?}", d2.len());
-    let DirtyRect { width, height, .. } = d2[0];
-    assert!(width > 0 && height > 0, "脏区应非空");
+    // mip 是**懒生成**的：普通取字形只占 L0 一块，所以脏区仍然只有 1 块。
+    // （若将来改回安装时生成 mip，这里会变成 3，到时改这条断言。）
+    assert_eq!(
+        d2.len(),
+        1,
+        "写一个字形应有一个脏区（mip 懒生成），实际 {:?}",
+        d2.len()
+    );
+    for DirtyRect { width, height, .. } in d2 {
+        assert!(width > 0 && height > 0, "脏区应非空");
+    }
 }
 
 /// 图集像素格式：RGB = 覆盖度，A = 255。
