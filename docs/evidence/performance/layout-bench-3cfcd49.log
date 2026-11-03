@@ -1,0 +1,22 @@
+﻿cargo :    Compiling y901-ui v0.1.0 (F:\Y901\crates\y901-ui)
+所在位置 行:5 字符: 1
++ cargo test -p y901-ui --release --test layout_bench -- --ignored --no ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling y9...crates\y901-ui):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `release` profile [optimized] target(s) in 0.50s
+     Running tests\layout_bench.rs (target\release\deps\layout_bench-4354c4cd538e1d7e.exe)
+
+running 1 test
+[bench] nodes=11111 rounds=20 avg=1288.3us worst=1613.4us
+test layout_10k_full_relayout ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+
+---
+# [人工注释 2026-11-02] 本 log 来自 layout_bench.rs，只构建 11 111 个节点（10k flat + 一层深）。
+# 50k 数字不在本文件中：早期文档里的 50k 数值是"按 11k 线性外推"，从未实测（见 git 96f6c5f 正文自述）。
+# 真实 50k 实测见同目录 perf-bench-after-3cfcd49.log 的 bench_layout_50k_flat / 50k_plain_leaf。
+# 命令：cargo test -p y901-ui --release --test layout_bench -- --ignored --nocapture

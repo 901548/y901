@@ -1,22 +1,29 @@
 # Y901 框架验收凭证
 
-生成时间：2026-10-31
-命令：`cargo test --workspace --offline -- --include-ignored`
-日志：`target/test-workspace-final.log`（构建产物目录，被 `.gitignore` 排除，不入库）
+生成时间：2026-11-02
+命令：`cargo test --workspace -- --include-ignored`
+日志：`docs/evidence/correctness/final-760-include-ignored.log`（已入库；文件名沿用旧口径 760，实测 766）
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **722 passed / 0 failed** |
-| 加上 `--include-ignored` | **760 passed / 0 failed**（含基准与 doc-test） |
+| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **728 passed / 0 failed** |
+| 加上 `--include-ignored` | **766 passed / 0 failed**（含基准与 doc-test） |
 
-差值 24 = 需要真机/耗时的 `#[ignore]` 用例：
+差值 **38**（766 − 728）= `#[ignore]` 用例。源码里共有 **42** 处 `#[ignore]`，与 38 的差额有两个来源：
 
-- **7 个 GPU harness**（D3D11 逐像素对拍，见下表）
-- **1 个 GPU 图集重建**：`backend::rebuild_atlas_tests::rebuild_reuploads_atlas`
-- **3 个万节点性能基准**：`layout_10k_full_relayout`、`rev_snapshot_is_linear_on_10k_nodes`、`public_tree_is_linear_on_10k_nodes`
-- **11 个性能基准用例**（`perf_bench` / `perf_alloc`）——见 [PERFORMANCE.md](PERFORMANCE.md)
+- **2 处在 example**（`y901-ui/examples/hash_bench.rs`）：`cargo test` 不执行 example 里的测试；
+- **2 处在 `y901-backend-x11`**：该 crate 在 Windows 上 suite 存在但 `running 0 tests`（整 crate 被 cfg 掉）。
+
+| 类别 | 数量 | 用例 |
+|---|---|---|
+| GPU / D3D11 依赖 | **13** | `snapshot_harness` ×10、`soft_matches_d3d_within_antialiasing_tolerance`、`pixel_statistics_and_png_baseline`、`rebuild_reuploads_atlas` |
+| DirectWrite 对拍 | **2** | `compare_with_directwrite_l1_l2`、`l2_best_shift_diagnostic` |
+| 性能基准 | **17** | ui 9（`perf_bench` ×6、`layout_bench`、`perf_alloc`、`rev_snapshot`）、win32 7（`perf_bench` ×3、`breakdown_rasterize_vs_atlas_insert`、`cold_start_500_cjk_glyphs`、`all_phases_reference_cost`、`soft_fill_rate_1280x800`）、widgets 1（`rev_snapshot_agent`） |
+| 调试探针 | **5** | `debug_print_glyphs`、`debug_crossings_for_a`、`debug_print_cjk_frames`、`occupancy_matches_glyph_count_sanity`、`probe_orientation_and_channels` |
+| 压力测试 | **1** | `forced_eviction_thrash_measurement`（图集 eviction 抖动） |
+| **合计** | **38** | |
 
 ## 7 个 GPU harness（真机 D3D11，全部 ok）
 
@@ -37,7 +44,7 @@
 ## 性能
 
 详见 **[PERFORMANCE.md](PERFORMANCE.md)**（官方白皮书）：
-脏区合并 −220×、布局 −44~49%、图集与实例提交经实测确认不是瓶颈。
+脏区合并 −230×、布局 −47%、图集与实例提交经实测确认不是瓶颈。
 
 ## 浮层架构（最终形态）
 

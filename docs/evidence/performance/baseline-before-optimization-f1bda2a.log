@@ -1,0 +1,20 @@
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-39b02c189a3cd4a6.exe)
+
+running 5 tests
+test bench_dirty_region_streaming ... [dirty] streaming 10000 adds: total=135607.4us avg=13521ns p99=31900ns max=1216600ns final_rects=10000 is_full=false
+[dirty] scattered 10000 adds: total=134415.4us final_rects=10000
+ok
+test bench_layout_10k_deep ... [layout] 10k deep: nodes=11111 rounds=15 avg=2815us p50=2876us p99=3953us max=3953us
+ok
+test bench_layout_10k_flat ... [layout] 10k flat: nodes=10001 rounds=15 avg=1672us p50=1692us p99=2345us max=2345us
+ok
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=25388us p50=28246us p99=31601us max=31601us
+ok
+test bench_layout_id_length_sensitivity ... [layout] id_len= 4: 10k nodes avg=4003us
+[layout] id_len=16: 10k nodes avg=3083us
+[layout] id_len=48: 10k nodes avg=5309us
+ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.46s
+

@@ -1,0 +1,78 @@
+﻿# 50k 布局基准：优化后（HEAD 3cfcd49），连跑 7 次
+
+=== RUN 1/7 === 2026-11-02T21:22:39
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-6fd519a3d30d8009.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=8932us p50=7881us p99=17790us max=17790us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 5.06s
+
+=== RUN 2/7 === 2026-11-02T21:22:44
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-6fd519a3d30d8009.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=6860us p50=7340us p99=8602us max=8602us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 5.03s
+
+=== RUN 3/7 === 2026-11-02T21:22:49
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-6fd519a3d30d8009.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=6936us p50=7496us p99=9110us max=9110us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 5.01s
+
+=== RUN 4/7 === 2026-11-02T21:22:54
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-6fd519a3d30d8009.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=6372us p50=6813us p99=7905us max=7905us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 5.02s
+
+=== RUN 5/7 === 2026-11-02T21:22:59
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-6fd519a3d30d8009.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=6684us p50=6848us p99=8090us max=8090us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 5.01s
+
+=== RUN 6/7 === 2026-11-02T21:23:04
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-6fd519a3d30d8009.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=6727us p50=6828us p99=9078us max=9078us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 5.02s
+
+=== RUN 7/7 === 2026-11-02T21:23:10
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-6fd519a3d30d8009.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=6619us p50=7188us p99=7638us max=7638us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 4.99s
+
+---
+# [汇总 2026-11-02 21:3x] 优化后（HEAD 3cfcd49）50k flat，7 次，每次独立进程、--test-threads=1、只跑 bench_layout_50k_flat
+# 样本(us): 8932, 6860, 6936, 6372, 6684, 6727, 6619
+# 中位数 6727us | p95 8932us | 最小 6372 | 最大 8932 | 均值 7019
+# 注：第 1 次含进程冷启动；剔除首跑后 6 次中位数 6706us（差异 <0.4%）
+# 命令: cargo test -p y901-ui --release --test perf_bench -- --ignored --nocapture --test-threads=1 bench_layout_50k_flat

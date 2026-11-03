@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running tests\font_m3_cjk.rs (target\debug\deps\font_m3_cjk-318f9a6a3dfe1e57.exe)
+
+running 1 test
+[perf] 读字体 6436us | 500 个 CJK 光栅化总计 51510us（avg 103.0us/字，共 500 字，墨量 18293）
+test cold_start_500_cjk_glyphs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.06s
+

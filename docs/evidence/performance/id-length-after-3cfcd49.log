@@ -1,0 +1,22 @@
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-6fd519a3d30d8009.exe)
+
+running 1 test
+test bench_layout_id_length_sensitivity ... [layout] id_len= 4: 10k nodes avg=1031us
+[layout] id_len=16: 10k nodes avg=950us
+[layout] id_len=48: 10k nodes avg=976us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.73s
+
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-6fd519a3d30d8009.exe)
+
+running 1 test
+test bench_layout_id_length_sensitivity ... [layout] id_len= 4: 10k nodes avg=961us
+[layout] id_len=16: 10k nodes avg=927us
+[layout] id_len=48: 10k nodes avg=939us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.73s
+

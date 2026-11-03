@@ -1,0 +1,79 @@
+﻿# 50k 布局基准：优化前（worktree @ f1bda2a），连跑 7 次
+
+=== RUN 1/7 === 2026-11-02T21:32:08
+   Compiling y901-ui v0.1.0 (F:\Y901-baseline\crates\y901-ui)
+   Compiling y901-agent v0.1.0 (F:\Y901-baseline\crates\y901-agent)
+    Finished `release` profile [optimized] target(s) in 2.88s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-39b02c189a3cd4a6.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=11629us p50=12510us p99=13684us max=13684us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 5.34s
+
+=== RUN 2/7 === 2026-11-02T21:32:14
+    Finished `release` profile [optimized] target(s) in 0.06s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-39b02c189a3cd4a6.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=19534us p50=21247us p99=23116us max=23116us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 5.49s
+
+=== RUN 3/7 === 2026-11-02T21:32:20
+    Finished `release` profile [optimized] target(s) in 0.09s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-39b02c189a3cd4a6.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=12318us p50=13250us p99=14425us max=14425us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 5.63s
+
+=== RUN 4/7 === 2026-11-02T21:32:25
+    Finished `release` profile [optimized] target(s) in 0.06s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-39b02c189a3cd4a6.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=12061us p50=13213us p99=14092us max=14092us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 5.43s
+
+=== RUN 5/7 === 2026-11-02T21:32:34
+    Finished `release` profile [optimized] target(s) in 0.06s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-39b02c189a3cd4a6.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=12796us p50=13661us p99=15597us max=15597us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 6.15s
+
+=== RUN 6/7 === 2026-11-02T21:32:40
+    Finished `release` profile [optimized] target(s) in 0.06s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-39b02c189a3cd4a6.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=12955us p50=13220us p99=17950us max=17950us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 5.88s
+
+=== RUN 7/7 === 2026-11-02T21:32:45
+    Finished `release` profile [optimized] target(s) in 0.06s
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-39b02c189a3cd4a6.exe)
+
+running 1 test
+test bench_layout_50k_flat ... [layout] 50k flat: nodes=50001 rounds=10 avg=12675us p50=13247us p99=16145us max=16145us
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 5.48s
+
+---
+# [汇总 2026-11-02 21:3x] 优化前（worktree @ f1bda2a）50k flat，7 次，口径同上
+# 样本(us): 11629, 19534, 12318, 12061, 12796, 12955, 12675
+# 中位数 12675us | p95 19534us | 最小 11629 | 最大 19534 | 均值 13424
+# 加速比（中位数之比）12675 / 6727 = 1.88x；按最小值之比 1.83x

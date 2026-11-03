@@ -1,0 +1,12 @@
+   Compiling y901-runtime v0.1.0 (F:\Y901\crates\y901-runtime)
+   Compiling y901-widgets v0.1.0 (F:\Y901\crates\y901-widgets)
+   Compiling y901-backend-win32 v0.1.0 (F:\Y901\crates\y901-backend-win32)
+    Finished `release` profile [optimized] target(s) in 1.60s
+     Running tests\font_m3_cjk.rs (target\release\deps\font_m3_cjk-79834256f89feffc.exe)
+
+running 1 test
+[perf] 读字体 6243us | 500 个 CJK 光栅化总计 8040us（avg 16.1us/字，共 500 字，墨量 18293）
+test cold_start_500_cjk_glyphs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.02s
+

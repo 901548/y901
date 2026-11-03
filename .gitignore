@@ -1,4 +1,4 @@
-﻿# Rust
+# Rust
 target/
 target-dead-code/
 **/*.rs.bk
@@ -23,3 +23,6 @@ desktop.ini
 test.log
 target/test-workspace.log
 commitmsg.txt
+
+# 证据文件例外（论文可引用的原始 log / 基线图像，必须入库）
+!docs/evidence/**

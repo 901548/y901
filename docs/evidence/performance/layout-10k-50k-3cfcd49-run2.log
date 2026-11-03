@@ -1,0 +1,25 @@
+﻿cargo :     Finished `release` profile [optimized] target(s) in 0.06s
+所在位置 行:4 字符: 1
++ cargo test -p y901-ui --release --test perf_bench -- --ignored --noca ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `r...get(s) in 0.06s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running tests\perf_bench.rs (target\release\deps\perf_bench-6fd519a3d30d8009.exe)
+
+running 5 tests
+[layout] 10k flat: nodes=10001 rounds=15 avg=1068us p50=1016us p99=1646us max=1646us
+test bench_layout_10k_flat ... ok
+[layout] id_len= 4: 10k nodes avg=975us
+[layout] 10k deep: nodes=11111 rounds=15 avg=1152us p50=1170us p99=1356us max=1356us
+test bench_layout_10k_deep ... ok
+[layout] id_len=16: 10k nodes avg=958us
+[layout] id_len=48: 10k nodes avg=960us
+test bench_layout_id_length_sensitivity ... ok
+[layout] 50k plain-leaf: nodes=50001 rounds=10 avg=14802us p50=16134us p99=18271us max=18271us
+test bench_layout_50k_plain_leaf ... ok
+[layout] 50k flat: nodes=50001 rounds=10 avg=17091us p50=18651us p99=24518us max=24518us
+test bench_layout_50k_flat ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 6.80s
+

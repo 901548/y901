@@ -1,0 +1,17 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running tests\soft_backend.rs (target\debug\deps\soft_backend-54e999c84409a379.exe)
+
+running 1 test
+[y901] Instance layout ok: size=96 stride=96 offsets=pos:0 size:8 uv:16 color:32 end:48 grad:64 params:80
+[y901] backend ready: engine=legacy ascent=13.75 atlas=1024
+[y901] 警告：ASCII advance (13.47px) 偏离 cell_width (8.00px) 超过 10%，字形将按居中补偿摆放
+[y901] 警告：CJK advance (9.68px) 偏离 2*cell_width (16.00px) 超过 10%，字形将按居中补偿摆放
+[soft-vs-d3d] (80,30) d3d=(25,51,204) soft=(26,51,204)
+[soft-vs-d3d] (50,20) d3d=(25,51,204) soft=(26,51,204)
+[soft-vs-d3d] (100,90) d3d=(229,102,51) soft=(230,102,51)
+[soft-vs-d3d] (200,60) d3d=(92,60,42) soft=(92,60,42)
+[soft-vs-d3d] 302x153: exact=72.8%  within(|d|<=24)=100.0%  max_diff=2 at (19, 70)
+test soft_matches_d3d_within_antialiasing_tolerance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.46s
+

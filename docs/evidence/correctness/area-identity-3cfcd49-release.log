@@ -1,0 +1,14 @@
+   Compiling y901-backend-win32 v0.1.0 (F:\Y901\crates\y901-backend-win32)
+    Finished `release` profile [optimized] target(s) in 0.73s
+     Running tests\font_m1.rs (target\release\deps\font_m1-a976315e216262ee.exe)
+
+running 1 test
+[area] 'A': bitmap=11x12 ink=30.55 polygon=30.43 err=0.395%
+[area] 'o': bitmap=10x10 ink=22.97 polygon=22.96 err=0.034%
+[area] 'e': bitmap=9x10 ink=23.41 polygon=23.52 err=0.440%
+[area] 'B': bitmap=8x12 ink=35.64 polygon=35.58 err=0.188%
+[area] '8': bitmap=9x13 ink=32.15 polygon=32.15 err=0.017%
+test area_identity_holds_for_typical_glyphs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.01s
+

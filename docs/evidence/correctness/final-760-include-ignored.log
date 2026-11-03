@@ -1,0 +1,1513 @@
+﻿# 注意：文件名沿用旧口径 760，实测为 766（728 默认 + 38 ignored）。
+# 760 是 v0.1.1 之前的口径（722 + 38），v0.1.1 后新增 6 个测试。
+# 本注释为人工追加，下面为原始 cargo test 输出。
+# 命令：cargo test --workspace -- --include-ignored    退出码 0，耗时 48.5s，123 个 suite
+# 日期：2026-11-02    commit：3cfcd49
+   Compiling y901-mcp v0.1.0 (F:\Y901\crates\y901-mcp)
+   Compiling y901-app v0.1.0 (F:\Y901\crates\y901-app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.29s
+     Running unittests src\lib.rs (target\debug\deps\y901_agent-3fc1e2270b94632b.exe)
+
+running 17 tests
+test api::tests::click_dispatches_mouse_down_and_up ... ok
+test api::tests::token_is_checked ... ok
+test api::tests::stale_revision_is_conflict ... ok
+test mcp::tests::initialize_returns_capabilities ... ok
+test api::tests::type_and_scroll_are_translated ... ok
+test api::tests::unexposed_node_is_forbidden ... ok
+test api::tests::unknown_action_is_rejected ... ok
+test api::tests::sensitive_value_is_redacted_in_tree ... ok
+test mcp::tests::initialized_notification_has_no_response ... ok
+test mcp::tests::parse_error_is_reported ... ok
+test mcp::tests::tools_call_on_hidden_node_is_error_without_leaking ... ok
+test mcp::tests::resources_read_returns_redacted_tree ... ok
+test rpc::connection_setup_tests::setup_connection_propagates_spawn_failure ... ok
+test mcp::tests::unknown_method_returns_jsonrpc_error ... ok
+test mcp::tests::tools_list_exposes_four_tools_with_schema ... ok
+test rpc::connection_setup_tests::setup_connection_propagates_write_timeout_failure ... ok
+test mcp::tests::tools_call_click_succeeds ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\rpc_char.rs (target\debug\deps\rpc_char-48e072611359d5a9.exe)
+
+running 7 tests
+test char_accepts_cjk ... ok
+test char_rejects_beyond_unicode ... ok
+test char_rejects_low_surrogate ... ok
+test char_rejects_high_surrogate ... ok
+test char_rejects_negative ... ok
+test char_rejects_u64_max ... ok
+test char_roundtrips_through_to_json ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\rpc_dead_connection.rs (target\debug\deps\rpc_dead_connection-4ab1a3306e0443f1.exe)
+
+running 4 tests
+test dead_flag_prevents_further_try_send ... ok
+test write_timeout_is_set_on_connection ... ok
+test slow_client_still_gets_replies_until_dead ... ok
+test stalled_client_gets_disconnected ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+
+     Running tests\rpc_writer_thread.rs (target\debug\deps\rpc_writer_thread-6ce2f9c9bf74e927.exe)
+
+running 4 tests
+test reply_and_push_are_fifo_per_connection ... ok
+test ten_concurrent_connections_all_get_replies ... ok
+test writer_thread_exits_when_client_disconnects ... ok
+test reply_to_stays_bounded_when_client_never_reads ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running unittests src\main.rs (target\debug\deps\y901-8e171f3f621f4005.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\audit_fixes.rs (target\debug\deps\audit_fixes-19baafd10b75250e.exe)
+
+running 5 tests
+test host_handled_event_short_circuits_tree ... ok
+test ime_commit_becomes_text_not_compose ... ok
+test standard_mcp_handshake_when_no_token_configured ... ok
+test mcp_click_emits_command_that_host_receives ... ok
+test rpc_get_tree_matches_mcp_ui_tree ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\mcp_mode.rs (target\debug\deps\mcp_mode-93b365dfe929a5a6.exe)
+
+running 3 tests
+test app_mcp_mode_rejects_calls_before_initialize ... ok
+test app_mcp_mode_dispatches_click_into_real_tree ... ok
+test app_mcp_mode_serves_handshake_and_tool_calls ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests\no_c_deps.rs (target\debug\deps\no_c_deps-87d3b92a264c28fc.exe)
+
+running 2 tests
+test no_c_or_cpp_toolchain_dependencies ... ok
+test sibling_repo_helm_has_no_c_dependencies ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.82s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_backend_win32-24599e1e14c6563e.exe)
+
+running 42 tests
+test backend::clip_quad_tests::outside_is_dropped ... ok
+test backend::d3d11::render_guard_tests::rejects_zero_size ... ok
+test backend::clip_quad_tests::partial_top_overflow_shrinks_and_remaps_uv ... ok
+test backend::d3d11::render_guard_tests::rejects_everything_at_once ... ok
+test backend::d3d11::render_guard_tests::rejects_unsynced_atlas ... ok
+test backend::clip_quad_tests::inside_is_unchanged ... ok
+test backend::clip_quad_tests::zero_size_is_dropped ... ok
+test backend::font::cell_metrics_tests::default_font_still_16px ... ok
+test backend::font::cell_metrics_tests::font_size_changes_cell_size ... ok
+test backend::font::cell_metrics_tests::invalid_font_size_is_clamped ... ok
+test backend::d3d11::render_guard_tests::accepts_ready_atlas_with_nonzero_size ... ok
+test backend::font::options_tests::default_font_is_nsimsun_16 ... ok
+test backend::font::options_tests::font_config_changes_cell_size ... ok
+test backend::font::span_tests::span_matches_core_implementation ... ok
+test backend::gfx_layout_tests::gfx_instance_layout_matches_d3d_instance ... ok
+test backend::glyph_offset_tests::cjk_offset_centers_glyph_in_two_cells ... ok
+test backend::glyph_offset_tests::exact_2to1_has_zero_offset ... ok
+test backend::glyph_offset_tests::oversized_advance_gets_negative_offset ... ok
+test window::char_filter_tests::backspace_and_escape_do_not_double_fire ... ok
+test backend::font::options_tests::defaults_are_none ... ok
+test window::char_filter_tests::enter_key_does_not_double_fire ... ok
+test window::char_filter_tests::key_state_is_consumed_by_exactly_one_char ... ok
+test window::char_filter_tests::mismatched_key_and_char_still_delivers ... ok
+test backend::rebuild_source_tests::rebuild_calls_update_atlas ... ok
+test backend::font::font_probe::font_probe ... ok
+test window::char_filter_tests::printable_char_still_fires ... ok
+test window::char_filter_tests::tab_key_does_not_double_fire ... ok
+test window::dirty_plan_tests::empty_region_returns_none ... ok
+test window::dirty_plan_tests::exactly_at_limit_still_partial ... ok
+test window::dirty_plan_tests::full_region_returns_none ... ok
+test window::dirty_plan_tests::too_many_dirty_rects_falls_back_to_full ... ok
+test window::key_filter_tests::backspace_and_escape_do_not_double_fire ... ok
+test window::key_filter_tests::only_four_control_keys_are_mapped ... ok
+test window::key_filter_tests::tab_key_does_not_double_fire ... ok
+test window::wndproc_sequence_tests::enter_key_produces_exactly_one_event ... ok
+test window::wndproc_sequence_tests::invalid_codepoint_is_dropped ... ok
+test window::wndproc_sequence_tests::tab_key_produces_exactly_one_event ... ok
+test window::wndproc_sequence_tests::printable_key_produces_keydown_and_char ... ok
+test window::wndproc_sequence_tests::unrelated_message_yields_nothing ... ok
+test window::key_filter_tests::enter_key_does_not_double_fire ... ok
+test window::key_filter_tests::printable_char_still_fires ... ok
+test backend::rebuild_atlas_tests::rebuild_reuploads_atlas ... ok
+
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+     Running tests\black_screen_regression.rs (target\debug\deps\black_screen_regression-e26a032eafa06b1f.exe)
+
+running 5 tests
+test repaint_request_is_one_shot ... ok
+test window_render_has_dirty_guard ... ok
+test wm_paint_requests_full_redraw ... ok
+test runtime_consumes_repaint_request_before_render ... ok
+test tree_render_draws_nothing_when_clean ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\d3d_image.rs (target\debug\deps\d3d_image-fcdf22f8f84ba25f.exe)
+
+running 2 tests
+test image_quadrants_sample_correctly_on_gpu ... ok
+test image_tint_and_contain_on_gpu ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests\font_3c_pixels.rs (target\debug\deps\font_3c_pixels-b43a2f3e895a70ad.exe)
+
+running 2 tests
+test pixel_statistics_and_png_baseline ... ok
+test probe_orientation_and_channels ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+     Running tests\font_m1.rs (target\debug\deps\font_m1-9783fc5a82a1948f.exe)
+
+running 8 tests
+test debug_crossings_for_a ... ok
+test characters_differ_from_each_other ... ok
+test debug_print_glyphs ... ok
+test area_identity_holds_for_typical_glyphs ... ok
+test holes_are_preserved ... ok
+test glyph_bitmap_is_plausible ... ok
+test compare_with_directwrite_l1_l2 ... ok
+test rasterization_is_fast_enough ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\font_m2.rs (target\debug\deps\font_m2-2686a43a153323f9.exe)
+
+running 10 tests
+test atlas_pixels_are_coverage_with_opaque_alpha ... ok
+test take_dirty_is_consuming_like_legacy ... ok
+test phase_shifts_ink_centroid_monotonically ... ok
+test cell_span_matches_legacy_for_ascii ... ok
+test cell_span_matches_legacy_for_cjk ... ok
+test four_phases_produce_distinct_bitmaps ... ok
+test l2_best_shift_diagnostic ... ok
+test ascii_full_set_occupancy_below_60_percent ... ok
+test eviction_is_bounded_per_frame ... ok
+test clears_and_recovers_all_glyphs ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\font_m3_atlas.rs (target\debug\deps\font_m3_atlas-f03eec3b2638c6c6.exe)
+
+running 5 tests
+test eviction_clears_pixels_and_rebuild_restores ... ok
+test occupancy_matches_glyph_count_sanity ... ok
+test breakdown_rasterize_vs_atlas_insert ... ok
+test forced_eviction_thrash_measurement ... ok
+test atlas_2048_holds_1200_cjk_times_four_phases ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.71s
+
+     Running tests\font_m3_cjk.rs (target\debug\deps\font_m3_cjk-23b4050cfd6882d5.exe)
+
+running 4 tests
+test cjk_frames_are_hollow_where_expected ... ok
+test debug_print_cjk_frames ... ok
+test cold_start_500_cjk_glyphs ... ok
+test five_hundred_cjk_glyphs_rasterize ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests\font_m3_prefetch.rs (target\debug\deps\font_m3_prefetch-64dd341b5e091eba.exe)
+
+running 4 tests
+test prefetch_does_not_evict_existing_glyphs ... ok
+test c_plan_1200_chars_first_frame_under_60ms ... ok
+test prefetch_removes_on_demand_rasterization ... ok
+test all_phases_reference_cost ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+
+     Running tests\input_events.rs (target\debug\deps\input_events-ede968ac9c0ceb24.exe)
+
+running 8 tests
+test alt_key_produces_system_key_down ... ok
+test char_after_keydown_is_still_deduplicated ... ok
+test left_click_still_works ... ok
+test ctrl_wheel_produces_wheel_with_mods ... ok
+test file_drop_translates_and_routes_to_hit_target ... ok
+test middle_click_produces_mouse_down_middle ... ok
+test plain_wheel_has_no_modifiers ... ok
+test right_click_produces_mouse_down_right ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\options_wiring.rs (target\debug\deps\options_wiring-b177510f85165a38.exe)
+
+running 2 tests
+test options_font_reaches_text_engine ... ok
+test options_theme_reaches_backend ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\perf_and_clip.rs (target\debug\deps\perf_and_clip-e57d471faf40f3f7.exe)
+
+running 3 tests
+test glyphs_are_clipped_by_quad ... ok
+test backend_seeds_client_area_clip ... ok
+test runtime_idles_when_nothing_to_do ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\perf_bench.rs (target\debug\deps\perf_bench-45925117a9d12521.exe)
+
+running 3 tests
+test bench_atlas_5000_glyphs ... ok
+test bench_empty_frame_baseline ... ok
+test bench_instance_submission_10k ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+     Running tests\runtime_theme_font.rs (target\debug\deps\runtime_theme_font-bcb1629dbb663769.exe)
+
+running 6 tests
+test host_theme_requests_default_to_none ... ok
+test set_font_builds_new_engine_before_swapping ... ok
+test set_theme_changes_rendered_colors ... ok
+test set_theme_does_not_touch_atlas ... ok
+test options_carry_theme_and_font_for_startup ... ok
+test set_font_changes_cell_size ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\snapshot_harness.rs (target\debug\deps\snapshot_harness-c989b0521a580509.exe)
+
+running 10 tests
+test round_rect_sdf_matches_math ... ok
+test round_stroke_draws_ring_only ... ok
+test text_label_paints_visible_non_background_pixels ... ok
+test text_inside_scrollview_is_not_clipped_away ... ok
+test snapshot_harness_is_deterministic ... ok
+test gradient_round_rect_matches_math ... ok
+test gradient_matches_math_at_45_degrees ... ok
+test rebuild_of_cached_target_does_not_leave_black_areas ... ok
+test two_disjoint_dirty_rects_match_full_redraw ... ok
+test invalidate_rect_partial_equals_full ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.73s
+
+     Running tests\soft_backend.rs (target\debug\deps\soft_backend-fe8a14be69069799.exe)
+
+running 11 tests
+test clip_culls_outside_area ... ok
+test resize_rebuilds_buffer_and_reports_change ... ok
+test fill_rect_interior_is_exact ... ok
+test gradient_endpoints_and_midpoint ... ok
+test translucent_overlay_matches_analytic_source_over ... ok
+test round_rect_cuts_corners_but_fills_center ... ok
+test alpha_blend_is_source_over ... ok
+test text_draws_visible_pixels ... ok
+test frame_hash_is_deterministic ... ok
+test soft_matches_d3d_within_antialiasing_tolerance ... ok
+test soft_fill_rate_1280x800 ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_backend_x11-3ed110ca0c3e459f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\golden.rs (target\debug\deps\golden-d0ad7b7e7a80a441.exe)
+
+running 32 tests
+test change_property_format32_divides_bytes_to_items ... ok
+test create_glyph_cursor_is_32_bytes ... ok
+test create_window_value_mask_and_list_order ... ok
+test change_property_format8_counts_items_not_bytes ... ok
+test decode_masks_synthetic_bit ... ok
+test create_window_without_values_has_no_value_list ... ok
+test decode_button_press ... ok
+test decode_client_message_delete_window ... ok
+test keymap_lookup_respects_first_keycode_and_columns ... ok
+test decode_expose ... ok
+test decode_configure_notify ... ok
+test create_window_sorts_values_by_mask_bit ... ok
+test decode_motion_notify ... ok
+test decode_short_buffer_is_an_error_not_a_panic ... ok
+test get_input_focus_forces_a_round_trip ... ok
+test intern_atom_pads_name_to_4_bytes ... ok
+test intern_atom_with_aligned_name_has_no_padding ... ok
+test keysym_ascii_maps_to_char ... ok
+test decode_key_press_and_release ... ok
+test decode_unknown_event_is_preserved ... ok
+test map_window_is_exactly_8_bytes ... ok
+test modifier_keysyms_are_not_characters ... ok
+test no_operation_packet ... ok
+test open_font_pads_name ... ok
+test pad4_aligns_upward ... ok
+test put_image_data_is_padded_to_4_bytes ... ok
+test put_image_length_field_caps_single_request_at_256kb ... ok
+test put_image_zpixmap_stride_and_length ... ok
+test setup_request_layout ... ok
+test setup_request_without_auth_has_no_padding ... ok
+test special_keysyms_map_to_function_keys ... ok
+test x11_state_bits_map_to_modifiers ... ok
+
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\real_window.rs (target\debug\deps\real_window-155a9b9e3584656d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_core-7c51e09a457c1e0a.exe)
+
+running 12 tests
+test tests::pending_wrap_defers_until_next_char ... ok
+test tests::alt_screen_roundtrip ... ok
+test tests::cursor_keeps_pointing_at_same_char ... ok
+test tests::wide_char_pushes_down_instead_of_splitting ... ok
+test tests::pending_wrap_cursor_survives_reflow ... ok
+test tests::narrowing_never_splits_wide_chars ... ok
+test tests::cell_is_eight_bytes ... ok
+test tests::scrollback_keeps_evicted_rows ... ok
+test tests::overwriting_tail_clears_whole_wide_char ... ok
+test tests::reflow_includes_history ... ok
+test tests::style_table_interns_and_dedups ... ok
+test tests::shell_crlf_makes_hard_lines ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_extras-8d87b7efa4359679.exe)
+
+running 33 tests
+test palette::tests::basic_colors ... ok
+test palette::tests::truecolor_is_fully_consumed ... ok
+test palette::tests::color256_is_indexed ... ok
+test palette::tests::bright_colors ... ok
+test palette::tests::xterm256_cube_and_gray ... ok
+test paste::tests::bracketed_wrap_uses_esc_200_and_201 ... ok
+test selection::tests::contains_respects_row_bounds ... ok
+test selection::tests::pos_to_cell_negative_coords_return_none ... ok
+test paste::tests::detector_handles_sequence_split_across_chunks ... ok
+test paste::tests::detector_last_occurrence_wins ... ok
+test paste::tests::detector_sees_enable_and_disable ... ok
+test paste::tests::non_bracketed_wrap_is_plain_sanitized_bytes ... ok
+test selection::tests::pos_to_cell_zero_cell_size_returns_none ... ok
+test palette::tests::flags_set_and_clear ... ok
+test selection::tests::cross_row_selection_includes_middle_rows_fully ... ok
+test paste::tests::crlf_is_normalized_to_cr ... ok
+test selection::tests::pos_to_cell_bottom_right_edge_clamps_to_last_cell ... ok
+test selection::tests::pos_to_cell_outside_rect_returns_none ... ok
+test paste::tests::control_characters_are_dropped_except_cr_and_tab ... ok
+test selection::tests::pos_to_cell_normal_path ... ok
+test selection::tests::pos_to_cell_clamps_when_rect_is_larger_than_grid ... ok
+test selection::tests::pos_to_cell_zero_rect_returns_none ... ok
+test selection::tests::reverse_drag_is_normalized ... ok
+test selection::tests::single_cell_click_is_an_empty_selection ... ok
+test selection::tests::single_row_selection_takes_the_substring ... ok
+test selection::tests::trailing_spaces_are_trimmed_per_line ... ok
+test vt::tests::color_persists_across_lines ... ok
+test vt::tests::scrollback_collects_evicted_rows ... ok
+test vt::tests::sgr_background ... ok
+test vt::tests::sgr_bold_underline_reverse ... ok
+test vt::tests::sgr_truecolor_roundtrip ... ok
+test vt::tests::sgr_red_then_reset ... ok
+test vt::tests::utf8_split_across_chunks ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\selection_reverse.rs (target\debug\deps\selection_reverse-5ea12147894b5a65.exe)
+
+running 3 tests
+test single_row_selection_reverses_only_selected_cells ... ok
+test cross_row_selection_reverses_first_middle_and_last_rows_correctly ... ok
+test clearing_selection_restores_the_original_pixels ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\sgr_reverse.rs (target\debug\deps\sgr_reverse-3061f2dae3b88372.exe)
+
+running 3 tests
+test selection_on_top_of_sgr7_cancels_out ... ok
+test sgr27_restores_default_colours ... ok
+test sgr7_swaps_default_colours_with_exact_rgb ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\sgr_reverse_indexed.rs (target\debug\deps\sgr_reverse_indexed-3409e37bee77e3f7.exe)
+
+running 7 tests
+test indexed_colour_bounds_are_well_defined ... ok
+test reverse_with_indexed_foreground_and_default_background ... ok
+test reverse_with_both_indexed_colours ... ok
+test reverse_with_default_foreground_and_indexed_background ... ok
+test reverse_with_underline_still_draws_the_underline ... ok
+test reverse_with_truecolor_colours ... ok
+test reverse_with_bold_still_swaps_colours_and_thickens_glyphs ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\terminal_render_alloc.rs (target\debug\deps\terminal_render_alloc-4c34660c792ab707.exe)
+
+running 1 test
+test terminal_render_has_no_to_string ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\terminal_widget.rs (target\debug\deps\terminal_widget-a3868532dd9354f4.exe)
+
+running 8 tests
+test mouse_down_before_arrange_does_not_panic_or_select ... ok
+test selection_after_arrange_maps_coordinates_correctly ... ok
+test selection_text_reaches_the_clipboard ... ok
+test widget_crate_does_not_depend_on_pty ... ok
+test terminal_downcast_reaches_pty_driver ... ok
+test terminal_role_is_defined_by_extras ... ok
+test tab_switches_focus_outside_terminal ... ok
+test terminal_consumes_tab_instead_of_focus_switch ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_mcp-573f745ea0818354.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\debug\deps\y901_mcp-efcdf44da5233f1a.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\stdio.rs (target\debug\deps\stdio-9ccad3fe8d4ab2aa.exe)
+
+running 3 tests
+test uninitialized_session_rejects_tools_call ... ok
+test node_resource_redacts_state_fields ... ok
+test stdio_bridge_serves_initialize_list_and_call_in_order ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_render-faf6adc85a20373a.exe)
+
+running 5 tests
+test atlas::tests::merge_adjacent_levels ... ok
+test atlas::tests::padding_is_only_right_and_bottom ... ok
+test atlas::tests::skyline_uses_less_height_than_shelf ... ok
+test atlas::tests::compact_preserves_every_uv_mapping ... ok
+test atlas::tests::lru_evicts_when_pressure_is_high ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests\grid_clip.rs (target\debug\deps\grid_clip-5e9f05c616171e6c.exe)
+
+running 1 test
+test overflow_is_clipped_to_the_cell ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\image.rs (target\debug\deps\image-efca332c1aabeafe.exe)
+
+running 6 tests
+test tint_multiplies_the_sampled_colour ... ok
+test solid_texture_fills_the_rect_with_exact_colour ... ok
+test invalid_texture_draws_nothing ... ok
+test upload_rejects_bad_sizes ... ok
+test two_by_two_quadrants_sample_close_to_the_source_colours ... ok
+test cover_crops_sides_and_contain_letterboxes ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\popup_anim.rs (target\debug\deps\popup_anim-fd44e8808419c5aa.exe)
+
+running 1 test
+test popup_open_animation_shrinks_the_first_frame ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\soft_glyphs.rs (target\debug\deps\soft_glyphs-65b2867c0a615749.exe)
+
+running 3 tests
+test latin_test_font_has_no_cjk_glyphs ... ok
+test default_text_style_is_visible ... ok
+test latin_glyph_really_renders ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\transform.rs (target\debug\deps\transform-212e7d7f2578138d.exe)
+
+running 4 tests
+test pop_transform_restores_absolute_coordinates ... ok
+test degenerate_scale_is_ignored_not_crashing ... ok
+test nested_transforms_multiply ... ok
+test scaled_rect_lands_at_half_size_around_origin ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_runtime-e2b2b8386897b05e.exe)
+
+running 7 tests
+test tests::set_cursor_and_close_emit_nothing ... ok
+test gfx::tests::empty_frame_still_reports_present ... ok
+test gfx::tests::recording_backend_records_calls_in_order ... ok
+test tests::char_becomes_text ... ok
+test tests::mouse_translates_to_positional_event ... ok
+test gfx::tests::recording_backend_can_simulate_device_loss ... ok
+test tests::snapshot_hooks_are_host_contract ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_shell-b1ef1be5800089ba.exe)
+
+running 7 tests
+test secret::tests::backend_name_is_never_empty ... ok
+test clipboard::tests::get_text_on_empty_clipboard_is_ok_or_err_but_never_panics ... ok
+test secret::tests::garbage_ciphertext_is_an_error_not_a_panic ... ok
+test clipboard::tests::roundtrip_on_supported_platforms ... ok
+test secret::tests::roundtrip_when_supported ... ok
+test widget_clipboard::tests::empty_clipboard_maps_to_none ... ok
+test widget_clipboard::tests::adapter_forwards_to_system_clipboard ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_ui-60806bf0a5b391f2.exe)
+
+running 50 tests
+test animation::tests::animate_interpolates_and_finishes ... ok
+test animation::tests::ease_in_starts_slow_and_out_starts_fast ... ok
+test animation::tests::easing_endpoints_and_monotonicity ... ok
+test animation::tests::retarget_continues_from_current_value_without_jumping_back ... ok
+test image::tests::contain_letterboxes_and_keeps_aspect ... ok
+test grid::tests::child_rects_follow_tracks_and_gaps ... ok
+test image::tests::empty_target_yields_empty_result ... ok
+test grid::tests::auto_uses_largest_content_in_that_track ... ok
+test animation::tests::linear_easing_is_identity ... ok
+test animation::tests::progress_tracks_easing_not_raw_time ... ok
+test grid::tests::fractions_split_remaining_space ... ok
+test grid::tests::mixed_tracks_account_for_gaps_and_auto ... ok
+test image::tests::cover_crops_the_source_horizontally ... ok
+test animation::tests::zero_duration_completes_immediately ... ok
+test json::tests::escapes_and_arrays ... ok
+test grid::tests::cell_mapping_wraps_by_column_count ... ok
+test grid::tests::fixed_columns_keep_their_width ... ok
+test grid::tests::rows_resolve_independently_of_columns ... ok
+test animation::tests::ticking_a_finished_animation_is_a_no_op ... ok
+test image::tests::none_keeps_native_size_centered ... ok
+test query::tests::contains_is_case_insensitive ... ok
+test grid::tests::empty_tracks_take_everything ... ok
+test image::tests::fill_stretches_to_target ... ok
+test image::tests::invalid_texture_id_is_not_valid ... ok
+test json::tests::roundtrip ... ok
+test query::tests::parse_bool_and_limit ... ok
+test query::tests::parse_role_and_label ... ok
+test query::tests::unknown_key_is_error ... ok
+test signal::tests::drain_clears_queue ... ok
+test signal::tests::multiple_subscribers_all_get_notified ... ok
+test signal::tests::set_twice_with_same_value_does_not_notify ... ok
+test signal::tests::unsubscribe_stops_notifications ... ok
+test text::tests::backspace_across_cjk_never_splits_utf8 ... ok
+test text::tests::backspace_on_emoji_removes_whole_codepoint ... ok
+test text::tests::backspace_with_selection_deletes_selection ... ok
+test text::tests::click_places_cursor ... ok
+test text::tests::cursor_snaps_to_char_boundary ... ok
+test text::tests::delete_forward_removes_next_char ... ok
+test text::tests::empty_buffer_measurements_are_zero ... ok
+test text::tests::insert_mixed_cjk_and_ascii ... ok
+test text::tests::insert_replaces_selection ... ok
+test text::tests::line_bounds_and_measure_are_per_line ... ok
+test text::tests::move_left_right_by_char ... ok
+test text::tests::offset_for_x_picks_nearest_boundary ... ok
+test text::tests::offset_roundtrip_through_x ... ok
+test text::tests::shift_move_extends_selection ... ok
+test text::tests::x_for_offset_counts_cjk_as_two_cells ... ok
+test theme::tests::dark_and_light_differ ... ok
+test theme::tests::states_have_distinct_backgrounds ... ok
+test theme::tests::unknown_role_falls_back_to_panel ... ok
+
+test result: ok. 50 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\animation_tree.rs (target\debug\deps\animation_tree-756339849f619dad.exe)
+
+running 5 tests
+test animate_then_tick_runs_to_completion_and_clears ... ok
+test completion_callback_runs_exactly_once ... ok
+test different_keys_run_concurrently ... ok
+test same_key_interrupts_the_old_animation ... ok
+test no_animations_means_no_extra_ticks ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\broadcast_redraw.rs (target\debug\deps\broadcast_redraw-055ffce873a71238.exe)
+
+running 2 tests
+test tick_without_responders_leaves_dirty_empty ... ok
+test tick_redraw_marks_only_responding_node ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\cursor_layers.rs (target\debug\deps\cursor_layers-3face5ca738c4874.exe)
+
+running 6 tests
+test cursor_at_child_overrides_parent_same_layer ... ok
+test cursor_at_matches_hit_index_with_overlapping_layers ... ok
+test cursor_at_respects_ancestor_clip ... ok
+test cursor_at_later_sibling_wins_same_layer ... ok
+test cursor_at_skips_closed_overlay ... ok
+test cursor_at_still_works_for_simple_hover ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\dirty_and_popup.rs (target\debug\deps\dirty_and_popup-8aea36b516ec5964.exe)
+
+running 9 tests
+test disjoint_rects_stay_separate ... ok
+test overlapping_rects_merge_into_union ... ok
+test popup_flips_up_when_bottom_space_is_short ... ok
+test new_rect_containing_old_removes_old ... ok
+test growing_dirty_rect_collapses_to_one ... ok
+test popup_hit_rect_matches_draw_rect ... ok
+test popup_fits_below_when_space_allows ... ok
+test popup_never_exceeds_bounds ... ok
+test popup_shifts_left_when_right_space_is_short ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\dirty_union_shrink.rs (target\debug\deps\dirty_union_shrink-7cda88ac48314cc3.exe)
+
+running 3 tests
+test unchanged_layout_marks_nothing ... ok
+test shrink_marks_union_of_old_and_new_rect ... ok
+test grow_also_marks_union ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\draw_char.rs (target\debug\deps\draw_char-13f41bbb784e7f35.exe)
+
+running 2 tests
+test draw_char_returns_character_width ... ok
+test draw_char_matches_draw_text ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\framework.rs (target\debug\deps\framework-d3a426b3f9a0cd8e.exe)
+
+running 18 tests
+test commands_are_routed_not_interpreted ... ok
+test dirty_region_prunes_untouched_subtrees ... ok
+test flex_measure_is_cached_too ... ok
+test infinite_constraints_never_produce_nan ... ok
+test paint_order_follows_tree_order ... ok
+test overlay_is_on_top_but_lets_clicks_through ... ok
+test modal_blocks_clicks_outside_and_traps_focus ... ok
+test pointer_capture_routes_moves_outside_the_node ... ok
+test capture_phase_can_stop_propagation ... ok
+test three_phases_in_order ... ok
+test hover_only_dirties_two_nodes ... ok
+test unbounded_measure_returns_finite_content ... ok
+test rpc_get_tree_and_dispatch ... ok
+test click_dispatch_is_linear_in_depth ... ok
+test second_layout_measures_zero ... ok
+test changing_one_leaf_only_remeasures_its_path ... ok
+test broadcast_never_blocks_ui ... ok
+test broadcast_writer_removes_dead_connections ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests\hash_collision.rs (target\debug\deps\hash_collision-a0867f88d90df78b.exe)
+
+running 2 tests
+test field_boundary_is_not_ambiguous ... ok
+test one_million_semantic_surfaces_have_no_collisions ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests\hover.rs (target\debug\deps\hover-11b62da4dbb5685f.exe)
+
+running 6 tests
+test entering_a_node_fires_mouse_enter ... ok
+test leaving_the_window_clears_hover ... ok
+test leaving_fires_mouse_leave_for_the_old_node ... ok
+test moving_inside_the_same_node_only_sends_moves ... ok
+test removing_the_hovered_node_clears_it_without_panicking ... ok
+test hover_snapshot_reaches_render_ctx ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\invalidation_handle.rs (target\debug\deps\invalidation_handle-e5e23fc0c7fee8a2.exe)
+
+running 6 tests
+test handle_after_tree_dropped_is_harmless ... ok
+test background_invalidate_all_marks_full_dirty ... ok
+test woken_flag_clears_after_drain ... ok
+test background_invalidate_marks_dirty_on_next_frame ... ok
+test invalidation_handle_is_send_sync ... ok
+test multiple_background_invalidations_merge ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\layout_bench.rs (target\debug\deps\layout_bench-d56a707122614d71.exe)
+
+running 1 test
+test layout_10k_full_relayout ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+
+     Running tests\overlay.rs (target\debug\deps\overlay-a6bce85a37b0118d.exe)
+
+running 5 tests
+test click_outside_closes_popup ... ok
+test click_inside_popup_routes_to_it ... ok
+test closing_popup_marks_its_area_dirty ... ok
+test popup_flips_when_no_space_below ... ok
+test popup_is_not_clipped_by_parent ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\perf_alloc.rs (target\debug\deps\perf_alloc-1f6e8ebcb105887a.exe)
+
+running 1 test
+test bench_layout_allocations_10k ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s
+
+     Running tests\perf_bench.rs (target\debug\deps\perf_bench-99642617e294cd08.exe)
+
+running 6 tests
+test bench_dirty_region_streaming ... ok
+test bench_layout_10k_flat ... ok
+test bench_layout_10k_deep ... ok
+test bench_layout_id_length_sensitivity ... ok
+test bench_layout_50k_plain_leaf ... ok
+test bench_layout_50k_flat ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 23.31s
+
+     Running tests\popup_and_hover.rs (target\debug\deps\popup_and_hover-854b54aadfa82ded.exe)
+
+running 4 tests
+test request_close_popup_closes_the_open_popup ... ok
+test closing_an_unknown_popup_is_harmless ... ok
+test hover_enter_reaches_the_hit_node ... ok
+test ancestors_receive_enter_and_leave ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\popup_requests.rs (target\debug\deps\popup_requests-d1cde52937bee4e7.exe)
+
+running 8 tests
+test escape_closes_modal_popup ... ok
+test render_draws_popup_after_base_with_viewport_clip ... ok
+test closing_modal_restores_previous_focus ... ok
+test modal_popup_confines_tab_to_popup ... ok
+test modal_popup_survives_outside_click ... ok
+test request_popup_mounts_after_dispatch ... ok
+test requested_popup_is_visible_to_semantics ... ok
+test requested_popup_closes_on_outside_click ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\primitives.rs (target\debug\deps\primitives-734427abd966b18f.exe)
+
+running 10 tests
+test gradient_diagonal_follows_dominant_axis ... ok
+test legacy_one_axis_wrapper_still_works ... ok
+test round_rect_edges_have_partial_coverage ... ok
+test gradient_zero_vector_is_solid ... ok
+test gradient_vertical_is_exact_and_seamless ... ok
+test gradient_horizontal_is_exact ... ok
+test gradient_empty_rect_draws_nothing ... ok
+test round_rect_leaves_corners_unpainted ... ok
+test round_rect_rows_are_monotonic ... ok
+test round_rect_zero_radius_is_plain_rect ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\relayout.rs (target\debug\deps\relayout-c0ade7bfdcf67ae9.exe)
+
+running 4 tests
+test non_relayout_event_does_not_dirty ... ok
+test dispatch_to_relayout_marks_dirty_and_forces_layout ... ok
+test dirty_deep_parent_propagates_to_root ... ok
+test second_layout_is_skipped_when_nothing_changed ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\rev_snapshot.rs (target\debug\deps\rev_snapshot-183ebd88e5119a2d.exe)
+
+running 2 tests
+test rev_snapshot_matches_effective_revision ... ok
+test rev_snapshot_is_linear_on_10k_nodes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.19s
+
+     Running tests\revision.rs (target\debug\deps\revision-0c6d317339eca0f0.exe)
+
+running 6 tests
+test dispatch_changes_state_bumps_revision ... ok
+test disabled_change_bumps_revision ... ok
+test remove_node_clears_last_semantic ... ok
+test signal_changes_label_bumps_revision ... ok
+test id_reuse_with_different_generation_does_not_false_bump ... ok
+test hover_does_not_bump_revision ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\state.rs (target\debug\deps\state-a549fcce6f71855a.exe)
+
+running 4 tests
+test state_can_also_invalidate_other_node ... ok
+test state_same_value_does_not_dirty ... ok
+test state_change_marks_owner_dirty ... ok
+test state_update_in_place ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_widgets-ee7210b570169f52.exe)
+
+running 58 tests
+test list_view::tests::visible_range_with_variable_heights ... ok
+test checkbox::tests::click_points_toggle_and_fire_the_callback ... ok
+test list_view::tests::dynamic_row_heights_shape_total_and_rects ... ok
+test list_view::tests::height_provider_change_recomputes_layout ... ok
+test list_view::tests::tree_owns_list_and_hit_tests_rows ... ok
+test list_view::tests::row_at_matches_row_rect_with_variable_heights ... ok
+test list_view::tests::only_visible_rows_are_painted ... ok
+test list_view::tests::sticky_bottom_follows_len_growth ... ok
+test checkbox::tests::space_toggles_and_other_keys_do_not ... ok
+test list_view::tests::scroll_keeps_visible_window_small ... ok
+test list_view::tests::visible_range_follows_offset ... ok
+test progress::tests::value_is_clamped_on_construction ... ok
+test radio::tests::arrow_keys_cycle_when_focused ... ok
+test radio::tests::callback_fires_on_change_only ... ok
+test radio::tests::selecting_is_mutually_exclusive ... ok
+test slider::tests::click_maps_position_to_value ... ok
+test slider::tests::thumb_hit_test_covers_the_knob ... ok
+test slider::tests::value_setter_clamps_and_notifies_once_per_change ... ok
+test text_input::tests::backspace_across_cjk ... ok
+test text_input::tests::copy_paste_through_clipboard ... ok
+test text_input::tests::drag_creates_selection ... ok
+test text_input::tests::drag_outside_widget_still_selects_via_pointer_capture ... ok
+test text_input::tests::full_flow_click_shift_select_replace_backspace ... ok
+test checkbox::tests::checked_box_has_a_check_mark ... ok
+test text_input::tests::home_end_and_delete ... ok
+test text_input::tests::long_text_scrolls_to_follow_caret ... ok
+test text_input::tests::render_draws_background_selection_caret ... ok
+test text_input::tests::semantics_expose_editor_state ... ok
+test text_input::tests::shift_selection_then_ctrl_a_then_replace ... ok
+test text_input::tests::unfocused_ignores_keyboard ... ok
+test checkbox::tests::unchecked_box_has_no_check_mark ... ok
+test context_menu::tests::left_click_does_not_open_the_menu ... ok
+test context_menu::tests::popup_as_mut_returns_none_for_the_wrong_type ... ok
+test tree_view::tests::child_text_is_indented_one_level ... ok
+test tree_view::tests::clicking_a_row_selects_it ... ok
+test tree_view::tests::flatten_only_includes_expanded_branches ... ok
+test context_menu::tests::right_click_opens_a_menu_popup ... ok
+test tree_view::tests::row_at_maps_y_to_index ... ok
+test tree_view::tests::visible_range_follows_scroll ... ok
+test context_menu::tests::empty_menu_does_not_open ... ok
+test tree_view::tests::thousand_children_are_virtualized ... ok
+test progress::tests::zero_value_draws_no_progress ... ok
+test tooltip::tests::mouse_down_does_not_open_anything ... ok
+test context_menu::tests::clicking_outside_closes_the_popup ... ok
+test progress::tests::half_value_covers_half_the_track ... ok
+test context_menu::tests::clicking_a_menu_item_fires_the_callback_and_closes_the_popup ... ok
+test progress::tests::out_of_range_values_are_clamped ... ok
+test progress::tests::full_value_covers_the_whole_track ... ok
+test radio::tests::only_the_selected_row_has_a_dot ... ok
+test slider::tests::thumb_center_tracks_the_value ... ok
+test tree_view::tests::collapsing_hides_child_rows_in_pixels ... ok
+test context_menu::tests::menu_is_painted_with_real_pixels ... ok
+test tooltip::tests::no_ticks_are_requested_after_the_tooltip_opens ... ok
+test tooltip::tests::tooltip_appears_after_the_delay ... ok
+test tooltip::tests::tooltip_closes_on_leave ... ok
+test tooltip::tests::tooltip_flips_above_when_there_is_no_room_below ... ok
+test tooltip::tests::tooltip_pixels_appear_and_disappear ... ok
+test tooltip::tests::quick_pass_does_not_open_a_tooltip ... ok
+
+test result: ok. 58 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests\agent_visibility.rs (target\debug\deps\agent_visibility-af9f322adfa2aaa7.exe)
+
+running 7 tests
+test semantics_disabled_false_has_no_state_key ... ok
+test query_result_reports_disabled ... ok
+test get_tree_reports_disabled_false ... ok
+test get_tree_reports_disabled_true ... ok
+test node_resource_reports_disabled ... ok
+test disabled_matches_component_state ... ok
+test semantics_disabled_is_top_level_only ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\audit.rs (target\debug\deps\audit-06f70fc6f435b753.exe)
+
+running 5 tests
+test initial_tree_triggers_on_mount_recursively ... ok
+test default_semantics_are_not_exposed ... ok
+test listview_bar_branch_precedes_row_click ... ok
+test closed_overlay_is_neither_rendered_nor_hittable ... ok
+test render_pushes_clip_for_scrolling_container ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\button_selected.rs (target\debug\deps\button_selected-924511a7a4f3a5bf.exe)
+
+running 7 tests
+test theme_selected_color_is_between_normal_and_pressed ... ok
+test button_disabled_overrides_selected ... ok
+test button_selected_overrides_hovered_and_pressed ... ok
+test event_result_still_handled_when_selected ... ok
+test button_selected_renders_with_selected_state ... ok
+test button_set_selected_does_not_auto_invalidate ... ok
+test button_set_selected_updates_semantics ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\contract.rs (target\debug\deps\contract-a5224cfdd3047cd5.exe)
+
+running 8 tests
+test insert_node_rejects_duplicate_id ... ok
+test add_node_mounts_whole_subtree ... ok
+test gateway_errors_when_action_not_handled ... ok
+test add_node_rejects_duplicate_id ... ok
+test menu_select_action_triggers_command_and_closes ... ok
+test dialog_close_action_closes_it ... ok
+test undeclared_action_is_rejected ... ok
+test menu_select_out_of_range_is_ignored ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\cursor.rs (target\debug\deps\cursor-b1d7124eb484903b.exe)
+
+running 4 tests
+test button_declares_pointer_cursor ... ok
+test text_input_declares_ibeam_cursor ... ok
+test splitter_cursor_comes_from_position_not_state ... ok
+test cursor_respects_clip_of_scroll_container ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\dialog_dynamic.rs (target\debug\deps\dialog_dynamic-942ab5629cf627a3.exe)
+
+running 11 tests
+test dialog_buttons_emit_app_command ... ok
+test dialog_arranges_all_children ... ok
+test dialog_set_buttons_updates_buttons ... ok
+test add_node_requests_layout ... ok
+test dialog_clear_and_push_children ... ok
+test dialog_set_open_opens_and_closes ... ok
+test dialog_set_title_updates_render ... ok
+test text_input_clear_resets_all ... ok
+test remove_node_requests_layout ... ok
+test text_input_set_text_updates_buffer ... ok
+test text_input_supports_downcast ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\dialog_residual.rs (target\debug\deps\dialog_residual-20c3673cbf4f5be6.exe)
+
+running 1 test
+test closing_dialog_partial_redraw_matches_full_redraw ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\dispatcher.rs (target\debug\deps\dispatcher-560e26adc6830587.exe)
+
+running 3 tests
+test id_convention_is_queryable ... ok
+test role_is_injected_by_framework_not_by_component ... ok
+test rpc_and_mcp_query_return_the_same_payload ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\downcast_audit.rs (target\debug\deps\downcast_audit-294ff0d9fa865a48.exe)
+
+running 6 tests
+test menu_open_close_via_downcast ... ok
+test downcast_to_wrong_type_returns_none ... ok
+test text_label_runtime_set_text_via_downcast ... ok
+test list_view_runtime_set_items_via_downcast ... ok
+test downcast_reaches_concrete_widget ... ok
+test widgets_layout_uses_real_rects ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\edge_cases.rs (target\debug\deps\edge_cases-ec762bbaba0e13f7.exe)
+
+running 6 tests
+test grid_accepts_zero_and_non_finite_tracks_without_panicking ... ok
+test image_from_rgba_on_oversize_degrades_instead_of_panicking ... ok
+test slider_rejects_nan_and_infinity ... ok
+test image_rejects_oversized_dimensions ... ok
+test text_buffer_truncates_at_the_limit_instead_of_panicking ... ok
+test text_buffer_truncation_never_splits_a_multibyte_char ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\file_drop.rs (target\debug\deps\file_drop-0e543b1b9ef99890.exe)
+
+running 3 tests
+test file_drop_outside_control_is_ignored ... ok
+test file_drop_routes_to_control_under_cursor ... ok
+test file_drop_marks_redraw_when_target_requests_it ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\finale.rs (target\debug\deps\finale-66a31329990e8969.exe)
+
+running 3 tests
+test scrollview_child_outside_viewport_is_not_clickable_until_scrolled ... ok
+test rpc_accepts_requests_with_token ... ok
+test rpc_rejects_requests_without_token ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+
+     Running tests\focus.rs (target\debug\deps\focus-f47f1d6f7d3669fc.exe)
+
+running 7 tests
+test focus_order_follows_tree_order ... ok
+test compose_reports_ime_candidate_position ... ok
+test shift_tab_walks_backwards ... ok
+test tab_cycles_through_focusable_nodes ... ok
+test disabled_node_ignores_events ... ok
+test tab_skips_disabled_nodes ... ok
+test tab_is_linear_in_number_of_nodes ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\focus_closed_subtree.rs (target\debug\deps\focus_closed_subtree-600a37f0308b229b.exe)
+
+running 5 tests
+test dialog_supports_downcast_for_runtime_updates ... ok
+test closed_dialog_is_skipped_by_tab_from_outside ... ok
+test closed_dialog_children_are_not_focusable ... ok
+test open_dialog_children_are_focusable ... ok
+test open_close_dialog_updates_focus_order ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\focus_semantics.rs (target\debug\deps\focus_semantics-756841c4b95913df.exe)
+
+running 8 tests
+test state_focused_is_removed ... ok
+test subscribe_patches_disabled_change ... ok
+test text_input_click_only_sets_focused_after_focus_event ... ok
+test any_widget_also_has_top_level_focused ... ok
+test subscribe_patches_focused_change ... ok
+test subscribe_patches_label_change ... ok
+test top_level_focused_reflects_framework_focus ... ok
+test focused_consistent_across_three_interfaces ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\focus_tab.rs (target\debug\deps\focus_tab-ec9b1e76c6152db9.exe)
+
+running 2 tests
+test tab_cycles_between_textinput_and_button ... ok
+test focused_button_redraws_and_uses_focused_style ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\image_widget.rs (target\debug\deps\image_widget-0bceb45cd8f3cbac.exe)
+
+running 6 tests
+test bad_png_bytes_return_an_error_not_a_panic ... ok
+test short_rgba_buffer_is_padded_instead_of_panicking ... ok
+test png_roundtrip_keeps_colour_and_size ... ok
+test tint_produces_the_tinted_colour ... ok
+test contain_letterboxes_a_wide_image ... ok
+test decoded_png_renders_with_the_original_colour ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\label_color.rs (target\debug\deps\label_color-10eb5e949ea13985.exe)
+
+running 11 tests
+test custom_arg_name_does_not_break_existing_actions ... ok
+test parse_rejects_empty ... ok
+test parse_rejects_named_color ... ok
+test parse_rejects_non_hex_chars ... ok
+test invoke_set_color_changes_label_color ... ok
+test invoke_set_text_still_uses_text_argument ... ok
+test field_change_without_invalidate_does_not_repaint ... ok
+test parse_hex_rrggbb ... ok
+test parse_rejects_rgba_function ... ok
+test parse_hex_rrggbbaa ... ok
+test parse_rejects_short_hex ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\overlay_render.rs (target\debug\deps\overlay_render-5b4f42b0804e3ecc.exe)
+
+running 4 tests
+test closed_base_widget_is_not_painted ... ok
+test closed_dialog_does_not_paint_its_body ... ok
+test open_dialog_paints_its_body ... ok
+test closing_dialog_stops_painting_and_leaves_index ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\p0.rs (target\debug\deps\p0-d2409d01656e9d01.exe)
+
+running 6 tests
+test standalone_scrollbar_reports_new_offset ... ok
+test insert_node_clamps_out_of_range_index ... ok
+test insert_node_places_child_at_index ... ok
+test bound_label_subscribes_on_mount_without_manual_call ... ok
+test unmounted_label_unsubscribes_automatically ... ok
+test click_selects_row_and_fires_callback ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\p0_audit.rs (target\debug\deps\p0_audit-c313af8d882f4118.exe)
+
+running 13 tests
+test dispatch_request_focus_checks_exposed ... ok
+test dispatch_to_unexposed_node_is_forbidden ... ok
+test dispatch_request_subscribe_rejects_bad_interval ... ok
+test host_routes_focus_through_dispatch_request ... ok
+test key_event_roundtrips_through_json ... ok
+test dispatch_with_stale_rev_is_conflict ... ok
+test mcp_requires_token_when_configured ... ok
+test subscribe_with_nan_interval_returns_400 ... ok
+test if_rev_from_get_tree_is_accepted_by_click ... ok
+test subscribe_with_infinity_interval_returns_400 ... ok
+test dispatch_request_unsubscribe_no_locate_needed ... ok
+test subscribe_with_string_interval_returns_400 ... ok
+test dispatch_request_subscribe_checks_exposed ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\p1.rs (target\debug\deps\p1-fb0d3a49aed0a4a2.exe)
+
+running 4 tests
+test dialog_buttons_emit_action_and_close ... ok
+test dialog_without_buttons_still_traps_clicks ... ok
+test menu_keyboard_navigation_moves_and_confirms ... ok
+test listview_scrollbar_click_does_not_select_row ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\password_placeholder.rs (target\debug\deps\password_placeholder-09fc9f6c7381f430.exe)
+
+running 13 tests
+test dialog_set_size_changes_arrange ... ok
+test dialog_set_size_clamps ... ok
+test dialog_close_still_works_after_set_size ... ok
+test non_password_semantics_unchanged ... ok
+test placeholder_renders_when_empty ... ok
+test password_masks_spaces_too ... ok
+test password_masks_semantics ... ok
+test password_preserves_interaction ... ok
+test placeholder_not_rendered_when_has_text ... ok
+test placeholder_not_rendered_during_ime_composition ... ok
+test password_masks_rendered_text ... ok
+test placeholder_not_in_semantics ... ok
+test password_masks_ime_preedit ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\query_actions.rs (target\debug\deps\query_actions-fe3c4e3999e3c37e.exe)
+
+running 8 tests
+test query_with_bad_syntax_is_bad_request ... ok
+test query_skips_unexposed_nodes ... ok
+test query_returns_compact_nodes_not_full_tree ... ok
+test invoke_with_wrong_argument_type_is_rejected ... ok
+test query_filters_by_role_and_label ... ok
+test query_limit_truncates_results ... ok
+test button_click_is_inputkind_none_and_textinput_set_text_is_text ... ok
+test unimplemented_action_still_rejected ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\reactive.rs (target\debug\deps\reactive-146faba59e54dd16.exe)
+
+running 7 tests
+test removing_focused_node_clears_focus ... ok
+test add_then_remove_node_updates_tree_and_hit_test ... ok
+test unmounted_label_unsubscribes ... ok
+test signal_change_repaints_label_without_manual_invalidation ... ok
+test lifecycle_hooks_fire_on_mount_and_unmount ... ok
+test unrelated_color_helper_still_compiles ... ok
+test signal_updates_are_deduplicated_and_dirty_state_set ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\rev_snapshot_agent.rs (target\debug\deps\rev_snapshot_agent-6157736044ae5901.exe)
+
+running 1 test
+test public_tree_is_linear_on_10k_nodes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+
+     Running tests\revision_consistency.rs (target\debug\deps\revision_consistency-56ff464c49e7a9e8.exe)
+
+running 2 tests
+test all_three_interfaces_report_the_same_revision ... ok
+test revision_is_nonzero_after_a_state_change_across_all_interfaces ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\revision_latency.rs (target\debug\deps\revision_latency-7a034b0339f2a4f5.exe)
+
+running 2 tests
+test layout_is_not_required_between_action_and_read ... ok
+test action_rev_is_never_stale ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests\rich_text.rs (target\debug\deps\rich_text-58e784a97e8ff2f8.exe)
+
+running 4 tests
+test code_block_keeps_blank_lines ... ok
+test paragraphs_and_code_block_render ... ok
+test update_then_partial_invalidate_stays_local ... ok
+test update_relayouts_and_returns_last_block_rect ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\rpc_agent.rs (target\debug\deps\rpc_agent-102203d118c6f91c.exe)
+
+running 5 tests
+test rpc_event_parsing_covers_mouse_and_wheel ... ok
+test subscription_throttle_coalesces_rapid_changes ... ok
+test dispatch_reports_unhandled_nodes ... ok
+test agent_subscribes_and_gets_incremental_patch ... ok
+test agent_drives_text_input_over_rpc ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\scroll_dirty.rs (target\debug\deps\scroll_dirty-55fe9d56a49fabbe.exe)
+
+running 3 tests
+test no_scroll_no_dirty ... ok
+test scroll_marks_whole_viewport ... ok
+test scroll_twice_keeps_viewport_dirty ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\scroll_partial_redraw.rs (target\debug\deps\scroll_partial_redraw-e7acffb3caa2c574.exe)
+
+running 1 test
+test scroll_partial_redraw_matches_full_redraw ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\scroll_split.rs (target\debug\deps\scroll_split-97f6c2a027f1f7b6.exe)
+
+running 7 tests
+test text_label_still_renders_with_theme ... ok
+test splitter_reports_resize_cursor ... ok
+test splitter_drag_changes_pane_sizes ... ok
+test hit_test_respects_clip_after_scroll ... ok
+test theme_switch_changes_component_colors ... ok
+test scrolled_out_rows_cannot_be_hit ... ok
+test scroll_view_clip_matches_viewport ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\security.rs (target\debug\deps\security-0d17fe12bc590b97.exe)
+
+running 9 tests
+test json_roundtrip_helper ... ok
+test label_bound_signal_auto_subscribes_on_tree_creation ... ok
+test closed_menu_is_not_hittable ... ok
+test mcp_rejects_bad_jsonrpc_version ... ok
+test scrollview_children_are_reachable_and_hittable ... ok
+test button_is_exposed_by_default_but_plain_widgets_are_not ... ok
+test sensitive_label_is_redacted_too ... ok
+test unexposed_node_is_invisible_to_agent_by_default ... ok
+test standard_mcp_initialize_when_no_token_configured ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\set_focus_semantics.rs (target\debug\deps\set_focus_semantics-b741182036723fd4.exe)
+
+running 6 tests
+test set_focus_rejects_closed_dialog_input ... ok
+test set_focus_rejects_disabled ... ok
+test initial_focus_before_layout_works ... ok
+test set_focus_rejects_non_focusable ... ok
+test set_focus_accepts_open_dialog_input ... ok
+test modal_focus_after_open_works ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\shared_texture.rs (target\debug\deps\shared_texture-da37331efed891db.exe)
+
+running 3 tests
+test adopting_an_invalid_texture_draws_nothing_and_retains_nothing ... ok
+test from_bytes_image_still_releases_its_own_texture ... ok
+test two_images_share_one_texture_until_both_unmount ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\streaming_sticky_rows.rs (target\debug\deps\streaming_sticky_rows-6b9e2128ae6b6d0c.exe)
+
+running 7 tests
+test invalidate_rect_keeps_dirty_local ... ok
+test invalidate_rect_clamps_and_ignores_empty ... ok
+test invalidate_row_returns_row_rect_and_stays_local ... ok
+test invalidate_row_out_of_range_returns_none ... ok
+test listview_renders_multiple_columns_and_icon ... ok
+test stick_to_bottom_follows_content_growth ... ok
+test user_scroll_up_disarms_stick_until_back_at_bottom ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\style_injection.rs (target\debug\deps\style_injection-bded409a4b0d0966.exe)
+
+running 10 tests
+test set_style_with_same_value_reports_no_change ... ok
+test dialog_can_be_used_as_a_popup_without_double_scrim ... ok
+test dialog_button_style_is_applied ... ok
+test dialog_panel_style_is_applied ... ok
+test button_style_injection_draws_gradient_and_focus_ring ... ok
+test text_input_style_injection_replaces_theme_background ... ok
+test style_injection_keeps_dirty_region_local ... ok
+test menu_works_as_popup_without_layer ... ok
+test dialog_runs_as_modal_popup ... ok
+test scrollbar_style_is_applied ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\tab_focus.rs (target\debug\deps\tab_focus-57b2424af7f6ec18.exe)
+
+running 2 tests
+test terminal_consumes_tab_instead_of_focus_switch ... ok
+test tab_still_switches_focus_outside_terminal ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\tabs.rs (target\debug\deps\tabs-0afeeb1bc55265bb.exe)
+
+running 4 tests
+test arrow_keys_cycle_selection_when_focused ... ok
+test click_selects_the_tab_under_the_pointer ... ok
+test only_the_active_page_is_painted ... ok
+test switch_transition_is_visible_in_pixels ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+     Running tests\texture_release.rs (target\debug\deps\texture_release-da0607f43515152a.exe)
+
+running 6 tests
+test extra_release_of_unknown_texture_is_harmless ... ok
+test image_renders_with_adopted_texture ... ok
+test image_reports_its_texture_when_unmounted ... ok
+test upload_then_release_frees_the_texture ... ok
+test double_release_is_harmless ... ok
+test unmounting_a_node_queues_its_texture_and_the_next_frame_releases_it ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\theme_injection.rs (target\debug\deps\theme_injection-c649e0791d4fe81d.exe)
+
+running 3 tests
+test theme_injection_changes_button_color ... ok
+test default_theme_is_dark ... ok
+test rendering_a_tree_does_not_require_a_theme ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\tick_pruning.rs (target\debug\deps\tick_pruning-7e70272dcbb38b97.exe)
+
+running 4 tests
+test non_tick_broadcasts_still_reach_everyone ... ok
+test tick_broadcast_pruning ... ok
+test tick_reaches_all_subscribers ... ok
+test tick_does_not_trigger_full_redraw_when_nobody_draws ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\tree_view_keys.rs (target\debug\deps\tree_view_keys-78257abb47f7f542.exe)
+
+running 5 tests
+test arrow_right_expands_then_enters_first_child ... ok
+test arrow_left_collapses_then_jumps_to_parent ... ok
+test arrow_up_moves_selection_back ... ok
+test arrow_down_moves_selection_to_the_next_row ... ok
+test keyboard_without_focus_does_nothing ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_agent
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_backend_win32
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_backend_x11
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_extras
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_mcp
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_render
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_shell
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_ui
+
+running 2 tests
+test crates\y901-ui\src\lib.rs - (line 22) - compile ... ok
+test crates\y901-ui\src\widget.rs - widget::Role (line 66) ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+   Doc-tests y901_widgets
+
+running 1 test
+test crates\y901-widgets\src\style.rs - style::WidgetStyle (line 15) ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+
