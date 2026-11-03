@@ -243,6 +243,22 @@ impl SoftBackend {
     /// # Safety
     #[inline]
     /// 叠代复合变换：从最内层开始得到屏幕坐标。
+    /// 变换栈的**缩放乘积**（不含平移）。
+    ///
+    /// 用于选 mip 级：嵌套的变换会逐层相乘，所以这里也要相乘。
+    /// 没有变换时返回 1.0（调用方无需特别判断）。
+    fn map_scale(&self) -> f32 {
+        let mut s = 1.0f32;
+        for (_, scale) in &self.transforms {
+            s *= *scale;
+        }
+        if s.is_finite() && s > 0.0 {
+            s
+        } else {
+            1.0
+        }
+    }
+
     fn map_point(&self, p: y901_ui::Pos) -> y901_ui::Pos {
         let mut x = p.x;
         let mut y = p.y;
@@ -525,6 +541,8 @@ impl RenderCtx for SoftBackend {
         // 这是已知限制，已写在报告与文档里。
         let mapped = self.map_point(origin);
         let origin = Pos::new(mapped.x, mapped.y);
+        // 变换栈的缩放乘积：决定选哪一级 mip，也决定字形末尺寸
+        let scale = self.map_scale();
         let mut pen_x = origin.x;
         let start = pen_x;
         let cell_w = self.cell.w;
@@ -538,12 +556,30 @@ impl RenderCtx for SoftBackend {
                 );
             }
             if ch != ' ' {
-                // 字形贴图：从 TextEngine 的 RGBA 图集抽 coverage → 按颜色混合
-                if let Some(g) = self.text.glyph(ch).cloned() {
-                    if !g.is_empty() {
+                // 按当前缩放选一级字形（level 0 = L0，与不缩放时逐像素相同）
+                if let Some(sg) = self.text.glyph_at_scale(ch, scale) {
+                    if sg.w > 0 && sg.h > 0 {
                         let atlas_size = self.text.atlas_size() as usize;
-                        let bx = (pen_x + g.bearing_x as f32).floor() as i32;
-                        let by = (origin.y + ascent + g.bearing_y as f32).floor() as i32;
+                        // 基线：布局始终用原字号的 bearing，屏幕位置再乘缩放因子
+                        let bx = (pen_x + sg.bearing_x * scale).floor() as i32;
+                        let by = (origin.y + ascent * scale + sg.bearing_y * scale).floor() as i32;
+                        // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
+                        let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
+                        let dh = (sg.h as f32 * scale).round().max(1.0) as i32;
+                        let g = crate::GlyphInfo {
+                            width: dw as u32,
+                            height: dh as u32,
+                            bearing_x: 0,
+                            bearing_y: 0,
+                            advance: sg.advance,
+                            atlas_x: sg.slot.atlas_x,
+                            atlas_y: sg.slot.atlas_y,
+                            last_used: 0,
+                            ink: 0.0,
+                            mips: [None, None, None],
+                        };
+                        // slot 实际像素尺寸（用于采样归一化）
+                        let (sw, sh) = (sg.slot.width.max(1), sg.slot.height.max(1));
                         for gy in 0..g.height as i32 {
                             let dy = by + gy;
                             if dy < 0 || dy >= self.height as i32 {
@@ -559,8 +595,11 @@ impl RenderCtx for SoftBackend {
                                         continue;
                                     }
                                 }
-                                let ax = g.atlas_x as usize + gx as usize;
-                                let ay = g.atlas_y as usize + gy as usize;
+                                // 从 slot 取像素：目标像素映射到级内坐标
+                                let sx = (gx as u32 * sw / g.width).min(sw - 1);
+                                let sy = (gy as u32 * sh / g.height).min(sh - 1);
+                                let ax = sg.slot.atlas_x as usize + sx as usize;
+                                let ay = sg.slot.atlas_y as usize + sy as usize;
                                 let si = (ay * atlas_size + ax) * 4;
                                 let mut cov = self.text.atlas().get(si).copied().unwrap_or(0) as f32 / 255.0;
                                 if style.bold {
@@ -571,7 +610,7 @@ impl RenderCtx for SoftBackend {
                                     // 字形边缘会发模糊；max 只拓宽、不加深，边缘仍保持单次抗锯。
                                     // 取**右侧邻居**的覆盖度取最大值 → 字形向右拓宽 1px。
                                     // （取左邻居是错的：它只会把已有的墨再加深，字形几乎不变宽）。
-                                    let right = if (gx as u32) + 1 < g.width {
+                                    let right = if (gx as u32) + 1 < g.width && sx + 1 < sw {
                                         self.text.atlas().get(si + 4).copied().unwrap_or(0) as f32 / 255.0
                                     } else {
                                         0.0

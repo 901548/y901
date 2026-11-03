@@ -506,6 +506,19 @@ impl FontEngine for MyFontEngine {
     fn cell_span(&self, ch: char) -> u32 {
         MyFontEngine::cell_span(self, ch)
     }
+
+    fn glyph_at_scale(&mut self, ch: char, scale: f32) -> Option<crate::font::ScaledGlyph> {
+        let sel = MyFontEngine::glyph_at_scale(self, ch, scale)?;
+        Some(crate::font::ScaledGlyph {
+            level: sel.level,
+            slot: sel.slot,
+            w: sel.glyph.width,
+            h: sel.glyph.height,
+            bearing_x: sel.glyph.bearing_x as f32,
+            bearing_y: sel.glyph.bearing_y as f32,
+            advance: sel.glyph.advance,
+        })
+    }
     fn atlas(&self) -> &[u8] {
         &self.atlas
     }

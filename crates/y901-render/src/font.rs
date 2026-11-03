@@ -41,6 +41,33 @@ impl MipSlot {
     }
 }
 
+/// 按缩放比选好的一级字形（**纯值**，可跨借用边界返回）。
+///
+/// 为什么不是 `MipSelection<'_>`：`FontEngine` 是 trait object，
+/// 返回带生命周期的引用会把借用关系带进 trait，`Box<dyn FontEngine>` 侧很难用。
+///
+/// **`w`/`h` 是 L0 的尺寸，不是所选级的位图尺寸。** 这一点必须写清：
+/// 布局（摆放、换行、光标）永远按原字号算；绘制时把**整个 slot** 拉伸到 `(w*s, h*s)`
+/// 即可，采样倍率由 `w / slot.width` 隐式决定。
+/// 若把 `w` 定义成所选级的宽度，调用方再乘 `scale` 就会把字画成 `1/2^level` 大小。
+#[derive(Clone, Copy, Debug)]
+pub struct ScaledGlyph {
+    /// 实际用到的级：0 = L0，1 = 1/2，2 = 1/4。
+    pub level: usize,
+    /// 该级在图集里的区域（可能比 L0 小）。
+    pub slot: MipSlot,
+    /// **L0** 墨迹宽度（布局与绘制目标尺寸都用它）。
+    pub w: u32,
+    /// **L0** 墨迹高度。
+    pub h: u32,
+    /// 原字号的 bearing_x（已是渲染坐标，不随 level 变）。
+    pub bearing_x: f32,
+    /// 原字号的 bearing_y。
+    pub bearing_y: f32,
+    /// 原字号的 advance（布局用它；不乘缩放因子）。
+    pub advance: f32,
+}
+
 #[derive(Clone, Debug)]
 /// 一个已光栅化字形的度量与图集位置。
 /// 为什么带 `bearing`：字形墨迹不一定从原点开始，绘制时要按 bearing 偏移，
@@ -123,6 +150,28 @@ pub trait FontEngine {
     fn take_dirty(&mut self) -> (bool, Vec<DirtyRect>);
     /// 开始一帧。
     fn begin_frame(&mut self);
+    /// 按缩放比选一级字形；默认实现**永远返回 L0**。
+    ///
+    /// 默认实现的语义是"这个引擎不支持缩放"——它不是错误，
+    /// 只是能力差异：DirectWrite 路径没有 mip 链，也就没有更粗的级可选。
+    fn glyph_at_scale(&mut self, ch: char, _scale: f32) -> Option<ScaledGlyph> {
+        let g = self.glyph(ch)?.clone();
+        Some(ScaledGlyph {
+            level: 0,
+            slot: MipSlot {
+                atlas_x: g.atlas_x,
+                atlas_y: g.atlas_y,
+                width: g.width,
+                height: g.height,
+            },
+            w: g.width,
+            h: g.height,
+            bearing_x: g.bearing_x as f32,
+            bearing_y: g.bearing_y as f32,
+            advance: g.advance,
+        })
+    }
+
     /// 基线高度。
     fn ascent(&self) -> f32;
     /// 格宽度。
