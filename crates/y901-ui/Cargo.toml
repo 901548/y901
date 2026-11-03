@@ -3,7 +3,7 @@ name = "y901-ui"
 version.workspace = true
 edition.workspace = true
 
-# 框架核心：零依赖。
+# 框架核心：零**外部**依赖（只依赖内部 crate `y901-core`）。
 # 不认识 D3D11，不认识 PTY，不认识 Win32，也不认识任何具体业务。
 # 所有平台能力经 trait 由应用层注入；所有业务语义由应用层解释。
 [dependencies]

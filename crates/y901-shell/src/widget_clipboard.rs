@@ -50,8 +50,14 @@ mod tests {
     use super::*;
     use y901_widgets::text_input::Clipboard as WidgetClipboardTrait;
 
+    /// 系统剪贴板是**进程外的全局资源**，同一个测试二进制里多个用例并行写它就会互相覆盖。
+    /// 用一把进程内锁把"写 → 读" 变成原子区，否则会出现假红
+    /// （实际遇到过：读回来的是另一个测试写的串）。
+    static CLIPBOARD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn adapter_forwards_to_system_clipboard() {
+        let _guard = CLIPBOARD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut c = WidgetClipboard::system();
         let text = "adapter 测试 ABC 中文";
         c.set(text);
@@ -63,6 +69,7 @@ mod tests {
 
     #[test]
     fn empty_clipboard_maps_to_none() {
+        let _guard = CLIPBOARD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // 空剪贴板对控件来说就是"没有东西可粘"
         let mut c = WidgetClipboard::system();
         c.set("");

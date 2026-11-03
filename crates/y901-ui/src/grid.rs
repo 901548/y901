@@ -133,10 +133,56 @@ impl Grid {
         self
     }
 
-    /// 第 `i` 个子控件落在 `(col, row)`（顺序排布）。
+    /// 第 `i` 个子控件落在 `(col, row)`。
+    ///
+    /// 显式定位过的走 `placement`（见 `child_rects`），这里只处理**自动流**：
+    /// 按树序逐个找"第一个未被占用的格子"（行优先），而不是按下标硬算。
+    ///
+    /// 为什么不能用 `index % cols`：一旦有显式定位，下标与格子就脱钩了。
+    /// 例：`place("a", 1..2, 0..1)` 之后，第二个子控件应在 `(0,0)`，而 `index % 2` 会给出 `(1,0)`——那格已被 a 占了。
     fn cell_of(&self, index: usize) -> (usize, usize) {
+        // 超出子控件个数的查询（诊断/测试用）退回纯下标映射：
+        // 它不对应任何实体控件，也就不受显式定位影响。
+        if index >= self.children.len() {
+            let cols = self.cols.len().max(1);
+            return (index % cols, index / cols);
+        }
+        self.auto_cells().get(index).copied().unwrap_or((0, 0))
+    }
+
+    /// 计算所有子控件的**自动**落位（显式定位的跳过）。
+    ///
+    /// 返回的下标与 `children` 对齐；被显式定位的位置写 `(0,0)`（不会被用到）。
+    fn auto_cells(&self) -> Vec<(usize, usize)> {
         let cols = self.cols.len().max(1);
-        (index % cols, index / cols)
+        let rows = self.rows.len().max(1);
+        // 在占用表的**副本**上模拟：布局是只读的，不能把自动落位写回真占用表
+        let mut taken: Vec<IntervalSet> = self.occupancy.clone();
+        taken.resize(rows, IntervalSet::new());
+
+        let mut out = Vec::with_capacity(self.children.len());
+        for child in &self.children {
+            if self.placements.contains_key(child.id()) {
+                out.push((0, 0));
+                continue;
+            }
+            let mut placed = None;
+            // 逐行扫描：每行是一个一维集，找到第一个空列就停。
+            for (r, row_taken) in taken.iter_mut().enumerate().take(rows) {
+                for c in 0..cols {
+                    if !row_taken.contains(c as u32) {
+                        let _ = row_taken.insert(c as u32, c as u32 + 1);
+                        placed = Some((c, r));
+                        break;
+                    }
+                }
+                if placed.is_some() {
+                    break;
+                }
+            }
+            out.push(placed.unwrap_or((0, 0)));
+        }
+        out
     }
 
     /// 计算轨道长度。
@@ -181,8 +227,11 @@ impl Grid {
         out
     }
 
-    /// 每个子控件的目标矩形。
-    fn child_rects(&self) -> Vec<Rect> {
+    /// 每个子控件的目标矩形（解析后的结果，供测试与调试直接断言）。
+    ///
+    /// 为什么公开：它是纯函数（输入轨道尺寸 + 定位，输出矩形），
+    /// 几何断言比像素断言精确得多，错了能直接报出哪个数字不对。
+    pub fn child_rects(&self) -> Vec<Rect> {
         (0..self.children.len())
             .map(|i| {
                 if let Some(span) = self.placements.get(self.children[i].id()) {
@@ -582,6 +631,18 @@ impl Widget for Grid {
     }
 
     fn children_clip(&self, cell_rect: Rect) -> Option<Rect> {
+        // 跨格控件：裁剪到**区间并集**（含区间内的间距），而不是它起始那一格。
+        // 否则"跨三列"的控件只能画在第一列里，跨格就白跨了。
+        if let Some(id) = self
+            .children
+            .iter()
+            .find(|c| c.rect() == cell_rect)
+            .map(|c| c.id())
+        {
+            if let Some(span) = self.placements.get(id) {
+                return Some(self.rect_for_span(*span));
+            }
+        }
         Some(cell_rect)
     }
 

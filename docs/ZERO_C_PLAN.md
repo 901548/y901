@@ -42,7 +42,7 @@ RUSTFLAGS="-C linker=rust-lld" cargo build --release --workspace  # → exit 0
 
 | crate | 依赖 | 纯 Rust？ | 判定依据 |
 |---|---|---|---|
-| `y901-ui` | **无** | ✅ | 零依赖（这是刻意设计） |
+| `y901-ui` | **无外部依赖**（仅 `y901-core` 内部 crate） | ✅ | 零第三方依赖（这是刻意设计） |
 | `y901-core` | `unicode-width 0.2` | ✅ | 查表实现，无 build.rs |
 | `y901-widgets` | core, ui | ✅ | 内部路径依赖 |
 | `y901-extras` | core, ui, `crossbeam-channel 0.5`, `portable-pty 0.8.1` | ✅ | 见 §1.3 |

@@ -1,6 +1,6 @@
 # Y901 框架总览
 
-Y901 是一个**零依赖、Agent 原生**的桌面 UI 框架。UI 框架本身不认识任何平台 API，
+Y901 是一个**零 C/C++ 编译依赖、Agent 原生**的桌面 UI 框架。UI 框架本身不认识任何平台 API，
 平台能力（Win32 / D3D11 / DirectWrite / PTY）全部收敛在应用层。
 
 ## 1. 八个 crate
@@ -8,7 +8,7 @@ Y901 是一个**零依赖、Agent 原生**的桌面 UI 框架。UI 框架本身�
 | crate | 职责 | 生产依赖 |
 |---|---|---|
 | `y901-core` | 纯逻辑：终端 Grid / reflow / scrollback / 格宽（`width_of_char`） | `unicode-width` |
-| `y901-ui` | 框架：Widget / UiTree / 布局 / 事件 / Signal / 语义树 / revision | **无** |
+| `y901-ui` | 框架：Widget / UiTree / 布局 / 事件 / Signal / 语义树 / revision | `y901-core`（内部，仅布局原语 `IntervalSet`） |
 | `y901-widgets` | **通用**组件：Button / TextLabel / TextInput / ScrollView / ListView / SplitView / Menu / Dialog / StyledText | `core`, `ui` |
 | `y901-extras` | **扩展**组件：TerminalWidget（Grid + VT + PTY） | `core`, `ui`, `crossbeam-channel`, `portable-pty` |
 | `y901-agent` | 安全网关：语义 API（`dispatch_request`）、Token、作用域、版本锁、脱敏；RPC 与 MCP 协议 | `ui` |
@@ -29,7 +29,8 @@ y901-app ──> y901-backend-win32 ──> y901-runtime ──> y901-agent ─�
 
 关键约束：
 
-- `y901-ui` 的 `[dependencies]` 是**空的**。这不是洁癖，而是测试策略的地基：
+- `y901-ui` **零外部依赖**：它只依赖内部 crate `y901-core`（用于布局原语 `IntervalSet`）。
+  这不是洁癖，而是测试策略的地基：
   728 项测试（另有 7 项 GPU harness，`--ignored` 运行）里绝大多数不需要窗口、GPU、PTY。
 - 只有 `y901-backend-win32` 依赖 `windows-sys`（grep 可验证）。
 - `y901-runtime` 单独存在的原因：`Host::policy()` 需要 `y901_agent::Policy`，

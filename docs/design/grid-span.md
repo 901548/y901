@@ -261,8 +261,10 @@ impl IntervalSet {
 
 ### 5.2 放哪个 crate
 
-**`IntervalSet` → `y901-core`**：它是纯数据结构，零依赖，且 `y901-core` 已被
-`y901-ui` / `y901-agent` / `y901-extras` 同时依赖 —— 放这里三方都能用，不引入新边。
+**`IntervalSet` → `y901-core`**：它是纯数据结构、零外部依赖。
+> 更正：初稿说“`y901-core` 已被 `y901-ui` 依赖”是**错**的——当时 `y901-ui` 的 `[dependencies]` 是空的。
+> 实际情况是本次为了复用才**新增**了 `ui → core` 这条边（无循环，且符合项目概览里画的分层），
+> 代价是 `unicode-width` 会通过 core 传递进入 ui。
 
 **约束求解（CSP）→ `y901-ui`**：它需要 `Constraints` / `Size`，属于布局语义，不该下沉到 core。
 
