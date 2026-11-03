@@ -88,8 +88,7 @@ fn build(cols: usize, rows: usize, spanning: usize) -> Grid {
 }
 
 #[test]
-#[ignore = "性能基准，--ignored 手动跑"]
-fn grid_10k_layout_time() {
+fn grid_layout_10k_with_spans() {
     let (cols, rows) = (100usize, 100usize);
     let nodes = cols * rows;
 
@@ -118,12 +117,18 @@ fn grid_10k_layout_time() {
     }
     let avg = total / rounds as f64;
     eprintln!("[grid-perf] nodes={nodes} spanning=50 avg={avg:.3}ms worst={worst:.3}ms");
-    assert!(avg > 0.0);
+
+    // 阈值：release 实测 1.26ms（预算 3ms，留 2 倍余量）；
+    // debug 构建慢一个量级，用 20 倍阈值避免假红。
+    let limit = if cfg!(debug_assertions) { 60.0 } else { 6.0 };
+    assert!(
+        avg <= limit,
+        "10k 网格布局超时：{avg:.3}ms > {limit}ms（说明布局退化了）"
+    );
 }
 
 #[test]
-#[ignore = "性能基准，--ignored 手动跑"]
-fn grid_10k_conflict_detection_time() {
+fn grid_place_10k_batch() {
     let (cols, rows) = (100usize, 100usize);
     let mut children: Vec<Box<dyn Widget>> = Vec::with_capacity(cols * rows);
     for i in 0..cols * rows {
@@ -146,5 +151,11 @@ fn grid_10k_conflict_detection_time() {
     }
     let ms = t.elapsed().as_secs_f64() * 1e3;
     eprintln!("[grid-perf] placements={} {ms:.3}ms", cols * rows);
-    assert!(ms > 0.0);
+
+    // 这是"批量配置"场景（不是单次布局的冲突检测），预算宽松：≤ 50ms。
+    let limit = if cfg!(debug_assertions) { 150.0 } else { 50.0 };
+    assert!(
+        ms <= limit,
+        "10k 次 place 超时：{ms:.3}ms > {limit}ms（id 查找或冲突检测退化）"
+    );
 }

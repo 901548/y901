@@ -80,6 +80,13 @@ pub struct Grid {
     occupancy: Vec<IntervalSet>,
     /// 内容版本：`place()` 改变布局时 +1，让布局缓存知道要重算。
     version: u64,
+    /// 子控件 id → 下标索引（避免 `place` 里做 O(n) 字符串扫描）。
+    ///
+    /// 失效机制：`children_mut()` 会把 `index_dirty` 置为 `true`；`place()` 入口发现
+    /// 脏标记或长度不匹配时重建。宁可多比一次长度，也不能拿到错的下标。
+    id_index: HashMap<String, usize>,
+    /// 索引是否可能已失效（`children_mut()` 被调用过）。
+    index_dirty: bool,
     /// 自动落位缓存（与 `children` 下标对齐）。
     ///
     /// 为什么要缓存：`auto_cells` 本身是 O(n·rows·cols)。若 `cell_of(i)`
@@ -117,6 +124,8 @@ impl Grid {
             placements: HashMap::new(),
             occupancy: Vec::new(),
             version: 0,
+            id_index: HashMap::new(),
+            index_dirty: false,
             auto_cache: Vec::new(),
         }
     }
@@ -136,7 +145,17 @@ impl Grid {
     /// 批量设置子控件（链式）。
     pub fn with_children(mut self, children: Vec<Box<dyn Widget>>) -> Self {
         self.children = children;
+        self.rebuild_index();
         self
+    }
+
+    /// 重建 id → 下标索引（同名 id 保留第一个）。
+    fn rebuild_index(&mut self) {
+        self.id_index.clear();
+        for (i, c) in self.children.iter().enumerate() {
+            self.id_index.entry(c.id().to_string()).or_insert(i);
+        }
+        self.index_dirty = false;
     }
 
     /// 第 `i` 个子控件落在 `(col, row)`。
@@ -522,7 +541,11 @@ impl Grid {
             });
         }
 
-        if !self.children.iter().any(|c| c.id() == id) {
+        // 索引可能失效：长度不匹配或被标脏就重建。
+        if self.index_dirty || self.id_index.len() != self.children.len() {
+            self.rebuild_index();
+        }
+        if !self.id_index.contains_key(&id) {
             return Err(PlacementError::UnknownChild { id });
         }
 
@@ -622,6 +645,9 @@ impl Widget for Grid {
     }
 
     fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        // 外部可以直接改这个 Vec，索引必须标脏；
+        // 标脏代价是 O(1)，而"拿到错下标"会定位到错的控件。
+        self.index_dirty = true;
         Some(&mut self.children)
     }
 
