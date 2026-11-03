@@ -704,7 +704,7 @@ mod tests {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             for k in self.children.iter_mut() {
                 let _ = k;

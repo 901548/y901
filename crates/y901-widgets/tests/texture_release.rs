@@ -85,7 +85,7 @@ impl Widget for Host {
     fn id(&self) -> &str {
         "host"
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         c.constrain(Size::new(32.0, 32.0))
     }
     fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut LayoutCache) {

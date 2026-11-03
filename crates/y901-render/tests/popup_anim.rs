@@ -24,10 +24,10 @@ impl Widget for Root {
     fn id(&self) -> &str {
         "root"
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         c.constrain(Size::new(W as f32, H as f32))
     }
-    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut LayoutCache) {
+    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
         self.rect = rect;
     }
     fn rect(&self) -> Rect {
@@ -51,10 +51,10 @@ impl Widget for WhitePanel {
     fn id(&self) -> &str {
         "panel"
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         c.constrain(Size::new(120.0, 80.0))
     }
-    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut LayoutCache) {
+    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
         self.rect = rect;
     }
     fn rect(&self) -> Rect {

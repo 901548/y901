@@ -92,7 +92,7 @@ impl Widget for ClippedBox {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(c.max.w, c.max.h))
     }
@@ -184,7 +184,7 @@ fn click_inside_popup_routes_to_it() {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(120.0, 60.0))
         }
@@ -192,7 +192,7 @@ fn click_inside_popup_routes_to_it() {
             &mut self,
             r: Rect,
             _m: &dyn TextMetrics,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) {
             self.0.set(self.0.get());
             let _ = r;
@@ -290,7 +290,7 @@ impl Widget for PaintProbe {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         let s = if self.rect.is_empty() {
             Size::new(80.0, 40.0)
@@ -299,7 +299,7 @@ impl Widget for PaintProbe {
         };
         c.constrain(s)
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         if self.rect.is_empty() {
             self.rect = r;
         }

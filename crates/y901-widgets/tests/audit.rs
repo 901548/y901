@@ -81,11 +81,11 @@ impl Widget for Box3 {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(c.max.w, 40.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -189,7 +189,7 @@ fn initial_tree_triggers_on_mount_recursively() {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(10.0, 10.0))
         }
@@ -197,7 +197,7 @@ fn initial_tree_triggers_on_mount_recursively() {
             &mut self,
             _r: Rect,
             _m: &dyn TextMetrics,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) {
         }
         fn rect(&self) -> Rect {

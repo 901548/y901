@@ -42,11 +42,11 @@ impl Widget for Secret {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(100.0, 40.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -177,11 +177,11 @@ impl Widget for Painted {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(c.max.w, 30.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -252,7 +252,7 @@ fn button_is_exposed_by_default_but_plain_widgets_are_not() {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(10.0, 10.0))
         }
@@ -260,7 +260,7 @@ fn button_is_exposed_by_default_but_plain_widgets_are_not() {
             &mut self,
             _r: Rect,
             _m: &dyn TextMetrics,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) {
         }
         fn rect(&self) -> Rect {

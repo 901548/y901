@@ -215,12 +215,12 @@ pub fn level_for(scale: f32, ink: f32, max_level: usize) -> usize {
     } else {
         0
     };
-    // 只从 **level >= 1** 开始才多降一级。
+    // 只从 **level >= 2** 开始才多降一级。
     //
     // 为什么：幂级 0 对应"s >= 0.5 的基础选择"。若从 0 往下降一级，
     // 0.75 会用 1/2 位图去画 11.25px 的字——那是**放大采样**，比原图更糊。
     // 密字形的优势只在"已经要缩小到半尺寸以下"时才成立。
-    if ink > 0.25 && level >= 1 {
+    if ink > 0.25 && level >= 2 {
         level += 1;
     }
     level.min(max_level)
@@ -266,14 +266,14 @@ mod tests {
     #[test]
     fn dense_glyph_drops_one_extra_level() {
         let c = chain3();
-        assert_eq!(
-            c.level_for(0.5, 0.3),
-            2,
-            "ink > 0.25 时多降一级（密集字形缩小后笔画会粘连）"
-        );
-        // 阈值边界：0.25 本身不算"密"
-        assert_eq!(c.level_for(0.5, 0.25), 1, "ink == 0.25 不触发额外降级");
-        assert_eq!(c.level_for(0.5, 0.2501), 2);
+        // 语义变更：密度加级从 `level >= 1` 改为 `level >= 2`。
+        // 原因：0.5 的 base 是 1，加级会选 L2（L0/4）却要画到 L0×0.5 的尺寸上
+        // —— 那是**放大采样**，实测让 'A' 的形状 MAD 从 0.090 恶化到 0.199。
+        assert_eq!(c.level_for(0.5, 0.3), 1, "base level 1 不再加级");
+        assert_eq!(c.level_for(0.5, 0.25), 1, "ink == 0.25 不触发加级");
+        assert_eq!(c.level_for(0.5, 0.2501), 1);
+        // base level 2（0.25）时加级仍生效，但会被链长夹住
+        assert_eq!(c.level_for(0.25, 0.3), 2, "base 2 加级后被 clamp 到最粗级");
     }
 
     #[test]

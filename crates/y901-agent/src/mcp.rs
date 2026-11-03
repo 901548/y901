@@ -495,7 +495,7 @@ mod tests {
             &mut self,
             _m: &dyn TextMetrics,
             c: y901_ui::Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(100.0, 40.0))
         }
@@ -503,7 +503,7 @@ mod tests {
             &mut self,
             r: y901_ui::Rect,
             _m: &dyn TextMetrics,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) {
             self.rect = r;
         }

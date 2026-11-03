@@ -376,7 +376,7 @@ fn dialog_runs_as_modal_popup() {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(120.0, 40.0))
         }
@@ -384,7 +384,7 @@ fn dialog_runs_as_modal_popup() {
             &mut self,
             r: Rect,
             _m: &dyn TextMetrics,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) {
             self.rect = r;
         }

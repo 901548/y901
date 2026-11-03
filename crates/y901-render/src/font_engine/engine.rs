@@ -271,6 +271,8 @@ impl MyFontEngine {
                 atlas_y: ay,
                 width: w,
                 height: h,
+                bearing_x: bmp.bearing_x as f32,
+                bearing_y: bmp.bearing_y as f32,
             });
         }
     }
@@ -297,6 +299,8 @@ impl MyFontEngine {
                     atlas_y: g.atlas_y,
                     width: g.width,
                     height: g.height,
+                    bearing_x: g.bearing_x as f32,
+                    bearing_y: g.bearing_y as f32,
                 },
             });
         }
@@ -319,6 +323,8 @@ impl MyFontEngine {
                     atlas_y: g.atlas_y,
                     width: g.width,
                     height: g.height,
+                    bearing_x: g.bearing_x as f32,
+                    bearing_y: g.bearing_y as f32,
                 },
             });
         }
@@ -343,6 +349,8 @@ impl MyFontEngine {
                 atlas_y: g.atlas_y,
                 width: g.width,
                 height: g.height,
+                bearing_x: g.bearing_x as f32,
+                bearing_y: g.bearing_y as f32,
             },
         })
     }
@@ -514,8 +522,6 @@ impl FontEngine for MyFontEngine {
             slot: sel.slot,
             w: sel.glyph.width,
             h: sel.glyph.height,
-            bearing_x: sel.glyph.bearing_x as f32,
-            bearing_y: sel.glyph.bearing_y as f32,
             advance: sel.glyph.advance,
         })
     }

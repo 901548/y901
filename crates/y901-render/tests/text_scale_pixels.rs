@@ -23,6 +23,26 @@ fn soft() -> SoftBackend {
     SoftBackend::new_headless(W, H, Box::new(engine), Size::new(cw, ch)).expect("soft")
 }
 
+/// 墨量：所有像素与背景的差之和（等价于覆盖度积分）。
+///
+/// 为什么不能只数"非背景像素个数"：小字号下几乎每个像素都带一点覆盖度，
+/// 数个数会把"半透明边缘"也算成了"墨"，比例偏大（实测 0.339）。
+fn ink_mass(px: &SoftBackend) -> u64 {
+    let bg = px.pixel(W - 1, H - 1).expect("bg");
+    let mut sum = 0u64;
+    for y in 0..H {
+        for x in 0..W {
+            let p = px.pixel(x, y).expect("p");
+            for shift in [0u32, 8, 16] {
+                let a = ((p >> shift) & 0xFF) as i32;
+                let b = ((bg >> shift) & 0xFF) as i32;
+                sum += (a - b).unsigned_abs() as u64;
+            }
+        }
+    }
+    sum
+}
+
 /// 统计画布上的非背景像素数（背景取右下角）。
 fn ink(px: &SoftBackend) -> usize {
     let bg = px.pixel(W - 1, H - 1).expect("bg");
@@ -89,11 +109,23 @@ fn half_scale_ink_is_about_a_quarter() {
     draw_at(&mut b, "A", Some(0.5));
     let half = ink(&b);
 
-    let ratio = half as f64 / full as f64;
+    let count_ratio = half as f64 / full as f64;
+
+    // 用**墨量**（覆盖度积分）判定：它才近似面积，而非背景像素**个数**
+    let mut a = soft();
+    draw_at(&mut a, "A", None);
+    let mass_full = ink_mass(&a);
+    let mut b2 = soft();
+    draw_at(&mut b2, "A", Some(0.5));
+    let mass_half = ink_mass(&b2);
+    let ratio = mass_half as f64 / mass_full as f64;
+    eprintln!(
+        "[text-scale] s=0.5 墨量比 = {ratio:.3}（像素个数比 = {count_ratio:.3}）"
+    );
     // 面积缩小到 1/4，允许 ±30% 的抗锯钽边误差
     assert!(
         (0.175..=0.325).contains(&ratio),
-        "s = 0.5 的墨迹数应约为 0.25 倍，实测 {ratio:.3}（{half}/{full}）"
+        "s = 0.5 的墨量应约为 0.25 倍，实测 {ratio:.3}（{mass_half}/{mass_full}）"
     );
 
     // 变异对照：半尺寸的墨迹必须严格小于原尺寸

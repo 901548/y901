@@ -260,10 +260,10 @@ mod tests {
         fn id(&self) -> &str {
             "box"
         }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
             c.constrain(Size::new(40.0, 20.0))
         }
-        fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut LayoutCache) {
+        fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
             self.rect = rect;
         }
         fn rect(&self) -> Rect {

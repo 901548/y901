@@ -36,11 +36,11 @@ impl Widget for Trigger {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(120.0, 40.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -80,11 +80,11 @@ impl Widget for PaintProbe {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(140.0, 90.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -160,11 +160,11 @@ fn modal_popup_survives_outside_click() {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(120.0, 40.0))
         }
-        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
             self.rect = r;
         }
         fn rect(&self) -> Rect {
@@ -298,11 +298,11 @@ impl Widget for FocusProbe {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(80.0, 24.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -340,7 +340,7 @@ impl Widget for TwoButtons {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(200.0, 80.0))
     }
@@ -387,7 +387,7 @@ fn build_modal_tree() -> (UiTree, Rect, std::rc::Rc<Cell<bool>>) {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(c.max.w, c.max.h))
         }

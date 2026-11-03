@@ -74,11 +74,11 @@ impl Widget for Box0 {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(c.max.w, 50.0))
     }
-    fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {}
+    fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {}
     fn rect(&self) -> Rect {
         Rect::new(0.0, 0.0, 100.0, 50.0)
     }

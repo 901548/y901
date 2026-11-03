@@ -168,7 +168,7 @@ fn agent_drives_text_input_over_rpc() {
             r2.get("ok").and_then(|v| v.as_bool()),
             Some(true),
             "mouse_down 失败: {}",
-            r2.to_string()
+            r2
         );
 
         // 3) 全选
@@ -347,7 +347,7 @@ fn agent_subscribes_and_gets_incremental_patch() {
     assert!(
         patch2.get("focused").is_none(),
         "未变化的字段不应出现在 patch 里: {}",
-        patch2.to_string()
+        patch2
     );
     assert!(patch2.get("text").is_some());
 }

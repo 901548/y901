@@ -22,7 +22,7 @@ pub struct DirtyRect {
 /// 为什么不直接存 [`crate::mip::MipLevel`]：那会把覆盖率像素复制一份进 `GlyphInfo`，
 /// 与"图集是唯一存储"的设计冲突（内存直接翻倍）。mip 的像素住在图集里，
 /// `GlyphInfo` 只记坐标。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MipSlot {
     /// 图集内 X（左上角）。
     pub atlas_x: u32,
@@ -32,6 +32,13 @@ pub struct MipSlot {
     pub width: u32,
     /// 墨迹高度（像素）。
     pub height: u32,
+    /// **该级自己**的 bearing_x（在该级字号下光栅化得到）。
+    ///
+    /// 不能用 L0 的 bearing 乘缩放：每级都是在自己字号下重新光栅化的，
+    /// 边界取整与载距略微不同，算出的 bearing 相差 0.5~1px。
+    pub bearing_x: f32,
+    /// 该级自己的 bearing_y。
+    pub bearing_y: f32,
 }
 
 impl MipSlot {
@@ -60,10 +67,6 @@ pub struct ScaledGlyph {
     pub w: u32,
     /// **L0** 墨迹高度。
     pub h: u32,
-    /// 原字号的 bearing_x。**绘制时要乘 `scale`**：`x = pen_x + bearing_x * scale`。
-    pub bearing_x: f32,
-    /// 原字号的 bearing_y。同理乘 `scale`。
-    pub bearing_y: f32,
     /// 原字号的 advance。**调用方布局时必须自己乘 `scale`**（`pen_x += advance * scale`）。
     ///
     /// 为什么不预乘：advance 是字形的**固有属性**，`scale` 是调用方的**变换**，
@@ -166,11 +169,11 @@ pub trait FontEngine {
                 atlas_y: g.atlas_y,
                 width: g.width,
                 height: g.height,
+                bearing_x: g.bearing_x as f32,
+                bearing_y: g.bearing_y as f32,
             },
             w: g.width,
             h: g.height,
-            bearing_x: g.bearing_x as f32,
-            bearing_y: g.bearing_y as f32,
             advance: g.advance,
         })
     }

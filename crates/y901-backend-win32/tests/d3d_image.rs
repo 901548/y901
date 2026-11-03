@@ -23,7 +23,7 @@ impl Widget for Scene {
     fn id(&self) -> &str {
         "scene"
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         c.constrain(Size::new(200.0, 200.0))
     }
     fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut LayoutCache) {

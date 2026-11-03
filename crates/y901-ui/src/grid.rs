@@ -1020,10 +1020,10 @@ mod tests {
         fn id(&self) -> &str {
             &self.id
         }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
             c.constrain(Size::new(10.0, 10.0))
         }
-        fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut LayoutCache) {
+        fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
             self.rect = rect;
         }
         fn rect(&self) -> Rect {
@@ -1309,11 +1309,11 @@ mod tests {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut LayoutCache,
+            _cache: &mut LayoutCache,
         ) -> Size {
             c.constrain(self.size)
         }
-        fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut LayoutCache) {
+        fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
             self.rect = rect;
         }
         fn rect(&self) -> Rect {

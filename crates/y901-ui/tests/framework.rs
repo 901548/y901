@@ -411,10 +411,10 @@ fn commands_are_routed_not_interpreted() {
         fn id(&self) -> &str {
             &self.id
         }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
             c.constrain(Size::new(10.0, 10.0))
         }
-        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut LayoutCache) {
+        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
             self.rect = r;
         }
         fn rect(&self) -> Rect {
@@ -618,10 +618,10 @@ impl Widget for Probe {
     fn flex(&self) -> FlexItem {
         self.item
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         c.constrain(Size::new(10.0, 10.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -715,10 +715,10 @@ impl Widget for Pass {
     fn id(&self) -> &str {
         &self.id
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         c.constrain(Size::new(10.0, 10.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {

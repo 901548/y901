@@ -68,11 +68,11 @@ impl Widget for Probe {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.max
     }
-    fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {}
+    fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {}
     fn rect(&self) -> Rect {
         self.rect
     }
@@ -110,7 +110,7 @@ impl Widget for Col {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.max
     }
@@ -282,11 +282,11 @@ impl Widget for CursorBox {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.max
     }
-    fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {}
+    fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {}
     fn rect(&self) -> Rect {
         self.rect
     }

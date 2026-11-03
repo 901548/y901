@@ -341,7 +341,7 @@ impl Widget for StyledText {
         c.constrain(Size::new(width, self.content_h))
     }
 
-    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = rect;
     }
 

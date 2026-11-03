@@ -32,11 +32,11 @@ impl Widget for Scene {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(640.0, 240.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = r;
         self.text_rect = Rect::new(r.x + 16.0, r.y + 16.0, r.w - 32.0, r.h - 32.0);
     }
@@ -501,11 +501,11 @@ fn invalidate_rect_partial_equals_full() {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(c.max.w, c.max.h))
         }
-        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
             self.rect = r;
             // 流式行固定在左上角一块小区域
             self.line = Rect::new(r.x + 8.0, r.y + 8.0, 320.0, 20.0);
@@ -616,11 +616,11 @@ fn two_disjoint_dirty_rects_match_full_redraw() {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(40.0, 20.0))
         }
-        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
             self.rect = r;
         }
         fn rect(&self) -> Rect {
@@ -657,7 +657,7 @@ fn two_disjoint_dirty_rects_match_full_redraw() {
             &mut self,
             _m: &dyn TextMetrics,
             c: Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(c.max.w, c.max.h))
         }

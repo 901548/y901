@@ -181,12 +181,12 @@ impl Widget for Menu {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(c.max)
     }
 
-    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = rect;
         let w = 220.0_f32.min((rect.w - 16.0).max(0.0));
         let h = PAD * 2.0 + self.items.len() as f32 * ITEM_H;
@@ -565,7 +565,7 @@ impl Widget for Dialog {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(c.max)
     }

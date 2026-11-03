@@ -561,8 +561,8 @@ impl RenderCtx for SoftBackend {
                     if sg.w > 0 && sg.h > 0 {
                         let atlas_size = self.text.atlas_size() as usize;
                         // 基线：布局始终用原字号的 bearing，屏幕位置再乘缩放因子
-                        let bx = (pen_x + sg.bearing_x * scale).floor() as i32;
-                        let by = (origin.y + ascent * scale + sg.bearing_y * scale).floor() as i32;
+                        let bx = (pen_x + sg.slot.bearing_x * scale).floor() as i32;
+                        let by = (origin.y + ascent * scale + sg.slot.bearing_y * scale).floor() as i32;
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
                         let dh = (sg.h as f32 * scale).round().max(1.0) as i32;

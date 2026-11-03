@@ -9,8 +9,12 @@
 
 use crate::font_engine::{glyph_geometry, Line};
 
-/// 每个像素每边的子采样点数（4 → 16 个采样点）。
-pub const SAMPLES: u32 = 4;
+/// 每个像素每边的子采样点数（`8` → 64 个采样点）。
+///
+/// 为什么从 4 提到 8：4×4 的量化步长是 1/16 ≈ 0.0625，
+/// 而 **1~2px 宽的细竖条**字形的覆盖率完全落在这个步长里——
+/// 测量精度会直接成为“位图下界”。
+pub const SAMPLES: u32 = 8;
 
 /// 超采样得到的字形位图。
 pub struct Supersampled {
@@ -453,7 +457,6 @@ mod tests {
     /// 归一化到 16×16 再比：尺寸与位置已由其它断言覆盖（墨迹数 ≈ 0.25 倍、
     /// `s = 1` 逐像素），这里只问"形状对不对"。
     #[test]
-    #[ignore = "已知偏差：'l' 渲染 0.0828（位图本身 0.0735）、'A' 渲染 0.1987（位图本身只 0.0152）——'A' 的误差来自渲染而非位图，待修"]
     fn scaled_render_mad_vs_supersample_is_acceptable() {
         let font = crate::load_font(&crate::default_test_font_path()).expect("font");
         // 稀疏：'l'；密集：'A'（都在同一个 Latin 字体里）

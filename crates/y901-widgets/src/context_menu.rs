@@ -60,7 +60,7 @@ impl Widget for ContextMenu {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(c.max.w, c.max.h))
     }
@@ -69,7 +69,7 @@ impl Widget for ContextMenu {
         &mut self,
         rect: Rect,
         _m: &dyn TextMetrics,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
     }

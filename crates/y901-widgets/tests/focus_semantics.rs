@@ -72,7 +72,7 @@ fn top_level_focused_reflects_framework_focus() {
         get_field(btn, "focused"),
         Some(Json::Bool(true)),
         "焦点在 btn 上时，btn 的顶层 focused 必须为 true：{}",
-        btn.to_string()
+        btn
     );
     assert_eq!(
         get_field(field_node, "focused"),
@@ -192,7 +192,7 @@ fn any_widget_also_has_top_level_focused() {
         get_field(node, "focused"),
         Some(Json::Bool(true)),
         "任何可聚焦控件都应获得顶层 focused：{}",
-        node.to_string()
+        node
     );
 }
 
@@ -263,11 +263,11 @@ impl Widget for Probe {
         &mut self,
         _m: &dyn TextMetrics,
         c: Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(Size::new(c.max.w, 24.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _c: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -343,7 +343,7 @@ fn subscribe_patches_label_change() {
         patch.get("label").and_then(|v| v.as_str()),
         Some("B"),
         "patch 必须包含 label：{}",
-        patch.to_string()
+        patch
     );
 }
 
@@ -365,7 +365,7 @@ fn subscribe_patches_disabled_change() {
         patch.get("disabled"),
         Some(&Json::Bool(true)),
         "patch 必须包含 disabled：{}",
-        patch.to_string()
+        patch
     );
 }
 
@@ -381,7 +381,7 @@ fn subscribe_patches_focused_change() {
         patch.get("focused"),
         Some(&Json::Bool(true)),
         "patch 必须包含 focused：{}",
-        patch.to_string()
+        patch
     );
 }
 

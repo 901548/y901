@@ -60,7 +60,7 @@ fn get_tree_reports_disabled_true() {
         field_of(&view, "ok", "disabled"),
         Some(Json::Bool(true)),
         "disabled 的按钮必须在 get_tree 里可见：{}",
-        view.to_string()
+        view
     );
     assert_eq!(field_of(&view, "field", "disabled"), Some(Json::Bool(true)));
 }
@@ -89,7 +89,7 @@ fn query_result_reports_disabled() {
         items[0].get("disabled"),
         Some(&Json::Bool(true)),
         "query 结果也必须带 disabled：{}",
-        items[0].to_string()
+        items[0]
     );
 }
 

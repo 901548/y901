@@ -257,7 +257,7 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
             &mut self,
             _m: &dyn TextMetrics,
             c: y901_ui::Constraints,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) -> Size {
             c.constrain(Size::new(c.max.w, c.max.h))
         }
@@ -265,7 +265,7 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
             &mut self,
             r: Rect,
             _m: &dyn TextMetrics,
-            _c: &mut y901_ui::layout::LayoutCache,
+            _cache: &mut y901_ui::layout::LayoutCache,
         ) {
             self.rect = r;
         }

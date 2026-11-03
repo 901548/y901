@@ -38,10 +38,10 @@ impl Widget for Leaf {
     fn id(&self) -> &str {
         &self.id
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         c.constrain(Size::new(50.0, 50.0))
     }
-    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _c: &mut LayoutCache) {
+    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
         self.rect = rect;
     }
     fn rect(&self) -> Rect {
@@ -97,7 +97,7 @@ impl Widget for Wrap {
     fn id(&self) -> &str {
         &self.id
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         c.constrain(Size::new(100.0, 100.0))
     }
     fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut LayoutCache) {
@@ -220,7 +220,7 @@ impl Widget for RecordingWrap {
     fn id(&self) -> &str {
         &self.id
     }
-    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _c: &mut LayoutCache) -> Size {
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         c.constrain(Size::new(100.0, 100.0))
     }
     fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut LayoutCache) {

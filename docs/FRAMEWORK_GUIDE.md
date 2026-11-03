@@ -701,7 +701,7 @@ ctx.draw_image(rect, id, style);            // 默认什么都不画
 
 ### §42.1 部分门禁 = 没有门禁
 
-门禁必须同时满足四项：**0 failed + clippy 0 warn + clippy 0 err + 哈希（同尺寸下）一致**。
+门禁必须同时满足四项：**0 failed + clippy 0 警告 / 0 错误 + 哈希（同尺寸下）一致 + `missing_docs` 0**，由 `scripts/gate.ps1` 一次验证。
 
 真实事故：提交 `bbdbd89` 时门禁只检查了 `clippy err`，于是带着 **5 个 warning** 提交了；
 另一提交 `746de7d` 在 `645 passed, 1 failed` 红灯下被提交（"再跑一次就好了"不是流程）。

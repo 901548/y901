@@ -47,7 +47,7 @@ impl y901_ui::Widget for TabConsumer {
         &mut self,
         _m: &dyn TextMetrics,
         c: y901_ui::Constraints,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         c.constrain(c.max)
     }
@@ -55,7 +55,7 @@ impl y901_ui::Widget for TabConsumer {
         &mut self,
         r: y901_ui::Rect,
         _m: &dyn TextMetrics,
-        _c: &mut y901_ui::layout::LayoutCache,
+        _cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = r;
     }

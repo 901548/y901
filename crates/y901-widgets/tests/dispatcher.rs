@@ -93,7 +93,7 @@ fn role_is_injected_by_framework_not_by_component() {
     assert!(
         out.to_string().contains("\"count\":3"),
         "按 role 查询应命中 3 个按钮：{}",
-        out.to_string()
+        out
     );
 }
 
