@@ -215,7 +215,12 @@ pub fn level_for(scale: f32, ink: f32, max_level: usize) -> usize {
     } else {
         0
     };
-    if ink > 0.25 {
+    // 只从 **level >= 1** 开始才多降一级。
+    //
+    // 为什么：幂级 0 对应"s >= 0.5 的基础选择"。若从 0 往下降一级，
+    // 0.75 会用 1/2 位图去画 11.25px 的字——那是**放大采样**，比原图更糊。
+    // 密字形的优势只在"已经要缩小到半尺寸以下"时才成立。
+    if ink > 0.25 && level >= 1 {
         level += 1;
     }
     level.min(max_level)
