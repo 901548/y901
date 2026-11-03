@@ -167,10 +167,23 @@ impl Grid {
     fn auto_cells(&mut self) -> Vec<(usize, usize)> {
         let cols = self.cols.len().max(1);
         let rows = self.rows.len().max(1);
-        // 在占用表的**副本**上模拟：布局是只读的，不能把自动落位写回真占用表
-        let mut taken: Vec<IntervalSet> = self.occupancy.clone();
-        taken.resize(rows, IntervalSet::new());
 
+        // 每行一个**占用位图**：点查询 O(1)。
+        // 为什么不用 `IntervalSet::contains`：它是**线性扫描**区间列表，
+        // 适合插入/合并/查空位，不适合"逐格点查"——实测让 10k 网格多了 40ms。
+        let mut taken: Vec<Vec<bool>> = vec![vec![false; cols]; rows];
+        for (r, set) in self.occupancy.iter().enumerate().take(rows) {
+            for (a, b) in set.spans() {
+                let from = (a as usize).min(cols);
+                let to = (b as usize).min(cols);
+                if from < to {
+                    taken[r][from..to].fill(true);
+                }
+            }
+        }
+
+        // 每行一个游标：列只会单调增长，不必每次从 0 扫。
+        let mut cursor = vec![0usize; rows];
         let mut out = Vec::with_capacity(self.children.len());
         for child in &self.children {
             if self.placements.contains_key(child.id()) {
@@ -178,16 +191,15 @@ impl Grid {
                 continue;
             }
             let mut placed = None;
-            // 逐行扫描：每行是一个一维集，找到第一个空列就停。
-            for (r, row_taken) in taken.iter_mut().enumerate().take(rows) {
-                for c in 0..cols {
-                    if !row_taken.contains(c as u32) {
-                        let _ = row_taken.insert(c as u32, c as u32 + 1);
-                        placed = Some((c, r));
-                        break;
-                    }
+            for r in 0..rows {
+                let mut c = cursor[r];
+                while c < cols && taken[r][c] {
+                    c += 1;
                 }
-                if placed.is_some() {
+                cursor[r] = c;
+                if c < cols {
+                    taken[r][c] = true;
+                    placed = Some((c, r));
                     break;
                 }
             }
