@@ -60,11 +60,14 @@ pub struct ScaledGlyph {
     pub w: u32,
     /// **L0** 墨迹高度。
     pub h: u32,
-    /// 原字号的 bearing_x（已是渲染坐标，不随 level 变）。
+    /// 原字号的 bearing_x。**绘制时要乘 `scale`**：`x = pen_x + bearing_x * scale`。
     pub bearing_x: f32,
-    /// 原字号的 bearing_y。
+    /// 原字号的 bearing_y。同理乘 `scale`。
     pub bearing_y: f32,
-    /// 原字号的 advance（布局用它；不乘缩放因子）。
+    /// 原字号的 advance。**调用方布局时必须自己乘 `scale`**（`pen_x += advance * scale`）。
+    ///
+    /// 为什么不预乘：advance 是字形的**固有属性**，`scale` 是调用方的**变换**，
+    /// 两者混在一起会让"这个值代表什么"变得不可推断。但布局时若不乘，缩放后字距会是原尺寸。
     pub advance: f32,
 }
 
