@@ -24,6 +24,7 @@
 //! ```
 
 #![deny(missing_docs)]
+pub mod mip;
 pub mod atlas;
 pub mod font;
 pub mod font_engine;
