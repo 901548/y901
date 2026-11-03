@@ -93,7 +93,21 @@ impl SkylinePacker {
         }
     }
 
-    /// 清空所有平台并恢复到初始状态（整张图集重新可用）。
+    /// **仅测试**：图集总面积的 `u64` 形式（避免 `size * size` 在 `u32` 上溢出）。
+    #[cfg(test)]
+    pub(crate) fn size_u64(&self) -> u64 {
+        (self.size as u64) * (self.size as u64)
+    }
+
+    /// **仅测试**：把已用面积直接设成某个值（用于构造"图集接近满"的场景）。
+    ///
+    /// 为什么需要它：要验证"占用率 > 0.8 时跳过 L2"，靠真实字形填到 85% 需要
+    /// 数百个字形且会触发驱逐（驱逐会把占用率又拉下来，测试变成不确定的）。
+    #[cfg(test)]
+    pub(crate) fn set_used_area_for_test(&mut self, area: u64) {
+        self.used_area = area.min((self.size as u64) * (self.size as u64));
+    }
+
     /// 只读统计：已用面积 / 剩余面积 / 最大可放矩形 / 占用率。
     ///
     /// 为什么需要它：之前只能用"已用包围盒"代理碎片率，
@@ -649,5 +663,50 @@ mod tests {
         p.reset();
         assert_eq!(p.stats().used_area, 0);
         assert!((p.stats().occupancy - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn stats_show_shrinking_largest_free_rect_as_the_atlas_fills() {
+        // 用真实分配模拟两个场景（靠数字而不是靠推测）
+        let mut half = SkylinePacker::new(1024);
+        let mut guard = 0;
+        while half.stats().occupancy < 0.5 && guard < 10_000 {
+            if half.insert(32, 32).is_none() {
+                break;
+            }
+            guard += 1;
+        }
+        let s_half = half.stats();
+        eprintln!(
+            "[packer] 半满：occupancy={:.3} used={} largest={:?}",
+            s_half.occupancy, s_half.used_area, s_half.largest_free_rect
+        );
+
+        let mut full = SkylinePacker::new(1024);
+        let mut guard = 0;
+        while full.stats().occupancy < 0.85 && guard < 100_000 {
+            if full.insert(32, 32).is_none() {
+                break;
+            }
+            guard += 1;
+        }
+        let s_full = full.stats();
+        eprintln!(
+            "[packer] 接近满：occupancy={:.3} used={} largest={:?}",
+            s_full.occupancy, s_full.used_area, s_full.largest_free_rect
+        );
+
+        assert!(s_half.occupancy >= 0.45, "半满场景应接近 0.5");
+        assert!(
+            s_full.occupancy >= 0.8,
+            "接近满场景应过 0.8，实测 {}",
+            s_full.occupancy
+        );
+        // 碎片化正在发生：剩余面积越大的同时最大可放矩形变小
+        assert!(
+            s_full.largest_free_rect.map(|(w, _)| w).unwrap_or(0)
+                <= s_half.largest_free_rect.map(|(w, _)| w).unwrap_or(0),
+            "越满的图集不应拥有更宽的可放位"
+        );
     }
 }

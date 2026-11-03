@@ -231,6 +231,11 @@ impl MyFontEngine {
     /// 只用 phase 0：缩小后亚像素差异不可见，存 4 个相位只是浪费图集。
     fn insert_mips(&mut self, ch: char, info: &mut GlyphInfo) {
         for level in 0..2usize {
+            // 占用率保护：图集接近满时**不生成 L2**（它只服务 s < 0.5 的极端场景）。
+            // 为一个很少用到的精度级去挤掉一个真正在用的字形不划算。
+            if level == 1 && self.packer.stats().occupancy > 0.8 {
+                break;
+            }
             let size = self.size / (2.0f32.powi(level as i32 + 1));
             if size < 1.0 {
                 break;
@@ -385,6 +390,13 @@ impl MyFontEngine {
         self.cell.h
     }
 
+    /// **仅测试**：把打包器的占用率直接设成某个比例。
+    #[cfg(test)]
+    pub(crate) fn force_occupancy_for_test(&mut self, ratio: f32) {
+        let total = self.packer.size_u64() as f64;
+        self.packer.set_used_area_for_test((total * ratio as f64) as u64);
+    }
+
     /// 已缓存字形数。
     pub fn glyph_count(&self) -> usize {
         self.cache.len()
@@ -418,5 +430,47 @@ impl FontEngine for MyFontEngine {
     }
     fn cell_height(&self) -> f32 {
         self.cell.h
+    }
+}
+
+#[cfg(test)]
+mod mip_guard_tests {
+    use super::*;
+
+    fn engine(atlas: u32) -> MyFontEngine {
+        let (cw, ch) = crate::cell_metrics_for(15.0);
+        MyFontEngine::with_atlas_size(
+            crate::load_font(&crate::default_test_font_path()).expect("font"),
+            15.0,
+            y901_ui::Size::new(cw, ch),
+            atlas,
+        )
+        .expect("engine")
+    }
+
+    #[test]
+    fn l2_is_skipped_when_the_atlas_is_nearly_full() {
+        let mut e = engine(256);
+        let _ = e.glyph('A').expect("A");
+        e.force_occupancy_for_test(0.85);
+        assert!(e.ensure_mips('A'));
+        let g = e.glyph('A').expect("A").clone();
+        assert!(g.mips[0].is_some(), "占用率高时 L1 仍应生成");
+        assert!(
+            g.mips[1].is_none(),
+            "占用率 > 0.8 时应跳过 L2，实际 {:?}",
+            g.mips[1]
+        );
+    }
+
+    #[test]
+    fn l1_and_l2_are_both_generated_at_half_occupancy() {
+        let mut e = engine(256);
+        let _ = e.glyph('B').expect("B");
+        e.force_occupancy_for_test(0.5);
+        assert!(e.ensure_mips('B'));
+        let g = e.glyph('B').expect("B").clone();
+        assert!(g.mips[0].is_some(), "L1 应生成");
+        assert!(g.mips[1].is_some(), "占用率 0.5 时 L2 也应生成");
     }
 }
