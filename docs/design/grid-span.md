@@ -227,8 +227,15 @@ w = Σ col_widths[c_start..c_end] + gap * (c_end - c_start - 1)
 
 | 指标 | 目标 | 依据 |
 |---|---|---|
-| 10k 节点 Grid 的 `measure + arrange` | **≤ 3 ms** | 现状 11k 节点全树重排 1.26ms，Grid 比 Flex 多一次轨道归因，给 2.4× 余量 |
-| 冲突检测 | ≤ 0.3 ms @ 10k | O(n log n + n·rows/64) |
+| 10k 节点布局（含 50 跨格） | **≤ 3 ms** | **1.44 ms** |
+| 10k 次 `place` 批量配置 | **≤ 50 ms** | **2.27 ms** |
+
+> 实测数据来自 commit `a349cc3`，基准见 `grid_layout_10k_with_spans` / `grid_place_10k_batch`
+> （`crates/y901-ui/tests/grid_perf.rs`，两个都已进回归）。
+>
+> 口径说明：早期写的"冲突检测 ≤ 0.3 ms @ 10k"把**单次布局**与
+> **10k 次批量配置**混为一谈——后者每次 30ns 在任何实现下都不可能。
+> 现已拆成两个基准、两条预算。
 | 跨格控件（跨度 ≤ 3）的归因 | ≤ 0.1 ms @ 10k | 线性 |
 
 **不达标的处理**：如果 min/max-content 两遍测量让 10k 节点超过 3ms，

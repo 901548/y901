@@ -1294,4 +1294,31 @@ mod tests {
         let g = measured(g, 400.0, 100.0);
         assert_eq!(g.col_widths, vec![30.0, 70.0]);
     }
+
+    #[test]
+    fn empty_grid_does_not_panic() {
+        // 0 个子控件、轨道为空：不能 panic，且尺寸退化为 0 而非 NaN
+        let mut g = Grid::new("g", vec![], vec![]);
+        let mut cache = LayoutCache::new();
+        let c = Constraints::loose(Size::new(100.0, 100.0));
+        let size = g.measure(&Mono, c, &mut cache);
+        assert!(size.w.is_finite() && size.h.is_finite(), "尺寸必须有限：{size:?}");
+        assert!(size.w >= 0.0 && size.h >= 0.0);
+        g.arrange(Rect::new(0.0, 0.0, 100.0, 100.0), &Mono, &mut cache);
+        assert!(g.child_rects().is_empty());
+    }
+
+    #[test]
+    fn single_cell_grid_gives_the_child_the_content_area() {
+        // 1x1 网格 + 1 个子控件：子控件应占满内容区（扣除 padding）
+        let mut g = Grid::new("g", vec![GridTrack::Fraction(1.0)], vec![GridTrack::Fraction(1.0)])
+            .padding(Edges::all(10.0))
+            .with_children(vec![Box::new(SizedLeaf::new("only", 10.0, 10.0))]);
+        let mut cache = LayoutCache::new();
+        let c = Constraints::loose(Size::new(100.0, 50.0));
+        let _ = g.measure(&Mono, c, &mut cache);
+        g.arrange(Rect::new(0.0, 0.0, 100.0, 50.0), &Mono, &mut cache);
+        let r = g.child_rects()[0];
+        assert_eq!(r, Rect::new(10.0, 10.0, 80.0, 30.0), "应占满内容区");
+    }
 }

@@ -593,6 +593,26 @@ fn children_clip(&self, cell_rect: Rect) -> Option<Rect> { None }  // 默认不�
 | `clip()` | 节点自身 + 整棵子树 | ScrollView / ListView / Overlay（视口） |
 | `children_clip(cell)` | **每个子控件各自**的格子 | Grid（固定列宽是硬约束） |
 
+### §40.1.1 Grid 的 `children_clip` 返回什么（三种情况）
+
+`Grid` 是唯一覆写 `children_clip` 的内置容器，返回**该子控件自己的可用区域**：
+
+| 子控件 | 返回 | 说明 |
+|---|---|---|
+| 单格（`place(id, c..c+1, r..r+1)`） | `cell_rect` | 就是它那一格 |
+| 跨格（`place(id, c0..c1, r0..r1)`） | **区间并集矩形** | `Σ col_widths[c0..c1] + gap·(跨度-1)`，行方向同理 |
+| 自动流（没调用过 `place`） | `cell_rect` | 它只有一格，没有 span |
+
+**为什么 Grid 与其它容器不同**：滚动容器裁到**视口**（一个矩形，整棵子树共用），
+而 Grid 要保证"**每个子控件各自被裁到自己的格子/并集里**"——固定列宽是硬约束，
+内容太大就裁掉，而不是把布局撞开。这正是 `children_clip` 与 `clip()` 存在的意义差别：
+
+- `clip()`：节点**自己及其整棵子树**的裁剪（滚动视口）；
+- `children_clip(cell)`：**逐个**子控件各自的裁剪（Grid 的格子/并集）。
+
+**跨格控件为什么必须给并集**：若返回起始那一格，"跨三列"的控件只能画在第一列里，跨格就白跨了。
+（实测见 `crates/y901-ui/tests/grid_span.rs::spanning_child_is_clipped_to_the_union_not_the_first_cell`。）
+
 注意：容器**不要自己遍历子控件绘制** —— 树会逐个节点渲染，容器再画一遍会**双重绘制**
 （半透明变深、文字发虚）。`Grid` 曾因此被裁剪测试抓出 bug。
 
