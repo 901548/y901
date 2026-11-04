@@ -17,7 +17,8 @@
 param(
     [switch]$SkipTest,
     [switch]$SkipAudit,
-    [switch]$SkipGpu
+    [switch]$SkipGpu,
+    [switch]$AllowStaleAudit
 )
 
 # cargo writes progress to stderr; 'Stop' would turn that into a fatal NativeCommandError.
@@ -142,6 +143,9 @@ else {
         $auditCode = $LASTEXITCODE
         Write-Host $auditOut
         if ($auditCode -eq 0) {
+            if (-not $AllowStaleAudit) {
+                Fail "audit requires network or explicit -AllowStaleAudit"
+            }
             $script:auditStale = $true
             Write-Host "[gate] ok: audit ran against CACHED advisory DB (may be stale; re-run online for a release)"
         }
@@ -158,11 +162,16 @@ $notReleasable = @()
 if ($SkipTest)  { $notReleasable += "SKIP TEST" }
 if ($SkipAudit) { $notReleasable += "SKIP AUDIT" }
 if ($script:gpuSkipped -gt 0) { $notReleasable += "SKIP GPU: $($script:gpuSkipped) tests" }
-if ($script:auditStale) { $notReleasable += "STALE AUDIT" }
 
 if ($notReleasable.Count -gt 0) {
+    # 主动跳过：不是发布门禁
     Write-Host "GATE NOT RELEASABLE ($($notReleasable -join '; '))"
     exit 2
+}
+if ($script:auditStale) {
+    # 被动降级（离线，指南库取不到）：代码质量通过，但非发布级
+    Write-Host "GATE OK (DEV: STALE AUDIT)"
+    exit 0
 }
 Write-Host "GATE OK"
 exit 0

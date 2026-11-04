@@ -195,6 +195,11 @@ impl D3dBackend {
     }
 
     /// 把 CPU 图集的脏区同步到 GPU。首次调用会创建纹理。
+    /// # Safety
+    ///
+    /// `self` 必须是**本线程且已初始化**的后端；图集、字形引擎与 D3D 设备已就绪。
+    /// 违反后果：设备未就绪时会向空指针上传像素（崩溃点在驱动层）；
+    /// 跨线程调用会让图集与上传命令交错，字形出现随机块状污点。
     unsafe fn sync_atlas(&mut self) -> Result<(), String> {
         let (reset, dirty) = self.text.take_dirty();
         if !reset && dirty.is_empty() {
@@ -308,6 +313,11 @@ impl D3dBackend {
     /// 调整交换链与自持 RT 尺寸。
     ///
     /// 返回：`true` = 自持 RT 被重建（**内容丢失，调用方必须整窗重绘**）。
+    /// # Safety
+    ///
+    /// 只能在**拥有该窗口的 GUI 线程**调用；`width`/`height` 必须 > 0 且不超过设备最大纹理尺寸。
+    /// 违反后果：跨线程重建交换链会拿到属于另一线程的 HWND，`Present` 持续失败（黑屏）；
+    /// 零尺寸会让后备缓冲创建失败，而本函数只返回 `false`，调用方很容易忽略。
     pub unsafe fn resize(&mut self, width: u32, height: u32) -> bool {
         self.viewport = Size::new(width as f32, height as f32);
         // 交换链尺寸更新交给 present 前的 rebuild 路径；这里只记尺寸。
