@@ -85,5 +85,19 @@ if ($docCount -gt 0) {
 }
 Write-Host "[gate] ok: 0 missing docs"
 
+# ---------------------------------------------------------------- 6. security audit
+Step "cargo audit (no known vulnerabilities)"
+if (Get-Command cargo-audit -ErrorAction SilentlyContinue) {
+    & cargo audit 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[gate] FAIL: cargo audit found vulnerabilities"
+        exit 1
+    }
+    Write-Host "[gate] ok: no vulnerabilities (warnings such as 'unmaintained' are reported above)"
+}
+else {
+    Write-Host "[gate] skipped: cargo-audit not installed (cargo install cargo-audit)"
+}
+
 Write-Host "GATE OK"
 exit 0
