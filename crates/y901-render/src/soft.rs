@@ -486,13 +486,23 @@ impl RenderCtx for SoftBackend {
         let scale_y = dst.h / src.h;
         let draw_scale = scale_x.min(scale_y);
         let max_level = self.mips.get(&texture).map(|m| m.len()).unwrap_or(0);
-        let _computed_level = crate::mip::level_for_image(draw_scale, max_level);
+        let computed_level = crate::mip::level_for_image(draw_scale, max_level);
         // 第一步先不开启选级：只证明"选级与坐标映射的引入本身不改变渲染"。
-        let level = 0usize;
+        // 第 2 步：打开选级。`s >= 1` 时 `level_for_image` 返回 0，
+        // 因此 s=1.0 的像素必须与第 1 步（强制 level=0）逐字节相同。
+        let level = computed_level;
         let shift = 1u32 << level;
         // src 是 L0 像素坐标；选中的级坐标 = src / 2^level。dst 始终是屏幕坐标。
 
         // L0 字节：仅当 level == 0 时使用（保证与改造前逐字节相同）。
+        // **坐标映射**：`sx0/sy0/du/dv` 之前是用 **L0 坐标** 算的，
+        // 但下面要从选中的级采样，那张图只有 ·/2^level 的尺寸。
+        // 不除的话，坐标会超出级图宽度 → 读到错词的像素（实测 MAD 高达 0.37）。
+        let sx0 = sx0 / shift as f32;
+        let sy0 = sy0 / shift as f32;
+        let du = du / shift as f32;
+        let dv = dv / shift as f32;
+
         let tex_bytes = self
             .textures
             .get(&texture)
