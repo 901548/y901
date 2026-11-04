@@ -154,17 +154,15 @@ else {
     }
 }
 
-if ($script:auditStale -and $script:gpuSkipped -gt 0) {
-    Write-Host "GATE OK (STALE AUDIT + $($script:gpuSkipped) SKIPPED: not a release gate)"
+$notReleasable = @()
+if ($SkipTest)  { $notReleasable += "SKIP TEST" }
+if ($SkipAudit) { $notReleasable += "SKIP AUDIT" }
+if ($script:gpuSkipped -gt 0) { $notReleasable += "SKIP GPU: $($script:gpuSkipped) tests" }
+if ($script:auditStale) { $notReleasable += "STALE AUDIT" }
+
+if ($notReleasable.Count -gt 0) {
+    Write-Host "GATE NOT RELEASABLE ($($notReleasable -join '; '))"
+    exit 2
 }
-elseif ($script:gpuSkipped -gt 0) {
-    Write-Host "GATE OK (SKIPPED: $($script:gpuSkipped) D3D tests)"
-}
-elseif ($script:auditStale) {
-    # 明确区分：这不是"完整门禁通过"，而是"审计基于可能过时的缓存库通过"。
-    Write-Host "GATE OK (STALE AUDIT: cached advisory DB, re-run online for a release)"
-}
-else {
-    Write-Host "GATE OK"
-}
+Write-Host "GATE OK"
 exit 0

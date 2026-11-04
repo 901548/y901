@@ -111,7 +111,7 @@
 ## 审查报告状态
 
 - **v0.1.10 起，审查报告 23 项全部关闭**（#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20 均已处理）
-- 门禁六步：MSRV / 测试（基线 **806**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试（基线 **818**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 
@@ -196,7 +196,7 @@
 ## 已完成的里程碑
 
 - **v0.1.0 ~ v0.1.12**
-- **818 测试全绿**（基线 818；`#[ignore]` 45）
+- **818 测试全绿**（基线 818；`#[ignore]` **52**；`--include-ignored` **870**）
 - **审查报告 23/23 关闭**
 - **SAFETY 100% 调用点覆盖**（d3d11 / font / window）+ vtable 契约 + context 三段式
 - **文本缩放**（CPU + D3D）与**图片 mipmap LOD** 均有像素/解析真值验证

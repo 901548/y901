@@ -168,7 +168,13 @@ static D3D_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn record_skip(reason: &str) {
     eprintln!("SKIP: {reason}");
     let path = skip_log_path();
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    // 开写失败必须 panic：否则 gate 看不到 SKIP，会把"没跑"当成"没有 skip"。
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .unwrap_or_else(|e| panic!("SKIP log write failed: {e}"));
+    {
         use std::io::Write as _;
         let _ = writeln!(f, "SKIP: {reason}");
     }

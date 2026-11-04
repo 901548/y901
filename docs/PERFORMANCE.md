@@ -37,7 +37,7 @@
 | `crates/y901-ui/tests/perf_alloc.rs` | 堆分配计数（独立二进制，见 §1.3） | 否 |
 | `crates/y901-backend-win32/tests/perf_bench.rs` | 图集 skyline、10k 实例 CPU 构建、整帧、空帧基线 | 是 |
 
-全部 `#[ignore]`，不进默认测试流程（默认 801 个测试保持秒级）。
+全部 `#[ignore]`，不进默认测试流程（默认 818 个测试保持秒级）。
 
 ### 1.2 为什么不用火焰图
 
