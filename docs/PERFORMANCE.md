@@ -244,28 +244,31 @@ cargo test -p y901-backend-win32 --release --test perf_bench -- --ignored --noca
 
 **本框架的"性能调优阶段"到此竣工。** 后续若性能回退，先跑 §6 的命令对表，再决定是否动刀。
 
-## 5. Present 耗时：sync=0 vs sync=1（v0.1.12 实测）
+## 5. Present 节拍：sync=0 vs sync=1（v0.1.12）
 
-基准：`crates/y901-backend-win32/tests/present_bench.rs`（`#[ignore]`），800×600 窗口，100 帧取样，release。
+基准：`crates/y901-backend-win32/tests/present_bench.rs`（`#[ignore]`），800×600 窗口，100 帧，release。
 
 | 组 | 配置 | avg | p50 | p95 | max |
 |---|---|---|---|---|---|
-| A′ | 窗口 + `sync_interval = 0` | 6773.4µs | **6957.4µs** | 7165.2µs | 7309.7µs |
-| B | 窗口 + `sync_interval = 1` | 6942.5µs | **6939.6µs** | 7085.6µs | 7289.7µs |
+| A′ | 窗口 + `sync_interval = 0` | 6801.6µs | **6935.7µs** | 7108.2µs | 7285.9µs |
+| B | 窗口 + `sync_interval = 1` | 6940.8µs | **6932.1µs** | 7116.4µs | 7213.6µs |
 
-**p50 差值（B − A′）= −17.8µs**。
+**p50 差值（B − A′）= −3.6µs**（上一轮 −18µs，均为**噪声级**）。
 
-### 结论（重要）
+### 结论
 
-**这不是"顺利证明 vsync 是瓶颈"的结果**。 `sync=0` **没有变快**，两组都在 **6.9ms**。
-6.9ms ≈ 1/144Hz，说明 **耗时不在 `Present` 这一步的等待上**，而在**更早或更深的环节**：
+1. **6.9ms = 1/144Hz，与 `sync_interval` 无关** —— 两组几乎完全相同。
+2. **主循环里没有固定 sleep**：全局搜索 `thread::sleep` / `WaitMessage` / `SetTimer` 无命中；
+   `MsgWaitForMultipleObjectsEx` 只在 `wait_message(timeout)` 里，而基准不调它。
+3. **因此帧节奏被 DWM 合成器限制**：窗口模式下即使 `SyncInterval = 0`，
+   `Present` 仍被合成周期牵引。这是 **Windows 窗口模式的固有行为**，不是框架问题。
 
-- 本机为 **144Hz + 双虚拟适配器**（GameViewer / ToDesk），合成器/DWM 可能在 `Present`
-  之外强制了帧节奏；
-- 也可能 `render` 前的等待（如 `MsgWaitForMultipleObjectsEx` 或空闲循环）被计入了这 6.9ms。
+### 已知限制
 
-**因此：不能用这组数据声称"渲染开销可忽略"。** 要得到纯提交耗时，需要：
+**窗口模式无法测出纯 Present 提交耗时**。要得到它需要：
 
-1. 独占全屏（暂缓：需手写 `SetFullscreenState` 的 COM 槽位）；
-2. 或用 GPU 计时（timestamp query）区分"提交"与"展现"；
-3. 或把测量点缩小到 `render` 内部（只计 `Present` 调用本身）。
+- **独占全屏**（`SetFullscreenState`，需手写 COM 槽位，暂缓）；
+- 或 **GPU timestamp query**（区分 submit 与 present，改动更深，暂缓）。
+
+在那之前，**不应引用 6.9ms 作为"渲染开销"或"提交开销"的代表值**——
+它只是屏幕刷新周期。

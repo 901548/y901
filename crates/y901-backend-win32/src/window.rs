@@ -786,6 +786,19 @@ impl Window {
 
     /// 把 UI 树画到交换链。
     pub fn render(&mut self, tree: &mut UiTree) {
+        self.render_inner(tree, 1);
+    }
+
+    /// 渲染一帧，**显式指定 `sync_interval`**（仅供基准测试）。
+    ///
+    /// 注意：**窗口模式下 DWM 合成器会将帧节奏限制在 ~1/刷新率**，
+    /// 因此 `sync = 0` 并不会更快（实测 p50 差仅 18µs）。要测纯提交耗时需独占全屏。
+    pub fn render_with_sync(&mut self, tree: &mut UiTree, sync_interval: u32) {
+        self.render_inner(tree, sync_interval);
+    }
+
+    /// `render` 与 `render_with_sync` 的共同实现。
+    fn render_inner(&mut self, tree: &mut UiTree, sync_interval: u32) {
         // **没有脏区就不清屏、不 Present**：保留上一帧。
         //
         // 之前每帧都 begin()+present()：`begin` 清空实例，`tree.render` 在脏区为空时
@@ -827,7 +840,7 @@ impl Window {
     // `present` 内部会重新校验设备状态，失败时返回 HRESULT 而不是 UB。
     // 违反后果：若在窗口已销毁后 present，交换链仍持有失效的 HWND —— 表现为黑屏或 Present 失败。
         unsafe {
-            let _ = backend.present(self.hwnd, w, h);
+            let _ = backend.present(self.hwnd, w, h, sync_interval);
         }
     }
 

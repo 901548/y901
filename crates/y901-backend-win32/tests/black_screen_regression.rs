@@ -148,12 +148,14 @@ fn repaint_request_is_one_shot() {
 
 #[test]
 fn window_render_has_dirty_guard() {
-    // 结构断言：Window::render 必须在 begin() 之前判断脏区为空并早退。
-    // 这是"黑屏"的核心修复点——删掉它整个 bug 会回来。
+    // 结构性断言：防止"删掉脏区守卫"这类回归。
+    // v0.1.12 起出图体在 `render_inner`（为基准拆出 sync 参数），
+    // `render` 只剩委托一行。
     let src = include_str!("../src/window.rs");
+
     let start = src
-        .find("pub fn render(&mut self, tree: &mut UiTree)")
-        .expect("Window::render 必须存在");
+        .find("fn render_inner(&mut self, tree: &mut UiTree")
+        .expect("render_inner 定义未找到");
     let body = &src[start..];
     let end = body[1..]
         .find("\n    pub ")
@@ -163,13 +165,17 @@ fn window_render_has_dirty_guard() {
 
     assert!(
         body.contains("tree.dirty().is_empty()"),
-        "Window::render 必须检查脏区：\n{body}"
+        "render_inner 必须检查脏区\n{body}"
     );
     assert!(
         body.find("tree.dirty().is_empty()").unwrap() < body.find("backend.begin()").unwrap(),
-        "脏区检查必须在 begin() 之前（否则已经清屏了）"
+        "脏区检查必须在 begin() 之前"
     );
-    assert!(body.contains("return;"), "脏区为空时必须早退（不 Present）");
+    assert!(body.contains("return;"), "脏区为空时提前返回（不 Present）");
+    assert!(
+        src.contains("self.render_inner(tree, 1);"),
+        "Window::render 默认必须传 sync_interval = 1"
+    );
 }
 
 #[test]

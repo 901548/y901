@@ -2,7 +2,6 @@
 # The gate FAILS when the total drops below this number: that means a test was deleted or #[ignore]d.
 #
 # 818 -- image quality: analytic tests (checkerboard 127.5, ramp 8i+2)
-# 816 -- image mipmap LOD boundary + box/storage
+# 816 -- image mipmap LOD
 # 806 -- #15 flatten limits
-# 801 -- v0.1.6: Grid span added 7 tests
 818

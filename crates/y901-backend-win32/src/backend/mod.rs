@@ -246,7 +246,13 @@ impl D3dBackend {
     ///
     /// 违反会导致：重建路径用悬垂 HWND 创建交换链（未定义行为），
     /// 或尺寸反复不一致造成资源重建风暴。设备丢失属于预期，返回 `false` 而非崩溃。
-    pub unsafe fn present(&mut self, hwnd: HWND, width: u32, height: u32) -> bool {
+    pub unsafe fn present(
+        &mut self,
+        hwnd: HWND,
+        width: u32,
+        height: u32,
+        sync_interval: u32,
+    ) -> bool {
         if self.gfx.is_empty() {
             if let Err(err) = self.gfx.rebuild(hwnd, width, height) {
                 eprintln!("[y901] rebuild failed: {err}");
@@ -264,7 +270,7 @@ impl D3dBackend {
         // 帧末把"图片区间"与"图集区间"交替排开。
         // 没有图片时 `batches` 为空 → `render_batched` 退化为单次 draw，与改动前一致。
         let batches = self.build_batches();
-        let mut hr = self.gfx.render_batched(&self.instances, &batches, 0);
+        let mut hr = self.gfx.render_batched(&self.instances, &batches, sync_interval);
 
         if Gfx::device_lost(hr) {
             eprintln!("[y901] device lost: 0x{:08X}, rebuilding", hr as u32);
@@ -279,7 +285,7 @@ impl D3dBackend {
             {
                 eprintln!("[y901] atlas re-upload failed: {err}");
             }
-            hr = self.gfx.render_batched(&self.instances, &batches, 0);
+            hr = self.gfx.render_batched(&self.instances, &batches, sync_interval);
         }
 
         if hr < 0 {
@@ -564,7 +570,7 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
         }
         let (w, h) = self.size;
         // SAFETY: hwnd 与尺寸均由本结构保存，调用方保证窗口存活。
-        let ok = unsafe { D3dBackend::present(self, self.hwnd, w, h) };
+        let ok = unsafe { D3dBackend::present(self, self.hwnd, w, h, 1) };
         self.last_occluded = !ok;
         if ok {
             Ok(())
