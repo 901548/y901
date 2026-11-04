@@ -34,6 +34,22 @@
 //! |-----|------|
 //! | 3 | GetBufferPointer |
 //! | 4 | GetBufferSize |
+//!
+//! ## Vtable 契约（本文件所有 `unsafe extern "system"` 声明与 `*Vtbl` 结构共用）
+//!
+//! 这里的 `*Vtbl` 必须与 Windows SDK 的 COM 接口定义**逐字段一致**：
+//!
+//! - `#[repr(C)]` 保证字段顺序与 C ABI 布局（去掉它，字段会被重排，槽位全错）；
+//! - 槽位顺序必须与 SDK 头文件中的方法声明顺序**完全相同**（含继承自 IUnknown 的
+//!   `QueryInterface` / `AddRef` / `Release` 三个前置槽）；
+//! - 每个函数签名的参数与返回类型必须与 SDK 完全一致（`extern "system"` = `__stdcall`，
+//!   换成 `extern "C"` 在 x64 上恰好相同、在 x86 上会让栈失衡）。
+//!
+//! **违反后果**：调用会从错误的槽位取函数指针并跳转 —— 表现为随机崩溃、错误的 HRESULT
+//! 或静默的错误行为，且堆栈回溯通常指向无辜的调用点。
+//!
+//! 为什么这里不给每个声明单独写 SAFETY：这些行是**类型声明**，不是调用点；
+//! 逐条复制同一段话会让真正的调用契约淹没在模板里。调用点的契约写在各 `unsafe { }` 上方。
 
 use std::ffi::{c_void, CString};
 use std::ptr::{null, null_mut, slice_from_raw_parts};
@@ -819,9 +835,11 @@ impl Blob {
 impl Device {
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// `desc.ByteWidth` 必须与对应 InputLayout 的 **stride 整除**（`ByteWidth % stride == 0`）；
+    /// `D3D11_USAGE_DYNAMIC` 时 `CPUAccessFlags` 必须包含 `CPU_ACCESS_WRITE`，否则 Map 失败。
+    /// 违反后果：调用本身可能成功（D3D11 不校验这一点），但**绘制时读到错位的顶点**——画面错乱，严重时越界读取。
     unsafe fn create_buffer(&self, desc: &BufferDesc) -> Result<Buffer, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -834,9 +852,10 @@ impl Device {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// `texture` 必须由**同一个 device** 创建，且 `BindFlags` 含 `RENDER_TARGET`。
+    /// 违反后果：跨设备创建视图 → `E_INVALIDARG`；缺标志时视图可能创建成功但渲染结果未定义。
     unsafe fn create_render_target(&self, texture: &Texture) -> Result<RenderTarget, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -853,9 +872,10 @@ impl Device {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// `elements` 的字段序、偏移与类型必须与 vertex shader 的输入签名**逐项一致**；结尾需有 `SemanticName = null` 的终止项。
+    /// 违反后果：调用可能成功，但 IA 会按**错误的布局解析顶点数据**——坐标错乱或越界。
     unsafe fn create_input_layout(
         &self,
         elements: &[InputElementDesc],
@@ -879,9 +899,10 @@ impl Device {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// `code` 必须是面向 `vs_4_0`/`vs_5_0` 编译出的 DXBC 字节；传入错误 profile 会在创建时报 `E_INVALIDARG`。
+    /// 违反后果：编译产物与 profile 不匹配时此处拒绝；若签名与 InputLayout 不匹配，错误会**延后到绘制时**才暴露。
     unsafe fn create_vertex_shader(&self, code: &[u8]) -> Result<VertexShader, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -900,9 +921,10 @@ impl Device {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// `code` 必须是面向 `ps_4_0`/`ps_5_0` 编译出的 DXBC，且与所用 RTV 的格式兼容。
+    /// 违反后果：格式不兼容时绘制会被调试层报错，否则输出颜色错位。
     unsafe fn create_pixel_shader(&self, code: &[u8]) -> Result<PixelShader, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -921,9 +943,10 @@ impl Device {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// `desc` 的枚举字段（混合因子/运算）必须在 SDK 定义范围内，否则返回 `E_INVALIDARG`。
+    /// 违反后果：超出范围时创建失败（本函数转为 `Err`）；合法但语义错误的值会“正常”渲染出错色。
     unsafe fn create_blend_state(&self, desc: &BlendDesc) -> Result<BlendState, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -936,9 +959,10 @@ impl Device {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// `desc` 中的 `FillMode`/`CullMode`/`DepthBias` 必须在 SDK 定义范围内；`DepthBias` 过大会让图元整体偏离。
+    /// 违反后果：超范围时 `E_INVALIDARG`；合法但极端的值会让图元被锯掉或消失。
     unsafe fn create_rasterizer_state(
         &self,
         desc: &RasterizerDesc,
@@ -954,9 +978,11 @@ impl Device {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// 尺寸不得超过 `D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION`（16384）；需要 SRV 时 `BindFlags` 必须含 `SHADER_RESOURCE`。
+    /// `pInitialData` 非空时，行距必须 ≥ `width × 每像素字节数`，否则创建返回 `E_INVALIDARG`。
+    /// 违反后果：超尺寸/缺 BindFlags 会在**后续创建资源视图时**失败（错误点距离真正原因很远，难排查）。
     unsafe fn create_texture_2d(
         &self,
         desc: &Texture2DDesc,
@@ -977,9 +1003,10 @@ impl Device {
     /// 自持 RT 每帧会被清屏覆盖，因此不需要初始内容。
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// 同 `create_texture_2d`，但**不提供初始数据**（`pInitialData = null`）；因此内容在首次写入前是未定义的。
+    /// 违反后果：若以为它已清零，首帧会出现**未初始化素材**（花屏）。
     unsafe fn create_texture_2d_empty(&self, desc: &Texture2DDesc) -> Result<Texture, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let mut raw: *mut c_void = null_mut();
@@ -992,9 +1019,10 @@ impl Device {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// `texture` 必须由**同一个 device** 创建，且创建时 `BindFlags` 必须含 `SHADER_RESOURCE`。
+    /// 违反后果：跨设备 → `E_INVALIDARG`；缺标志 → 创建失败，且错误信息指向 SRV 而不是真正的原因（贴图步骤）。
     unsafe fn create_shader_resource_view(
         &self,
         texture: &Texture,
@@ -1015,9 +1043,10 @@ impl Device {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程上未释放**的 ID3D11Device（或 DXGI 工厂）；
-    /// 所有出参结构/描述指针由调用方提供且在调用期间保持有效、非空、按 D3D11 要求对齐；
-    /// 返回的 COM 对象所有权转交调用方（`Drop` 时 Release），失败时返回 `Err` 且不产生裸指针。
+    /// `self` 必须是**本线程且未释放**的 ID3D11Device；出参指针指向的结构在调用期间保持有效。
+    /// 成功时返回的 COM 接口**所有权转交调用方**（本类 `Drop` 负责 Release 一次）。
+    /// 本函数不接受描述结构，内部固定为双线性 + Clamp；若需其他采样方式必须改本函数而非传参。
+    /// 违反后果：无（内部枚举已固定）；但同一 device 上多个 sampler 共存时，PS 引用的槽位必须与绑定一致。
     unsafe fn create_sampler_state(&self) -> Result<SamplerState, String> {
         let table = vtbl::<DeviceVtbl>(self.as_ptr());
         let desc = SamplerDesc {

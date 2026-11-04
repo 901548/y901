@@ -8,6 +8,22 @@
 //!
 //! 布局约定：调用方给出引擎坐标系里的 (base_x, baseline)，
 //! 绘制时 pos = (base_x + bearing_x, baseline + bearing_y)。
+//!
+//! ## Vtable 契约（本文件所有 `unsafe extern "system"` 声明与 `*Vtbl` 结构共用）
+//!
+//! 这里的 `*Vtbl` 必须与 Windows SDK 的 COM 接口定义**逐字段一致**：
+//!
+//! - `#[repr(C)]` 保证字段顺序与 C ABI 布局（去掉它，字段会被重排，槽位全错）；
+//! - 槽位顺序必须与 SDK 头文件中的方法声明顺序**完全相同**（含继承自 IUnknown 的
+//!   `QueryInterface` / `AddRef` / `Release` 三个前置槽）；
+//! - 每个函数签名的参数与返回类型必须与 SDK 完全一致（`extern "system"` = `__stdcall`，
+//!   换成 `extern "C"` 在 x64 上恰好相同、在 x86 上会让栈失衡）。
+//!
+//! **违反后果**：调用会从错误的槽位取函数指针并跳转 —— 表现为随机崩溃、错误的 HRESULT
+//! 或静默的错误行为，且堆栈回溯通常指向无辜的调用点。
+//!
+//! 为什么这里不给每个声明单独写 SAFETY：这些行是**类型声明**，不是调用点；
+//! 逐条复制同一段话会让真正的调用契约淹没在模板里。调用点的契约写在各 `unsafe { }` 上方。
 
 // # 安全契约
 //
@@ -595,7 +611,14 @@ impl TextEngine {
     ) -> Result<Self, String> {
         unsafe {
             let mut raw: *mut c_void = null_mut();
-            let hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWRITEFACTORY, &mut raw);
+            // SAFETY：`DWriteCreateFactory` 的三条前置条件在此全部成立 ——
+    // (1) `DWRITE_FACTORY_TYPE_SHARED` 是 SDK 定义的合法枚举；
+    // (2) `IID_IDWRITEFACTORY` 是常量 GUID，`&` 取得的是它的只读地址，调用期间有效；
+    // (3) `raw` 是栈上的 `*mut c_void`，`&mut` 保证出参指针可写且按指针宽度对齐。
+    // 违反后果：传入错误 GUID 会拿到**类型不符的接口**，后续 vtbl 调用跳到错误槽位；
+    // 出参不对齐时 DWrite 会写入错位地址，直接破坏栈。
+    // 成功时工厂对象的所有权归本模块，由 `Factory` 的 `Drop` 释放一次。
+    let hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWRITEFACTORY, &mut raw);
             if hr < 0 {
                 return Err(format!("DWriteCreateFactory failed: 0x{:08X}", hr as u32));
             }
