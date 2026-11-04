@@ -1236,3 +1236,15 @@ cargo doc --no-deps                                    # 打开 API 参考
 实例：反向验证后恢复 `render_inner(tree, 1)`，测试仍读到 `[0]`，`cargo clean` 后变绿。
 
 **规则**：反向验证之后，先 `cargo clean -p <crate>` 再验恢复，否则可能是在测一份旧二进制。
+
+### 离线时必须显式承认，不能静默提交
+
+实例：网络断开时 `gate.ps1` 输出 `FAIL: audit requires network or explicit -AllowStaleAudit`，
+但直接 `git commit` 了。加一个 `-AllowStaleAudit` 参数就能确认代码质量，没有做。
+
+**规则**：
+
+1. 门禁红时**禁止提交**，即使红的原因是“网络断开”
+2. 离线时用 `-AllowStaleAudit` 重跑，确认 `GATE OK (DEV: STALE AUDIT)`
+3. 如果连 `-AllowStaleAudit` 也红，那是代码质量问题，必须先修
+4. 提交信息或 STATUS 里标注“DEV 级”，让读者知道这不是联网验证过的发布提交

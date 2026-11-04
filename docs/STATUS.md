@@ -218,3 +218,6 @@
 - 各向异性图片缩放（第一版不做，已知限制：`max/min > 2` 时仍按 `min` 取级）
 - 动态图片 mipmap（`upload_texture_dynamic` 已绕过）
 - dead_code 的 12 处"内部实现 / 编译见证"可进一步分类
+
+**v0.1.16-dev**：`62b1c9f` 代码质量已补跑确认（`GATE OK (DEV: STALE AUDIT)`），
+提交时未显式承认离线。
