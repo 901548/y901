@@ -67,3 +67,16 @@ cargo audit
 
 `scripts/gate.ps1` 在 `cargo-audit` **未安装**时打印 `skipped`，而不是当作通过 ——
 "没审计"不等于"审计通过"。
+
+## `miniz_oxide` 双版本（`0.8.9` + `0.9.1`）
+
+`cargo tree --workspace --duplicates` 显示两个版本同时存在：
+
+```
+miniz_oxide v0.8.9 <- png v0.17.16 <- y901-shell
+miniz_oxide v0.9.1 <- flate2 v1.1.10 <- png v0.17.16 (*)
+```
+
+**原因**：`png 0.17.16` 对 `miniz_oxide` 与 `flate2` 各有约束，两条路径选中了不同大版本。
+**不属于我们能单独统一的依赖**：要统一需等 `png`/`flate2` 发布新版。
+**当前决策**：接受（只增二进制体积与编译时间，无行为差异）。
