@@ -425,10 +425,10 @@ impl RenderCtx for SoftBackend {
     ) {
         // 变换在入口应用一次；采样本身用绝对像素坐标
         let rect = self.map_rect(rect);
-        let Some(tex) = self.textures.get(&texture) else {
+        // 只取尺寸（不持有对 `self.textures` 的长作用域借用）。
+        let Some((tw, th)) = self.textures.get(&texture).map(|t| (t.0, t.1)) else {
             return;
         };
-        let (tw, th) = (tex.0, tex.1);
         if tw == 0 || th == 0 {
             return;
         }
@@ -456,9 +456,16 @@ impl RenderCtx for SoftBackend {
         let du = src.w / dst.w;
         let dv = src.h / dst.h;
 
-        // 把纹理字节先拷一份：循环里要同时读纹理、写帧缓冲，
-        // 都通过 `self` 会被借用检查器拦下来（它看不出是两个字段）。
-        let tex_bytes = tex.2.clone();
+        // **零拷贝**：只借用 `self.textures` 这一个字段。
+        //
+        // 为什么这样能编译：`self.textures` 与下面要写的 `self.buf` 是**不相交字段**，
+        // Rust 允许同时存在它们的不可变/可变借用；旧实现先把整个 `self` 借了一轮，
+        // 才不得不拷整张纹理（`1024²` → 4 MiB/帧，实测见 `perf_texture_alloc`）。
+        let tex_bytes = self
+            .textures
+            .get(&texture)
+            .map(|t| t.2.as_slice())
+            .unwrap_or(&[]);
 
         let x0 = area.x.floor() as i32;
         let x1 = area.right().ceil() as i32;
@@ -482,7 +489,7 @@ impl RenderCtx for SoftBackend {
                     continue;
                 }
                 let sx = sx0 + (px - area.x) * du;
-                let mut c = Self::sample_bilinear_tex((tex_bytes.as_slice(), tw, th), sx, sy);
+                let mut c = Self::sample_bilinear_tex((tex_bytes, tw, th), sx, sy);
                 if let Some(t) = style.tint {
                     c[0] *= t.r;
                     c[1] *= t.g;
