@@ -540,8 +540,10 @@ unsafe fn vtbl<T>(object: *mut c_void) -> &'static T {
 
 /// # Safety
 ///
-/// `self.ptr` 要么为空、要么是一个**仍持有引用**的合法 COM 接口指针；本函数按 COM 规则调用
-/// `Release` 并把指针置空，因此同一对象不得被并发释放（`&mut self` 已保证串行）。
+/// `object` 必须是一个**本模块拥有所有权**的合法 COM 接口指针（来自 `Create*`/`Query*`），或为空。
+/// 违反的后果是不可诊断的堆损坏：本函数从虚表第 3 个槽取 `Release` 并调用，
+/// 指针失效或虚表错位都会跳到随机地址；重复释放会把引用计数减到 0 以下。
+/// 调用后不得再触碰 `object`：所有权已交回 COM。
 unsafe fn release(object: *mut c_void) {
     if object.is_null() {
         return;
@@ -573,6 +575,9 @@ macro_rules! com_type {
             ///
             /// `raw` 必须是某次 `Create*`/`Query*` 返回、且**所有权尚未转交他人**的接口指针；
             /// 本函数接管所有权（`Drop` 时释放）。传 null 返回 `None`，不会 panic。
+            ///
+            /// 违反的后果：若 `raw` 已被别处释放（例如从借用指针构造），本类会在 drop 时
+            /// **二次释放**；若 `raw` 不是该接口类型，`Release` 会从错位的虚表槽跳转。
             unsafe fn from_raw(ptr: *mut c_void) -> Option<Self> {
                 if ptr.is_null() {
                     return None;
@@ -589,6 +594,9 @@ macro_rules! com_type {
 
         impl Drop for $name {
             fn drop(&mut self) {
+                // SAFETY：`self.0` 只能由 `from_raw` 写入（字段私有，外部无法构造非法值），
+                // 所以本类持有它的所有权；本类不实现 `Clone`、也不向外传播 `self.0`，
+                // 因此这一次是对该接口的**唯一一次** `Release`。多一次会让引用计数下降到负、堆损坏。
                 unsafe { release(self.0) }
                 #[cfg(debug_assertions)]
                 LIVE_OBJECTS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
