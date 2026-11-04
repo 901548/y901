@@ -139,3 +139,24 @@ fn per_frame_clear_only_allocs() {
     let _ = (Pos::new(0.0, 0.0), TextStyle::fg(Color::WHITE));
     assert!(a < 1000);
 }
+
+/// **快速回归**（非 ignored）：画一帧就要求零分配。
+///
+/// 为什么只画 1 帧：`per_frame_draw_image_allocs` 需要 100 帧才能统计分布，
+/// 而“每帧复制整张纹理”这个回归**画一帧就能抓到**（一帧就是 4 MiB）。
+#[test]
+fn texture_draw_is_zero_alloc_quick() {
+    let mut s = backend();
+    let pixels = rgba(TEX);
+    let id = s.upload_texture(TEX, TEX, &pixels);
+
+    let rect = Rect::new(0.0, 0.0, W as f32, H as f32);
+    let style = ImageStyle::default();
+    s.draw_image(rect, id, style); // 预热
+
+    let _ = take();
+    s.draw_image(rect, id, style);
+    let (a, b) = take();
+    assert_eq!(a, 0, "texture draw must be zero-alloc, got {a} allocs");
+    assert_eq!(b, 0, "texture draw must be zero-alloc, got {b} bytes");
+}
