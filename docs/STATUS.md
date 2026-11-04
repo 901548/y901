@@ -233,3 +233,12 @@
 - **serial 残留**：仍在 `Cargo.lock:225`，`cargo tree -i serial` 报 "did not match any packages"（不可达）；
   清除需联网 `cargo update`（本轮离线，未尝试硬删）
 - **下一步**：重新跑全量审查（新报告为准），而不是围着一份丢失的旧报告转
+
+## 审查报告状态（v0.1.16）
+
+- **P0 = 0**
+- **P1 = 1**：P1-03 x11 `EnvGuard`（需 WSL，Windows 宿主无法编译验证）
+- **P2 = 1**：`serial` lock 残留（需联网）；其余已修（ignore 计数同步、Guide 编号）或接受（miniz_oxide 上游约束）
+- **P3 = 4**（设计取舍 / 旧项失效）
+- 数字由 `scripts/sync-doc-numbers.ps1` 生成，并由 gate 的 `-Check` 步骤拦截漂移
+- 最新审查报告：`docs/audit-v0.1.15.md`
