@@ -86,6 +86,11 @@ else {
 }
 
 # ---------------------------------------------------------------- 3. clippy (exit code FIRST, then count)
+Step "test inventory fingerprint (per-binary test names)"
+& powershell -NoProfile -File (Join-Path $PSScriptRoot 'check-test-inventory.ps1') | Out-Host
+if ($LASTEXITCODE -ne 0) { Fail "test inventory mismatch (see [inv] lines above)" }
+Write-Host "[gate] ok: test inventory matches"
+
 Step "cargo clippy (exit code must be 0 AND warnings must be 0)"
 $clippyJson = & cargo clippy --workspace --all-targets --offline --message-format=json 2>&1 | Out-String
 $clippyCode = $LASTEXITCODE
