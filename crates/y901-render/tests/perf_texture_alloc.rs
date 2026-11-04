@@ -9,25 +9,31 @@
 //! ```
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
-static ALLOCS: AtomicUsize = AtomicUsize::new(0);
-static BYTES: AtomicUsize = AtomicUsize::new(0);
+// **线程局部**计数器。
+//
+// 为何不用全局 `AtomicUsize`：全局计数器在 `--include-ignored` 全量并行时
+// 会把**别的测试线程**的分配记到本用例头上（实测：应 0 却测到 4），
+// 于是那条 100 帧基准必然失败、整轮中止。
+// `const { Cell::new(0) }` 保证初始化不分配（避免分配器重入）。
+thread_local! {
+    static T_ALLOCS: Cell<usize> = const { Cell::new(0) };
+    static T_BYTES: Cell<usize> = const { Cell::new(0) };
+}
 
 struct Counting;
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::Relaxed);
-        BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+        bump(layout.size());
         System.alloc(layout)
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         System.dealloc(ptr, layout)
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::Relaxed);
-        BYTES.fetch_add(new_size, Ordering::Relaxed);
+        bump(new_size);
         System.realloc(ptr, layout, new_size)
     }
 }
@@ -35,11 +41,16 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static GLOBAL: Counting = Counting;
 
+fn bump(bytes: usize) {
+    // `try_with`：线程退出时 TLS 已销毁会返回 Err，不能 panic 在分配器里。
+    let _ = T_ALLOCS.try_with(|c| c.set(c.get() + 1));
+    let _ = T_BYTES.try_with(|c| c.set(c.get() + bytes));
+}
+
 fn take() -> (usize, usize) {
-    (
-        ALLOCS.swap(0, Ordering::Relaxed),
-        BYTES.swap(0, Ordering::Relaxed),
-    )
+    let a = T_ALLOCS.with(|c| c.replace(0));
+    let b = T_BYTES.with(|c| c.replace(0));
+    (a, b)
 }
 
 use y901_render::soft::SoftBackend;
