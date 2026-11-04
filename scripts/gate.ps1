@@ -21,6 +21,8 @@ param(
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 $baselineTests = Join-Path $root 'docs\evidence\test-baseline.txt'
+# 审计是否降级到了缓存指南库（影响最终结论的措辞）
+$script:auditStale = $false
 
 function Step($name) { Write-Host "[gate] $name ..." }
 function Fail($msg) { Write-Host "[gate] FAIL: $msg"; exit 1 }
@@ -37,7 +39,10 @@ if (-not $SkipTest) {
     if (-not (Test-Path $baselineTests)) {
         Fail "test baseline missing: $baselineTests"
     }
-    $expected = [int]((Get-Content $baselineTests -Raw).Trim())
+    # 基线文件允许写注释（`#` 开头）：取第一个非注释、非空行作为数字
+    $baselineLine = (Get-Content $baselineTests | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } | Select-Object -First 1)
+    if (-not $baselineLine) { Fail "test baseline has no number: $baselineTests" }
+    $expected = [int]$baselineLine.Trim()
     $testOut = & cargo test --workspace --offline 2>&1 | Out-String
 
     if ($testOut -match 'error\[E\d+\]' -or $testOut -match 'could not compile') {
@@ -114,6 +119,7 @@ else {
         $auditCode = $LASTEXITCODE
         Write-Host $auditOut
         if ($auditCode -eq 0) {
+            $script:auditStale = $true
             Write-Host "[gate] ok: audit ran against CACHED advisory DB (may be stale; re-run online for a release)"
         }
     }
@@ -125,5 +131,11 @@ else {
     }
 }
 
-Write-Host "GATE OK"
+if ($script:auditStale) {
+    # 明确区分：这不是"完整门禁通过"，而是"审计基于可能过时的缓存库通过"。
+    Write-Host "GATE OK (STALE AUDIT: cached advisory DB, re-run online for a release)"
+}
+else {
+    Write-Host "GATE OK"
+}
 exit 0

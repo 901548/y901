@@ -1,1 +1,6 @@
+# Test-count baseline for scripts/gate.ps1 (sum of 'N passed' across all test binaries).
+# The gate FAILS when the total drops below this number: that means a test was deleted or #[ignore]d.
+#
+# 801  -- updated at v0.1.6: Grid span added 7 tests
+# When you change this number, record which tests were added or removed and why.
 801

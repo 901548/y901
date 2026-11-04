@@ -70,6 +70,12 @@ fn solid_rgba(w: u32, h: u32, c: (u8, u8, u8)) -> Vec<u8> {
 }
 
 /// 建窗口（隐藏尺寸小一点，快照足够）。
+/// 序列化所有建真实 D3D 窗口的测试。
+///
+/// 为什么需要：同一个测试二进制里的用例默认**并发**跑，而每个用例都要建真窗口、
+/// 拿 D3D 设备、请求快照；并发时会互相抢占前台窗口，实测出现过假红。
+static D3D_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn window(title: &str, w: u32, h: u32) -> Option<Window> {
     let options = Options {
         title: title.to_string(),
@@ -98,6 +104,7 @@ fn rgb(px: &[u8], w: u32, x: u32, y: u32) -> (u8, u8, u8) {
 
 #[test]
 fn image_quadrants_sample_correctly_on_gpu() {
+    let _guard = D3D_LOCK.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
     let Some(mut win) = window("y901-d3d-image-quad", 240, 200) else {
         eprintln!("[image-d3d] 无 D3D11 设备，跳过");
         return;
@@ -147,6 +154,7 @@ fn image_quadrants_sample_correctly_on_gpu() {
 
 #[test]
 fn image_tint_and_contain_on_gpu() {
+    let _guard = D3D_LOCK.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
     let Some(mut win) = window("y901-d3d-image-tint", 240, 200) else {
         eprintln!("[image-d3d] 无 D3D11 设备，跳过");
         return;
