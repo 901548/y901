@@ -291,7 +291,12 @@ struct AltScreen {
 impl Grid {
     /// 建一个空网格；`cols`/`rows` 至少为 1。
     pub fn new(cols: u16, rows: u16) -> Self {
-        assert!(cols > 0 && rows > 0, "grid must be non-empty");
+        // 为什么 **clamp 而不是 panic**：这是公开 API，零尺寸来自外部输入
+        // （窗口尺寸 / 配置文件）时，一个 panic 会把整个进程拖下水；
+        // 而"至少 1 行 1 列"是唯一能继续运行的语义。调试期间仍然吵一声。
+        debug_assert!(cols > 0 && rows > 0, "grid must be non-empty (clamped in release)");
+        let cols = cols.max(1);
+        let rows = rows.max(1);
         let screen = (0..rows)
             .map(|i| Row::new(cols, LineId(i as u32), 0))
             .collect();
@@ -501,7 +506,9 @@ impl Grid {
 
     /// 按新列宽重排整屏：合并 wrapped 段 → 重新切片 → 重新投影光标。
     pub fn reflow(&mut self, new_cols: u16) {
-        assert!(new_cols > 0, "cols must be positive");
+        // 同 `new`：零列无法表示，clamp 到 1 而不抢 panic。
+        debug_assert!(new_cols > 0, "cols must be positive (clamped in release)");
+        let new_cols = new_cols.max(1);
         if new_cols == self.cols {
             return;
         }
@@ -717,7 +724,8 @@ impl Grid {
 
     /// 仅改变可见行数：追加空行或裁剪末尾行，绝不触发重排。
     pub fn set_rows(&mut self, new_rows: u16) {
-        assert!(new_rows > 0, "rows must be positive");
+        debug_assert!(new_rows > 0, "rows must be positive (clamped in release)");
+        let new_rows = new_rows.max(1);
         if new_rows == self.rows {
             return;
         }

@@ -478,6 +478,10 @@ fn benchmark_shm_vs_putimage_1080p() {
     );
     // 对比组：强制关掉 SHM，走分块 PutImage
     drop(wdw);
+    // 环境变量是**进程全局**的：必须拿 SERVER_LOCK，否则并发的另一个用例
+    // 会在不同时机看到它（或看不到），测出来的性能对比就是假的。
+    let _env_lock = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let prev_no_shm = std::env::var_os("Y901_NO_SHM");
     std::env::set_var("Y901_NO_SHM", "1");
     let mut wdw2 = create_window_retry(&d, w, h, "bench-fallback");
     wdw2.present(&px, w as u32, h as u32).expect("warmup2");
@@ -486,7 +490,11 @@ fn benchmark_shm_vs_putimage_1080p() {
         wdw2.present(&px, w as u32, h as u32).expect("present2");
     }
     let total_fallback = t1.elapsed().as_secs_f64() * 1000.0;
-    std::env::remove_var("Y901_NO_SHM");
+    // 恢复原值（而不是无条件 remove：外部可能本来就设了它）
+    match prev_no_shm {
+        Some(v) => std::env::set_var("Y901_NO_SHM", v),
+        None => std::env::remove_var("Y901_NO_SHM"),
+    }
     eprintln!(
         "[bench] 回退路径（分块 PutImage）x{FRAMES}：总 {total_fallback:.1}ms，单帧 {:.2}ms",
         total_fallback / (FRAMES as f64)

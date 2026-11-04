@@ -108,7 +108,9 @@ impl McpServer {
             }
             return None;
         }
-        let id = id.unwrap();
+        // 上面已处理 `None` 分支（通知无 id）；这里再防一次，使 "此刻必有 id"
+        // 成为代码结构而非读者的假设。用 `?`（而非 `unwrap`）保持与前一段同一种退出方式。
+        let id = id?;
 
         // Token 不在协议层校验：标准 MCP 客户端（Claude Desktop / Cursor）的
         // initialize 参数只有 protocolVersion / capabilities / clientInfo。

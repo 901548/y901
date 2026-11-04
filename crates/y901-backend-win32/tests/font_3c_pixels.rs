@@ -82,6 +82,40 @@ impl Widget for Scene {
     }
 }
 
+/// 环境变量与**进程全局**状态一样：`cargo test` 默认并发跑用例，
+/// 两个测试同时 `set_var` 同一个键会互相覆盖（一个正在用，另一个已删掉）。
+/// 用锁 + **恢复原值**，而不是直接 remove。
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 在锁保护下设置环境变量，并在 drop 时恢复原值（含"原本不存在"这种情况）。
+struct EnvGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    key: &'static str,
+    prev: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os(key);
+        std::env::set_var(key, value);
+        Self {
+            _lock: lock,
+            key,
+            prev,
+        }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match self.prev.take() {
+            Some(v) => std::env::set_var(self.key, v),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
+
 fn fnv(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {
@@ -174,7 +208,7 @@ fn write_png(path: &str, rgba: &[u8], w: u32, h: u32) -> Result<(), String> {
 #[ignore = "需要 GPU（回读像素）"]
 fn pixel_statistics_and_png_baseline() {
     // 强制自研引擎（需在创建窗口前设）
-    std::env::set_var("Y901_FONT", "self");
+    let _env = EnvGuard::set("Y901_FONT", "self");
 
     let options = Options {
         title: "y901 3c evidence".to_string(),
@@ -244,7 +278,7 @@ fn pixel_statistics_and_png_baseline() {
 #[test]
 #[ignore = "调试"]
 fn probe_orientation_and_channels() {
-    std::env::set_var("Y901_FONT", "self");
+    let _env = EnvGuard::set("Y901_FONT", "self");
     let options = Options {
         title: "probe".to_string(),
         width: 400,

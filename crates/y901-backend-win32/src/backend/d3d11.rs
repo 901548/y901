@@ -2866,7 +2866,12 @@ unsafe fn create_device_and_swap_chain(
         }
     }
 
-    unreachable!("loop always returns")
+    // 代码上永远到不了这里：循环体内每条路径要么 `return`、要么以
+    // `driver_type == WARP` 为前提写入威胁；两轮循环后 `driver_type` 必为 WARP。
+    // 保留一个**可报错的**出口，而不是 `unreachable!()`：一旦上面的循环被改动，
+    // 这里会返回一个可诊断的 Err，而不是直接 panic 掉整个进程。
+    debug_assert!(false, "device creation loop should have returned");
+    Err("D3D11 device creation loop exited without a result".to_string())
 }
 
 // ---------------------------------------------------------------------------
