@@ -797,6 +797,15 @@ impl Window {
         self.render_inner(tree, sync_interval);
     }
 
+    /// 仅测试：取出 `present` 记录的 `sync_interval` 序列（转发到 `D3dBackend`）。
+    #[cfg(test)]
+    pub fn take_present_sync_log(&self) -> Vec<u32> {
+        self.backend
+            .as_ref()
+            .map(|b| b.take_present_sync_log())
+            .unwrap_or_default()
+    }
+
     /// `render` 与 `render_with_sync` 的共同实现。
     fn render_inner(&mut self, tree: &mut UiTree, sync_interval: u32) {
         // **没有脏区就不清屏、不 Present**：保留上一帧。
@@ -1316,5 +1325,116 @@ fn gdi_present(hwnd: HWND, pixels: &[u8], width: u32, height: u32) {
             SRCCOPY,
         );
         ReleaseDC(hwnd, hdc);
+    }
+}
+
+#[cfg(test)]
+mod present_sync_tests {
+    use super::*;
+
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct Scene {
+        rect: y901_ui::Rect,
+    }
+
+    impl y901_ui::Widget for Scene {
+        fn id(&self) -> &str {
+            "scene"
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn y901_ui::TextMetrics,
+            c: y901_ui::Constraints,
+            _cache: &mut y901_ui::layout::LayoutCache,
+        ) -> y901_ui::Size {
+            c.constrain(y901_ui::Size::new(c.max.w, c.max.h))
+        }
+        fn arrange(
+            &mut self,
+            r: y901_ui::Rect,
+            _m: &dyn y901_ui::TextMetrics,
+            _cache: &mut y901_ui::layout::LayoutCache,
+        ) {
+            self.rect = r;
+        }
+        fn rect(&self) -> y901_ui::Rect {
+            self.rect
+        }
+        fn event(&mut self, _c: &mut y901_ui::EventCtx, _e: &y901_ui::UiEvent) -> y901_ui::EventResult {
+            y901_ui::EventResult::Ignored
+        }
+        fn render(&mut self, ctx: &mut dyn y901_ui::RenderCtx) {
+            ctx.fill_rect(self.rect, y901_ui::Color::rgba(0.05, 0.05, 0.07, 1.0));
+        }
+        fn semantics(&self) -> y901_ui::Semantics {
+            y901_ui::Semantics::default()
+        }
+    }
+
+    fn setup() -> Option<(Window, UiTree)> {
+        let opts = y901_runtime::Options {
+            title: "sync assertions".to_string(),
+            width: 320,
+            height: 200,
+            theme: None,
+            font: None,
+        };
+        let mut window = match Window::create(&opts) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("SKIP: no D3D11 device ({e})");
+                return None;
+            }
+        };
+        let mut tree = UiTree::new(Box::new(Scene {
+            rect: y901_ui::Rect::ZERO,
+        }));
+        window.resize(&mut tree);
+        tree.invalidate_all();
+        window.render(&mut tree);
+        Some((window, tree))
+    }
+
+    #[test]
+    fn render_passes_sync_1_to_present() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((mut window, mut tree)) = setup() else {
+            return;
+        };
+        let before = window.take_present_sync_log().len();
+        tree.invalidate_all();
+        window.render(&mut tree);
+        let log = window.take_present_sync_log();
+        let tail = &log[before.min(log.len())..];
+        assert_eq!(tail.last(), Some(&1), "render 应传 sync=1，实测 {tail:?}");
+    }
+
+    #[test]
+    fn render_with_sync_0_passes_0() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((mut window, mut tree)) = setup() else {
+            return;
+        };
+        let before = window.take_present_sync_log().len();
+        tree.invalidate_all();
+        window.render_with_sync(&mut tree, 0);
+        let log = window.take_present_sync_log();
+        let tail = &log[before.min(log.len())..];
+        assert_eq!(tail.last(), Some(&0), "render_with_sync(0) 应传 0，实测 {tail:?}");
+    }
+
+    #[test]
+    fn render_with_sync_2_passes_2() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((mut window, mut tree)) = setup() else {
+            return;
+        };
+        let before = window.take_present_sync_log().len();
+        tree.invalidate_all();
+        window.render_with_sync(&mut tree, 2);
+        let log = window.take_present_sync_log();
+        let tail = &log[before.min(log.len())..];
+        assert_eq!(tail.last(), Some(&2), "render_with_sync(2) 应传 2，实测 {tail:?}");
     }
 }

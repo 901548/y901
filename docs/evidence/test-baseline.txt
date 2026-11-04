@@ -5,4 +5,4 @@
 #   default `cargo test --workspace`          passed 818, ignored 52
 #   `--include-ignored`                       passed 870, ignored 0
 # 818 -- image quality analytic tests +4 vs 814; keep this number in sync with the three above.
-818
+821

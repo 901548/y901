@@ -71,6 +71,9 @@ pub struct D3dBackend {
     /// 变换栈。第 1 步只建空栈：所有出图路径都过 `map_pos`/`map_size`，
     /// 但**栈为空时纯透传**——先证明恒等（像素哈希不变），再接真变换。
     transforms: Vec<(y901_ui::Pos, f32)>,
+    /// 仅测试：每次 `present` 前记下的 `sync_interval`。
+    #[cfg(test)]
+    pub present_sync_log: std::sync::Arc<std::sync::Mutex<Vec<u32>>>,
 }
 
 impl D3dBackend {
@@ -128,6 +131,8 @@ impl D3dBackend {
         );
 
         let mut backend = Self {
+        #[cfg(test)]
+        present_sync_log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             gfx,
             image_marks,
             hovered: None,
@@ -275,6 +280,8 @@ impl D3dBackend {
         // 帧末把"图片区间"与"图集区间"交替排开。
         // 没有图片时 `batches` 为空 → `render_batched` 退化为单次 draw，与改动前一致。
         let batches = self.build_batches();
+        #[cfg(test)]
+        self.present_sync_log.lock().unwrap().push(sync_interval);
         let mut hr = self.gfx.render_batched(&self.instances, &batches, sync_interval);
 
         if Gfx::device_lost(hr) {
@@ -299,6 +306,12 @@ impl D3dBackend {
         }
         !Gfx::is_occluded(hr)
     }
+    /// 返回至今为止记录的 `sync_interval` 序列（仅测试构建）。
+    #[cfg(test)]
+    pub fn take_present_sync_log(&self) -> Vec<u32> {
+        self.present_sync_log.lock().unwrap().clone()
+    }
+
 
     /// 记录新的客户区尺寸并尝试同步交换链。
     ///
