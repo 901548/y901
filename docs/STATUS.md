@@ -124,7 +124,7 @@
 | X11 真机验证 | 半天 | 真 Linux 机器 |
 | 多窗口支持 | 3~5d | 无（大改动） |
 
-## 图片 mipmap（本轮，部分完成）
+## 图片 mipmap（步骤 1 完成：建链 + 坐标映射，选级强制 level=0）
 
 **已做**（`y901-render::mip`）：
 - `level_for_image(scale, max_level)`：只看缩放比、不看墨量（图片没有"重新光栅化"
@@ -138,3 +138,21 @@
 - `Image` 结构体尚未加 `mips: Option<MipChain>`（动态/静态边界未咮定）。
 - `Cover` 模式"实际绘制倍率"与 `scale` 可能不同，选级应用前者；尚未实现与测量。
 - 存储成本已测（1.3125×），但尚未写进 `Image` 的文档。
+
+## 图片 mipmap 步骤 1（本轮）
+
+- `SoftBackend::upload_texture`：静态图片就地建 mip 链（**L1、L2**）；
+  **L0 不另存一份** —— 它就是 `textures` 表里的原始字节，
+  `level == 0` 路径因此与改造前**逐字节相同**。
+- `upload_texture_dynamic`：动态图片（视频帧）只存 L0，不建 mip。
+- `draw_image`：已算出 `scale_x = dst.w/src.w`、`scale_y = dst.h/src.h`，
+  `draw_scale = min(...)`，并调 `level_for_image` 得到 `_computed_level`；
+  但**本步骤强制 `level = 0`**，只证明"引入选级与坐标映射不改变渲染"。
+- `src` 到级坐标的映射：`src / 2^level`（L0 时即 `src` 本身）；dst 始终是屏幕坐标。
+
+**验证**：全量 816 全绿，像素哈希 **`0xDBB308DD1657EF9C` / 400×220 不变**。
+
+**未做（步骤 2）**：打开 `level = level_for_image(...)`，跑 `s=0.5` 与**超采样独立真值**的 MAD。
+
+**已知限制**：各向异性（`max(scale_x,scale_y) / min(...) > 2`）第一版**不特殊处理**，
+只按 `min` 取级（宁可略模糊，不导致走样）。

@@ -69,6 +69,11 @@ pub struct SoftBackend {
     anims: y901_ui::animation::AnimSnapshot,
     hovered: Option<String>,
     textures: std::collections::HashMap<y901_ui::image::TextureId, (u32, u32, Vec<u8>, u32)>,
+    /// 静态图片的 mip 级（**只存 L1 及以上**：L0 就是 `textures` 里的原始字节）。
+    ///
+    /// 为何不存 L0：存一份就多占 `w*h*4` 字节，而 `level == 0` 的路径**必须**和改造前
+    /// 逐字节相同（否则的哈希门禁会报“渲染回归”但实际上什么都没变）。
+    mips: std::collections::HashMap<y901_ui::image::TextureId, Vec<(u32, u32, Vec<u8>)>>,
     next_texture: u64,
     text: Box<dyn super::font::FontEngine>,
     cell: Size,
@@ -110,6 +115,7 @@ impl SoftBackend {
             anims: y901_ui::animation::AnimSnapshot::default(),
             hovered: None,
             textures: std::collections::HashMap::new(),
+            mips: std::collections::HashMap::new(),
             next_texture: 0,
             text: font,
             cell,
@@ -136,6 +142,7 @@ impl SoftBackend {
             anims: y901_ui::animation::AnimSnapshot::default(),
             hovered: None,
             textures: std::collections::HashMap::new(),
+            mips: std::collections::HashMap::new(),
             next_texture: 0,
             text: font,
             cell,
@@ -390,6 +397,14 @@ impl RenderCtx for SoftBackend {
         let bytes = rgba[..(width * height * 4) as usize].to_vec();
         // 上传即拥有一次引用（创建者）
         self.textures.insert(id, (width, height, bytes, 1));
+        // 静态图片：就地建 mip 链（L1 起）。
+        //
+        // 存储成本：L0 + L1 + L2 = 1 + 1/4 + 1/16 = **1.3125×**（三级有限链）。
+        // 注意 1.333 是无穷级数列 1+1/4+1/16+… 的极限，三级链拿不到那个值。
+        let levels = box_levels_rgba(&self.textures[&id].2, width, height, 2);
+        if !levels.is_empty() {
+            self.mips.insert(id, levels);
+        }
         id
     }
 
@@ -414,6 +429,7 @@ impl RenderCtx for SoftBackend {
         };
         if free {
             self.textures.remove(&id);
+        self.mips.remove(&id);
         }
     }
 
@@ -461,11 +477,31 @@ impl RenderCtx for SoftBackend {
         // 为什么这样能编译：`self.textures` 与下面要写的 `self.buf` 是**不相交字段**，
         // Rust 允许同时存在它们的不可变/可变借用；旧实现先把整个 `self` 借了一轮，
         // 才不得不拷整张纹理（`1024²` → 4 MiB/帧，实测见 `perf_texture_alloc`）。
+        // ---- mip 选级（本步骤**强制 level = 0**，只验证映射逻辑不改变渲染）----
+        //
+        // 实际绘制倍率 = 目标子矩形 / 源子矩形（每 1 源像素占多少屏幕像素）。
+        // 两个方向取 **min**：取更细的那个会让缩小较多的轴采样不足而走样，
+        // 而走样是**错误**；取更粗的一个只是让另一轴略模糊，是**取舍**。
+        let scale_x = dst.w / src.w;
+        let scale_y = dst.h / src.h;
+        let draw_scale = scale_x.min(scale_y);
+        let max_level = self.mips.get(&texture).map(|m| m.len()).unwrap_or(0);
+        let _computed_level = crate::mip::level_for_image(draw_scale, max_level);
+        // 第一步先不开启选级：只证明"选级与坐标映射的引入本身不改变渲染"。
+        let level = 0usize;
+        let shift = 1u32 << level;
+        // src 是 L0 像素坐标；选中的级坐标 = src / 2^level。dst 始终是屏幕坐标。
+
+        // L0 字节：仅当 level == 0 时使用（保证与改造前逐字节相同）。
         let tex_bytes = self
             .textures
             .get(&texture)
             .map(|t| t.2.as_slice())
             .unwrap_or(&[]);
+        let (tw, th, tex_bytes) = match self.mips.get(&texture).and_then(|m| m.get(level.wrapping_sub(1))) {
+            Some(lv) if level > 0 => (lv.0, lv.1, lv.2.as_slice()),
+            _ => (tw / shift, th / shift, tex_bytes),
+        };
 
         let x0 = area.x.floor() as i32;
         let x1 = area.right().ceil() as i32;
@@ -819,3 +855,49 @@ impl RenderCtx for SoftBackend {
 // 归类：编译见证 —— `_unused` 证明 Edges 被使用
 #[allow(dead_code)]
 fn _unused(_e: Edges) {}
+
+/// 对 RGBA 位图做 box 降采样，生成 L1..L`levels`（**不含 L0**）。
+///
+/// 为何不复用 `mip::MipChain`：它的 `MipLevel` 是**单通道 coverage**（字形用），
+/// 而图片是交错的 RGBA；对交错字节做平均会**把颜色通道混在一起**。
+/// 所以这里按 4 个通道分别求平均。
+fn box_levels_rgba(base: &[u8], w: u32, h: u32, levels: usize) -> Vec<(u32, u32, Vec<u8>)> {
+    let mut out = Vec::new();
+    let (mut cw, mut ch) = (w, h);
+    let mut cur = base.to_vec();
+    for _ in 0..levels {
+        if cw <= 1 && ch <= 1 {
+            break;
+        }
+        let (nw, nh) = ((cw / 2).max(1), (ch / 2).max(1));
+        let mut next = vec![0u8; (nw * nh * 4) as usize];
+        for y in 0..nh {
+            for x in 0..nw {
+                let mut acc = [0u32; 4];
+                let mut n = 0u32;
+                for dy in 0..2 {
+                    for dx in 0..2 {
+                        let sx = (x * 2 + dx).min(cw - 1);
+                        let sy = (y * 2 + dy).min(ch - 1);
+                        let si = ((sy * cw + sx) * 4) as usize;
+                        if si + 4 <= cur.len() {
+                            for c in 0..4 {
+                                acc[c] += cur[si + c] as u32;
+                            }
+                            n += 1;
+                        }
+                    }
+                }
+                let di = ((y * nw + x) * 4) as usize;
+                for c in 0..4 {
+                    next[di + c] = (acc[c] / n.max(1)) as u8;
+                }
+            }
+        }
+        out.push((nw, nh, next.clone()));
+        cur = next;
+        cw = nw;
+        ch = nh;
+    }
+    out
+}
