@@ -1,0 +1,139 @@
+//! soft.rs 纹理路径的分配计数基准（审查 #18 的 soft.rs 候选）。
+//!
+//! **必须 `--test-threads=1`**：计数器是进程全局的，并行会让别的用例的分配记到本轮上
+//! （上一轮 dispatch 基准就因此得到过 0.01 / 0.25 / 6.00 三种互相矛盾的读数）。
+//!
+//! 跑法：
+//! ```text
+//! cargo test -p y901-render --release --test perf_texture_alloc -- --ignored --nocapture --test-threads=1
+//! ```
+
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static ALLOCS: AtomicUsize = AtomicUsize::new(0);
+static BYTES: AtomicUsize = AtomicUsize::new(0);
+
+struct Counting;
+
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+        System.alloc(layout)
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        System.dealloc(ptr, layout)
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        BYTES.fetch_add(new_size, Ordering::Relaxed);
+        System.realloc(ptr, layout, new_size)
+    }
+}
+
+#[global_allocator]
+static GLOBAL: Counting = Counting;
+
+fn take() -> (usize, usize) {
+    (
+        ALLOCS.swap(0, Ordering::Relaxed),
+        BYTES.swap(0, Ordering::Relaxed),
+    )
+}
+
+use y901_render::soft::SoftBackend;
+use y901_render::MyFontEngine;
+use y901_ui::{image::ImageStyle, Color, Pos, Rect, RenderCtx, Size, TextStyle};
+
+const W: u32 = 512;
+const H: u32 = 512;
+/// 1024×1024 RGBA = 4 MiB，正好是"每帧 clone 一次就很贵"的典型尺寸。
+const TEX: u32 = 1024;
+
+fn backend() -> SoftBackend {
+    let (cw, ch) = y901_render::cell_metrics_for(15.0);
+    let engine = MyFontEngine::new(
+        y901_render::load_font(&y901_render::default_test_font_path()).expect("font"),
+        15.0,
+        Size::new(cw, ch),
+    )
+    .expect("engine");
+    SoftBackend::new_headless(W, H, Box::new(engine), Size::new(cw, ch)).expect("soft")
+}
+
+fn rgba(n: u32) -> Vec<u8> {
+    let mut v = vec![0u8; (n * n * 4) as usize];
+    for (i, p) in v.chunks_exact_mut(4).enumerate() {
+        p[0] = (i % 251) as u8;
+        p[1] = (i % 241) as u8;
+        p[2] = (i % 239) as u8;
+        p[3] = 255;
+    }
+    v
+}
+
+/// 首次上传：空纹理表 → `upload_texture` 一次。
+#[test]
+#[ignore = "基准：--ignored --nocapture --test-threads=1"]
+fn first_upload_allocs() {
+    let mut s = backend();
+    let pixels = rgba(TEX);
+    let _ = take();
+    let id = s.upload_texture(TEX, TEX, &pixels);
+    let (a, b) = take();
+    eprintln!(
+        "[tex] 首次上传 {TEX}×{TEX}：{a} 次分配 / {:.1} MiB",
+        b as f64 / (1024.0 * 1024.0)
+    );
+    assert!(id.is_valid());
+}
+
+/// 后续渲染：纹理已上传，连续 100 帧 `draw_image`。
+#[test]
+#[ignore = "基准：--ignored --nocapture --test-threads=1"]
+fn per_frame_draw_image_allocs() {
+    let mut s = backend();
+    let pixels = rgba(TEX);
+    let id = s.upload_texture(TEX, TEX, &pixels);
+
+    let rect = Rect::new(0.0, 0.0, W as f32, H as f32);
+    let style = ImageStyle::default();
+    // 预热
+    s.draw_image(rect, id, style);
+
+    const N: usize = 100;
+    let _ = take();
+    for _ in 0..N {
+        s.draw_image(rect, id, style);
+    }
+    let (a, b) = take();
+    eprintln!(
+        "[tex] 后续 100 帧 draw_image（{TEX}×{TEX} 源）：{} 次分配 / {:.1} MiB，每帧 {:.1} MiB",
+        a,
+        b as f64 / (1024.0 * 1024.0),
+        b as f64 / (1024.0 * 1024.0) / N as f64
+    );
+    assert!(a > 0, "若为 0 则说明计数器没接上");
+}
+
+/// 对照：不做 `draw_image`，只清屏 100 帧 —— 用来扣除"渲染本身"的固定分配。
+#[test]
+#[ignore = "基准：--ignored --nocapture --test-threads=1"]
+fn per_frame_clear_only_allocs() {
+    let mut s = backend();
+    s.clear();
+    const N: usize = 100;
+    let _ = take();
+    for _ in 0..N {
+        s.clear();
+    }
+    let (a, b) = take();
+    eprintln!(
+        "[tex] 对照：清屏 100 帧 = {a} 次分配 / {:.2} MiB（每帧 {:.3} MiB）",
+        b as f64 / (1024.0 * 1024.0),
+        b as f64 / (1024.0 * 1024.0) / N as f64
+    );
+    let _ = (Pos::new(0.0, 0.0), TextStyle::fg(Color::WHITE));
+    assert!(a < 1000);
+}

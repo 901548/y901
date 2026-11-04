@@ -11,7 +11,8 @@
 ## 已知问题
 
 1. `#15` **ttf-parser 无轮廓点数上限** —— 恶意/损坏字体可让展平器吃满 CPU/内存。未做。
-2. `#18` 热路径 clone：**tree.rs 已测**（见下），`soft.rs` 纹理 `tex.2.clone()` **未测**。
+2. `#18` 热路径 clone：**tree.rs 已测**（键盘 0 次，鼠标 6 次常数）；
+   **`soft.rs:461` 的 `tex.2.clone()` 已测：每次 `draw_image` 复制整张纹理（`1024²` → 4 MiB/帧）——**待修**。
 3. `#19` **31 处 `#[allow(dead_code)]`** 未定性（诊断 API / 测试 API / 真死代码）。
 4. `cargo update` 会顺带升级 3 个依赖且需联网，`Cargo.lock` 里 `serial` 残留未清（已记录在 `DEPENDENCIES.md`）。
 5. audit 依赖联网刷新指南库；离线时结论带 `STALE AUDIT` 标记，**不算发布门禁**。
@@ -43,6 +44,19 @@
 把 `focus.clone()` 换成借用需要改 `EventCtx` 的生命周期，收益是每帧 1 次小分配 ——
 **远低于"占比 > 10% 且可确认无回归"的改动门槛**。
 
+## #18 soft.rs 测量结果（本轮）
+
+基准：`crates/y901-render/tests/perf_texture_alloc.rs`（计数分配器，**必须 `--test-threads=1`**）
+
+| 场景 | 分配 |
+|---|---|
+| 首次上传 1024² | **2 次 / 4.0 MiB** |
+| 后续 100 帧 `draw_image` | **100 次 / 400.0 MiB**（**每帧 4.0 MiB**） |
+| 对照：清屏 100 帧 | 0 次 / 0 MiB |
+
+**结论：严重，必须改。** clone 位置 `crates/y901-render/src/soft.rs:461`
+（`let tex_bytes = tex.2.clone();`）在**每次 `draw_image` 都执行**。
+
 ## 下一轮计划
 
-`#18` 的另一半：给 `soft.rs` 的纹理 `tex.2.clone()` 写同口径基准，确认是否只在首次上传。
+修 `soft.rs:461` 的整张纹理复制（用分片借用替代 clone），并用本基准验证"每帧 0 次分配"。
