@@ -158,6 +158,26 @@ else {
     }
 }
 
+# --- audit log persistence (APPENDED: no existing line is deleted or moved) ---
+if (-not (Test-Path variable:auditOut))  { $auditOut = $null }
+if (-not (Test-Path variable:auditCode)) { $auditCode = -1 }
+
+$auditLogPath = Join-Path (Split-Path $PSScriptRoot -Parent) "target\audit.log"
+$auditDir = Split-Path $auditLogPath -Parent
+if (-not (Test-Path $auditDir)) { New-Item -ItemType Directory -Force -Path $auditDir | Out-Null }
+
+if ($SkipAudit) {
+    $auditContent = "=== audit SKIPPED by -SkipAudit @ $(Get-Date -Format o) ==="
+} else {
+    $auditContent = "=== audit @ $(Get-Date -Format o) exit=$auditCode stale=$($script:auditStale) ===`n$auditOut"
+}
+[System.IO.File]::WriteAllText($auditLogPath, $auditContent, [System.Text.UTF8Encoding]::new($false))
+if (-not (Test-Path $auditLogPath)) {
+    Write-Host "[gate] FAIL: audit log write failed silently: $auditLogPath"
+    exit 1
+}
+Write-Host "[gate] audit log: $auditLogPath"
+
 $notReleasable = @()
 if ($SkipTest)  { $notReleasable += "SKIP TEST" }
 if ($SkipAudit) { $notReleasable += "SKIP AUDIT" }
@@ -174,4 +194,6 @@ if ($script:auditStale) {
     exit 0
 }
 Write-Host "GATE OK"
+
+
 exit 0
