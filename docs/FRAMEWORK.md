@@ -3,7 +3,7 @@
 Y901 是一个**零 C/C++ 编译依赖、Agent 原生**的桌面 UI 框架。UI 框架本身不认识任何平台 API，
 平台能力（Win32 / D3D11 / DirectWrite / PTY）全部收敛在应用层。
 
-## 1. 八个 crate
+## 1. 十二个 crate
 
 | crate | 职责 | 生产依赖 |
 |---|---|---|
@@ -16,6 +16,9 @@ Y901 是一个**零 C/C++ 编译依赖、Agent 原生**的桌面 UI 框架。UI 
 | `y901-mcp` | MCP 桥：stdio + JSON-RPC 2.0，把网关暴露给 Claude Desktop / Cursor | `agent`, `ui`, `widgets` |
 | `y901-backend-win32` | 唯一接触 Win32 的 crate：窗口 / D3D11 / DirectWrite / IME / DPI | `core`, `ui`, `runtime`, `windows-sys` |
 | `y901-app` | 启动器：解析参数、建树、装配 Host、跑事件循环（不实现组件、不定义布局） | `backend-win32`, `runtime`, `mcp`, `agent`, `ui`, `widgets` |
+| `y901-render` | 软件光栅化器（SoftBackend）与自研 TTF 字形引擎（图集 / mipmap LOD） | `ui`, `ttf-parser` |
+| `y901-shell` | 应用壳：菜单栏 / 托盘 / 快捷键绑定 | `ui`, `runtime`, `windows-sys`（命令行 / 磁盘操作）|
+| `y901-backend-x11` | Linux X11 后端（Xvfb 下验证，真机待验） | `core`, `ui`, `render`, `runtime`, `x11rb` |
 
 依赖方向严格单向（箭头指向被依赖方）：
 
@@ -32,7 +35,7 @@ y901-app ──> y901-backend-win32 ──> y901-runtime ──> y901-agent ─�
 - `y901-ui` **零外部依赖**：它只依赖内部 crate `y901-core`（用于布局原语 `IntervalSet`）。
   这不是洁癖，而是测试策略的地基：
   801 项测试（另有 7 项 GPU harness，`--ignored` 运行）里绝大多数不需要窗口、GPU、PTY。
-- 只有 `y901-backend-win32` 依赖 `windows-sys`（grep 可验证）。
+- **`y901-backend-win32` 与 `y901-shell` 都直接依赖 `windows-sys`**（grep 可验证；前者用于窗口/渲染，后者用于命令行与磁盘操作）。
 - `y901-runtime` 单独存在的原因：`Host::policy()` 需要 `y901_agent::Policy`，
   而 `agent` 依赖 `ui`；若把 `Host` 放进 `ui` 会形成 `ui -> agent -> ui` 循环。
 
