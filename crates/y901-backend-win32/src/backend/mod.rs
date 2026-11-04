@@ -67,6 +67,9 @@ pub struct D3dBackend {
     ///
     /// **必须与 TextEngine 使用的 cell 尺寸一致**：measure_text/line_height/glyph_offset/draw_text 都读它。
     cell: Size,
+    /// 变换栈。第 1 步只建空栈：所有出图路径都过 `map_pos`/`map_size`，
+    /// 但**栈为空时纯透传**——先证明恒等（像素哈希不变），再接真变换。
+    transforms: Vec<(y901_ui::Pos, f32)>,
 }
 
 impl D3dBackend {
@@ -136,6 +139,7 @@ impl D3dBackend {
             last_occluded: false,
             theme,
             cell: Size::new(cell_w, cell_h),
+            transforms: Vec::new(),
         };
         backend.sync_atlas()?;
         Ok(backend)
@@ -343,6 +347,55 @@ impl D3dBackend {
     /// **不是**字形 advance，而是"这个字形应占几格"。
     /// 居中补偿 `offset_x = (span*CELL_W - advance)/2`：字体 advance 与格宽
     /// 不精确相等时（跨平台常见），字形仍落在格子中央而不是贴左。
+    /// 把屏幕坐标过一遍变换栈。
+    ///
+    /// **栈为空时直接返回原值**，不做任何浮点运算——
+    /// `* 1.0` 或 `+ 0.0` 足以让像素哈希漂移，而哈希门禁会把它判成渲染回归。
+    fn map_pos(&self, p: y901_ui::Pos) -> y901_ui::Pos {
+        if self.transforms.is_empty() {
+            return p;
+        }
+        let mut x = p.x;
+        let mut y = p.y;
+        for (o, s) in self.transforms.iter().rev() {
+            x = o.x + (x - o.x) * s;
+            y = o.y + (y - o.y) * s;
+        }
+        y901_ui::Pos::new(x, y)
+    }
+
+    /// 把尺寸过一遍变换栈（只乘缩放，不加平移）。栈为空时直接返回。
+    fn map_size(&self, sz: y901_ui::Size) -> y901_ui::Size {
+        if self.transforms.is_empty() {
+            return sz;
+        }
+        let k = self.current_scale();
+        y901_ui::Size::new(sz.w * k, sz.h * k)
+    }
+
+    /// 把一个矩形过一遍变换栈。栈为空时**逐位原样返回**。
+    fn map_rect(&self, r: Rect) -> Rect {
+        if self.transforms.is_empty() {
+            return r;
+        }
+        let o = self.map_pos(y901_ui::Pos::new(r.x, r.y));
+        let sz = self.map_size(y901_ui::Size::new(r.w, r.h));
+        Rect::new(o.x, o.y, sz.w, sz.h)
+    }
+
+    /// 当前缩放乘积（栈为空时恒为 1.0）。
+    fn current_scale(&self) -> f32 {
+        if self.transforms.is_empty() {
+            return 1.0;
+        }
+        let k: f32 = self.transforms.iter().map(|(_, s)| *s).product();
+        if k.is_finite() && k > 0.0 {
+            k
+        } else {
+            1.0
+        }
+    }
+
     fn push_glyph(&mut self, x: f32, y: f32, span: f32, ch: char, color: Color, bold: bool) {
         let atlas_size = self.text.atlas_size() as f32;
         let ascent = self.text.ascent();
@@ -354,12 +407,15 @@ impl D3dBackend {
             return;
         }
 
+        // 先把推进位置与台面位置过变换栈（空栈时逐位不变）
+        let mapped = self.map_pos(Pos::new(x, y));
         let offset_x = glyph_offset(span, self.cell.w, glyph.advance);
+        let gsz = self.map_size(Size::new(glyph.width as f32, glyph.height as f32));
         let pos = Pos::new(
-            x + offset_x + glyph.bearing_x as f32,
-            y + ascent + glyph.bearing_y as f32,
+            mapped.x + offset_x + glyph.bearing_x as f32,
+            mapped.y + ascent + glyph.bearing_y as f32,
         );
-        let size = [glyph.width as f32, glyph.height as f32];
+        let size = [gsz.w, gsz.h];
         let uv = [
             glyph.atlas_x as f32 / atlas_size,
             glyph.atlas_y as f32 / atlas_size,
@@ -594,6 +650,7 @@ impl RenderCtx for D3dBackend {
         let Some((_, tw, th)) = self.gfx.image(texture.0) else {
             return;
         };
+        let rect = self.map_rect(rect);
         let Some(r) = self.clip_of(rect) else {
             return;
         };
@@ -651,6 +708,8 @@ impl RenderCtx for D3dBackend {
     }
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {
+        // 先过变换栈（空栈时是纯透传），再裁剪到当前视口
+        let rect = self.map_rect(rect);
         let Some(r) = self.clip_of(rect) else {
             return;
         };
@@ -668,6 +727,8 @@ impl RenderCtx for D3dBackend {
     /// 为什么不用默认实现（CPU 切条带）：条带在斜向渐变下无法表达
     /// "同一行内颜色也随 x 变化"，只能逐行变色；GPU 实例能做到逐像素精确。
     fn fill_gradient_rect_dir(&mut self, rect: Rect, from: Color, to: Color, dir: (f32, f32)) {
+        let rect = self.map_rect(rect);
+
         let Some(r) = self.clip_of(rect) else {
             return;
         };
@@ -686,6 +747,13 @@ impl RenderCtx for D3dBackend {
     /// - CPU 版逐扫描线拼矩形，每行 3 次 draw，且覆盖率是“整行平均”的近似；
     /// - GPU 版逐像素精确 SDF，1 次 draw，且四角与直边连接处天然连续。
     fn fill_round_rect(&mut self, rect: Rect, color: Color, radius: f32) {
+        let rect = self.map_rect(rect);
+        // 空栈时 `current_scale()` 恒为 1.0，不会引入浮点往返
+        let radius = if self.transforms.is_empty() {
+            radius
+        } else {
+            radius * self.current_scale()
+        };
         let Some(r) = self.clip_of(rect) else {
             return;
         };
