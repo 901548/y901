@@ -609,6 +609,8 @@ impl TextEngine {
         cell_width: f32,
         cell_height: f32,
     ) -> Result<Self, String> {
+    // SAFETY：`DWriteCreateFactory` 的三条前置在此成立（合法枚举 + 常量 GUID 地址 + 栈上对齐出参）；
+    // 违反后果：错误 GUID 拿到类型不符的接口（后续 vtbl 跳错槽）；出参不对齐时 DWrite 写入错位地址、破坏栈。
         unsafe {
             let mut raw: *mut c_void = null_mut();
             // SAFETY：`DWriteCreateFactory` 的三条前置条件在此全部成立 ——
@@ -697,6 +699,9 @@ impl TextEngine {
     /// 取字形；未缓存则光栅化并写入图集。
     pub fn glyph(&mut self, ch: char) -> Option<&GlyphInfo> {
         if !self.cache.contains_key(&ch) {
+        // SAFETY：`rasterize` 的前提是字形轮廓已展平且图集已初始化，
+        // 两者在此均成立（调用点处于字形缓存缺失分支，图集已在 `Factory::new` 里建好）。
+        // 违反后果：未展平的曲线点会让扫描线算法读到无效数据 —— 越界或得到错误覆盖率（画面污点）。
             match unsafe { self.rasterize(ch) } {
                 Ok(info) => {
                     self.cache.insert(ch, info);

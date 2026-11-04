@@ -1985,14 +1985,9 @@ impl Gfx {
     ///
     /// # Safety
     ///
-    /// 调用者必须保证：
-    /// - `hwnd` 是**有效且未销毁**的窗口句柄，且调用期间不会被其它线程销毁；
-    /// - 调用发生在拥有该窗口的线程上（D3D11 immediate context 非线程安全）；
-    /// - `width`、`height` 均大于 0。
-    ///
-    /// 违反任一条会导致：DXGI 创建失败（返回错误码，可恢复），
-    /// 或产生绑定到悬垂 HWND 的交换链，后续 `Present` 访问已释放窗口内存
-    /// （未定义行为，通常表现为进程崩溃）。
+    /// 内部编排：`hwnd` 必须属于本 GUI 线程，且 `width`/`height` 是当前客户区尺寸。
+    /// 违反后果：跨线程创建交换链会在 `Present` 时失败或黑屏；尺寸与客户区不符会让渲染区域错位。
+    /// 设备创建失败时本函数返回 `Err`（不 panic，调用方可重试或降级到 WARP）。
     pub unsafe fn new(hwnd: HWND, width: u32, height: u32) -> Result<Self, String> {
         let mut gfx = Self {
             atlas: None,
@@ -2105,13 +2100,9 @@ impl Gfx {
     ///
     /// # Safety
     ///
-    /// 调用者必须保证：
-    /// - `data.len() >= (size as usize) * (size as usize)`（图集是 `size × size` 的 R8 单通道）；
-    /// - `size > 0` 且不超过设备最大纹理尺寸；
-    /// - `dirty` 中每个矩形满足 `x + width <= size`、`y + height <= size`。
-    ///
-    /// 违反会导致：`UpdateSubresource` 从 `data` 越界读取（未定义行为），
-    /// 或写入纹理越界区域（D3D11 报错或破坏相邻数据）。
+    /// 内部编排：图集尺寸必须与创建时一致（本函数不重建纹理），行距必须 ≥ `width × bpp`。
+    /// 违反后果：尺寸不符会让 `UpdateSubresource` 写入越界或只更新一部分（贴图残影）；
+    /// 行距不足会读到 `data` 之外的内存 —— 图集出现随机杂点。
     pub unsafe fn update_atlas(
         &mut self,
         data: &[u8],
@@ -2165,13 +2156,10 @@ impl Gfx {
     ///
     /// # Safety
     ///
-    /// 调用者必须保证：
-    /// - `width`、`height` 均大于 0；
-    /// - 调用时没有任何外部代码仍持有旧的 back buffer / RTV 引用
-    ///   （本方法内部会先解绑并释放）。
-    ///
-    /// 违反会导致：DXGI 返回 `DXGI_ERROR_INVALID_CALL`（可恢复，本次 resize 失败），
-    /// 或旧引用与新建缓冲并存，造成画面错乱。
+    /// 内部编排：新尺寸不得超过设备最大纹理尺寸（`D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION`），
+    /// 且重建前所有依赖旧后备缓冲的资源（RTV/staging）必须**先 Release**。
+    /// 违反后果：超尺寸重建失败（返回 `Err`）；旧资源未释放就重建会让它们指向已失效的缓冲，
+    /// 表现为设备丢失恢复后花屏或 `Present` 持续失败。
     pub unsafe fn resize(&mut self, width: u32, height: u32) -> Result<bool, String> {
         if width == 0 || height == 0 || (width == self.width && height == self.height) {
             return Ok(false);
@@ -2314,13 +2302,9 @@ impl Gfx {
     ///
     /// # Safety
     ///
-    /// 调用者必须保证：
-    /// - `Gfx` 已通过 [`Gfx::new`] / [`Gfx::rebuild`] 成功初始化；
-    /// - 若图集存在，必须在此前调用过 [`Gfx::update_atlas`]（否则 PS 采样未绑定的 SRV）；
-    /// - 仍在创建窗口的线程上调用。
-    ///
-    /// `instances` 长度任意：内部按 `INSTANCE_CAPACITY` 截断，不会越界。
-    /// 违反前述任一条不会造成内存不安全，但会得到未定义的画面或设备错误码。
+    /// 内部编排：所有 pipeline / buffer / 图集都必须**已就绪**，且当前不在设备丢失状态。
+    /// 违反后果：设备丢失期间提交命令会被静默丢弃；pipeline 未就绪时会绑定空指针 ——
+    /// 崩溃点在绘制调用内部，而不是调用者。
     pub unsafe fn render(&mut self, instances: &[Instance], sync_interval: u32) -> Hresult {
         // 没有图片时走这条：等价于改动前的单次 draw。
         self.render_batched(instances, &[], sync_interval)

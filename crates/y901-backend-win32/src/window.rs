@@ -128,6 +128,9 @@ fn ime_state() -> std::sync::MutexGuard<'static, ImeState> {
 }
 
 fn modifiers() -> Modifiers {
+    // SAFETY：`GetKeyState` 是 user32 的查询函数，无指针参数、无可失败前置条件；
+    // 它读的是**调用线程**的键盘状态队列，所以必须在本 GUI 线程调用（跨线程读到的是别的队列）。
+    // 违反后果：跨线程读到错误/恒为 0 的状态 —— 修饰键永远不放映，界面表现为按键行为异常。
     unsafe {
         Modifiers {
             shift: GetKeyState(0x10) < 0,
@@ -153,6 +156,8 @@ fn vk_to_key(vk: u32) -> Key {
         0x21 => Key::PageUp,
         0x22 => Key::PageDown,
         0x70..=0x87 => Key::Function((vk - 0x70 + 1) as u8),
+            // SAFETY：同上（`GetKeyState` 无指针参数）；这里额外用它判断 CapsLock 是否开启，
+            // 只有在 GUI 线程才有意义。违反后果：大写锁定判断恒错 —— 字母大小写翻转。
         0x41..=0x5A if unsafe { GetKeyState(0x11) < 0 } => char::from_u32(vk + 0x20)
             .map(Key::Char)
             .unwrap_or(Key::Unknown),
@@ -178,6 +183,11 @@ fn vk_to_key_for_system(vk: u32) -> Key {
     }
 }
 
+/// # Safety
+///
+/// `hwnd` 必须仍是**有效且未销毁**的窗口句柄；本函数只读光标位置与客户区矩形。
+/// 违反后果：对已销毁的 HWND 调用 `GetClientRect`/`ScreenToClient` 会失败并留下未初始化的 `POINT`，
+/// 返回的坐标是垃圾值（鼠标命中会偏移到别处）。
 unsafe fn client_pos(hwnd: HWND) -> Pos {
     let mut pt = POINT { x: 0, y: 0 };
     let _ = GetCursorPos(&mut pt);
@@ -336,6 +346,16 @@ impl CharFilter {
     }
 }
 
+/// # Safety
+///
+/// 这是 `extern "system"` 回调，由 Windows 消息循环在**创建窗口的那个 GUI 线程**上调用：
+/// - 返回值必须是合法 `LRESULT`；未处理的消息必须交给 `DefWindowProcW` 兜底，
+/// - 不得跨线程触碰 `Window` 的内部状态；
+/// - 通过 `GetWindowLongPtrW(GWLP_USERDATA)` 取出的 `Box<Window>` 指针**只在窗口存活期间有效**，
+///   且必须在 `WM_NCCREATE` 之后才可能非空。
+///
+/// 违反后果：返回错误的 `LRESULT` 会让系统消息处理异常（窗口不响应或无法关闭）；
+/// 跨线程触碰状态会在 `Box` 已释放后读写它 —— 典型的 use-after-free，崩溃点通常在消息回调深处。
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_NCCREATE => {
@@ -509,9 +529,20 @@ pub struct Window {
 impl Window {
     /// 创建窗口与渲染后端。`Options.width/height` 是**窗口尺寸**（含边框与标题栏），实际渲染用的是 `GetClientRect` 得到的客户区，后者会小一圈。
     pub fn create(options: &Options) -> Result<Self, String> {
+    // SAFETY：`create_inner` 的唯一前置条件是“在 GUI 线程、且 `options` 在调用期间有效”，
+    // 两者在这里都成立（本函数由调用方在准备窗口的线程上执行，`options` 是借用参数）。
+    // 违反后果：跨线程创建会让消息循环绑定到错误的线程，窗口收不到输入事件。
         unsafe { Self::create_inner(options) }
     }
 
+/// # Safety
+///
+/// 只在 **GUI 线程**调用；`options` 的所有字段在调用期间保持有效（本函数只借用它）。
+/// `CreateWindowExW` 的 `lpParam` 必须指向一个能活到 `WM_NCCREATE` 的 `Box` ——
+/// 回调在 `WM_NCCREATE` 里把它取回并接管所有权；若提前释放，`wndproc` 会读到悬垂指针。
+///
+/// 违反后果：跨线程创建让消息循环绑定错误线程；`lpParam` 悬垂 → `WM_NCCREATE` 里 use-after-free；
+/// 若中途失败而不 `DestroyWindow`，窗口类句柄泄漏并最终耗尽。
     unsafe fn create_inner(options: &Options) -> Result<Self, String> {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -711,6 +742,8 @@ impl Window {
 
     /// 泵一轮消息。返回 false 表示窗口已退出。
     pub fn pump(&mut self) -> bool {
+    // SAFETY：`PeekMessageW` 只在本 GUI 线程的消息队列上操作；`msg` 是栈上的 `MSG`，
+    // 由系统写入、对齐正确。违反后果：跨线程抽消息会拿到别的线程队列（本线程永远收不到输入）。
         unsafe {
             let mut msg: MSG = std::mem::zeroed();
             while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
@@ -735,6 +768,9 @@ impl Window {
     /// 为什么不能无限等：PTY 输出走的是 channel 而不是 Windows 消息，
     /// 主循环必须周期性醒来 `pump` 一次，所以这里用**有限超时**。
     pub fn wait_message(&self, timeout_ms: u32) -> bool {
+    // SAFETY：`MsgWaitForMultipleObjectsEx` 不接收句柄数组（`null` + count 0），
+    // 只等待本线程的消息队列；超时参数是纯数值。
+    // 违反后果：跨线程调用会等错队列 —— 表现为“卡住不动”或空转占满 CPU。
         unsafe {
             // 第 1 个参数 0 表示不等待任何句柄，只看消息队列。
             let r = MsgWaitForMultipleObjectsEx(0, std::ptr::null(), timeout_ms, QS_ALLINPUT, 0);
@@ -787,6 +823,9 @@ impl Window {
         backend.begin();
         tree.render(backend);
         let (w, h) = self.viewport;
+    // SAFETY：`backend` 与 `self.hwnd` 都来自同一个 `Window`，`w`/`h` 取自当前客户区；
+    // `present` 内部会重新校验设备状态，失败时返回 HRESULT 而不是 UB。
+    // 违反后果：若在窗口已销毁后 present，交换链仍持有失效的 HWND —— 表现为黑屏或 Present 失败。
         unsafe {
             let _ = backend.present(self.hwnd, w, h);
         }
@@ -890,6 +929,9 @@ impl Window {
             Cursor::Grab => IDC_SIZEALL,
             Cursor::Default => IDC_ARROW,
         };
+    // SAFETY：`LoadCursorW` 的两个参数分别是 `null` 实例句柄与系统预定义光标 ID，
+    // 都不涉及调用方内存；返回的句柄由系统持有，不需释放。
+    // 违反后果：无（失败返回空句柄，下面已判空）；但若传自定义 ID 会得到空指针，光标变成默认箭头。
         unsafe {
             let handle = LoadCursorW(std::ptr::null_mut(), id);
             if !handle.is_null() {
@@ -900,6 +942,9 @@ impl Window {
 
     /// IME 候选窗定位。
     pub fn set_ime_position(&self, x: f32, y: f32) {
+    // SAFETY：`set_composition_position` 只使用 `hwnd` 与两个坐标值，不持有指针；
+    // `hwnd` 由本 `Window` 保证在 `self` 存活期间有效。
+    // 违反后果：对已销毁的 HWND 设置 IME 位置会静默失败 —— 候选窗口出现在屏幕角落。
         unsafe {
             crate::ime::set_composition_position(self.hwnd, x, y);
         }
@@ -907,6 +952,9 @@ impl Window {
 
     /// 请求关闭窗口（投递退出消息）。为什么不是析构：关闭要经过消息循环，直接销毁会让正在处理的这条消息访问悬垂句柄。
     pub fn close(&self) {
+    // SAFETY：`DestroyWindow` 只接受本线程创建的窗口句柄；本 `Window` 独占该句柄，
+    // 不会再被第二次销毁（`close` 之后调用方不应继续 `present`/`pump`）。
+    // 违反后果：重复销毁会破坏窗口类状态（静默失败）；跨线程销毁会失败并让窗口残留。
         unsafe {
             DestroyWindow(self.hwnd);
         }
