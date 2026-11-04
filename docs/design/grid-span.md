@@ -1,6 +1,7 @@
 # Grid 跨格与显式定位：设计文档
 
-> 状态：**设计已定稿**（4 个决策已确认）；实现进行中。实现状态见 §8。
+> 状态：**已实现（v0.1.3）**，验证见 `crates/y901-ui/tests/grid_span.rs` 与 `grid.rs` 的单测。
+> 未实现：显式定位（`place`）与 `span` 目前**互斥**（跳格只适用于自动流）。
 > 现有实现参照 `crates/y901-ui/src/grid.rs`（顺序排布，`cell_of(i) = (i % cols, i / cols)`）。
 
 ---
