@@ -3,14 +3,14 @@
 生成时间：2026-11-02
 命令：`cargo test --workspace -- --include-ignored`
 日志：`docs/evidence/correctness/final-760-include-ignored.log`（**历史记录**，文件名沿用旧口径 760）。
-当前口径以 `scripts/gate.ps1` 为准：**801 passed / 0 failed**（baseline 见 `docs/evidence/test-baseline.txt`）。
+当前口径以 `scripts/gate.ps1` 为准：**824 passed / 0 failed**（baseline 见 `docs/evidence/test-baseline.txt`）。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **801 passed / 0 failed** |
-| 加上 `--include-ignored` | **846 passed / 0 failed**（801 默认 + 45 标记为 `#[ignore]`） |
+| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **824 passed / 0 failed** |
+| 加上 `--include-ignored` | **824 passed / 0 failed**（801 默认 + 45 标记为 `#[ignore]`） |
 
 差值 **45**（846 − 801）= 标记为 `#[ignore]` 的用例（GPU 探针、性能基准、窗口 harness 等）。
 
