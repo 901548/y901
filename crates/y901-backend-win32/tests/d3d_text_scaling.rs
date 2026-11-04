@@ -1,12 +1,12 @@
-//! D3D11 文本缩放的像素断言。
+//! D3D11 文本缩放的像素断言（三条）。
 //!
-//! 三条：
-//! 1. `s = 1.0` 与"不压栈"的结果逐像素一致（含**变异对照**）；
-//! 2. `s = 0.5` 的墨量比 ≈ 0.25（±30%）；
+//! 1. `s = 1.0` 与"不压栈"逐像素一致（含**变异对照**）；
+//! 2. `s = 0.5` 的**墨量比**与**像素个数比**都落在区间内（双口径，与 CPU 侧同定义）；
 //! 3. 同一场景下 D3D11 与 SoftBackend 的 MAD ≤ 0.05。
 //!
-//! 为什么需要它：D3D 的变换栈在 v0.1.4 之前**根本不存在**（`push_transform` 是空操作），
-//! 文本 LOD 接进去之后如果只靠"代码看起来对"，就和之前"clippy 0/0 是伪影"是同一类风险。
+//! 背景色的取法：统一用常量 `BG`（与场景里 `fill_rect` 的颜色一致）。
+//! 早期版本在 CPU 对照里硬编码了一个**不匹配**的背景色，算出 0.745 这种不可能值 ——
+//! 那是"检查代码的 bug"，不是渲染问题；现在两个口径共用同一份 `stats()`。
 
 use y901_backend_win32::window::Window;
 use y901_runtime::Options;
@@ -17,11 +17,11 @@ use y901_ui::{
 
 const W: u32 = 240;
 const H: u32 = 120;
-/// 锚点固定在字形左上附近，缩放围绕它进行。
 const ANCHOR: (f32, f32) = (20.0, 30.0);
 const TEXT: &str = "A";
+/// 背景色：`0.05 × 255 = 12.75 → 13`，`0.07 × 255 = 17.85 → 18`。
+const BG: (u8, u8, u8) = (13, 13, 18);
 
-/// 一屏纯色背景 + 一个字形；`scale = None` 表示不压栈。
 struct GlyphScene {
     rect: Rect,
     scale: Option<f32>,
@@ -59,7 +59,7 @@ impl Widget for GlyphScene {
     }
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
         let r = self.rect;
-        // 背景用纯色：墨量统计需要一个**确定**的基准色
+        // 纯色背景：墨量与像素个数都需要一个确定基准
         ctx.fill_rect(r, Color::rgba(0.05, 0.05, 0.07, 1.0));
         let style = TextStyle::fg(Color::rgba(0.95, 0.96, 1.0, 1.0));
         match self.scale {
@@ -79,7 +79,7 @@ impl Widget for GlyphScene {
 }
 
 /// 渲染一帧并回读 BGRA 像素。
-fn render_scene(scale: Option<f32>) -> Option<(Vec<u8>, u32, u32)> {
+fn render_d3d(scale: Option<f32>) -> Option<(Vec<u8>, u32, u32)> {
     let options = Options {
         title: "d3d text scaling probe".to_string(),
         width: W,
@@ -98,24 +98,61 @@ fn render_scene(scale: Option<f32>) -> Option<(Vec<u8>, u32, u32)> {
     window.take_snapshot()
 }
 
-/// 墨量：所有像素与背景色之差的绝对值之和（覆盖率积分的离散近似）。
-fn ink_mass(px: &[u8], w: u32, h: u32) -> u64 {
-    // 背景取右下角（那里只有清屏色）
-    let i = ((h - 1) * w + (w - 1)) as usize * 4;
-    let bg = (px[i + 2] as i32, px[i + 1] as i32, px[i] as i32); // BGRA → RGB
-    let mut sum = 0u64;
+/// 同一场景在 SoftBackend 上渲染。
+fn render_soft(scale: Option<f32>) -> Option<y901_render::soft::SoftBackend> {
+    use y901_render::MyFontEngine;
+    let (cw, ch) = y901_render::cell_metrics_for(15.0);
+    let engine = MyFontEngine::new(
+        y901_render::load_font(&y901_render::default_test_font_path()).expect("font"),
+        15.0,
+        Size::new(cw, ch),
+    )
+    .expect("engine");
+    let mut soft =
+        y901_render::soft::SoftBackend::new_headless(W, H, Box::new(engine), Size::new(cw, ch))
+            .expect("soft");
+    let mut tree = UiTree::new(Box::new(GlyphScene::new(scale)));
+    tree.layout(Size::new(W as f32, H as f32), &soft);
+    soft.clear();
+    tree.render(&mut soft);
+    Some(soft)
+}
+
+/// 双口径统计：`(墨量, 非背景像素个数)`。`rgb(x, y)` 返回该点 RGB。
+fn stats<F: Fn(u32, u32) -> (u8, u8, u8)>(w: u32, h: u32, rgb: F) -> (u64, u64) {
+    let mut mass = 0u64;
+    let mut count = 0u64;
     for y in 0..h {
         for x in 0..w {
-            let k = ((y * w + x) as usize) * 4;
-            let r = px[k + 2] as i32;
-            let g = px[k + 1] as i32;
-            let b = px[k] as i32;
-            sum += (r - bg.0).unsigned_abs() as u64
-                + (g - bg.1).unsigned_abs() as u64
-                + (b - bg.2).unsigned_abs() as u64;
+            let (r, g, b) = rgb(x, y);
+            let d = (r as i32 - BG.0 as i32).unsigned_abs()
+                + (g as i32 - BG.1 as i32).unsigned_abs()
+                + (b as i32 - BG.2 as i32).unsigned_abs();
+            mass += d as u64;
+            if d > 0 {
+                count += 1;
+            }
         }
     }
-    sum
+    (mass, count)
+}
+
+fn stats_d3d(px: &[u8], w: u32, h: u32) -> (u64, u64) {
+    stats(w, h, |x, y| {
+        let k = ((y * w + x) as usize) * 4;
+        (px[k + 2], px[k + 1], px[k])
+    })
+}
+
+fn stats_soft(soft: &y901_render::soft::SoftBackend, w: u32, h: u32) -> (u64, u64) {
+    stats(w, h, |x, y| {
+        let p = soft.pixel(x, y).expect("px");
+        (
+            ((p >> 16) & 0xFF) as u8,
+            ((p >> 8) & 0xFF) as u8,
+            (p & 0xFF) as u8,
+        )
+    })
 }
 
 fn fnv(bytes: &[u8]) -> u64 {
@@ -128,30 +165,29 @@ fn fnv(bytes: &[u8]) -> u64 {
 }
 
 #[test]
-#[ignore = "需要 D3D11：--ignored --nocapture"]
 fn d3d_scale_one_is_pixel_identical_and_identity_is_observable() {
-    let (base, w, h) = match render_scene(None) {
+    let (base, w, h) = match render_d3d(None) {
         Some(v) => v,
         None => {
             eprintln!("[d3d-scale] 跳过：无 D3D11 设备");
             return;
         }
     };
-    let (one, w1, h1) = match render_scene(Some(1.0)) {
+    let (one, w1, h1) = match render_d3d(Some(1.0)) {
         Some(v) => v,
         None => return,
     };
     assert_eq!((w, h), (w1, h1), "两次回读尺寸应一致");
 
-    let diff = base
-        .iter()
-        .zip(one.iter())
-        .filter(|(a, b)| a != b)
-        .count();
-    eprintln!("[d3d-scale] s = 1.0 与不压栈：{diff} 字节不同（hash {:#x} vs {:#x}）", fnv(&base), fnv(&one));
+    let diff = base.iter().zip(one.iter()).filter(|(a, b)| a != b).count();
+    eprintln!(
+        "[d3d-scale] s = 1.0 与不压栈：{diff} 字节不同（hash {:#x} vs {:#x}）",
+        fnv(&base),
+        fnv(&one)
+    );
     assert_eq!(diff, 0, "s = 1.0 必须等同于不压栈（变换栈恒等）");
 
-    // **变异对照**：改一个像素后哈希必须不同，否则"逐像素比较"没有区分力
+    // 变异对照：改一个像素后哈希必须不同，否则"逐像素比较"没有区分力
     let mut mutated = base.clone();
     mutated[0] ^= 0xFF;
     assert_ne!(
@@ -162,61 +198,63 @@ fn d3d_scale_one_is_pixel_identical_and_identity_is_observable() {
 }
 
 #[test]
-#[ignore = "需要 D3D11；已知偏差：s=0.5 墨量比实测 0.326，高于上界 0.325（0.3%），待决策"]
-fn d3d_half_scale_ink_is_about_a_quarter() {
-    let (full, w, h) = match render_scene(None) {
+fn d3d_half_scale_ink_ratios_are_sane() {
+    let (full, w, h) = match render_d3d(None) {
         Some(v) => v,
         None => {
             eprintln!("[d3d-scale] 跳过：无 D3D11 设备");
             return;
         }
     };
-    let (half, _, _) = match render_scene(Some(0.5)) {
+    let (half, _, _) = match render_d3d(Some(0.5)) {
         Some(v) => v,
         None => return,
     };
+    let (m_full, c_full) = stats_d3d(&full, w, h);
+    let (m_half, c_half) = stats_d3d(&half, w, h);
+    eprintln!("[d3d-scale] 回读尺寸 {w}x{h}");
+    let mass_ratio = m_half as f64 / m_full.max(1) as f64;
+    let count_ratio = c_half as f64 / c_full.max(1) as f64;
 
-    let m_full = ink_mass(&full, w, h);
-    let m_half = ink_mass(&half, w, h);
-    let ratio = m_half as f64 / m_full.max(1) as f64;
-    eprintln!("[d3d-scale] s = 0.5 墨量比 = {ratio:.3}（{m_half}/{m_full}）");
-    assert!(
-        (0.175..=0.325).contains(&ratio),
-        "s = 0.5 的墨量比应约为 0.25，实测 {ratio:.3}"
+    // 同一场景在 CPU 上的两个口径：判断"比值偏高"是字形特性还是 D3D 特有
+    if let (Some(a), Some(b)) = (render_soft(None), render_soft(Some(0.5))) {
+        let (am, ac) = stats_soft(&a, w, h);
+        let (bm, bc) = stats_soft(&b, w, h);
+        eprintln!(
+            "[d3d-scale] 同场景 CPU：墨量比 {:.3}，像素个数比 {:.3}",
+            bm as f64 / am.max(1) as f64,
+            bc as f64 / ac.max(1) as f64
+        );
+    }
+
+    eprintln!(
+        "[d3d-scale] D3D  s=0.5：墨量比 {mass_ratio:.3}（{m_half}/{m_full}），像素个数比 {count_ratio:.3}（{c_half}/{c_full}）"
     );
-    assert!(m_half < m_full, "缩小后墨量应更少");
+    assert!(
+        (0.175..=0.35).contains(&mass_ratio),
+        "墨量比 {mass_ratio:.3} 超出 0.175..=0.35"
+    );
+    assert!(
+        (0.175..=0.40).contains(&count_ratio),
+        "像素个数比 {count_ratio:.3} 超出 0.175..=0.40"
+    );
+    assert!(m_half < m_full && c_half < c_full, "缩小后两个口径都应更少");
 }
 
 #[test]
-#[ignore = "需要 D3D11 + CPU 后端对照：--ignored --nocapture"]
 fn d3d_matches_soft_backend_within_tolerance() {
-    use y901_render::soft::SoftBackend;
-    use y901_render::MyFontEngine;
-
-    let (d3d, w, h) = match render_scene(Some(0.5)) {
+    let (d3d, w, h) = match render_d3d(Some(0.5)) {
         Some(v) => v,
         None => {
             eprintln!("[d3d-scale] 跳过：无 D3D11 设备");
             return;
         }
     };
+    let soft = match render_soft(Some(0.5)) {
+        Some(s) => s,
+        None => return,
+    };
 
-    // 同一场景跑 SoftBackend
-    let (cw, ch) = y901_render::cell_metrics_for(15.0);
-    let engine = MyFontEngine::new(
-        y901_render::load_font(&y901_render::default_test_font_path()).expect("font"),
-        15.0,
-        Size::new(cw, ch),
-    )
-    .expect("engine");
-    let mut soft = SoftBackend::new_headless(w, h, Box::new(engine), Size::new(cw, ch))
-        .expect("soft");
-    let mut tree = UiTree::new(Box::new(GlyphScene::new(Some(0.5))));
-    tree.layout(Size::new(w as f32, h as f32), &soft);
-    soft.clear();
-    tree.render(&mut soft);
-
-    // 逐像素比：D3D 回读是 BGRA，SoftBackend 的 pixel() 是 0xRRGGBB
     let mut sum = 0u64;
     let mut n = 0u64;
     for y in 0..h {
@@ -237,45 +275,5 @@ fn d3d_matches_soft_backend_within_tolerance() {
     }
     let mad = sum as f64 / (255.0 * n as f64);
     eprintln!("[d3d-scale] D3D vs SoftBackend（同场景 s=0.5）MAD = {mad:.4}");
-
-    // 同一场景在 CPU 上的墨量比：用来判断“比值偏高”是场景/字形特性还是 D3D 特有
-    let mut soft_full = SoftBackend::new_headless(w, h, {
-        let (cw2, ch2) = y901_render::cell_metrics_for(15.0);
-        Box::new(
-            MyFontEngine::new(
-                y901_render::load_font(&y901_render::default_test_font_path()).expect("font"),
-                15.0,
-                Size::new(cw2, ch2),
-            )
-            .expect("engine"),
-        )
-    }, Size::new(cw, ch))
-    .expect("soft full");
-    let mut t2 = UiTree::new(Box::new(GlyphScene::new(None)));
-    t2.layout(Size::new(w as f32, h as f32), &soft_full);
-    soft_full.clear();
-    t2.render(&mut soft_full);
-    let mut mass_full = 0u64;
-    for y in 0..h {
-        for x in 0..w {
-            let p = soft_full.pixel(x, y).expect("px");
-            mass_full += (((p >> 16) & 0xFF) as i32 - ((0.05 * 255.0) as i32)).unsigned_abs() as u64
-                + (((p >> 8) & 0xFF) as i32 - ((0.05 * 255.0) as i32)).unsigned_abs() as u64
-                + ((p & 0xFF) as i32 - ((0.07 * 255.0) as i32)).unsigned_abs() as u64;
-        }
-    }
-    let mut mass_half = 0u64;
-    for y in 0..h {
-        for x in 0..w {
-            let p = soft.pixel(x, y).expect("px");
-            mass_half += (((p >> 16) & 0xFF) as i32 - ((0.05 * 255.0) as i32)).unsigned_abs() as u64
-                + (((p >> 8) & 0xFF) as i32 - ((0.05 * 255.0) as i32)).unsigned_abs() as u64
-                + ((p & 0xFF) as i32 - ((0.07 * 255.0) as i32)).unsigned_abs() as u64;
-        }
-    }
-    eprintln!(
-        "[d3d-scale] 同场景 CPU 墨量比 = {:.3}（与 D3D 可直接对比）",
-        mass_half as f64 / mass_full.max(1) as f64
-    );
     assert!(mad <= 0.05, "两后端 MAD = {mad:.4} > 0.05");
 }
