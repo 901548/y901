@@ -1545,10 +1545,12 @@ float4 ps_blit(VSOutput input) : SV_Target
 }
 "#;
 
-/// # Safety
-///
-/// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
-/// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
+    /// # Safety
+    ///
+    /// 内部编排：`entry` 必须是 `source` 里真实存在的入口点，`target` 必须是合法的 profile 串，
+    /// 且 HLSL 源码由本模块内置（合法 UTF-8）；这些前置条件外部无法伪造。
+    /// 违反后果：编译失败会返回 `Err`（已处理）；但入口点拼错时错误来自 D3DCompile 的消息而不是
+    /// 我们的类型 —— 排查时容易误以为是着色器逻辑问题。
 unsafe fn compile_shader(entry: &str, target: &str) -> Result<Blob, String> {
     let entry = CString::new(entry).map_err(|_| "invalid entry point".to_string())?;
     let target = CString::new(target).map_err(|_| "invalid target".to_string())?;
@@ -1623,10 +1625,11 @@ struct Atlas {
 //   1. 项目 MSRV 未强制到引入 c-string 字面量的版本（1.77）；
 //   2. 语义名将来要按顶点属性表运行时拼接时，b"" 形式更容易与 fmt 组合。
 #[allow(clippy::manual_c_str_literals)]
-/// # Safety
-///
-/// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
-/// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
+    /// # Safety
+    ///
+    /// 内部编排：所有组件（VS/PS/InputLayout/BlendState/RasterizerState）都由**同一个 `device`** 创建，
+    /// 且 InputLayout 的字段序与 VS 输入签名逐项匹配 —— 这两条由下面的构建代码保证，不在类型里。
+    /// 违反后果：签名不匹配时 D3D11 **不校验**，Draw 时静默丢帧（画面空着但没有错误码）。
 unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
     let vs_blob = compile_shader("vs_main", "vs_5_0")?;
     let ps_blob = compile_shader("ps_main", "ps_5_0")?;
@@ -1888,10 +1891,11 @@ unsafe fn draw_scene(
 /// 说明：用**独立的** `blit_buffer`——复用 `instance_buffer` 会 `Map(DISCARD)`
 /// 掉 UI 实例，而 GPU 可能还没执行完 UI 那次 draw（实测表现为只剩背景色）。
 #[allow(clippy::too_many_arguments)]
-/// # Safety
-///
-/// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
-/// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
+    /// # Safety
+    ///
+    /// 内部编排：`cached.rtv` 与 swapchain 后备缓冲的**尺寸必须一致**，且调用时 `cached` 已完整绘制过一帧。
+    /// 违反后果：尺寸不一致时只有重叠区域被绘制，其余区域保持上一帧内容 —— 表现为“画面撕裂/残留”，
+    /// 且不会有任何错误码。
 unsafe fn blit_cached(
     context: &Context,
     pipeline: &Pipeline,
@@ -2326,8 +2330,9 @@ impl Gfx {
     ///
     /// # Safety
     ///
-    /// 与 [`Gfx::render`] 相同；额外要求：`batches` 的区间必须在
-    /// `instances` 范围内，且**按 start 升序且不重叠**（重叠会重复画）。
+    /// 内部编排：`batches` 里每个 `start + count` 都必须落在 `instances.len()` 之内；
+    /// 各批次共用同一 pipeline 与实例 buffer。
+    /// 违反后果：越界会让 GPU 读到 buffer 之外 —— 可能挂起设备（TDR）或画出随机三角形。
     pub unsafe fn render_batched(
         &mut self,
         instances: &[Instance],
@@ -2605,8 +2610,9 @@ impl Gfx {
 
     /// # Safety
     ///
-    /// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
-    /// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
+    /// 内部编排：必须在 `Present` **之前**调用（后备缓冲仍有效），且内部使用的 staging texture 必须是
+    /// `D3D11_USAGE_STAGING` + `CPU_ACCESS_READ`。
+    /// 违反后果：`Present` 之后回读拿到空帧或上一帧；staging 配置错误时 `Map` 返回 null（本函数返回 `None`）。
     unsafe fn read_back_frame(&self) -> Option<(Vec<u8>, u32, u32)> {
         let (Some(device), Some(context), Some(swap_chain)) = (
             self.device.as_ref(),

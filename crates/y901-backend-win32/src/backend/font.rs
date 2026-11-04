@@ -744,8 +744,9 @@ impl TextEngine {
 
     /// # Safety
     ///
-    /// `self` 必须是未释放的字形分析器；`advance_pen`/`origin` 必须指向调用方持有的有效内存，
-    /// `outline` 的容量必须足以容纳 `GetGlyphRunOutline` 写出的轮廓点数（本文件按 4096 点预留）。
+    /// 内部编排：`ch` 的轮廓必须已由 flatten 展开为**合法的点序列**（曲线已离散化），
+    /// 且本引擎的图集/字形缓存已完成初始化。
+    /// 违反后果：未展平的曲线点会让扫描线算法读到无效数据 —— 越界或产生错误的覆盖率（画面污点）。
     unsafe fn rasterize(&mut self, ch: char) -> Result<GlyphInfo, String> {
         // **不要用 `encode_utf16()[0]`**：非 BMP 字符（emoji 等）会得到代理项，
         // 查不到字形；DWrite 的 GetGlyphIndices 本来就要 32 位码点。
