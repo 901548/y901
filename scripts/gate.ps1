@@ -1,77 +1,89 @@
-# Unified gate: MSRV + tests + clippy + pixel-hash + docs completeness.
+# Unified gate: MSRV + tests(count) + clippy + pixel-hash + docs + audit.
 #
-# Why this script exists: until now the "four-condition gate" was three commands typed by hand
-# every time, and the clippy one used a regex that silently missed warnings whose text starts with
-# a backtick. A gate you retype is a gate you eventually mistype.
+# Four ways this gate used to lie, all fixed here:
+#   1. audit missing   -> said "skipped" and still printed GATE OK;
+#   2. audit DB down   -> reported "found vulnerabilities" (wrong reason) or was silently skipped;
+#   3. clippy          -> never checked $LASTEXITCODE, so a compile error could still look clean;
+#   4. tests           -> only looked for "test result: ok", so a test that got #[ignore]d just
+#                         vanished from the count and the gate stayed green.
 #
 # Usage:
-#   pwsh -File scripts/gate.ps1              # full gate
-#   pwsh -File scripts/gate.ps1 -SkipTest    # fast local loop (skips cargo test)
+#   pwsh -File scripts/gate.ps1                 # full gate (use this before a tag)
+#   pwsh -File scripts/gate.ps1 -SkipTest       # fast local loop
+#   pwsh -File scripts/gate.ps1 -SkipAudit      # offline only; NOT a release gate
 
 param(
-    [switch]$SkipTest
+    [switch]$SkipTest,
+    [switch]$SkipAudit
 )
 
 # cargo writes progress to stderr; 'Stop' would turn that into a fatal NativeCommandError.
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
-$failed = @()
+$baselineTests = Join-Path $root 'docs\evidence\test-baseline.txt'
 
 function Step($name) { Write-Host "[gate] $name ..." }
+function Fail($msg) { Write-Host "[gate] FAIL: $msg"; exit 1 }
 
 # ---------------------------------------------------------------- 1. MSRV
 Step "MSRV (rustc >= 1.92)"
 $ver = (& rustc --version) -join ' '
-if ($ver -notmatch 'rustc 1\.(9[2-9]|[1-9][0-9]{2})') {
-    Write-Host "[gate] FAIL: $ver"
-    exit 1
-}
+if ($ver -notmatch 'rustc 1\.(9[2-9]|[1-9][0-9]{2})') { Fail $ver }
 Write-Host "[gate] ok: $ver"
 
-# ---------------------------------------------------------------- 2. tests
+# ---------------------------------------------------------------- 2. tests (count against baseline)
 if (-not $SkipTest) {
-    Step "cargo test --workspace"
+    Step "cargo test --workspace (count must not drop below baseline)"
+    if (-not (Test-Path $baselineTests)) {
+        Fail "test baseline missing: $baselineTests"
+    }
+    $expected = [int]((Get-Content $baselineTests -Raw).Trim())
     $testOut = & cargo test --workspace --offline 2>&1 | Out-String
-    if ($testOut -notmatch 'test result: ok') {
-        Write-Host "[gate] FAIL: no 'test result: ok' in output"
+
+    if ($testOut -match 'error\[E\d+\]' -or $testOut -match 'could not compile') {
         Write-Host $testOut
-        exit 1
+        Fail "workspace does not compile"
     }
-    $failedTests = [regex]::Matches($testOut, '(\d+) failed')
-    foreach ($m in $failedTests) {
-        if ([int]$m.Groups[1].Value -gt 0) {
-            Write-Host "[gate] FAIL: $($m.Value)"
-            exit 1
-        }
+    $passed = 0
+    $failed = 0
+    foreach ($m in [regex]::Matches($testOut, 'test result: \w+\. (\d+) passed; (\d+) failed')) {
+        $passed += [int]$m.Groups[1].Value
+        $failed += [int]$m.Groups[2].Value
     }
-    Write-Host "[gate] ok: all test binaries reported 0 failed"
+    Write-Host "[gate] passed=$passed failed=$failed baseline=$expected"
+    if ($failed -gt 0) { Fail "$failed test(s) failed" }
+    if ($passed -lt $expected) {
+        Fail "test count dropped: expected >= $expected, got $passed (a test was removed or #[ignore]d)"
+    }
+    Write-Host "[gate] ok: $passed tests (>= baseline $expected), 0 failed"
 }
 else {
     Write-Host "[gate] skipped: cargo test (-SkipTest)"
 }
 
-# ---------------------------------------------------------------- 3. clippy (JSON, no text regex)
-Step "cargo clippy (warnings must be 0)"
+# ---------------------------------------------------------------- 3. clippy (exit code FIRST, then count)
+Step "cargo clippy (exit code must be 0 AND warnings must be 0)"
 $clippyJson = & cargo clippy --workspace --all-targets --offline --message-format=json 2>&1 | Out-String
-# Count only real diagnostic objects, not the human-readable lines around them.
+$clippyCode = $LASTEXITCODE
+if ($clippyCode -ne 0) {
+    Write-Host $clippyJson
+    Fail "clippy exited $clippyCode (compile error or lint denied)"
+}
 $warnCount = ([regex]::Matches($clippyJson, '"level":"warning"')).Count
 if ($warnCount -gt 0) {
-    Write-Host "[gate] FAIL: clippy reported $warnCount warnings"
-    # Show the first few for convenience.
     ($clippyJson -split "`n" | Select-String '"level":"warning"' | Select-Object -First 5) | ForEach-Object { Write-Host $_ }
-    exit 1
+    Fail "clippy reported $warnCount warnings"
 }
-Write-Host "[gate] ok: 0 warnings"
+Write-Host "[gate] ok: exit 0, 0 warnings"
 
-# ---------------------------------------------------------------- 4. pixel hash
-Step "pixel hash gate (same-session baseline)"
+# ---------------------------------------------------------------- 4. pixel hash (committed baseline)
+Step "pixel hash gate (baseline is committed; missing baseline is a failure)"
 & powershell -NoProfile -File (Join-Path $PSScriptRoot 'hash-gate.ps1') | Out-Host
 $hashCode = $LASTEXITCODE
 if ($hashCode -ne 0) {
-    Write-Host "[gate] FAIL: hash gate exit $hashCode (2 = client area changed, 1 = render regression)"
-    exit 1
+    Fail "hash gate exit $hashCode (1 = render regression, 2 = client area changed, 3 = baseline missing)"
 }
-Write-Host "[gate] ok: hash matches baseline"
+Write-Host "[gate] ok: hash matches committed baseline"
 
 # ---------------------------------------------------------------- 5. docs
 Step "missing_docs (must be 0)"
@@ -79,36 +91,38 @@ $env:RUSTFLAGS = '-W missing_docs'
 $docOut = & cargo build --workspace --offline 2>&1 | Out-String
 Remove-Item Env:\RUSTFLAGS -ErrorAction SilentlyContinue
 $docCount = ([regex]::Matches($docOut, 'missing documentation')).Count
-if ($docCount -gt 0) {
-    Write-Host "[gate] FAIL: $docCount items without docs"
-    exit 1
-}
+if ($docCount -gt 0) { Fail "$docCount items without docs" }
 Write-Host "[gate] ok: 0 missing docs"
 
 # ---------------------------------------------------------------- 6. security audit
-Step "cargo audit (no known vulnerabilities)"
-if (Get-Command cargo-audit -ErrorAction SilentlyContinue) {
+Step "cargo audit (must actually run and report 0 vulnerabilities)"
+if ($SkipAudit) {
+    Write-Host "[gate] WARNING: audit skipped by -SkipAudit -- this run is NOT a release gate"
+}
+elseif (-not (Get-Command cargo-audit -ErrorAction SilentlyContinue)) {
+    Fail "audit SKIPPED: cargo-audit not installed. Install: cargo install cargo-audit"
+}
+else {
     $auditOut = & cargo audit 2>&1 | Out-String
     $auditCode = $LASTEXITCODE
     Write-Host $auditOut
+    if ($auditCode -ne 0 -and ($auditOut -match "couldn't fetch advisory database" -or $auditOut -match "failed to prepare fetch")) {
+        # 拉不到最新指南库 ≠ 无法审计：本机已有缓存副本时可以用 --no-fetch 审一遍，
+        # 但必须**明说指南库可能过时**——不把"没拉到最新"伪装成"已审计到最新"。
+        Write-Host "[gate] WARNING: advisory DB refresh failed; retrying against the CACHED database"
+        $auditOut = & cargo audit --no-fetch 2>&1 | Out-String
+        $auditCode = $LASTEXITCODE
+        Write-Host $auditOut
+        if ($auditCode -eq 0) {
+            Write-Host "[gate] ok: audit ran against CACHED advisory DB (may be stale; re-run online for a release)"
+        }
+    }
     if ($auditCode -ne 0) {
-        if ($auditOut -match "couldn't fetch advisory database" -or $auditOut -match "failed to prepare fetch" -or $auditOut -match "network") {
-            # 指南库拉不到时**并不代表没有漏洞**，但也不能因为断网就把本地门禁卡死。
-            # 这里明确标注“未完成审计”，并要求在联网环境/CI 重跑。
-            Write-Host "[gate] audit UNAVAILABLE: advisory database could not be fetched (offline?)"
-            Write-Host "[gate]   -> this is NOT a pass; re-run in a networked environment or CI"
-        }
-        else {
-            Write-Host "[gate] FAIL: cargo audit reported a problem (exit $auditCode)"
-            exit 1
-        }
+        Fail "audit FAILED: cargo-audit exited $auditCode (no usable advisory database)"
     }
-    else {
-        Write-Host "[gate] ok: no vulnerabilities (warnings such as 'unmaintained' are reported above)"
+    if ($auditCode -eq 0) {
+        Write-Host "[gate] ok: 0 vulnerabilities"
     }
-}
-else {
-    Write-Host "[gate] skipped: cargo-audit not installed (cargo install cargo-audit)"
 }
 
 Write-Host "GATE OK"

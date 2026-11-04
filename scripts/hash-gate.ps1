@@ -1,7 +1,7 @@
 ﻿# 哈希门禁：同会话前后对比（不硬编码任何哈希常量）
 #
 # 用法：
-#   pwsh -File scripts/hash-gate.ps1            # 对比基线；没有基线就先记录
+#   pwsh -File scripts/hash-gate.ps1            # 对比基线；**基线缺失则失败**（exit 3）
 #   pwsh -File scripts/hash-gate.ps1 -Update    # 用当前结果覆盖基线（改动了渲染且确认无误后）
 #
 # 为什么不再硬编码 `0xF38B9C1AB8A877E2`：
@@ -20,7 +20,8 @@ param(
 # cargo 会向 stderr 写进度信息，`Stop` 会把它当成致命错误 → 这里必须放宽。
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
-$baseline = Join-Path $root 'target\hash-baseline.txt'
+# 基线**必须入库**（`target/` 被 gitignore），否则换一个 checkout 就“没有基线”而静默通过。
+$baseline = Join-Path $root 'docs\evidence\hash-baseline.txt'
 
 Write-Host '[hash-gate] 运行 font_3c_pixels ...'
 $out = & cargo test -p y901-backend-win32 --offline --test font_3c_pixels -- --ignored --nocapture 2>&1 | Out-String
@@ -42,10 +43,16 @@ $current = "hash=$hash size=$size"
 
 Write-Host "[hash-gate] 当前：$current"
 
-if ($Update -or -not (Test-Path $baseline)) {
+if ($Update) {
     Set-Content -Path $baseline -Value $current -Encoding utf8
     Write-Host "[hash-gate] 已记录基线：$baseline"
     exit 0
+}
+
+if (-not (Test-Path $baseline)) {
+    Write-Host "[hash-gate] 失败：基线缺失（$baseline）"
+    Write-Host "               请用 -Update 创建，并把文件提交入库。"
+    exit 3
 }
 
 $stored = (Get-Content -Path $baseline -Raw).Trim()

@@ -155,6 +155,12 @@ fn stats_soft(soft: &y901_render::soft::SoftBackend, w: u32, h: u32) -> (u64, u6
     })
 }
 
+/// 串行化所有 D3D 探针测试。
+///
+/// 为什么需要：每个测试都 `Window::create` 一个真实窗口；并行时会争抢 D3D 设备与前台窗口，
+/// 实测出现过一次假红（单独跑全绿）。
+static D3D_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn fnv(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {
@@ -166,6 +172,7 @@ fn fnv(bytes: &[u8]) -> u64 {
 
 #[test]
 fn d3d_scale_one_is_pixel_identical_and_identity_is_observable() {
+    let _guard = D3D_LOCK.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
     let (base, w, h) = match render_d3d(None) {
         Some(v) => v,
         None => {
@@ -199,6 +206,7 @@ fn d3d_scale_one_is_pixel_identical_and_identity_is_observable() {
 
 #[test]
 fn d3d_half_scale_ink_ratios_are_sane() {
+    let _guard = D3D_LOCK.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
     let (full, w, h) = match render_d3d(None) {
         Some(v) => v,
         None => {
@@ -243,6 +251,7 @@ fn d3d_half_scale_ink_ratios_are_sane() {
 
 #[test]
 fn d3d_matches_soft_backend_within_tolerance() {
+    let _guard = D3D_LOCK.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
     let (d3d, w, h) = match render_d3d(Some(0.5)) {
         Some(v) => v,
         None => {
