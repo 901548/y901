@@ -45,7 +45,8 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM}
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
-    SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    AdjustWindowRectExForDpi, GetDpiForSystem, SetProcessDpiAwarenessContext,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, DragQueryPoint};
@@ -514,6 +515,24 @@ impl Window {
     unsafe fn create_inner(options: &Options) -> Result<Self, String> {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
+        // `Options.width/height` 是**客户区**尺寸，不是窗口尺寸。
+        //
+        // 为什么要反算：直接把它们传给 CreateWindowExW 时，它们是**窗口**尺寸，
+        // 客户区要减掉边框与标题栏，而那个差值随 DPI / 主题 / DWM 状态变化——
+        // 实测在同一台机器上来回在 378x164 与 382x173 之间摆动，
+        // 直接让像素哈希门禁在“重建基线”与“报回归”之间反复横跳。
+        // 现在用 AdjustWindowRectExForDpi 反算：**客户区恒为调用者说的大小**。
+        let dpi = GetDpiForSystem();
+        let mut frame = RECT {
+            left: 0,
+            top: 0,
+            right: options.width as i32,
+            bottom: options.height as i32,
+        };
+        AdjustWindowRectExForDpi(&mut frame, WS_OVERLAPPEDWINDOW, 0, 0, dpi);
+        let win_w = (frame.right - frame.left).max(1);
+        let win_h = (frame.bottom - frame.top).max(1);
+
         let instance = GetModuleHandleW(std::ptr::null());
         if instance.is_null() {
             return Err("GetModuleHandleW failed".into());
@@ -550,8 +569,8 @@ impl Window {
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            options.width as i32,
-            options.height as i32,
+            win_w,
+            win_h,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             instance,
