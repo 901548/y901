@@ -2,7 +2,7 @@
 
 - **HEAD**: `bf9968e` + 本轮（dispatch 分配基准）
 - **tags**: v0.1.0 … v0.1.9
-- **测试**: 806（基线 806；`#[ignore]` 45，含 ignore 851）
+- **测试**: 816（基线 816；`#[ignore]` 45，含 ignore 861）
 - **门禁**: `scripts/gate.ps1` 六步（MSRV / 测试计数 / clippy / 哈希 / missing_docs / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xDBB308DD1657EF9C` / `400x220`
@@ -123,3 +123,18 @@
 | 真机 Present 数字 | 1h | 物理显示器 + 独占全屏 |
 | X11 真机验证 | 半天 | 真 Linux 机器 |
 | 多窗口支持 | 3~5d | 无（大改动） |
+
+## 图片 mipmap（本轮，部分完成）
+
+**已做**（`y901-render::mip`）：
+- `level_for_image(scale, max_level)`：只看缩放比、不看墨量（图片没有"重新光栅化"
+  这个维度，每级只能由上一级 box 降采样得到）；取 floor，`≥ 1` / NaN / `≤ 0` 均回 0。
+- `image_mip_chain(base, levels)`：复用 `MipChain` + `downsample_box`；1px 时提前停止。
+- **6 + 4 = 10 个测试**：LOD 边界（1.0 / 0.75 / 0.5 / 0.25 / 非法值 / clamp）
+  + box 降采样为四点平均、左黑右白保持分界、1px 不再生成、存储 **1.3125×**。
+
+**未完成**（下一轮）：
+- `soft.rs` 的 `draw_image` **还没接** mip 选级（仍只采 L0），因此 `s=0.5` 的 MAD 对比“超采样真值"尚未做。
+- `Image` 结构体尚未加 `mips: Option<MipChain>`（动态/静态边界未咮定）。
+- `Cover` 模式"实际绘制倍率"与 `scale` 可能不同，选级应用前者；尚未实现与测量。
+- 存储成本已测（1.3125×），但尚未写进 `Image` 的文档。

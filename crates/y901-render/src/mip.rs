@@ -336,3 +336,154 @@ mod tests {
         assert_eq!(chain.get(2).map(|l| l.width), Some(2));
     }
 }
+
+/// 图片用的 LOD 选择：**只看缩放比，不看墨量**。
+///
+/// 与 `level_for`（字形用）的区别在于"真值来源"：
+/// - 字形的每一级都是**在该字号下重新光栅化**得到的，所以"密集字形多降一级"
+///   在小字号下有真实依据（笔画边缘占比上升）；
+/// - 图片的每一级都是**同一张位图的 box 降采样**，没有"更精细的源"可挖，
+///   所以没有 `ink` 这个维度。
+///
+/// 输入：`scale`（**实际绘制倍率**）、`max_level`。
+/// 输出：目标级（未满足时由调用方向下回退）。
+///
+/// 为何与字形同样取 **floor**：0.5 是中点，选粗一级会把细节永久丢掉；
+/// 图片丢细节的后果比字形更难察觉（没有"笔画断裂"这种强信号）。
+pub fn level_for_image(scale: f32, max_level: usize) -> usize {
+    if !(scale.is_finite() && scale > 0.0 && scale < 1.0) {
+        return 0;
+    }
+    let lvl = (1.0 / scale).log2().floor().max(0.0);
+    (lvl as usize).min(max_level)
+}
+
+#[cfg(test)]
+mod image_lod_tests {
+    use super::level_for_image;
+
+    #[test]
+    fn image_scale_one_uses_l0() {
+        assert_eq!(level_for_image(1.0, 2), 0);
+    }
+
+    #[test]
+    fn image_scale_three_quarters_uses_l0() {
+        // floor(log2(1/0.75)) = floor(0.415) = 0
+        assert_eq!(level_for_image(0.75, 2), 0);
+    }
+
+    #[test]
+    fn image_scale_half_uses_l1() {
+        assert_eq!(level_for_image(0.5, 2), 1);
+    }
+
+    #[test]
+    fn image_scale_quarter_uses_l2() {
+        assert_eq!(level_for_image(0.25, 2), 2);
+    }
+
+    #[test]
+    fn image_invalid_scale_falls_back_to_l0() {
+        assert_eq!(level_for_image(f32::NAN, 2), 0);
+        assert_eq!(level_for_image(0.0, 2), 0);
+        assert_eq!(level_for_image(-1.0, 2), 0);
+        assert_eq!(level_for_image(2.0, 2), 0);
+    }
+
+    #[test]
+    fn image_lod_is_clamped_to_available_levels() {
+        // 1/16 会算出 level 4，但链只有 0..=2
+        assert_eq!(level_for_image(1.0 / 16.0, 2), 2);
+    }
+}
+
+/// 图片的 mip 链生成（box 降采样）。
+///
+/// 与字形的区别：图片源是**固定位图**，每级只能由上一级 box 降采样得到；
+/// 字形能"重新光栅化"是因为源是无限精度的 TTF 轮廓。
+///
+/// 输入：基层（L0）像素与最多生成的级数（`levels` = 2 表示 L1+L2）。
+/// 输出：链；尺寸已到 1px 的级会提前停止（不生成 0 宽的位图）。
+pub fn image_mip_chain(base: MipLevel, levels: usize) -> MipChain {
+    let mut chain = MipChain::new(base);
+    while chain.len() <= levels {
+        let prev = chain.get(chain.len() - 1).expect("刚推入的级");
+        if prev.width <= 1 && prev.height <= 1 {
+            break;
+        }
+        let next = prev.downsample_box();
+        chain.push(next);
+    }
+    chain
+}
+
+#[cfg(test)]
+mod image_mip_tests {
+    use super::*;
+
+    /// 用一张 2×2 四色图验证 box 降采样的像素值：
+    /// L1 的每个像素应是对应 2×2 块的**平均值**，不是取一个点。
+    #[test]
+    fn box_downsample_is_average_of_four() {
+        let base = MipLevel::new(
+            2,
+            2,
+            vec![0, 100, 200, 255], // 四色
+        );
+        let chain = image_mip_chain(base, 1);
+        assert_eq!(chain.len(), 2, "应生成 L0 + L1");
+        let l1 = chain.get(1).expect("L1");
+        assert_eq!((l1.width, l1.height), (1, 1));
+        let avg = (0.0 + 100.0 + 200.0 + 255.0) / 4.0;
+        assert!(
+            (l1.coverage[0] as f32 - avg).abs() <= 1.0,
+            "L1 应为四点平均值（~{avg}），实测 {}",
+            l1.coverage[0]
+        );
+    }
+
+    /// 已知形状：左半黑右半白的 4×4，L1 左半应接近 0、右半接近 255。
+    /// 这是一个**可推导**的结果，不是拿 box filter 自己当真值。
+    #[test]
+    fn half_black_half_white_keeps_the_split() {
+        let mut cov = vec![0u8; 16];
+        for y in 0..4 {
+            for x in 0..4 {
+                cov[y * 4 + x] = if x < 2 { 0 } else { 255 };
+            }
+        }
+        let chain = image_mip_chain(MipLevel::new(4, 4, cov), 1);
+        let l1 = chain.get(1).expect("L1");
+        assert_eq!((l1.width, l1.height), (2, 2));
+        for y in 0..2 {
+            assert!(l1.coverage[y * 2] <= 2, "左半应保持黑");
+            assert!(l1.coverage[y * 2 + 1] >= 253, "右半应保持白");
+        }
+    }
+
+    /// 尺寸小到 1px 时必须停止，不生成 0 宽位图（否则下一次降采样会除零）。
+    #[test]
+    fn stops_before_generating_zero_sized_levels() {
+        let chain = image_mip_chain(MipLevel::new(1, 1, vec![7]), 2);
+        assert_eq!(chain.len(), 1, "1×1 不应再生成 L1");
+    }
+
+    /// 1024² → L1 512²、L2 256²；储存 **1 + 1/4 + 1/16 = 1.3125×**。
+    ///
+    /// 注意：无穷级数列 1+1/4+1/16+… = **4/3 ≈ 1.333**，但只生成 L1+L2 时
+    /// 只有 **1.3125**。我第一版把它当成 1.333 写进断言，测出 1.312 才发现算错了。
+    #[test]
+    fn storage_factor_is_about_one_third_extra() {
+        let n = 1024 * 1024;
+        let chain = image_mip_chain(MipLevel::new(1024, 1024, vec![0; n]), 2);
+        assert_eq!(chain.len(), 3);
+        assert_eq!((chain.get(1).unwrap().width, chain.get(2).unwrap().width), (512, 256));
+        let total: usize = (0..chain.len()).map(|i| {
+            let l = chain.get(i).unwrap();
+            (l.width * l.height) as usize
+        }).sum();
+        let factor = total as f64 / n as f64;
+        assert!((factor - 1.3125).abs() < 0.005, "存储倍数应为 1.3125（L0+L1+L2），实测 {factor:.4}");
+    }
+}
