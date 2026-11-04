@@ -55,9 +55,30 @@ foreach ($f in $docFiles) {
     $orig = [System.IO.File]::ReadAllText($p)
     $t = $orig
     # \u53ea\u66ff\u6362\u201c\u6570\u5b57 + \u660e\u786e\u8bed\u4e49\u201d\u7684\u7ec4\u5408\uff0c\u4e0d\u505a\u5168\u6587\u6570\u5b57\u66ff\u6362
+    if ($Check) {
+        # 校验比同步更严：**任何**与“测试 / passed”同行的 3 位数，
+        # 只要不等于当前实测值，就算漂移。
+        # 为何要这么宽：上一版只匹配 `**N** 项测试` 这类固定形式，
+        # 改 README 表格里的 `**824**（cargo test` 就检不出来。
+        foreach ($line in ($t -split "`n")) {
+            if ($line -notmatch '测试|passed|ignored') { continue }
+            # 只看**加粗**的 3 位数：历史记录里的 760/801 是普通文本，不应报。
+            foreach ($m in [regex]::Matches($line, '\*\*(\d{3})\*\*')) {
+                $n = [int]$m.Groups[1].Value
+                if ($n -eq $passed -or $n -eq $ignored -or $n -eq $includePassed -or $n -eq $baseline) { continue }
+                if ($n -lt 100) { continue }
+                Write-Host "[sync] OUT OF SYNC: $f has stale number $n (expected $passed)"
+                $stale++
+                break
+            }
+        }
+        continue
+    }
     $t = [regex]::Replace($t, '(\d+)\s*passed', { param($m) "$passed passed" })
     $t = [regex]::Replace($t, '(\d+)\s*failed', { param($m) "$failed failed" })
     $t = [regex]::Replace($t, '(\d+)\s*ignored', { param($m) "$ignored ignored" })
+    $t = [regex]::Replace($t, '--include-ignored\s*\*\*(\d+)\*\*', { param($m) "--include-ignored **$includePassed**" })
+    $t = [regex]::Replace($t, '\u5305\u542b\s*\*\*(\d+)\*\*', { param($m) "\u5305\u542b **$includePassed**" })
     $t = [regex]::Replace($t, '\*\*(\d{3})\*\*\s*\u9879\u6d4b\u8bd5', { param($m) "**$passed** \u9879\u6d4b\u8bd5" })
     $t = [regex]::Replace($t, '(\d{3})\s*\u9879\u6d4b\u8bd5', { param($m) "$passed \u9879\u6d4b\u8bd5" })
     $t = [regex]::Replace($t, '\u6d4b\u8bd5[^\n]{0,6}\*\*(\d{3})\*\*', { param($m) "\u6d4b\u8bd5 **$passed**" })

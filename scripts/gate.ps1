@@ -128,6 +128,15 @@ $docCount = ([regex]::Matches($docOut, 'missing documentation')).Count
 if ($docCount -gt 0) { Fail "$docCount items without docs" }
 Write-Host "[gate] ok: 0 missing docs"
 
+# ---------------------------------------------------------------- doc numbers (appended)
+Step "doc numbers match docs/evidence/numbers.txt"
+& powershell -NoProfile -File (Join-Path $PSScriptRoot 'sync-doc-numbers.ps1') -Check | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[gate] HINT: run 'pwsh -File scripts/sync-doc-numbers.ps1' to fix doc numbers"
+    Fail "doc numbers out of sync"
+}
+Write-Host "[gate] ok: doc numbers in sync"
+
 # ---------------------------------------------------------------- 6. security audit
 Step "cargo audit (must actually run and report 0 vulnerabilities)"
 if ($SkipAudit) {
