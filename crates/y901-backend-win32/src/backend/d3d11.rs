@@ -50,6 +50,18 @@
 //!
 //! 为什么这里不给每个声明单独写 SAFETY：这些行是**类型声明**，不是调用点；
 //! 逐条复制同一段话会让真正的调用契约淹没在模板里。调用点的契约写在各 `unsafe { }` 上方。
+//!
+//! ## Context 契约（本文件所有 immediate context 调用共用三段式）
+//!
+//! 1. **单线程**：`ID3D11DeviceContext` 不是线程安全的，同一个 context 只能在本线程调用；
+//!    跨线程调用会让命令流交错，驱动层表现为随机崩溃或静默丢帧。
+//! 2. **同设备**：所有传给 context 的资源（buffer/texture/view/state）必须由**创建本 context 的
+//!    那个 device** 创建；跨设备资源会被 D3D 调试层报错，运行期则可能直接花屏。
+//! 3. **Map 配对**：`Map` 返回的指针只在配对 `Unmap` 之前有效；重复 Unmap 或使用已 Unmap 的指针
+//!    属未定义行为，驱动内部状态错乱后往往在很远的位置崩溃。
+//!
+//! 各调用点只写「它自己额外要求什么、违反会怎样」；上面三条不再逐条复述。
+
 
 use std::ffi::{c_void, CString};
 use std::ptr::{null, null_mut, slice_from_raw_parts};
@@ -1073,8 +1085,8 @@ impl Device {
 impl Context {
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// `target` 的视图必须由**创建本 context 的 device** 产生；传 `None` 是合法的（解绑）。
+    /// 违反后果：跨设备 RTV 在 `Present` 时表现为花屏或整帧被丢弃（不报错）。
     unsafe fn set_render_target(&self, target: Option<&RenderTarget>) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         match target {
@@ -1088,8 +1100,8 @@ impl Context {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// `target` 的 RTV 必须由同一 device 创建且当前已绑定为渲染目标。
+    /// 违反后果：清一个未绑定的目标会**清掉别的目标**或什么都不做（取决于驱动），画面残留上一帧。
     unsafe fn clear(&self, target: &RenderTarget, color: [f32; 4]) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.clear_render_target_view)(self.as_ptr(), target.as_ptr(), color.as_ptr());
@@ -1097,8 +1109,9 @@ impl Context {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// `width`/`height` 必须 > 0 且 ≤ `D3D11_VIEWPORT_BOUNDS_MAX`；它们决定 NDC 到像素的映射。
+    /// 违反后果：为 0 时**整个 draw 被静默丢弃**（没有错误码，画面只是空着）；
+    /// 超出上限时视口被驱动 clamp，几何会画到错误的像素区域。
     unsafe fn set_viewport(&self, width: f32, height: f32) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         let viewport = Viewport {
@@ -1124,8 +1137,8 @@ impl Context {
     /// 整张纹理更新（mip 0）。
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// 目标纹理不能是 `D3D11_USAGE_DYNAMIC`；`data` 的行距必须 ≥ `width × 每像素字节数`。
+    /// 违反后果：两者都返回 `void`（**没有 HRESULT 可查**）；行距不足时会读到 `data` 之外的越界内存。
     unsafe fn update_subresource(&self, texture: &Texture, data: &SubresourceData) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.update_subresource)(
@@ -1174,10 +1187,12 @@ impl Context {
         );
     }
 
-        /// # Safety
+    /// # Safety
     ///
-    /// `buffer` 必须由本设备创建且当前**未被 Map**（重复 Map 同一缓冲是未定义行为）。
-    /// 返回的指针只能用到配套的 `unmap` 为止。
+    /// `buffer` 必须是 `D3D11_USAGE_DYNAMIC` 且带 `CPU_ACCESS_WRITE`；
+    /// **`D3D11_MAP_WRITE_DISCARD` 之后旧内容视为未定义**，读到的将是垃圾。
+    /// 违反后果：对非 DYNAMIC buffer 调用会失败并返回 `None`（本函数已处理）；
+    /// 若把 `Some` 里的指针当成「只写了前半段、后半段仍是旧数据」来用，会读到任意内容。
 unsafe fn map_discard(&self, buffer: &Buffer) -> Option<MappedSubresource> {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         let mut mapped: MappedSubresource = std::mem::zeroed();
@@ -1192,9 +1207,10 @@ unsafe fn map_discard(&self, buffer: &Buffer) -> Option<MappedSubresource> {
         (hr >= 0 && !mapped.data.is_null()).then_some(mapped)
     }
 
-        /// # Safety
+    /// # Safety
     ///
-    /// `buffer` 必须**处于 Map 状态**（与 `map_discard` 成对）；重复 Unmap 会返回错误码而不会崩。
+    /// 必须与同一次 `map_discard` 严格配对，且**只能调用一次**。
+    /// 违反后果：重复 Unmap 是未定义行为 —— 驱动内部状态错乱，可能立即崩溃或静默损坏后续帧。
 unsafe fn unmap(&self, buffer: &Buffer) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.unmap)(self.as_ptr(), buffer.as_ptr(), 0);
@@ -1203,8 +1219,8 @@ unsafe fn unmap(&self, buffer: &Buffer) {
     /// 解除对一个**纹理**资源的 Map（`Unmap` 接受任意 `ID3D11Resource`）。
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// 必须与同一次 `map_read` 严格配对；`texture` 必须与 Map 时是同一个对象。
+    /// 违反后果：对未 Map 的纹理 Unmap → 驱动未定义行为；对另一个纹理 Unmap 会解错绑定。
     unsafe fn unmap_texture(&self, texture: &Texture) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.unmap)(self.as_ptr(), texture.as_ptr(), 0);
@@ -1212,8 +1228,8 @@ unsafe fn unmap(&self, buffer: &Buffer) {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// `pipeline` 内的各个 state/shader/InputLayout 必须与该 pipeline 的 VS 签名**互相匹配**。
+    /// 违反后果：不匹配的组合在绑定时不报错，绘制时表现为顶点错位或三角形消失。
     unsafe fn set_pipeline(&self, pipeline: &Pipeline) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
 
@@ -1247,8 +1263,8 @@ unsafe fn unmap(&self, buffer: &Buffer) {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// `count` 个实例必须已被实例化 buffer 覆盖；InputLayout 与 VS 必须已绑定。
+    /// 违反后果：实例数超出 buffer 容量 → GPU 侧**越界读取**（通常不崩溃，但画面错乱且难定位）。
     unsafe fn draw_instances(&self, count: u32, start_offset: u32) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.draw_instanced)(self.as_ptr(), 6, count, start_offset, 0);
@@ -1267,8 +1283,8 @@ unsafe fn unmap(&self, buffer: &Buffer) {
 
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// `srv` 与 `sampler` 必须同属本 device，且 SRV 对应的纹理创建时带 `SHADER_RESOURCE`。
+    /// 违反后果：绑定不匹配时 PS 采样到未定义内容 —— 贴图变黑/错位，且不会产生任何错误码。
     unsafe fn set_ps_texture(&self, srv: &ShaderResourceView, sampler: &SamplerState) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         let views = [srv.as_ptr()];
@@ -1283,9 +1299,10 @@ unsafe fn unmap(&self, buffer: &Buffer) {
     /// 副作用：之后所有 draw 只影响该矩形内的像素。
     // 诊断 API：com_type! 生成的接口别名只在内部与测试里具名使用；删除会削弱类型检查
     #[allow(dead_code)]
-        /// # Safety
+    /// # Safety
     ///
-    /// `rect` 必须在**当前 render target 范围内**（DXGI 对越界 scissor 的处理依设备而异）。
+    /// 矩形必须非负且不超出当前 RTV 尺寸；调用前 `scissor_enable` 必须为 1，否则此设置不生效。
+    /// 违反后果：超出 RTV 的部分被驱动 clamp —— 不报错，但裁剪结果与预期不同（隐蔽的裁切错误）。
 unsafe fn set_scissor(&self, rect: RectI32) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.rsset_scissor_rects)(self.as_ptr(), 1, &rect);
@@ -1294,8 +1311,8 @@ unsafe fn set_scissor(&self, rect: RectI32) {
     /// 整资源拷贝（`CopyResource`）：要求同格式、同尺寸、同 mip 数。
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// `src`/`dst` 必须是同一 device 创建、**同尺寸同格式**；参数是裸指针，类型信息已丢失。
+    /// 违反后果：`CopyResource` 返回 `void`，尺寸/格式不匹配时**错误被吞掉**，画面出现错位或花屏。
     unsafe fn copy_resource(&self, dst: *mut c_void, src: *mut c_void) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.copy_resource)(self.as_ptr(), dst, src);
@@ -1306,8 +1323,8 @@ unsafe fn set_scissor(&self, rect: RectI32) {
     /// 返回：映射指针与行跨度（`row_pitch`）；失败返回 `None`。
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// `texture` 必须是 `D3D11_USAGE_STAGING` 且带 `CPU_ACCESS_READ`，否则 `Map` 失败。
+    /// 违反后果：返回 `None`（本函数已处理）；若忽略 `None` 并解引用空指针 → 段错误。
     unsafe fn map_read(&self, texture: &Texture) -> Option<MappedSubresource> {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         let mut mapped: MappedSubresource = std::mem::zeroed();
@@ -1331,8 +1348,8 @@ unsafe fn set_scissor(&self, rect: RectI32) {
     /// 用途：blit 阶段复用同一套顶点管线，只把 `ps_main` 换成 `ps_blit`。
     /// # Safety
     ///
-    /// `self` 必须是**本线程独占**的 immediate context（D3D11 context 非线程安全，不得跨线程调用）；
-    /// 传入的资源必须由同一设备创建且尚未释放；`Map` 得到的指针只在配对的 `Unmap` 之前有效。
+    /// `ps` 必须由本 device 创建，且其资源绑定布局与当前绑定的 SRV/sampler 槽位一致。
+    /// 违反后果：槽位不一致时 shader 读到别的资源 —— 采样结果错乱，但调用本身成功。
     unsafe fn set_ps_shader(&self, ps: &PixelShader) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.psset_shader)(self.as_ptr(), ps.as_ptr(), null(), 0);
@@ -1767,10 +1784,11 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
 /// 局部时画一个同色背景 quad），并用 scissor 限制后续 draw。
 /// 失败：无返回值；scissor 必须提前开启（`scissor_enable = 1`）。
 #[allow(clippy::too_many_arguments)] // 纯内部函数，参数就是渲染所需的最小集合
-/// # Safety
-///
-/// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
-/// 内部直接解引用 vtable 与裸指针（交换链/设备/上下文），外部无法伪造这些前置条件。
+    /// # Safety
+    ///
+    /// 这是内部编排，不是 COM 调用：只能在 **`Gfx` 已完成初始化、且当前线程持有 HWND** 时调用。
+    /// 违反后果：在设备丢失或初始化未完成时进入，会在内部取空指针或提交半成品管线 —— 崩溃点
+    /// 落在很深的绘制循环里，而不是调用者。
 unsafe fn draw_scene(
     context: &Context,
     pipeline: &Pipeline,
