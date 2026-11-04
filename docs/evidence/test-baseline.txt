@@ -1,8 +1,8 @@
 # Test-count baseline for scripts/gate.ps1 (sum of 'N passed' across all test binaries).
 # The gate FAILS when the total drops below this number: that means a test was deleted or #[ignore]d.
 #
-# 816 -- image mipmap: +10 (6 LOD boundary + 4 box/storage)
-# 810 -- (intermediate) (box downsample avg, half-split, 1px stop, storage 1.3125)
-# 806 -- #15 flatten limits: +5 (MAX_LINES / MAX_CONTOURS bounds)
+# 818 -- image quality: +2 analytic tests (checkerboard 127/128, ramp 8i+2)
+# 816 -- image mipmap LOD boundary + box/storage
+# 806 -- #15 flatten limits
 # 801 -- v0.1.6: Grid span added 7 tests
-816
+818

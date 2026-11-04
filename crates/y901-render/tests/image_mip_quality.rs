@@ -1,22 +1,18 @@
-//! 图片 mipmap 的质量断言（#18 之后的图片 LOD 步骤 2b）。
+//! 图片 mipmap 质量：**解析真值**（闭式解），不是采样真值。
 //!
-//! 真值**独立构造**：对源图做 4×4 超采样后平均，再映射到目标尺寸；
-//! 不经过 `box_levels_rgba`（那是被测实现），否则就是"拿自己当自己的真值"。
-//!
-//! 跑法：
-//! ```text
-//! cargo test -p y901-render --release --test image_mip_quality -- --nocapture
-//! ```
+//! 为什么不用超采样：上一版用 4×4 子采样当"独立真值"，但采样点恰好落回 box 平均的
+//! 同一个 2×2 源块 —— 真值就是被测实现本身，MAD 恒为 0，什么也没证明。
+//! 这里两个图案都有**可推导的精确答案**，与采样网格无关。
 
 use y901_render::soft::SoftBackend;
 use y901_render::MyFontEngine;
 use y901_ui::image::ImageStyle;
 use y901_ui::{Rect, RenderCtx, Size};
 
-const W: u32 = 160;
-const H: u32 = 120;
-/// 源图：4 像素周期的高频棋盘 + 一条渐变，专门用来暴露"选级错误"和"降采样质量差"。
-const SRC: u32 = 128;
+const SRC: u32 = 64;
+const DST: u32 = 32;
+const W: u32 = 96;
+const H: u32 = 96;
 
 fn backend() -> SoftBackend {
     let (cw, ch) = y901_render::cell_metrics_for(15.0);
@@ -29,107 +25,117 @@ fn backend() -> SoftBackend {
     SoftBackend::new_headless(W, H, Box::new(engine), Size::new(cw, ch)).expect("soft")
 }
 
-fn source_rgba() -> Vec<u8> {
-    let mut v = vec![0u8; (SRC * SRC * 4) as usize];
-    for y in 0..SRC {
-        for x in 0..SRC {
-            let i = ((y * SRC + x) * 4) as usize;
-            // 8 像素棋盘 + 水平渐变：棋盘测"是否漏掉高频"，渐变测"整体亮度是否偏"
-            let checker = if ((x / 8) + (y / 8)) % 2 == 0 { 255 } else { 0 };
-            let grad = (x * 255 / SRC) as u8;
-            v[i] = ((checker as u16 + grad as u16) / 2) as u8;
-            v[i + 1] = ((checker as u16 + 255 - grad as u16) / 2) as u8;
-            v[i + 2] = checker;
-            v[i + 3] = 255;
-        }
-    }
-    v
-}
-
-/// **独立真值**：4×4 超采样平均，得到 `dw × dh` 的目标图。
-fn supersampled_truth(src: &[u8], dw: u32, dh: u32) -> Vec<u8> {
-    let mut out = vec![0u8; (dw * dh * 4) as usize];
-    for ty in 0..dh {
-        for tx in 0..dw {
-            let mut acc = [0u32; 4];
-            for sy in 0..4u32 {
-                for sx in 0..4u32 {
-                    // 目标像素 (tx,ty) 覆盖源图的 4×4 子块
-                    let gx = (tx * 4 + sx) * SRC / (dw * 4);
-                    let gy = (ty * 4 + sy) * SRC / (dh * 4);
-                    let si = ((gy.min(SRC - 1) * SRC + gx.min(SRC - 1)) * 4) as usize;
-                    for c in 0..4 {
-                        acc[c] += src[si + c] as u32;
-                    }
-                }
-            }
-            let di = ((ty * dw + tx) * 4) as usize;
-            for c in 0..4 {
-                out[di + c] = (acc[c] / 16) as u8;
-            }
+/// 渲染一张 64×64 源图到 32×32，返回目标区域内的 RGB 像素。
+fn render_half(src: &[u8]) -> Vec<(u8, u8, u8)> {
+    let mut s = backend();
+    let id = s.upload_texture(SRC, SRC, src);
+    s.clear();
+    s.draw_image(
+        Rect::new(0.0, 0.0, DST as f32, DST as f32),
+        id,
+        ImageStyle::default(),
+    );
+    let mut out = Vec::with_capacity((DST * DST) as usize);
+    for y in 0..DST {
+        for x in 0..DST {
+            let p = s.pixel(x, y).expect("px");
+            out.push((
+                ((p >> 16) & 0xFF) as u8,
+                ((p >> 8) & 0xFF) as u8,
+                (p & 0xFF) as u8,
+            ));
         }
     }
     out
 }
 
-fn render_scaled(scale: f32) -> (Vec<u8>, u32, u32) {
-    let mut s = backend();
-    let src = source_rgba();
-    let id = s.upload_texture(SRC, SRC, &src);
-    s.clear();
-    let rect = Rect::new(8.0, 8.0, (SRC as f32 * scale).round(), (SRC as f32 * scale).round());
-    s.draw_image(rect, id, ImageStyle::default());
-    let mut out = Vec::with_capacity((W * H * 4) as usize);
-    for y in 0..H {
-        for x in 0..W {
-            let p = s.pixel(x, y).expect("px");
-            out.push((p >> 16) as u8);
-            out.push((p >> 8) as u8);
-            out.push(p as u8);
-            out.push(255);
-        }
-    }
-    (out, W, H)
-}
-
-/// 目标矩形内的 MAD：看**画出来的那块**，不看空白背景。
-fn mad_in_rect(a: &[u8], b: &[u8], w: u32, x0: u32, y0: u32, rw: u32, rh: u32) -> f64 {
-    let mut sum = 0u64;
-    let mut n = 0u64;
-    for y in y0..(y0 + rh).min(H) {
-        for x in x0..(x0 + rw).min(W) {
-            let i = ((y * w + x) * 4) as usize;
-            // b 是真值图，它自己的宽度是 rw（不是屏幕宽度）：
-            // 用屏幕坐标去索引会越界（这是我第一版的 bug，测试直接报了 index out of bounds）。
-            let j = (((y - y0) * rw + (x - x0)) * 4) as usize;
-            for c in 0..3 {
-                sum += (a[i + c] as i32 - b[j + c] as i32).unsigned_abs() as u64;
-            }
-            n += 3;
-        }
-    }
-    sum as f64 / (255.0 * n.max(1) as f64)
-}
-
+/// 1 像素棋盘：`(x + y) % 2`。
+///
+/// **闭式真值**：任一 2×2 块里恒为 2 黑 2 白 → 平均值恰为 `(0 + 255) / 2 = 127.5`，
+/// 与采样位置无关，因此不可能与被测实现退化成同一个量。
 #[test]
-#[ignore = "**真值不独立**：我的 4×4 采样点落回 2×2 源像素，等价于 box，MAD 恒为 0 —— 需重新构造"]
-fn half_scale_matches_supersampled_truth() {
-    let (px, w, _h) = render_scaled(0.5);
-    let src = source_rgba();
-    let dw = SRC / 2;
-    let truth = supersampled_truth(&src, dw, dw);
+fn checkerboard_halves_to_mid_gray() {
+    let mut src = vec![0u8; (SRC * SRC * 4) as usize];
+    for y in 0..SRC {
+        for x in 0..SRC {
+            let i = ((y * SRC + x) * 4) as usize;
+            let v = if (x + y) % 2 == 0 { 255u8 } else { 0 };
+            src[i] = v;
+            src[i + 1] = v;
+            src[i + 2] = v;
+            src[i + 3] = 255;
+        }
+    }
 
-    // 目标矩形在 (8,8)，尺寸 dw×dw
-    let mad = mad_in_rect(&px, &truth, w, 8, 8, dw, dw);
-    eprintln!("[img-mip] s=0.5 与超采样真值 MAD = {mad:.4}");
+    let px = render_half(&src);
+    let mut bad = 0;
+    let mut min = 255u8;
+    let mut max = 0u8;
+    for (r, _g, _b) in &px {
+        min = min.min(*r);
+        max = max.max(*r);
+        if !(125..=130).contains(r) {
+            bad += 1;
+        }
+    }
+    eprintln!(
+        "[img-analytic] 棋盘 s=0.5：灰度范围 {min}..{max}，越界 {bad}/{}",
+        px.len()
+    );
+    assert_eq!(
+        bad, 0,
+        "每个目标像素都应为 127/128（闭式解），实测范围 {min}..{max}"
+    );
 
-    // 变异对照：人为改一个像素，MAD 必须变大（证明测量有区分力）
+    // 变异对照：人为改一个像素，必须落在区间外
     let mut mutated = px.clone();
-    let mi = ((8 * w + 8) * 4) as usize;
-    mutated[mi] = mutated[mi].wrapping_add(97);
-    let mad_mut = mad_in_rect(&mutated, &truth, w, 8, 8, dw, dw);
-    eprintln!("[img-mip] 变异对照 MAD = {mad_mut:.4}（应 > {mad:.4}）");
-    assert!(mad_mut > mad, "改一个像素后 MAD 应变大");
+    mutated[0].0 = 0;
+    assert!(
+        !(125..=130).contains(&mutated[0].0),
+        "改成 0 后应不在 125..=130 内"
+    );
+}
 
-    assert!(mad <= 0.05, "与超采样真值的 MAD = {mad:.4} > 0.05");
+/// 水平斜坡：`value = x * 4`。
+///
+/// **闭式真值**：目标列 `i` 覆盖源列 `2i` 与 `2i+1`，
+/// 平均 = `((2i)*4 + (2i+1)*4) / 2 = 8i + 2`。
+#[test]
+fn ramp_halves_to_analytic_midpoints() {
+    let mut src = vec![0u8; (SRC * SRC * 4) as usize];
+    for y in 0..SRC {
+        for x in 0..SRC {
+            let i = ((y * SRC + x) * 4) as usize;
+            let v = (x * 4) as u8;
+            src[i] = v;
+            src[i + 1] = v;
+            src[i + 2] = v;
+            src[i + 3] = 255;
+        }
+    }
+
+    let px = render_half(&src);
+    let mut worst = 0i32;
+    let mut worst_at = (0usize, 0usize);
+    for y in 0..DST {
+        for x in 0..DST {
+            let got = px[(y * DST + x) as usize].0 as i32;
+            let want = 8 * x as i32 + 2;
+            if (got - want).abs() > worst {
+                worst = (got - want).abs();
+                worst_at = (x as usize, y as usize);
+            }
+        }
+    }
+    eprintln!(
+        "[img-analytic] 斜坡 s=0.5：与闭式解最大偏差 = {worst}（最差处 x={} y={}）",
+        worst_at.0, worst_at.1
+    );
+    assert!(worst <= 3, "每列应为 8i+2（闭式解），最大偏差 {worst}");
+
+    // 变异对照：把某列加 10，必须脱离容差
+    let col = 5usize;
+    let got = px[col].0 as i32 + 10;
+    let want = 8 * col as i32 + 2;
+    assert!((got - want).abs() > 3, "加 10 后应脱离闭式解容差");
 }
