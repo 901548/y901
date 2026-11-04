@@ -92,6 +92,7 @@ cargo run --example tree_view    -p y901-app   # TreeView + 虚拟化 + 键盘�
 | 领域 | 已有能力 |
 |---|---|
 | **渲染** | 软光栅（CPU）与 D3D11 双后端；矩形/圆角/渐变/SDF 抗锯齿；字形图集 + LRU；纹理上传与双线性采样；变换栈（缩放）；像素回读 |
+| **文本缩放** | mipmap LOD（加载性生成、图集占用保护）| Windows D3D11 + Linux X11 CPU | ✅ 两个后端都有像素断言 |
 | **字体** | 自研 TTF 引擎（26.6 定点、自适应曲线扁平化、非零环绕填充、4 个亚像素相位）；CJK 支持 |
 | **布局** | Flex（百分比/padding/gap）、Stack、Grid（`Fixed`/`Fraction`/`Auto` 轨道）、滚动容器、容器裁剪子控件 |
 | **组件** | Button / TextLabel / TextInput / ListView / ScrollView / SplitView / Menu / Dialog / Tabs / ProgressBar / Checkbox / RadioGroup / Slider / Tooltip / ContextMenu / TreeView / Image / 终端 |
@@ -123,7 +124,7 @@ cargo run --example tree_view    -p y901-app   # TreeView + 虚拟化 + 键盘�
 
 | 项 | 状态 |
 |---|---|
-| 测试 | **728**（默认）/ **766**（`--include-ignored`），0 失败 |
+| 测试 | **801**（`cargo test --workspace`），0 失败 |
 | clippy | **0 warning / 0 error** |
 | 文档完整性 | **12 个 crate 全部 `#![deny(missing_docs)]`**，`RUSTFLAGS="-W missing_docs"` = 0 |
 | 像素哈希门禁 | 通过（`scripts/hash-gate.ps1`，同会话前后对比） |
@@ -135,11 +136,10 @@ cargo run --example tree_view    -p y901-app   # TreeView + 虚拟化 + 键盘�
 ### 已知限制
 
 - 无合成粗体的轮廓加粗：CPU 后端用"向右 1px 涂抹"近似，非真粗体（见 `CROSS_PLATFORM_PLAN.md §8.5.1`）
-- 文本在变换栈下**只平移、不缩放**
 - Xvfb 下 `CreateGlyphCursor` 返回 `BadFont`，光标恒为默认箭头（真 Xorg 未验）
 - 图片每张纹理一次 draw call（图集化未做）
 - 图片纹理在窗口销毁路径不回收（进程退出无影响）
-- Grid 只做顺序排布，不支持 `grid_cell(col,row)` / 跨格 span
+- Grid 自动流只支持**行优先**；`span` 放不下时退化为 1×1（不动态加行）
 
 
 ## 许可证
