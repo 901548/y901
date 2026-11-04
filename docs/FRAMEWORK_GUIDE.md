@@ -1218,3 +1218,21 @@ cargo doc --no-deps                                    # 打开 API 参考
 
 **规则**：加字段前先 grep“谁在这个字段的作用域里调用它”，
 **字段跟着调用点走，不跟着任务描述里的名字走**。
+
+### `#[cfg(test)]` 对 integration test 不可见
+
+`tests/*.rs` 是独立 crate，链接的是**正常编译的 lib**，看不到 `#[cfg(test)]` 字段和方法。
+实例：`Window::take_present_sync_log` 加了 `#[cfg(test)]`，integration test 调用时报 6 个 E0599。
+
+**规则**：
+
+- 测 `#[cfg(test)]` API → 单元测试写在同 crate 的 `#[cfg(test)] mod` 里（如 `window.rs` 末尾）
+- 测公开 API → integration test 放 `tests/`
+- 需要“完整链路 + 零 API 泄漏” → 单元测试写在调用方所在的 crate
+
+### 恢复文件 ≠ 恢复构建状态
+
+`Move-Item` 恢复文件后 mtime 可能回退，cargo 认为无需重编译，测试仍链接着“改坏的那份 lib”。
+实例：反向验证后恢复 `render_inner(tree, 1)`，测试仍读到 `[0]`，`cargo clean` 后变绿。
+
+**规则**：反向验证之后，先 `cargo clean -p <crate>` 再验恢复，否则可能是在测一份旧二进制。
