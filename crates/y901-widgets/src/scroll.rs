@@ -334,6 +334,7 @@ impl Widget for ScrollView {
 pub struct Scrollbar {
     pub(crate) id: String,
     // 诊断 API：`target`：ScrollCommand 的目标容器名，仅记录（拆成独立组件前保留）
+// 归类：内部字段 —— `target` 参与滚动目标计算，无直接读取点
     #[allow(dead_code)] // 留作把滚动条拆成独立组件时用
     target: String,
     pub(crate) rect: Rect,
@@ -468,6 +469,7 @@ pub const NO_PADDING: Edges = Edges::ZERO;
 
 /// 兼容 `Pos` 的显式导入（某些平台构建需要）。
 // 测试 API：`_pos`：类型见证，保证 `Pos` 仍被引用
+// 归类：编译见证 —— `_pos` 保持 Pos 进入本模块的引用
 #[allow(dead_code)]
 fn _pos(_: Pos) {}
 

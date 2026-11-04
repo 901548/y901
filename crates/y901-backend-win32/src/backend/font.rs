@@ -583,12 +583,14 @@ pub struct TextEngine {
     pub ascent: f32,
     // 诊断 API：`ascent` 字段：自研引擎用它算基线，DirectWrite 路径由 `metrics()` 读
     // 诊断 API：`has_dirty()` 与图集统计：后端据此跳过整张上传，`font_m3_atlas` 测试直接断言
+// 归类：诊断 API —— `descent` 供基线排查，渲染只用 `ascent`
     #[allow(dead_code)]
     /// 基线到行底的距离；与 `ascent` 一起决定行高。
     pub descent: f32,
     /// 等宽单元格宽度（由字号推出，必须与布局用的一致）。
     pub cell_width: f32,
     // 诊断 API：`descent` 字段：同上，行高计算的一部分
+// 归类：诊断 API —— `cell_height` 与 `ascent` 同源，测试读取
     #[allow(dead_code)] // 元数据：等宽字体的名义行高，目前用 ascent/descent
     /// 等宽单元格高度。
     pub cell_height: f32,
@@ -690,6 +692,7 @@ impl TextEngine {
     }
 
     // 诊断 API：`glyph_count()`：图集占用诊断，`font_m3_atlas` 测试读取
+// 归类：测试 API —— `glyph_count` 只被 font_m2/m3 测试读取
     #[allow(dead_code)] // 诊断：已缓存字形数
     /// 已缓存字形数（诊断与内存估算用）。
     pub fn glyph_count(&self) -> usize {
@@ -741,6 +744,7 @@ impl TextEngine {
         (reset, dirty)
     }
 
+// 归类：测试 API —— `has_dirty` 只被 black_screen_regression 读取
     #[allow(dead_code)] // 诊断：是否有待上传的图集脏区
     /// 是否有待上传的图集脏区；false 时后端可跳过整张图集上传。
     pub fn has_dirty(&self) -> bool {

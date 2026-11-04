@@ -14,7 +14,8 @@
    超限时 `flatten_glyph` 返回 `None`（与"字形不存在"同处理），诊断按 gid 去重只打一次。
 2. `#18` 热路径 clone：**tree.rs 已测**（键盘 0 次，鼠标 6 次常数）；
    **`soft.rs` 纹理复制已修**：改为分片借用，每帧分配 **0 次 / 0 字节**（修前 4 MiB/帧）。
-3. `#19` **31 处 `#[allow(dead_code)]`** 未定性（诊断 API / 测试 API / 真死代码）。
+3. ~~`#19` 31 处 `#[allow(dead_code)]` 未定性~~ —— **已处理**：29 处加了归类注释
+   （诊断 API 13 / 测试 API 4 / 内部实现与编译见证 12），**2 处真死代码已删除**。
 4. `cargo update` 会顺带升级 3 个依赖且需联网，`Cargo.lock` 里 `serial` 残留未清（已记录在 `DEPENDENCIES.md`）。
 5. audit 依赖联网刷新指南库；离线时结论带 `STALE AUDIT` 标记，**不算发布门禁**。
 
@@ -86,6 +87,23 @@
 
 新增 5 个测试：超限 ×2、边界 ×2（防 off-by-one）、超限后继续消费回调不崩。
 
+## #19 dead_code 定性（本轮）
+
+**先跑了真实检查**：`CARGO_TARGET_DIR=target-dead-code RUSTFLAGS=-W dead_code cargo build --workspace --all-targets`
+→ **exit 0、零 dead_code 警告**。说明得很清楚：**31 处 allow 把它们全遮住了**，
+编译器已无法告诉我们哪些真死 —— 这正是审查报告的论点。于是改用静态方式：
+逐处取出被标记的符号，再在全仓库数它的引用次数。
+
+| 归类 | 数量 | 依据 |
+|---|---|---|
+| 诊断 API | 13 | 仅由 `Y901_PROFILE` / `Y901_SCISSOR_TEST` / IME dump 等调用 |
+| 测试 API | 4 | 引用点全在 `tests/*.rs`（如 `glyph_count`、`has_dirty`） |
+| 内部实现 / 编译见证 | 12 | `_unused`/`_witness` 用于证明类型被使用；`HIT_R`、`target` 等 |
+| **真死代码（已删）** | **2** | `ime.rs` 的 `GCS_CURSORPOS`、`mip.rs` 的 `level_for_old`：全仓库仅定义处出现 |
+
+每处都在 `#[allow(dead_code)]` 上一行写了 `// 归类：…` 注释，将来看到就知道它为什么在那里。
+
 ## 下一轮计划
 
-`#19`：31 处 `#[allow(dead_code)]` 逐项定性（诊断 API / 测试 API / 真死代码）。
+本轮审查清单（#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20）**已全部处理**。
+下一步建议：打 `v0.1.10`，并把 `docs/STATUS.md` 作为每轮固定产出。

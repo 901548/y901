@@ -1298,6 +1298,7 @@ unsafe fn unmap(&self, buffer: &Buffer) {
     /// 输入：`rect`（像素，右/下为**开区间**）。
     /// 副作用：之后所有 draw 只影响该矩形内的像素。
     // 诊断 API：com_type! 生成的接口别名只在内部与测试里具名使用；删除会削弱类型检查
+// 归类：诊断 API —— `set_scissor` 只在 `Y901_SCISSOR_TEST` 打开时调用
     #[allow(dead_code)]
     /// # Safety
     ///
@@ -2819,6 +2820,7 @@ impl Gfx {
 
     /// 调试诊断：当前存活的 COM 对象数（Release 构建恒为 0）。
     // 诊断 API：COM 泄漏计数，仅 `live_objects()` 测试与人工排查调用
+// 归类：诊断 API —— `live_objects` 供泄漏排查（debug 构建计数）
     #[allow(dead_code)] // 留给调试/诊断使用，主循环不调用
     pub fn live_objects() -> isize {
         #[cfg(debug_assertions)]

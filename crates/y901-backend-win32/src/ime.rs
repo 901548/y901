@@ -19,10 +19,6 @@ pub const WM_IME_COMPOSITION: u32 = 0x010F;
 pub const GCS_COMPSTR: u32 = 0x0008;
 /// 本次携带的是"已确定的最终串"，应当作为 `UiEvent::Text` 提交。
 pub const GCS_RESULTSTR: u32 = 0x0800;
-// 诊断 API：`caret` 字段由 `composing_text()` 返回，UI 层可选消费
-#[allow(dead_code)] // 留作后续接线：组合串内的光标位置
-/// 本次携带了候选串里的光标位置（用于在预编辑串中画插入符）。
-pub const GCS_CURSORPOS: u32 = 0x0080;
 
 const CFS_POINT: u32 = 0x0002;
 
@@ -62,6 +58,7 @@ pub struct ImeState {
     /// 光标位置（客户区像素），用于画覆盖层。
     /// 留作后续接线：候选窗定位需要它，当前由组件自绘。
     // 诊断 API：预编辑光标位置，供覆盖层绘制
+// 归类：诊断 API —— `caret` 只被 `Y901_IME_DUMP` 读，供 IME 定位排查
     #[allow(dead_code)]
     pub caret: (f32, f32),
 }
@@ -132,6 +129,7 @@ pub unsafe fn get_composition_string(hwnd: HWND, flag: u32) -> Option<Vec<u16>> 
 /// 违反会导致：`ImmGetContext` 返回空指针（本函数已判空返回，安全），
 /// 或把候选窗钉到错误位置；不会造成内存不安全。
 // 诊断 API：`set_composition_position()`：输入法候选窗跟随，当前未接线
+// 归类：诊断 API —— `set_composition_position` 由 window.rs 的 IME 路径调用，测试不覆盖
 #[allow(dead_code)]
 pub unsafe fn set_composition_position(hwnd: HWND, x: f32, y: f32) {
     let himc = ImmGetContext(hwnd);
@@ -233,5 +231,6 @@ pub unsafe fn handle_ime_message(
 }
 
 /// 让编译器闭嘴：`WPARAM` / `LRESULT` 在签名里保留以便未来扩展。
+// 归类：编译见证 —— `_unused` 用来证明若干类型被使用，不是运行路径
 #[allow(dead_code)]
 fn _unused(_: WPARAM, _: LRESULT) {}

@@ -141,24 +141,6 @@ impl MipChain {
         level_for(scale, ink, self.max_level())
     }
 
-    #[allow(dead_code)]
-    fn level_for_old(&self, scale: f32, ink: f32) -> usize {
-        let max = self.max_level();
-        if !(scale.is_finite() && scale > 0.0) || scale >= 1.0 {
-            return 0;
-        }
-        // floor(log2(1/scale))：scale = 0.5 → 1；0.25 → 2；0.75 → 0
-        let halvings = (1.0 / scale).log2().floor();
-        let mut level = if halvings.is_finite() && halvings > 0.0 {
-            halvings as usize
-        } else {
-            0
-        };
-        if ink > 0.25 {
-            level += 1;
-        }
-        level.min(max)
-    }
 
     /// 用盒式滤波逐级生成到 `levels` 级（仅用于**对照组**与测试）。
     ///
