@@ -245,10 +245,14 @@ impl MyFontEngine {
     /// 重光栅化的 MAD 为 0.0194，盒式滤波为 0.1404（**5× 更近**）。
     ///
     /// 只用 phase 0：缩小后亚像素差异不可见，存 4 个相位只是浪费图集。
-    fn insert_mips(&mut self, ch: char, info: &mut GlyphInfo) {
-        for level in 0..2usize {
+    /// 生成 mip 直到 `max_level`（0 = 仅 L1，1 = L1+L2）。
+    fn insert_mips_upto(&mut self, ch: char, info: &mut GlyphInfo, max_level: usize) {
+        for level in 0..=max_level.min(1) {
             // 占用率保护：图集接近满时**不生成 L2**（它只服务 s < 0.5 的极端场景）。
             // 为一个很少用到的精度级去挤掉一个真正在用的字形不划算。
+            if info.mips.get(level).copied().flatten().is_some() {
+                continue; // 该级已有，不重复生成
+            }
             if level == 1 && self.packer.stats().occupancy > 0.8 {
                 break;
             }
@@ -370,15 +374,26 @@ impl MyFontEngine {
     /// "2048² 装得下 1200 个 CJK × 4 相位"的容量承诺破掉（实测：测试直接取不到字形）。
     /// 而 mip 只在**真的缩小渲染**时才有用，所以把成本推到首次需要它的时候。
     pub fn ensure_mips(&mut self, ch: char) -> bool {
+        self.ensure_mips_upto(ch, 2)
+    }
+
+    /// 按需生成 mip，**最多到 `max_level` 级**（幂等）。
+    ///
+    /// 为什么要"有限级"而不只是全部：
+    /// L1 的像素面积是 L2 的 4 倍。冷启动时只有 `s ∈ [0.5, 1)`
+    /// 需要 L1，把 L2 也一并生成是白付 20% 的时间。
+    /// 将来若冷启动超预算，可以改成"首次需要 L2 时才生成 L2"。
+    pub fn ensure_mips_upto(&mut self, ch: char, max_level: usize) -> bool {
         let key = (ch, 0u8);
         let Some(info) = self.cache.get(&key) else {
             return false;
         };
-        if info.mips.iter().all(|m| m.is_some()) {
+        let wanted = max_level.min(2);
+        if (0..=wanted).all(|i| info.mips.get(i).copied().flatten().is_some()) {
             return true;
         }
         let mut info = info.clone();
-        self.insert_mips(ch, &mut info);
+        self.insert_mips_upto(ch, &mut info, wanted);
         self.cache.insert(key, info);
         true
     }
