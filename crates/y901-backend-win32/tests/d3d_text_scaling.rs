@@ -161,6 +161,24 @@ fn stats_soft(soft: &y901_render::soft::SoftBackend, w: u32, h: u32) -> (u64, u6
 /// 实测出现过一次假红（单独跑全绿）。
 static D3D_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// 记录一次 "skip"。
+///
+/// 为什么不用 `println!`：`cargo test` 默认**捕获** stdout，门禁跑不带 `--nocapture`，
+/// 所以那行字根本到不了门禁眼前。写一个标记文件可以跨进程、不依赖 stdout 抓取。
+fn record_skip(reason: &str) {
+    eprintln!("SKIP: {reason}");
+    let path = skip_log_path();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        use std::io::Write as _;
+        let _ = writeln!(f, "SKIP: {reason}");
+    }
+}
+
+/// skip 记录文件路径（门禁会先删除它、跑完再数行数）。
+fn skip_log_path() -> std::path::PathBuf {
+    std::env::temp_dir().join("y901-test-skips.txt")
+}
+
 fn fnv(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {
@@ -176,13 +194,16 @@ fn d3d_scale_one_is_pixel_identical_and_identity_is_observable() {
     let (base, w, h) = match render_d3d(None) {
         Some(v) => v,
         None => {
-            eprintln!("[d3d-scale] 跳过：无 D3D11 设备");
+            record_skip("d3d_text_scaling: no D3D11 device");
             return;
         }
     };
     let (one, w1, h1) = match render_d3d(Some(1.0)) {
         Some(v) => v,
-        None => return,
+        None => {
+            record_skip("d3d_text_scaling: no D3D11 device");
+            return;
+        }
     };
     assert_eq!((w, h), (w1, h1), "两次回读尺寸应一致");
 
@@ -210,13 +231,16 @@ fn d3d_half_scale_ink_ratios_are_sane() {
     let (full, w, h) = match render_d3d(None) {
         Some(v) => v,
         None => {
-            eprintln!("[d3d-scale] 跳过：无 D3D11 设备");
+            record_skip("d3d_text_scaling: no D3D11 device");
             return;
         }
     };
     let (half, _, _) = match render_d3d(Some(0.5)) {
         Some(v) => v,
-        None => return,
+        None => {
+            record_skip("d3d_text_scaling: no D3D11 device");
+            return;
+        }
     };
     let (m_full, c_full) = stats_d3d(&full, w, h);
     let (m_half, c_half) = stats_d3d(&half, w, h);
@@ -255,13 +279,16 @@ fn d3d_matches_soft_backend_within_tolerance() {
     let (d3d, w, h) = match render_d3d(Some(0.5)) {
         Some(v) => v,
         None => {
-            eprintln!("[d3d-scale] 跳过：无 D3D11 设备");
+            record_skip("d3d_text_scaling: no D3D11 device");
             return;
         }
     };
     let soft = match render_soft(Some(0.5)) {
         Some(s) => s,
-        None => return,
+        None => {
+            record_skip("d3d_text_scaling: no D3D11 device");
+            return;
+        }
     };
 
     let mut sum = 0u64;

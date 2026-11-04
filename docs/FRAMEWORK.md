@@ -31,7 +31,7 @@ y901-app ──> y901-backend-win32 ──> y901-runtime ──> y901-agent ─�
 
 - `y901-ui` **零外部依赖**：它只依赖内部 crate `y901-core`（用于布局原语 `IntervalSet`）。
   这不是洁癖，而是测试策略的地基：
-  728 项测试（另有 7 项 GPU harness，`--ignored` 运行）里绝大多数不需要窗口、GPU、PTY。
+  801 项测试（另有 7 项 GPU harness，`--ignored` 运行）里绝大多数不需要窗口、GPU、PTY。
 - 只有 `y901-backend-win32` 依赖 `windows-sys`（grep 可验证）。
 - `y901-runtime` 单独存在的原因：`Host::policy()` 需要 `y901_agent::Policy`，
   而 `agent` 依赖 `ui`；若把 `Host` 放进 `ui` 会形成 `ui -> agent -> ui` 循环。
@@ -237,7 +237,7 @@ dlg.open();
 ## 10. 测试
 
 ```
-cargo test --workspace          # 728 项（另 7 个 GPU harness 需 --ignored）
+cargo test --workspace          # 801 项（另 7 个 GPU harness 需 --ignored）
 cargo build --workspace         # 零警告
 cargo clippy --workspace --all-targets   # 警告必须为 0（建议直接用 scripts/gate.ps1） 零警告
 scripts/test-count.ps1          # 唯一可信的计数方式（把输出写文件再解析）

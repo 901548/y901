@@ -1,6 +1,7 @@
 # 文本缩放（字形 mipmap / LOD）：设计文档
 
-> 状态：**设计草案**，未写代码。`【待决策】` 表示需要指令发出者拍板；共 **5 项**，见 §6。
+> 状态：**已实现（v0.1.4 ~ v0.1.5）**；验证见 `crates/y901-render/tests/text_scale_pixels.rs`、
+> `crates/y901-render/src/supersample.rs`（单元测试）与 `crates/y901-backend-win32/tests/d3d_text_scaling.rs`。
 > 现有实现参照：`crates/y901-render/src/soft.rs`（`draw_text`，L524 起）、
 > `crates/y901-render/src/font_engine/engine.rs`（图集 2048²、4 个亚像素相位、Skyline 打包）。
 

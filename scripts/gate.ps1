@@ -12,9 +12,12 @@
 #   pwsh -File scripts/gate.ps1 -SkipTest       # fast local loop
 #   pwsh -File scripts/gate.ps1 -SkipAudit      # offline only; NOT a release gate
 
+# -SkipGpu allows the D3D probes to skip when no GPU exists. NOT the default: "did not run" must
+# never quietly count as "passed".
 param(
     [switch]$SkipTest,
-    [switch]$SkipAudit
+    [switch]$SkipAudit,
+    [switch]$SkipGpu
 )
 
 # cargo writes progress to stderr; 'Stop' would turn that into a fatal NativeCommandError.
@@ -23,6 +26,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $baselineTests = Join-Path $root 'docs\evidence\test-baseline.txt'
 # 审计是否降级到了缓存指南库（影响最终结论的措辞）
 $script:auditStale = $false
+# 有多少个 D3D 探针因为没 GPU 而跳过（影响最终结论的措辞）
+$script:gpuSkipped = 0
 
 function Step($name) { Write-Host "[gate] $name ..." }
 function Fail($msg) { Write-Host "[gate] FAIL: $msg"; exit 1 }
@@ -43,7 +48,13 @@ if (-not $SkipTest) {
     $baselineLine = (Get-Content $baselineTests | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } | Select-Object -First 1)
     if (-not $baselineLine) { Fail "test baseline has no number: $baselineTests" }
     $expected = [int]$baselineLine.Trim()
+    $skipLog = Join-Path ([System.IO.Path]::GetTempPath()) 'y901-test-skips.txt'
+    Remove-Item $skipLog -ErrorAction SilentlyContinue
     $testOut = & cargo test --workspace --offline 2>&1 | Out-String
+    $skipCount = 0
+    if (Test-Path $skipLog) {
+        $skipCount = (Get-Content $skipLog | Where-Object { $_.Trim().StartsWith('SKIP:') } | Measure-Object).Count
+    }
 
     if ($testOut -match 'error\[E\d+\]' -or $testOut -match 'could not compile') {
         Write-Host $testOut
@@ -59,6 +70,13 @@ if (-not $SkipTest) {
     if ($failed -gt 0) { Fail "$failed test(s) failed" }
     if ($passed -lt $expected) {
         Fail "test count dropped: expected >= $expected, got $passed (a test was removed or #[ignore]d)"
+    }
+    if ($skipCount -gt 0) {
+        if (-not $SkipGpu) {
+            Fail "$skipCount test(s) were SKIPPED (D3D device missing?). Re-run on a GPU machine, or pass -SkipGpu to allow it."
+        }
+        $script:gpuSkipped = $skipCount
+        Write-Host "[gate] WARNING: $skipCount test(s) SKIPPED (-SkipGpu): they asserted nothing this run"
     }
     Write-Host "[gate] ok: $passed tests (>= baseline $expected), 0 failed"
 }
@@ -94,7 +112,12 @@ Write-Host "[gate] ok: hash matches committed baseline"
 Step "missing_docs (must be 0)"
 $env:RUSTFLAGS = '-W missing_docs'
 $docOut = & cargo build --workspace --offline 2>&1 | Out-String
+$docCode = $LASTEXITCODE
 Remove-Item Env:\RUSTFLAGS -ErrorAction SilentlyContinue
+if ($docCode -ne 0) {
+    Write-Host $docOut
+    Fail "build under -W missing_docs exited $docCode"
+}
 $docCount = ([regex]::Matches($docOut, 'missing documentation')).Count
 if ($docCount -gt 0) { Fail "$docCount items without docs" }
 Write-Host "[gate] ok: 0 missing docs"
@@ -131,7 +154,13 @@ else {
     }
 }
 
-if ($script:auditStale) {
+if ($script:auditStale -and $script:gpuSkipped -gt 0) {
+    Write-Host "GATE OK (STALE AUDIT + $($script:gpuSkipped) SKIPPED: not a release gate)"
+}
+elseif ($script:gpuSkipped -gt 0) {
+    Write-Host "GATE OK (SKIPPED: $($script:gpuSkipped) D3D tests)"
+}
+elseif ($script:auditStale) {
     # 明确区分：这不是"完整门禁通过"，而是"审计基于可能过时的缓存库通过"。
     Write-Host "GATE OK (STALE AUDIT: cached advisory DB, re-run online for a release)"
 }
