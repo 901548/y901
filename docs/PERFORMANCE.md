@@ -243,3 +243,29 @@ cargo test -p y901-backend-win32 --release --test perf_bench -- --ignored --noca
 | — | 布局数据结构重构（平铺数组） | ❌ 已否决（架构取舍，收益 < 成本） |
 
 **本框架的"性能调优阶段"到此竣工。** 后续若性能回退，先跑 §6 的命令对表，再决定是否动刀。
+
+## 5. Present 耗时：sync=0 vs sync=1（v0.1.12 实测）
+
+基准：`crates/y901-backend-win32/tests/present_bench.rs`（`#[ignore]`），800×600 窗口，100 帧取样，release。
+
+| 组 | 配置 | avg | p50 | p95 | max |
+|---|---|---|---|---|---|
+| A′ | 窗口 + `sync_interval = 0` | 6773.4µs | **6957.4µs** | 7165.2µs | 7309.7µs |
+| B | 窗口 + `sync_interval = 1` | 6942.5µs | **6939.6µs** | 7085.6µs | 7289.7µs |
+
+**p50 差值（B − A′）= −17.8µs**。
+
+### 结论（重要）
+
+**这不是"顺利证明 vsync 是瓶颈"的结果**。 `sync=0` **没有变快**，两组都在 **6.9ms**。
+6.9ms ≈ 1/144Hz，说明 **耗时不在 `Present` 这一步的等待上**，而在**更早或更深的环节**：
+
+- 本机为 **144Hz + 双虚拟适配器**（GameViewer / ToDesk），合成器/DWM 可能在 `Present`
+  之外强制了帧节奏；
+- 也可能 `render` 前的等待（如 `MsgWaitForMultipleObjectsEx` 或空闲循环）被计入了这 6.9ms。
+
+**因此：不能用这组数据声称"渲染开销可忽略"。** 要得到纯提交耗时，需要：
+
+1. 独占全屏（暂缓：需手写 `SetFullscreenState` 的 COM 槽位）；
+2. 或用 GPU 计时（timestamp query）区分"提交"与"展现"；
+3. 或把测量点缩小到 `render` 内部（只计 `Present` 调用本身）。
