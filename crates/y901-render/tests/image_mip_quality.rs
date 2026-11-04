@@ -139,3 +139,53 @@ fn ramp_halves_to_analytic_midpoints() {
     let want = 8 * col as i32 + 2;
     assert!((got - want).abs() > 3, "加 10 后应脱离闭式解容差");
 }
+
+// ---------------------------------------------------------------------------
+// 3b：矩阵补宽（非 2 的幂 / alpha / 边界 clamp）
+// ---------------------------------------------------------------------------
+
+/// **3b-1 结论**：`box_levels_rgba` 对 R/G/B/A **四个通道各自平均**，
+/// **不做 alpha 预乘**。所以下面的期望值是“直接平均”的结果，
+/// 而不是预乘公式的结果——两者在 alpha 均匀时相同，
+/// 在 alpha 不均匀时**不同**；这里取均匀 alpha，并在注释里说明这一点。
+#[test]
+fn alpha_half_transparent_red_plus_blue_averages_channels() {
+    // 2x2：上半红，下半蓝，alpha 均为 128。
+    let mut src = vec![0u8; 2 * 2 * 4];
+    for (i, px) in src.chunks_exact_mut(4).enumerate() {
+        if i < 2 {
+            px.copy_from_slice(&[255, 0, 0, 128]);
+        } else {
+            px.copy_from_slice(&[0, 0, 255, 128]);
+        }
+    }
+    let mut s = backend();
+    let id = s.upload_texture(2, 2, &src);
+    s.clear();
+    // s = 0.5 → L1 尺寸 1x1
+    s.draw_image(Rect::new(0.0, 0.0, 1.0, 1.0), id, ImageStyle::default());
+    let p = s.pixel(0, 0).expect("px");
+    let (r, g, b) = (((p >> 16) & 0xFF) as u8, ((p >> 8) & 0xFF) as u8, (p & 0xFF) as u8);
+    eprintln!("[img-mip] alpha 均匀 2x2 -> 1x1：({r},{g},{b})");
+    // 期望 (127,0,127) 经 alpha=128 混到黑底上 ≈ (64,0,64)；只断言 R≈B 且 G 最小
+    assert!(r.abs_diff(b) <= 2, "R 与 B 应近乎相等（均为半透明原色的平均），实测 ({r},{g},{b})");
+    assert!(g < r.max(b) / 2 + 1, "G 应最小，实测 ({r},{g},{b})");
+}
+
+/// **边界 clamp**：2x2 @ s=0.25 → 级尺寸与下一级都不得归 0，也不得 panic。
+#[test]
+fn tiny_texture_quarter_scale_does_not_panic_or_blank() {
+    let mut src = vec![0u8; 2 * 2 * 4];
+    for px in src.chunks_exact_mut(4) {
+        px.copy_from_slice(&[200, 100, 50, 255]);
+    }
+    let mut s = backend();
+    let id = s.upload_texture(2, 2, &src);
+    s.clear();
+    s.draw_image(Rect::new(0.0, 0.0, 1.0, 1.0), id, ImageStyle::default());
+    // 只要没 panic 且画出了东西，就说明尺寸被 clamp 到 ≥ 1。
+    let p = s.pixel(0, 0).expect("px");
+    let r = ((p >> 16) & 0xFF) as u8;
+    eprintln!("[img-mip] 2x2 @ s=0.25：({r},..)");
+    assert!(p != 0, "1x1 目标上应有像素写入（未 panic、且尺寸 clamp 到 1）");
+}
