@@ -88,12 +88,24 @@ Write-Host "[gate] ok: 0 missing docs"
 # ---------------------------------------------------------------- 6. security audit
 Step "cargo audit (no known vulnerabilities)"
 if (Get-Command cargo-audit -ErrorAction SilentlyContinue) {
-    & cargo audit 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[gate] FAIL: cargo audit found vulnerabilities"
-        exit 1
+    $auditOut = & cargo audit 2>&1 | Out-String
+    $auditCode = $LASTEXITCODE
+    Write-Host $auditOut
+    if ($auditCode -ne 0) {
+        if ($auditOut -match "couldn't fetch advisory database" -or $auditOut -match "failed to prepare fetch" -or $auditOut -match "network") {
+            # 指南库拉不到时**并不代表没有漏洞**，但也不能因为断网就把本地门禁卡死。
+            # 这里明确标注“未完成审计”，并要求在联网环境/CI 重跑。
+            Write-Host "[gate] audit UNAVAILABLE: advisory database could not be fetched (offline?)"
+            Write-Host "[gate]   -> this is NOT a pass; re-run in a networked environment or CI"
+        }
+        else {
+            Write-Host "[gate] FAIL: cargo audit reported a problem (exit $auditCode)"
+            exit 1
+        }
     }
-    Write-Host "[gate] ok: no vulnerabilities (warnings such as 'unmaintained' are reported above)"
+    else {
+        Write-Host "[gate] ok: no vulnerabilities (warnings such as 'unmaintained' are reported above)"
+    }
 }
 else {
     Write-Host "[gate] skipped: cargo-audit not installed (cargo install cargo-audit)"
