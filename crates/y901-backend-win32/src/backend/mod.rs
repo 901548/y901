@@ -400,27 +400,33 @@ impl D3dBackend {
         let atlas_size = self.text.atlas_size() as f32;
         let ascent = self.text.ascent();
 
-        let Some(glyph) = self.text.glyph(ch).cloned() else {
+        // 先按**当前缩放**选一级字形；`scale >= 1` 时这个调用就是 L0（不生成 mip）。
+        // 用 `ScaledGlyph` 而不是 `GlyphInfo`：它带着"实际用的级 + 该级的图集矩形 + 该级自己的 bearing"。
+        let scale = self.current_scale();
+        let Some(sel) = self.text.glyph_at_scale(ch, scale) else {
             return;
         };
-        if glyph.is_empty() {
+        if sel.w == 0 || sel.h == 0 {
             return;
         }
 
-        // 先把推进位置与台面位置过变换栈（空栈时逐位不变）
-        let mapped = self.map_pos(Pos::new(x, y));
-        let offset_x = glyph_offset(span, self.cell.w, glyph.advance);
-        let gsz = self.map_size(Size::new(glyph.width as f32, glyph.height as f32));
-        let pos = Pos::new(
-            mapped.x + offset_x + glyph.bearing_x as f32,
-            mapped.y + ascent + glyph.bearing_y as f32,
+        // 在**未缩放的字形空间**里算出矩形，最后整体过一次变换：
+        // 这样变换语义只在一个地方实现，不会出现"半个量乘了缩放、另半个没乘"。
+        let offset_x = glyph_offset(span, self.cell.w, sel.advance);
+        let raw_pos = Pos::new(
+            x + offset_x + sel.slot.bearing_x,
+            y + ascent + sel.slot.bearing_y,
         );
+        let mapped = self.map_pos(raw_pos);
+        let gsz = self.map_size(Size::new(sel.w as f32, sel.h as f32));
+        let pos = mapped;
         let size = [gsz.w, gsz.h];
+        // UV 指向**所选级**在图集里的矩形
         let uv = [
-            glyph.atlas_x as f32 / atlas_size,
-            glyph.atlas_y as f32 / atlas_size,
-            (glyph.atlas_x + glyph.width) as f32 / atlas_size,
-            (glyph.atlas_y + glyph.height) as f32 / atlas_size,
+            sel.slot.atlas_x as f32 / atlas_size,
+            sel.slot.atlas_y as f32 / atlas_size,
+            (sel.slot.atlas_x + sel.slot.width) as f32 / atlas_size,
+            (sel.slot.atlas_y + sel.slot.height) as f32 / atlas_size,
         ];
         let rgba = [color.r, color.g, color.b, color.a];
 
@@ -851,6 +857,19 @@ impl RenderCtx for D3dBackend {
             pen_x += span * self.cell.w;
         }
         pen_x - origin.x
+    }
+
+    fn push_transform(&mut self, origin: Pos, scale: f32) {
+        // 与 SoftBackend 一致：非法 scale（NaN / ≤ 0）**不压栈**，
+        // 否则会把整个子树的坐标变成 NaN 或反向，而那是不可视且难排查的。
+        if !scale.is_finite() || scale <= 0.0 {
+            return;
+        }
+        self.transforms.push((origin, scale));
+    }
+
+    fn pop_transform(&mut self) {
+        self.transforms.pop();
     }
 
     fn push_clip(&mut self, rect: Rect) {
