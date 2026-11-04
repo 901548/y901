@@ -2,7 +2,7 @@
 
 - **HEAD**: `bf9968e` + 本轮（dispatch 分配基准）
 - **tags**: v0.1.0 … v0.1.9
-- **测试**: 801（基线 801；`#[ignore]` 45，含 ignore 846）
+- **测试**: 806（基线 806；`#[ignore]` 45，含 ignore 851）
 - **门禁**: `scripts/gate.ps1` 六步（MSRV / 测试计数 / clippy / 哈希 / missing_docs / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xDBB308DD1657EF9C` / `400x220`
@@ -10,7 +10,8 @@
 
 ## 已知问题
 
-1. `#15` **ttf-parser 无轮廓点数上限** —— 恶意/损坏字体可让展平器吃满 CPU/内存。未做。
+1. ~~`#15` ttf-parser 无轮廓点数上限~~ —— **已修**：`flatten.rs` 加 `MAX_LINES = 10_000` / `MAX_CONTOURS = 256`，
+   超限时 `flatten_glyph` 返回 `None`（与"字形不存在"同处理），诊断按 gid 去重只打一次。
 2. `#18` 热路径 clone：**tree.rs 已测**（键盘 0 次，鼠标 6 次常数）；
    **`soft.rs` 纹理复制已修**：改为分片借用，每帧分配 **0 次 / 0 字节**（修前 4 MiB/帧）。
 3. `#19` **31 处 `#[allow(dead_code)]`** 未定性（诊断 API / 测试 API / 真死代码）。
@@ -72,6 +73,19 @@
 
 基准现已**断言**每帧 0 次分配。像素哈希不变（`0xDBB308DD1657EF9C` / 400×220）。
 
+## #15 字形上限（本轮）
+
+| 项 | 值 | 依据 |
+|---|---|---|
+| `MAX_LINES` | **10 000** | 常见 CJK 展平后 50–300 条；复杂字也在千条以内 → 一个数量级余量 |
+| `MAX_CONTOURS` | **256** | 汉字最多几十个笔画分支；256 已是实际上限的数倍 |
+
+超限处理：`ttf-parser` 的 `OutlineBuilder` **没有提前终止机制**，所以我们
+**继续消费回调但不再记录任何折线**（内存不涨、不影响上游解析），
+最后 `flatten_glyph` 整体返回 `None`。诊断只打一次（按 gid 去重）。
+
+新增 5 个测试：超限 ×2、边界 ×2（防 off-by-one）、超限后继续消费回调不崩。
+
 ## 下一轮计划
 
-`#15`：在 `flatten.rs` 加 `MAX_POINTS` / `MAX_CONTOURS` 上限，防恶意字体吃满 CPU。
+`#19`：31 处 `#[allow(dead_code)]` 逐项定性（诊断 API / 测试 API / 真死代码）。

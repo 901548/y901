@@ -27,6 +27,19 @@ impl Line {
 /// 平坦度阈值：0.25 px → 0.25*64 = 16（26.6）。
 const TOL_26_6: i32 = 16;
 
+/// 单个字形允许的**最多折线数**。
+///
+/// 取值依据：常见 CJK 字形经展平后约 50–300 条（笔画转折 + 曲线分解），
+/// 复杂的中心字（如「龙」「龟」）也在千条以内。
+/// 留 **10000** 是一个数量级的余量：真实字体碰不到，而恶意轮廓会先撞墅。
+const MAX_LINES: usize = 10_000;
+
+/// 单个字形允许的**最多轮廓数**（`move_to` 次数）。
+///
+/// 取值依据：汉字最多几十个笔画分支（含孔洞），字母更少。
+/// **256** 已是实际上限的数倍。
+const MAX_CONTOURS: usize = 256;
+
 /// 收集轮廓的回调（`ttf_parser::OutlineBuilder`）。
 pub struct Flattener {
     lines: Vec<Line>,
@@ -36,6 +49,12 @@ pub struct Flattener {
     start: (i32, i32),
     /// font unit → 26.6 的缩放系数。
     scale: f32,
+    /// 已开始的轮廓数（`move_to` 计数）。
+    contours: usize,
+    /// 是否已超限。超限后**继续消费回调但不再记录**，
+    /// 因为 `ttf-parser` 的 `OutlineBuilder` 没有提前终止机制；
+    /// 我们只能让自己的展平器拒收，不能让它解析出错。
+    overflowed: bool,
 }
 
 impl Flattener {
@@ -45,6 +64,8 @@ impl Flattener {
             cur: None,
             start: (0, 0),
             scale,
+            contours: 0,
+            overflowed: false,
         }
     }
 
@@ -57,6 +78,12 @@ impl Flattener {
     }
 
     fn push_line(&mut self, a: (i32, i32), b: (i32, i32)) {
+        // 超限后不再追加任何折线：既保证内存不涨，也保证
+        // 后续的扫描线不会读到一个截断的轮廓（它会因 `overflowed` 而整体被拒收）。
+        if self.overflowed || self.lines.len() >= MAX_LINES {
+            self.overflowed = true;
+            return;
+        }
         let l = Line {
             x0: a.0,
             y0: a.1,
@@ -167,6 +194,10 @@ impl Flattener {
 
 impl ttf_parser::OutlineBuilder for Flattener {
     fn move_to(&mut self, x: f32, y: f32) {
+        self.contours += 1;
+        if self.contours > MAX_CONTOURS {
+            self.overflowed = true;
+        }
         let p = self.conv(x, y);
         self.cur = Some(p);
         self.start = p;
@@ -220,6 +251,12 @@ pub fn flatten_glyph(
 ) -> Option<(Vec<Line>, f32)> {
     let mut f = Flattener::new(scale);
     face.outline_glyph(gid, &mut f)?;
+    if f.overflowed {
+        // 与“字形不存在”同一种处理：上层返回 `None`，不 panic、不崩。
+        // 诊断只打一次（按字形去重），否则每帧都会刷屏。
+        warn_overflow_once(gid.0);
+        return None;
+    }
     Some((f.lines, face.glyph_hor_advance(gid)? as f32))
 }
 
@@ -228,4 +265,96 @@ pub fn flatten_glyph(
 #[allow(dead_code)]
 fn _unused(l: Line) -> bool {
     l.is_horizontal() || l.is_degenerate()
+}
+
+/// 超限诊断的去重集：同一个字形只打一条日志。
+///
+/// 为什么要去重：超限字形如果在突发渲染中被反复请求，不去重会每帧写一条日志。
+fn warn_overflow_once(gid: u16) {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+    static SEEN: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
+    let first = match seen.lock() {
+        Ok(mut g) => g.insert(gid),
+        Err(p) => p.into_inner().insert(gid),
+    };
+    if first {
+        eprintln!(
+            "[flatten] 字形 gid={gid} 超出上限（折线 ≤ {MAX_LINES}，轮廓 ≤ {MAX_CONTOURS}），已拒收该字形"
+        );
+    }
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+    use ttf_parser::OutlineBuilder;
+
+    fn flat() -> Flattener {
+        Flattener::new(1.0)
+    }
+
+    /// 恰好 `MAX_LINES` 条折线：不应超限（防 off-by-one）。
+    #[test]
+    fn exactly_max_lines_is_accepted() {
+        let mut f = flat();
+        f.move_to(0.0, 0.0);
+        // 每次 line_to 产生 1 条折线；第一次需要一个起点，所以多画 1 次
+        for i in 0..MAX_LINES {
+            f.line_to(i as f32, 1.0);
+        }
+        assert!(!f.overflowed, "恰好 {MAX_LINES} 条不应超限");
+        assert!(f.lines.len() <= MAX_LINES);
+    }
+
+    /// `MAX_LINES + 1` 条：必须超限。
+    #[test]
+    fn max_lines_plus_one_overflows() {
+        let mut f = flat();
+        f.move_to(0.0, 0.0);
+        for i in 0..=MAX_LINES {
+            f.line_to(i as f32, 1.0);
+        }
+        assert!(f.overflowed, "超过 {MAX_LINES} 条应被拒收");
+        assert_eq!(f.lines.len(), MAX_LINES, "超限后不应再追加折线");
+    }
+
+    /// 恰好 `MAX_CONTOURS` 个轮廓：不应超限。
+    #[test]
+    fn exactly_max_contours_is_accepted() {
+        let mut f = flat();
+        for i in 0..MAX_CONTOURS {
+            f.move_to(i as f32, 0.0);
+            f.line_to(i as f32, 1.0);
+        }
+        assert!(!f.overflowed, "恰好 {MAX_CONTOURS} 个轮廓不应超限");
+    }
+
+    /// `MAX_CONTOURS + 1` 个轮廓：必须超限。
+    #[test]
+    fn max_contours_plus_one_overflows() {
+        let mut f = flat();
+        for i in 0..=MAX_CONTOURS {
+            f.move_to(i as f32, 0.0);
+            f.line_to(i as f32, 1.0);
+        }
+        assert!(f.overflowed, "超过 {MAX_CONTOURS} 个轮廓应被拒收");
+    }
+
+    /// 超限后**继续消费回调也不崩**（ttf-parser 没有提前终止机制）。
+    #[test]
+    fn keeps_consuming_callbacks_after_overflow_without_panicking() {
+        let mut f = flat();
+        f.move_to(0.0, 0.0);
+        for i in 0..(MAX_LINES * 2) {
+            f.line_to(i as f32, 1.0);
+        }
+        f.quad_to(1.0, 1.0, 2.0, 2.0);
+        f.curve_to(1.0, 1.0, 2.0, 2.0, 3.0, 3.0);
+        f.close();
+        assert!(f.overflowed);
+        assert_eq!(f.lines.len(), MAX_LINES, "再多的回调也不应使 lines 继续增长");
+    }
 }
