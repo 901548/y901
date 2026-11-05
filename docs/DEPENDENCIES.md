@@ -80,3 +80,25 @@ miniz_oxide v0.9.1 <- flate2 v1.1.10 <- png v0.17.16 (*)
 **原因**：`png 0.17.16` 对 `miniz_oxide` 与 `flate2` 各有约束，两条路径选中了不同大版本。
 **不属于我们能单独统一的依赖**：要统一需等 `png`/`flate2` 发布新版。
 **当前决策**：接受（只增二进制体积与编译时间，无行为差异）。
+
+## `serial 0.4.0` — 实为 `portable-pty` 的**必选依赖**（更正 P2-01 的描述）
+
+之前记为“lock 残留（不可达）”，**这个判断是错的**。本轮在联网条件下查证：
+
+```
+portable-pty 0.8.1 的 Cargo.toml：
+    [dependencies.serial]
+    version = "0.4"            # 非 optional！
+```
+
+`y901-extras` 依赖 `portable-pty`，所以 `serial` 在依赖图里是**可达的**。
+`cargo tree -i serial` 报 "did not match any packages" 是它的查询方式问题，不是事实。
+
+**清除方式**（均未执行）：
+
+1. 升级 `portable-pty` 到 0.9（cargo 提示 "available: v0.9.0"）—— 需验证 PTY API 兼容；
+2. 换用其它 PTY crate；
+3. 接受（当前选择）。
+
+**结论**：不是“残留”，而是**传递依赖**；不能靠 `cargo update` 或手删 lock 清掉。
+RUSTSEC-2017-0008 仍会在审计里出现，直到 `portable-pty` 升级。
