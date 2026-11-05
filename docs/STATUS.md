@@ -251,3 +251,13 @@
   单测 `handshake_reports_screen_and_visual` **通过**；但 **13 个用例并行跑时全部卡住**（>600s 超时），
   尚未定位是 `SERVER_LOCK` 互斥、基准耗时过长，还是某个用例等事件不返回。
   **因此不打 `v0.1.17`（运行时验证不完整）。**
+
+## Linux / WSL 验证口径
+
+- `cargo test --workspace` 在 WSL 上**不可行**：`y901-backend-win32` 在 Linux 下链接失败（预期，
+  `cc` 报 `input_events` / `font_3c_pixels` / `lib test`）
+- Linux 侧验证命令：`DISPLAY=:99 cargo test -p y901-backend-x11`（需 Xvfb :99 运行）
+- 平台中立 crate（`y901-core` / `y901-ui` / `y901-render` / `y901-widgets`）可单独 `-p` 跑
+- x11 全量：`DISPLAY=:99 cargo test -p y901-backend-x11 --test real_window -- --test-threads=1`
+  （**必须 `--test-threads=1`**：用例共享一个 X 连接与环境变量）
+- 已验证结果：**11 passed / 0 failed / 2 ignored**
