@@ -48,6 +48,7 @@ $numbers = @(
   "# DO NOT EDIT - regenerate with: pwsh -File scripts/sync-doc-numbers.ps1",
   "passed=$passed",
   "ignored=$ignored",
+  "# include_ignored = passed + ignored (full --include-ignored run, not a separate suite)",
   "include_ignored=$includeText",
   "baseline=$baseline"
 )
