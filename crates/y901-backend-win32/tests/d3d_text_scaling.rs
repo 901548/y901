@@ -176,7 +176,7 @@ fn record_skip(reason: &str) {
         .unwrap_or_else(|e| panic!("SKIP log write failed: {e}"));
     {
         use std::io::Write as _;
-        let _ = writeln!(f, "SKIP: {reason}");
+        writeln!(f, "SKIP: {reason}").expect("SKIP log write failed -- gate will not see this skip");
     }
 }
 
