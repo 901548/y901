@@ -35,31 +35,29 @@ const GXCOPY: u32 = 3;
 /// 业务里也本来只会建一个连接。
 static SERVER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// 环境变量专用锁：**不能复用 `SERVER_LOCK`**——测试函数已持有它，同线程再 lock 会自死锁。
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 
 /// 环境变量守卫：拿全局锁，并在 drop 时**恢复原值**（含“原本不存在”）。
 ///
 /// 为何不直接 `remove_var`：中途 panic 会把污染状态留给后续用例；
 /// 而外部可能本来就设了这个变量，无条件删除会抹掉它。
 struct EnvGuard {
-    _lock: std::sync::MutexGuard<'static, ()>,
     key: &'static str,
     prev: Option<std::ffi::OsString>,
 }
 
 impl EnvGuard {
     fn set(key: &'static str, value: &str) -> Self {
-        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // 不持有锁：测试函数已持有 `SERVER_LOCK`，序列化已由它保证。
+        // 若 guard 在生命周期内持锁，同一测试里**两个 guard 嵌套**会在同一把锁上自锁。
         let prev = std::env::var_os(key);
         std::env::set_var(key, value);
-        Self { _lock: lock, key, prev }
+        Self { key, prev }
     }
     fn remove(key: &'static str) -> Self {
-        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var_os(key);
         std::env::remove_var(key);
-        Self { _lock: lock, key, prev }
+        Self { key, prev }
     }
 }
 
