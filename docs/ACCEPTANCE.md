@@ -10,9 +10,9 @@
 | 口径 | 数量 |
 |---|---|
 | `cargo test --workspace`（默认，跳过 `#[ignore]`） | **825 passed / 0 failed** |
-| 加上 `--include-ignored` | **877 passed / 0 failed**（825 默认 + 52 标记 `#[ignore]`） |
+| 加上 `--include-ignored` | **877 passed / 0 failed**（含默认测试集与 `#[ignore]` 测试） |
 
-含 ignore 的总数是 **877**，即 825 默认 + 52 ignored；它是 `--include-ignored` 全量跑出的结果，不是单独跑的测试集。
+含 ignore 的总数是 **877**（默认测试集 + `#[ignore]` 测试的全量结果），不是单独跑的测试集。
 
 - **2 处在 example**（`y901-ui/examples/hash_bench.rs`）：`cargo test` 不执行 example 里的测试；
 - **2 处在 `y901-backend-x11`**：该 crate 在 Windows 上 suite 存在但 `running 0 tests`（整 crate 被 cfg 掉）。
