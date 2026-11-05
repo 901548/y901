@@ -88,6 +88,11 @@ foreach ($f in $docFiles) {
     $t = [regex]::Replace($t, '(\d+)\s*passed', { param($m) "$passed passed" })
     $t = [regex]::Replace($t, '(\d+)\s*failed', { param($m) "$failed failed" })
     $t = [regex]::Replace($t, '(\d+)\s*ignored', { param($m) "$ignored ignored" })
+    # **派生表述**也要能自动改写，否则每次计数变化都要手工对齐。
+    # 前瞻 (?=…) 保留后缀；后顾 (?<=…) 保留前缀。
+    $t = [regex]::Replace($t, '(?<!含 ignore\s{0,10})\*{0,2}(\d{1,4})\*{0,2}(?=\s*默认)', { param($m) "**$passed**" })
+    $t = [regex]::Replace($t, '(含 ignore[^\n]{0,12}?)\*\*(\d{1,4})\*\*', { param($m) $m.Groups[1].Value + "**$includePassed**" })
+    $t = [regex]::Replace($t, '(基线\s*)\*{0,2}(\d{1,4})\*{0,2}', { param($m) $m.Groups[1].Value + "**$baseline**" })
     $t = [regex]::Replace($t, '--include-ignored\s*\*\*(\d+)\*\*', { param($m) "--include-ignored **$includePassed**" })
     $t = [regex]::Replace($t, '包含\s*\*\*(\d+)\*\*', { param($m) "包含 **$includePassed**" })
     $t = [regex]::Replace($t, '\*\*(\d{3})\*\*\s*项测试', { param($m) "**$passed** 项测试" })

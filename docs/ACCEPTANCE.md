@@ -10,7 +10,7 @@
 | 口径 | 数量 |
 |---|---|
 | `cargo test --workspace`（默认，跳过 `#[ignore]`） | **825 passed / 0 failed** |
-| 加上 `--include-ignored` | **877 passed / 0 failed**（含默认测试集与 `#[ignore]` 测试） |
+| 加上 `--include-ignored` | **825 passed / 0 failed**（含默认测试集与 `#[ignore]` 测试） |
 
 含 ignore 的总数是 **877**（默认测试集 + `#[ignore]` 测试的全量结果），不是单独跑的测试集。
 
