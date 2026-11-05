@@ -3,16 +3,16 @@
 生成时间：2026-11-02
 命令：`cargo test --workspace -- --include-ignored`
 日志：`docs/evidence/correctness/final-760-include-ignored.log`（**历史记录**，文件名沿用旧口径 760）。
-当前口径以 `scripts/gate.ps1` 为准：**825 passed / 0 failed**（baseline 见 `docs/evidence/test-baseline.txt`）。
+当前口径以 `scripts/gate.ps1` 为准：**828 passed / 0 failed**（baseline 见 `docs/evidence/test-baseline.txt`）。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **825 passed / 0 failed** |
-| 加上 `--include-ignored` | **825 passed / 0 failed**（含默认测试集与 `#[ignore]` 测试） |
+| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **828 passed / 0 failed** |
+| 加上 `--include-ignored` | **828 passed / 0 failed**（含默认测试集与 `#[ignore]` 测试） |
 
-含 ignore 的总数是 **877**（默认测试集 + `#[ignore]` 测试的全量结果），不是单独跑的测试集。
+含 ignore 的总数是 **880**（默认测试集 + `#[ignore]` 测试的全量结果），不是单独跑的测试集。
 
 - **2 处在 example**（`y901-ui/examples/hash_bench.rs`）：`cargo test` 不执行 example 里的测试；
 - **2 处在 `y901-backend-x11`**：该 crate 在 Windows 上 suite 存在但 `running 0 tests`（整 crate 被 cfg 掉）。
