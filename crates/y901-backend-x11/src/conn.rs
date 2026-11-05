@@ -267,9 +267,16 @@ impl Connection {
     }
 
     fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), String> {
+        // 等应答必须有上界：协议错位时对端不会再回应答，而 `read_exact` 默认无限阻塞。
+        const REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
         self.stream
-            .read_exact(buf)
-            .map_err(|e| format!("读取失败（服务端关闭？）: {e}"))
+            .set_read_timeout(Some(REPLY_TIMEOUT))
+            .map_err(|e| format!("设置读超时失败: {e}"))?;
+        let r = self.stream.read_exact(buf).map_err(|e| {
+            format!("读取失败（对端关闭或等应答超时 5s）：{e}")
+        });
+        let _ = self.stream.set_read_timeout(None);
+        r
     }
 
     /// 发送一个已编码的请求（不 flush）。
