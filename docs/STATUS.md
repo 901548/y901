@@ -260,4 +260,4 @@
 - 平台中立 crate（`y901-core` / `y901-ui` / `y901-render` / `y901-widgets`）可单独 `-p` 跑
 - x11 全量：`DISPLAY=:99 cargo test -p y901-backend-x11 --test real_window -- --test-threads=1`
   （**必须 `--test-threads=1`**：用例共享一个 X 连接与环境变量）
-- 已验证结果：**11 passed / 0 failed / 2 ignored**
+- 已验证结果：**824 passed / 0 failed / 52 ignored**
