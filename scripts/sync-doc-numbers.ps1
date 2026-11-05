@@ -89,7 +89,8 @@ foreach ($f in $docFiles) {
     $t = [regex]::Replace($t, '包含\s*\*\*(\d+)\*\*', { param($m) "包含 **$includePassed**" })
     $t = [regex]::Replace($t, '\*\*(\d{3})\*\*\s*项测试', { param($m) "**$passed** 项测试" })
     $t = [regex]::Replace($t, '(\d{3})\s*项测试', { param($m) "$passed 项测试" })
-    $t = [regex]::Replace($t, '测试[^\n]{0,6}\*\*(\d{3})\*\*', { param($m) "测试 **$passed**" })
+    # 测试行的加粗数字：只替换数字本身，不动冒号与其他字符
+    $t = [regex]::Replace($t, '(?<=测试[^\n]{0,4})\*\*(\d{3})\*\*', { param($m) "**$passed**" })
     $t = [regex]::Replace($t, '\*\*(\d{3})\s*测试全绿\*\*', { param($m) "**$passed 测试全绿**" })
     if ($t -ne $orig) {
         if ($Check) { Write-Host "[sync] OUT OF SYNC: $f"; $stale++ }
