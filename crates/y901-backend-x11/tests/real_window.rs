@@ -35,6 +35,40 @@ const GXCOPY: u32 = 3;
 /// 业务里也本来只会建一个连接。
 static SERVER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// 环境变量守卫：拿全局锁，并在 drop 时**恢复原值**（含“原本不存在”）。
+///
+/// 为何不直接 `remove_var`：中途 panic 会把污染状态留给后续用例；
+/// 而外部可能本来就设了这个变量，无条件删除会抹掉它。
+struct EnvGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    key: &'static str,
+    prev: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let lock = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os(key);
+        std::env::set_var(key, value);
+        Self { _lock: lock, key, prev }
+    }
+    fn remove(key: &'static str) -> Self {
+        let lock = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os(key);
+        std::env::remove_var(key);
+        Self { _lock: lock, key, prev }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match self.prev.take() {
+            Some(v) => std::env::set_var(self.key, v),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
+
 fn connect() -> (std::sync::MutexGuard<'static, ()>, Connection) {
     let guard = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
@@ -481,8 +515,7 @@ fn benchmark_shm_vs_putimage_1080p() {
     // 环境变量是**进程全局**的：必须拿 SERVER_LOCK，否则并发的另一个用例
     // 会在不同时机看到它（或看不到），测出来的性能对比就是假的。
     let _env_lock = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let prev_no_shm = std::env::var_os("Y901_NO_SHM");
-    std::env::set_var("Y901_NO_SHM", "1");
+    let _shm_guard = EnvGuard::set("Y901_NO_SHM", "1");
     let mut wdw2 = create_window_retry(&d, w, h, "bench-fallback");
     wdw2.present(&px, w as u32, h as u32).expect("warmup2");
     let t1 = std::time::Instant::now();
@@ -490,11 +523,6 @@ fn benchmark_shm_vs_putimage_1080p() {
         wdw2.present(&px, w as u32, h as u32).expect("present2");
     }
     let total_fallback = t1.elapsed().as_secs_f64() * 1000.0;
-    // 恢复原值（而不是无条件 remove：外部可能本来就设了它）
-    match prev_no_shm {
-        Some(v) => std::env::set_var("Y901_NO_SHM", v),
-        None => std::env::remove_var("Y901_NO_SHM"),
-    }
     eprintln!(
         "[bench] 回退路径（分块 PutImage）x{FRAMES}：总 {total_fallback:.1}ms，单帧 {:.2}ms",
         total_fallback / (FRAMES as f64)
@@ -532,7 +560,7 @@ fn shm_and_fallback_produce_identical_pixels() {
     }
 
     // A：SHM 路径
-    std::env::remove_var("Y901_NO_SHM");
+    let _shm_a = EnvGuard::remove("Y901_NO_SHM");
     let mut a = create_window_retry(&d, w, h, "pixels-shm");
     a.present(&px, w as u32, h as u32).expect("present A");
     let (depth_a, got_a) = {
@@ -544,7 +572,7 @@ fn shm_and_fallback_produce_identical_pixels() {
     drop(a);
 
     // B：回退路径
-    std::env::set_var("Y901_NO_SHM", "1");
+    let _shm_b = EnvGuard::set("Y901_NO_SHM", "1");
     let mut b = create_window_retry(&d, w, h, "pixels-fallback");
     b.present(&px, w as u32, h as u32).expect("present B");
     let (depth_b, got_b) = {
@@ -553,7 +581,6 @@ fn shm_and_fallback_produce_identical_pixels() {
         let _ = c.sync();
         r
     };
-    std::env::remove_var("Y901_NO_SHM");
     drop(b);
 
     assert_eq!(depth_a, depth_b, "两路得到的 depth 应相同");
