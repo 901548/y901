@@ -1142,4 +1142,20 @@ mod tests {
     }
 
 
+
+    /// 零尺寸构造 / 重排 / 改行数都不得 panic，应被 clamp 到 ≥ 1。
+    ///
+    /// 为何值得单独一条：`Grid` 接受 `u16`，0 是合法值但无意义；
+    /// 旧版用 `debug_assert!` 守着，于是**测试里 panic、release 里 clamp**——两边行为不一致。
+    #[test]
+    fn zero_sized_grid_does_not_panic() {
+        let mut g = Grid::new(0, 0);
+        assert!(g.cols >= 1 && g.rows >= 1, "new(0,0) 应 clamp，实测 {}x{}", g.cols, g.rows);
+        g.place_cell('a', 0);
+        g.reflow(0);
+        assert!(g.cols >= 1, "reflow(0) 应 clamp，实测 {}", g.cols);
+        g.set_rows(0);
+        assert!(g.rows >= 1, "set_rows(0) 应 clamp，实测 {}", g.rows);
+    }
+
 }

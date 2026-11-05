@@ -64,20 +64,23 @@ foreach ($f in $docFiles) {
     $t = $orig
     # 只替换“数字 + 明确语义”的组合，不做全文数字替换
     if ($Check) {
-        # 校验比同步更严：**任何**与“测试 / passed”同行的 3 位数，
-        # 只要不等于当前实测值，就算漂移。
-        # 为何要这么宽：上一版只匹配 `**N** 项测试` 这类固定形式，
-        # 改 README 表格里的 `**824**（cargo test` 就检不出来。
-        foreach ($line in ($t -split "`n")) {
-            if ($line -notmatch '测试|passed|ignored') { continue }
-            # 只看**加粗**的 3 位数：历史记录里的 760/801 是普通文本，不应报。
-            foreach ($m in [regex]::Matches($line, '\*\*(\d{3})\*\*')) {
+        # **\u6309\u884c\u8bed\u4e49**\u6821\u9a8c\uff1a\u6bcf\u4e2a\u6570\u5b57\u53ea\u5728\u5b83\u7684\u8bed\u8a00\u73af\u5883\u91cc\u88ab\u6bd4\u5bf9\u3002
+        # \u4e3a\u4f55\u4e0d\u80fd\u201c\u6574\u884c\u6240\u6709\u6570\u5b57\u201d\uff1a\u4e00\u53e5\u8bdd\u91cc\u53ef\u80fd\u540c\u65f6\u6709\u57fa\u7ebf/\u9ed8\u8ba4/ignore \u4e09\u4e2a\u6570\uff0c
+        # \u4e5f\u53ef\u80fd\u6709\u65e0\u5173\u6570\u5b57\uff08\u5982\u5de5\u5177\u7248\u672c 13\uff09\u3002\u56e0\u6b64\u7528**\u7d27\u8d34\u5173\u952e\u8bcd\u7684\u6a21\u5f0f**\u3002
+        $rules = @(
+            @{ name = 'ignored';         pattern = '`#\[ignore\]`\s*\*\*(\d+)\*\*'; want = $ignored },
+            @{ name = 'baseline';        pattern = '\u57fa\u7ebf\s*\*\*(\d+)\*\*';            want = $baseline },
+            @{ name = 'include_ignored'; pattern = 'include-ignored`?\s*[|:]\s*\*\*(\d+)\*\*'; want = $includePassed },
+            @{ name = 'include_ignored'; pattern = '\u542b ignore[^\n]{0,8}\*\*(\d+)\*\*';       want = $includePassed },
+            @{ name = 'passed';          pattern = '\*\*(\d+)\*\*\s*passed';                 want = $passed }
+        )
+        foreach ($rule in $rules) {
+            foreach ($m in [regex]::Matches($t, $rule.pattern)) {
                 $n = [int]$m.Groups[1].Value
-                if ($n -eq $passed -or $n -eq $ignored -or $n -eq $includePassed -or $n -eq $baseline) { continue }
-                if ($n -lt 100) { continue }
-                Write-Host "[sync] OUT OF SYNC: $f has stale number $n (expected $passed)"
-                $stale++
-                break
+                if ($n -ne [int]$rule.want) {
+                    Write-Host "[sync] stale: $f -- '$($rule.name)' is $($rule.want) but the line says $n"
+                    $stale++
+                }
             }
         }
         continue
