@@ -1,8 +1,8 @@
 # 项目状态
 
-- **HEAD**: `bf9968e` + 本轮（dispatch 分配基准）
-- **tags**: v0.1.0 … v0.1.9
-- **测试**: 818（基线 818；`#[ignore]` 45，含 ignore 863）
+- **HEAD**: `112ce18`
+- **tags**: v0.1.0 ~ **v0.1.17**
+- **测试**: **824**（基线 **824**；`#[ignore]` **52**，含 ignore **876**）
 - **门禁**: `scripts/gate.ps1` 六步（MSRV / 测试计数 / clippy / 哈希 / missing_docs / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xDBB308DD1657EF9C` / `400x220`
@@ -261,3 +261,12 @@
 - x11 全量：`DISPLAY=:99 cargo test -p y901-backend-x11 --test real_window -- --test-threads=1`
   （**必须 `--test-threads=1`**：用例共享一个 X 连接与环境变量）
 - 已验证结果：**824 passed / 0 failed / 52 ignored**
+
+## 数字检查的覆盖范围（已知限制）
+
+`sync-doc-numbers.ps1 -Check` 当前只比对**加粗的三位数**（为避免把历史数字误报为漂移）。
+后果：**非加粗写法的旧数字会逃过检查**（v0.1.17 审查的 P1-01 就是这个）。
+
+下一步（下一轮）：让脚本比对含 `测试|passed|ignored` 的行里**所有**三位数，
+历史数字用显式标记豁免；Guide 索引由脚本从正文生成。
+本轮已把所有非加粗旧数字改为当前值，`-Check` 通过。

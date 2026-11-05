@@ -1168,6 +1168,8 @@ cargo doc --no-deps                                    # 打开 API 参考
 - **L7：`#[cfg(test)]` 对 integration test 不可见**
 - **L8：恢复文件 ≠ 恢复构建状态**
 - **L9：离线时必须显式承认，不能静默提交**
+- **L10：/proc 的 State + wchan 比读代码更快判定挂起类型**
+- **L11：guard 类型的锁不能跨越两个嵌套实例**
 
 （完整内容见下方各节）
 

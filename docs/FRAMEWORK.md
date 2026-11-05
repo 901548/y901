@@ -240,7 +240,7 @@ dlg.open();
 ## 10. 测试
 
 ```
-cargo test --workspace          # 801 项（另 7 个 GPU harness 需 --ignored）
+cargo test --workspace          # 824 项（另 7 个 GPU harness 需 --ignored）
 cargo build --workspace         # 零警告
 cargo clippy --workspace --all-targets   # 警告必须为 0（建议直接用 scripts/gate.ps1） 零警告
 scripts/test-count.ps1          # 唯一可信的计数方式（把输出写文件再解析）
