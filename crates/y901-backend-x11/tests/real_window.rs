@@ -35,6 +35,9 @@ const GXCOPY: u32 = 3;
 /// 业务里也本来只会建一个连接。
 static SERVER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// 环境变量专用锁：**不能复用 `SERVER_LOCK`**——测试函数已持有它，同线程再 lock 会自死锁。
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// 环境变量守卫：拿全局锁，并在 drop 时**恢复原值**（含“原本不存在”）。
 ///
 /// 为何不直接 `remove_var`：中途 panic 会把污染状态留给后续用例；
@@ -47,13 +50,13 @@ struct EnvGuard {
 
 impl EnvGuard {
     fn set(key: &'static str, value: &str) -> Self {
-        let lock = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var_os(key);
         std::env::set_var(key, value);
         Self { _lock: lock, key, prev }
     }
     fn remove(key: &'static str) -> Self {
-        let lock = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var_os(key);
         std::env::remove_var(key);
         Self { _lock: lock, key, prev }
@@ -514,7 +517,8 @@ fn benchmark_shm_vs_putimage_1080p() {
     drop(wdw);
     // 环境变量是**进程全局**的：必须拿 SERVER_LOCK，否则并发的另一个用例
     // 会在不同时机看到它（或看不到），测出来的性能对比就是假的。
-    let _env_lock = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // 本函数开头已持有 SERVER_LOCK；对同一把锁重复 lock() 会自死锁（Mutex 不可重入），
+    // 环境变量由 EnvGuard 自己的 ENV_LOCK 保护。
     let _shm_guard = EnvGuard::set("Y901_NO_SHM", "1");
     let mut wdw2 = create_window_retry(&d, w, h, "bench-fallback");
     wdw2.present(&px, w as u32, h as u32).expect("warmup2");
