@@ -1262,3 +1262,28 @@ cargo doc --no-deps                                    # 打开 API 参考
 2. 离线时用 `-AllowStaleAudit` 重跑，确认 `GATE OK (DEV: STALE AUDIT)`
 3. 如果连 `-AllowStaleAudit` 也红，那是代码质量问题，必须先修
 4. 提交信息或 STATUS 里标注“DEV 级”，让读者知道这不是联网验证过的发布提交
+
+### L10：/proc 的 State + wchan 比读代码更快判定挂起类型
+
+实例：`shm_and_fallback` 测试挂起，前四轮假设（锁冲突 / 重复锁 / SHM 竞态 / 读超时）
+全部是“读代码觉得像”，改完都不解决。第五轮读 `/proc/<pid>/status` 与 `wchan`：
+
+- `State: S` → **阻塞**（不是忙等）
+- `wchan: futex_wait_queue` → **等锁**（不是 socket 读）
+- `cpu_ticks` 不变 → 确认阻塞
+
+**一条证据把范围从“create 里某个未知位置”压到“某把锁”。**
+
+**规则**：进程挂起时，先读 `/proc/<pid>/status` 的 `State` 和 `/proc/<pid>/wchan`，
+比读代码猜快得多。`State: R` = 忙等；`State: S` + `futex` = 等锁；
+`State: S` + socket 相关 wchan = 等网络/等应答。
+
+### L11：guard 类型的锁不能跨越两个嵌套实例
+
+实例：`EnvGuard` 持有 `MutexGuard` 字段直到 `Drop`，而同一测试里构造了两个 `EnvGuard`
+→ 第二次 `lock()` 在同一线程上永久阻塞（`std::sync::Mutex` 不可重入）。
+上一轮修的是 `ENV_LOCK` vs `SERVER_LOCK`（跨锁），真正的死锁是 `ENV_LOCK` vs `ENV_LOCK`（同锁嵌套）。
+
+**规则**：guard 类型要么**不持有锁**（只在构造时短暂串行化），
+要么在文档里明写“同一作用域内不能构造两个”。
+写 guard 前先问：**调用方是否已经持有同一把锁？**
