@@ -76,21 +76,15 @@ impl DirtyRegion {
     /// 实测：10k 次追加要 145ms。上限一到就整窗，把最坏情况压回 O(1)。
     pub const MAX_RECTS: usize = 16;
 
-    /// 两个矩形是否相交**或边贴边**。
+    /// 两块是否**真实重叠**（重叠面积 > 0）。
     ///
-    /// 为什么要包含边贴边：流式输出的行是一行接一行追加的，
-    /// 它们共用一条边，`intersect()` 返回空 → 被当成"不相交"从而永远不合并
-    /// （实测：10k 行流式追加后仍然是 10000 块）。
-    /// 相邻合并成并集是**安全**的：脏区只会变大，不会漏画。
-    fn touches(a: Rect, b: Rect) -> bool {
-        // 先排除"完全分开"（两轴都有真正间隙）
-        let sep_x = a.right() < b.x || b.right() < a.x;
-        let sep_y = a.bottom() < b.y || b.bottom() < a.y;
-        if sep_x || sep_y {
-            return false;
-        }
-        // 一轴重叠（含相切）即可合并
-        true
+    /// 为何不用“边贴边即可合并”：零重叠时 `area(A∪B) − area(A) − area(B)` 恒 ≥ 0，
+    /// 而合并只能省一次切换 —— 几何上相邻并不代表合并后面积不增。
+    /// 实测反例：1000×1 与 1×1000 在角上相贴 → 合并成 1000×1001（过度覆盖 500×）。
+    fn overlaps(a: Rect, b: Rect) -> bool {
+        let x = a.x < b.x + b.w && b.x < a.x + a.w;
+        let y = a.y < b.y + b.h && b.y < a.y + a.h;
+        x && y
     }
 
     /// 追加一块脏区。为什么不合并成包围盒：两块不相邻的脏区合并后，中间的空白也会被清屏——而 CPU 侧已跳过那些节点，结果就是一块黑。
@@ -120,7 +114,7 @@ impl DirtyRegion {
                 self.rects.swap_remove(i);
                 continue;
             }
-            if Self::touches(r, rect) {
+            if Self::overlaps(r, rect) {
                 let merged = r.union(rect);
                 self.rects.swap_remove(i);
                 // 合并后的矩形可能还能合并其它的：递归一次（数量小，不担心栈深）

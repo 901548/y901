@@ -308,3 +308,39 @@ pub fn plan_dirty_rects(dirty: &DirtyRegion, p: &DirtyPlanParams)
 | prior art 文献核实（QRegion / SkRegion / damage 扩展 / 相关论文） | **待核实**（本会话无网络检索） |
 | `c_switch` / `c_pixel` 实测值 | **待实测** |
 | H1–H4 的实测验证 | **待实测** |
+
+---
+
+## 8. 后端无关性的修正（实测后新增）
+
+原代价函数 `k·c_switch + c_pixel·area(∪s)` **在 D3D 上是错的**。实测（见
+`docs/design/dirty-scissor-calibration.md`）：
+
+| 后端 | 每次"脏区绘制"的代价 | 最优策略 |
+|---|---|---|
+| CPU（Soft） | `c_switch ≈ 1.8 ns` ≈ **10 像素** | **逐块**，合并几乎从不划算 |
+| D3D | `c_rect = c_scissor + c_draw(N)`，`c_draw` 随实例数线性增长（10k 实例 ≈ 1.6 ms） | **激进合并**，每多一块 ≈ 一次全量 draw |
+
+**结论**：`plan_dirty_rects` **不该是后端无关的策略**。它需要后端提供两个常数：
+
+- `c_rect`：绘制一块脏区的代价（含 scissor + 可能的全量 draw）
+- `c_pixel`：每像素填充的代价
+
+由**后端**回答"合并是否划算"，而不是由一个全局启发式决定。
+
+### 下一步（架构级，未实施）
+
+- 在 `RenderBackend`（或等价 trait）加 `fn dirty_merge_threshold(&self) -> Option<(f64, f64)>`
+- `plan_dirty_rects` 依据该阈值决定合并策略
+- CPU 后端返回 `(≈10, 1.0)`；D3D 后端返回 `(≫10⁴, 1.0)`
+
+### 已实施的部分（本轮）
+
+`DirtyRegion::add` 的合并判据已从 `touches()`（边贴边即可合并）改为 `overlaps()`（**仅真实重叠**）。
+理由**不依赖任何后端常数**：
+
+```
+零重叠时 area(A∪B) − area(A) − area(B) ≥ 0
+合并只省一次 c_switch，却可能放大面积（角落相贴 = 500×）
+⇒ 零重叠合并在任何后端上都不可能更优
+```
