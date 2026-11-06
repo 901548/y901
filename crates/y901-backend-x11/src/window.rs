@@ -457,6 +457,7 @@ impl WindowBackend for X11Window {
 
     /// 脏区判定在 `render_tree` 内部（本层是唯一判定点）。
     fn render(&mut self, tree: &mut UiTree) -> Result<RenderOutcome, String> {
+        // 这里只生成 outcome；实际 skip 与 Present 在 `render_tree` 内。
         let had_dirty = !tree.dirty().is_empty();
         self.render_tree(tree)?;
         Ok(if had_dirty {

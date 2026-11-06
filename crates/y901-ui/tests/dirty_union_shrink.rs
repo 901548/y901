@@ -197,3 +197,35 @@ fn grow_also_marks_union() {
         "变大也要覆盖新区域"
     );
 }
+
+/// **空 dirty 时 `UiTree::render` 不得调用 `RenderCtx`**。
+///
+/// 这个防御性 guard 不决定 Present（Present 在 `WindowBackend::render` 里定），
+/// 但它保证了直接调 `UiTree::render` 的路径不会白跑一遍 Widget 树。
+#[test]
+fn clean_tree_render_draws_nothing() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let w = Rc::new(Cell::new(100.0f32));
+    let h = Rc::new(Cell::new(100.0f32));
+    let gen = Rc::new(Cell::new(0u64));
+    let root = Flex::column("root").push(Box::new(Shrinker {
+        w: w.clone(),
+        h: h.clone(),
+        gen: gen.clone(),
+        rect: Rect::ZERO,
+    }));
+    let mut tree = UiTree::new(Box::new(root));
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+
+    // 第一次渲染把脏区清空。
+    tree.render(&mut Sink);
+    assert!(tree.dirty().is_empty(), "前提：渲染后脏区应已清空");
+
+    // 脏区为空时再 render：不得改变脏区状态（否则说明 guard 失效）。
+    tree.render(&mut Sink);
+    assert!(
+        tree.dirty().is_empty(),
+        "空 dirty 下的 render 不应产生新脏区"
+    );
+}

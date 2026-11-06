@@ -223,3 +223,33 @@ fn runtime_consumes_repaint_request_before_render() {
         .expect("run_loop 必须调 render");
     assert!(hook < render, "after_frame 必须在 render 之前");
 }
+
+/// **空 dirty 时 Win32 必须返回 `Skipped`**（不 Present）。
+///
+/// 为何不是行为测试：`Window::create` 需要真实 `HWND` + D3D 设备，
+/// 而 `render_inner` 在没有设备时直接返回，建不出有意义的边界。
+/// 因此这里钉住**结构**：skip 由 `render_inner` 实施，outcome 由包装层生成，
+/// 且两者均以 `tree.dirty()` 为唯一依据。
+#[test]
+fn backend_render_reports_skipped_when_clean() {
+    let src = include_str!("../src/window.rs");
+    let start = src
+        .find("fn render(&mut self, tree: &mut UiTree) -> Result<RenderOutcome, String>")
+        .expect("WindowBackend::render 实现未找到");
+    let body = &src[start..];
+    let end = body.find("fn set_theme(").unwrap_or(body.len());
+    let body = &body[..end];
+
+    assert!(
+        body.contains("let had_dirty = !tree.dirty().is_empty();"),
+        "outcome 必须基于调用前的脏区状态"
+    );
+    assert!(
+        body.contains("self.render_inner(tree, 1);"),
+        "skip 与 Present 必须在 render_inner 内完成"
+    );
+    assert!(
+        body.contains("RenderOutcome::Skipped") && body.contains("RenderOutcome::Presented"),
+        "两种结果都必须出现"
+    );
+}

@@ -1494,6 +1494,7 @@ impl y901_backend_common::window::WindowBackend for Window {
     /// `had_dirty` 在调用**之前**取一次，仅用于回答“本帧动了没有”；
     /// 它不参与决策（决策仍在 `render_inner` 里）。
     fn render(&mut self, tree: &mut UiTree) -> Result<RenderOutcome, String> {
+        // 这里只生成 outcome；实际 skip 与 Present 在 `render_inner` 内。
         let had_dirty = !tree.dirty().is_empty();
         self.render_inner(tree, 1);
         Ok(if had_dirty {

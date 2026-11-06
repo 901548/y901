@@ -1679,6 +1679,9 @@ impl UiTree {
                 ctx.release_texture(id);
             }
         }
+        // 防御性 guard：脏区为空时不遍历 Widget、不绘制。
+        // 这**不决定 Present** —— Present 语义在 `WindowBackend::render`（见 `RenderOutcome`）。
+        // 保留此 guard 是为了直接调 `UiTree::render` 的测试与 Canvas 不画空树。
         if self.dirty.is_empty() {
             return;
         }

@@ -111,9 +111,9 @@ pub fn run_loop<W: WindowBackend>(
 
         // ---- 6. 渲染 ----
         //
-        // **脏区判定只在 `WindowBackend::render` 内部**；本循环不查 `tree.dirty()`，
-        // 而是用返回的 `RenderOutcome` 判断本帧是否真的提交了像素。
-        // 这样"停留与否"只有一个来源，不会出现两层判定互相掩盖。
+        // skip/Present 判定在 `WindowBackend::render`，返回 `RenderOutcome`。
+        // `UiTree::render` 的空 dirty 是**防御性 guard**（不决定 Present）。
+        // 本循环只看 `RenderOutcome`，不查 `tree.dirty()`。
         let outcome = window.render(tree)?;
         if !first_frame_done {
             first_frame_done = true;
@@ -146,5 +146,43 @@ pub fn run_loop<W: WindowBackend>(
         if !had_work && matches!(outcome, RenderOutcome::Skipped) {
             let _ = tree.dispatch(&UiEvent::Tick);
         }
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    /// `run_loop` 不得自己查脏区：否则会与 `WindowBackend::render` 的判定互相掩盖。
+    ///
+    /// 为何是结构断言而不是行为测试：`run_loop` 需要完整的 `Host` + `UiTree`
+    /// + 一个会真实渲染的窗口，在单元测试里构造起来成本高于它能发现的问题。
+    ///
+    /// 这条断言就是为了防止"有人又把 `tree.dirty()` 加回来"。
+    #[test]
+    fn run_loop_never_queries_dirty_directly() {
+        let src = include_str!("runtime.rs");
+        // 过滤掉注释行：注释里会提到 tree.dirty()（用于说明"不查"）。
+        // 只扫**含测试模块之前**的源码：否则会把本测试自己的字符串字面量算进去。
+        // 同时剔除行注释（注释里会提到 `tree.dirty()` 用于说明"不查"）。
+        let prod = src.split("#[cfg(test)]").next().unwrap_or(src);
+        let mut dirty_calls = 0;
+        for line in prod.lines() {
+            let code = line.split("//").next().unwrap_or("");
+            if code.contains("tree.dirty()") {
+                dirty_calls += 1;
+            }
+        }
+        assert_eq!(
+            dirty_calls, 0,
+            "run_loop 不得直接查 tree.dirty()；应用 RenderOutcome 判断"
+        );
+        let code = prod;
+        assert!(
+            code.contains("window.render(tree)?"),
+            "run_loop 必须通过 WindowBackend::render 取结果"
+        );
+        assert!(
+            code.contains("RenderOutcome::Presented") && code.contains("RenderOutcome::Skipped"),
+            "run_loop 必须同时用到两种 outcome"
+        );
     }
 }
