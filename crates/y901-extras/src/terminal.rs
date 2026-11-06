@@ -691,7 +691,7 @@ impl Widget for TerminalWidget {
             .prop("scroll_offset", self.grid.scroll_offset.to_string())
             .prop("history", self.grid.history.len().to_string())
             .prop("shell", if self.has_shell() { "pty" } else { "none" })
-            // 结构化状态：Agent 与增量推送都靠它感知"真的变了"
+            // 结构化状态：外部工具与增量推送都靠它感知"真的变了"
             .state("cols", self.grid.cols as u32)
             .state("rows", self.grid.rows as u32)
             .state("cursor_row", self.grid.cursor_row as u32)

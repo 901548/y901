@@ -110,7 +110,7 @@ impl ScrollView {
         self.offset
     }
 
-    /// 伴随滚动条的 id（`{容器 id}.bar`），供 Agent `query` / `invoke` 定位。
+    /// 伴随滚动条的 id（`{容器 id}.bar`），供外部工具 `query` / `invoke` 定位。
     ///
     /// 返回：借用字符串。副作用：无。
     pub fn bar_id(&self) -> &str {

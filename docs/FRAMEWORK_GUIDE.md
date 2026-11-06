@@ -9,7 +9,7 @@
 3. **组件互不认识**：只通过 `UiEvent::Action` 与 `Command` 通信。
 4. **Capture 拦截，Bubble 响应**：在 Capture 里做响应会执行两次。
 5. **默认封禁**：`Semantics::default()` 的 `exposed_to_ai = false`，
-   要给 AI 用必须显式 `.exposed(true)`。
+   要给外部工具用必须显式 `.exposed(true)`。
 
 ## 0.1 工程纪律：改文件的方式（永久规则）
 
@@ -101,7 +101,7 @@ impl Widget for Badge {
 
 - `measure` 只能用**传入的** `cache.measure(child, …)` 访问子节点，直接调子节点会绕过记忆化；
 - 颜色一律从 `ctx.theme()` 查，不要硬编码；
-- 交互组件记得 `.exposed(true)`，否则 AI 看不到也点不到。
+- 交互组件记得 `.exposed(true)`，否则外部工具看不到也点不到。
 
 ## 2. 容器
 
@@ -166,7 +166,7 @@ fn is_open(&self) -> bool { self.open }       // false 时不进索引、不拦�
 - Modal：吞噬外部点击，焦点被限制在子树内；
 - 两者都需要**全屏宿主**（`Stack`），否则 rect 会被父容器约束住。
 
-## 6. 与 Agent 打交道
+## 6. 语义树与外部工具
 
 ```rust
 fn semantics(&self) -> Semantics {
@@ -174,21 +174,21 @@ fn semantics(&self) -> Semantics {
         .label("Save")
         .action("click")            // invoke 白名单
         .state("dirty", true)       // 结构化状态
-        .exposed(true)              // 对 AI 可见
+        .exposed(true)              // 对外部可见
         .sensitive(false)           // true 则 label/value 打码
 }
 ```
 
-**版本锁**：`revision()` 变化代表语义状态变了。AI 带 `if_rev` 调用时会比对它，
+**版本锁**：`revision()` 变化代表语义状态变了。外部工具带 `if_rev` 调用时会比对它，
 不一致返回 409。文本类组件应在内容/光标变化时 bump。
 
 ### 6.1 顶层语义字段 vs `state` 字段
 
-边界只有一条：**Agent 需要独立判断的东西放顶层，组件自有的结构化数据放 `state`**。
+边界只有一条：**外部工具需要独立判断的东西放顶层，组件自有的结构化数据放 `state`**。
 
 | 字段 | 位置 | 理由 |
 |---|---|---|
-| `label` / `value` | 顶层 | Agent 直接读 |
+| `label` / `value` | 顶层 | 外部工具直接读 |
 | `disabled` | **顶层** | "现在能不能点"，是独立语义 |
 | `sensitive` / `exposed_to_ai` | **顶层** | 决定"看不看得到、要不要打码" |
 | `actions` | **顶层** | 动作集 |
@@ -196,11 +196,11 @@ fn semantics(&self) -> Semantics {
 
 **禁止在 `state` 里重复顶层字段**（例如 `state("disabled", …)`）。原因：
 
-1. Agent 会看到两份，无法判断哪个是权威；
+1. 外部工具会看到两份，无法判断哪个是权威；
 2. revision 的哈希范围要覆盖二者时会重复计算，不覆盖时又会漏报；
 3. 两份值漂移时，没有任何机制能发现。
 
-同一条规则也适用于 `props`：`props` 只给调试看，**不进 Agent 输出，也不进哈希**。
+同一条规则也适用于 `props`：`props` 只给调试看，**不进外部输出，也不进哈希**。
 
 ## 7. 应用骨架
 
@@ -217,9 +217,6 @@ fn main() {
 }
 ```
 
-`--mcp` 时把 `y901_mcp::bridge::spawn_io(stdin, stdout)` 拿到的 `Receiver<Job>`
-存进 App，在空闲时 `bridge::pump(&mut server, &mut tree, &jobs, 8)`。
-
 ## 8. 常见坑
 
 | 现象 | 原因 |
@@ -227,7 +224,7 @@ fn main() {
 | 子节点不显示、点不到 | `children_mut()` 返回了 `None` |
 | 滚动后点击错位 | 滚动没返回 `Relayout`，或没实现 `clip()` |
 | 滚轮滚两倍 | 在 Capture 阶段也处理了事件 |
-| AI 看不到组件 | 忘了 `.exposed(true)`（默认封禁） |
+| 外部工具看不到组件 | 忘了 `.exposed(true)`（默认封禁） |
 | 焦点丢失 | 删节点时框架会清焦点，需要重新 `set_focus` |
 | Signal 不生效 | 组件没在 `on_mount` 里 `subscribe` |
 
@@ -236,11 +233,11 @@ fn main() {
 - 布局/命中：构造 `UiTree`，`layout` 后断言 `rect_of` / `hit_test`；
 - 事件：用 `tree.dispatch_to(id, &event)` 走真实三阶段；
 - 渲染：实现一个记录型 `RenderCtx`，断言 `draw_text` 收到的内容；
-- 网关：直接调 `y901_agent::handle_call`，不需要起 TCP。
+- 语义：直接调 `Query::run(&root, &q)` / `UiTree::find(id)`，不需要起 TCP。
 
 ## 10. id 命名规范
 
-id 是 Agent 定位节点的**唯一稳定锚点**，也是 `query` 的筛选依据。建议按路径式命名：
+id 是外部工具定位节点的**唯一稳定锚点**，也是 `query` 的筛选依据。建议按路径式命名：
 
 | 类型 | 规范 | 示例 |
 |---|---|---|
@@ -267,7 +264,7 @@ panel.editor 里的一切：id~="panel.editor"
 ```
 
 框架不强制校验命名，但 `query` 的表达式能力建立在命名可预测之上——
-命名混乱时 AI 只能拉全树，方向 C 的收益就没了。
+命名混乱时只能拉全树，方向 C 的收益就没了。
 
 ## §12 待清理的语义一致性问题
 
@@ -276,17 +273,17 @@ panel.editor 里的一切：id~="panel.editor"
 > - `focused` 已统一为**顶层语义字段**，由 `UiTree::focus_path` 注入（见 §14）；
 >   `TextInput` / `Terminal` 的内部 `focused` 只用于渲染与按键门控，不再进 `state`。
 > - `disabled` 同样只出现在顶层（`sem.disabled`），`state` 里不再有它。
-> - `props` 仍未进哈希也未进 Agent 输出，但它是调试信息，不属于"语义重复"。
+> - `props` 仍未进哈希也未进外部输出，但它是调试信息，不属于"语义重复"。
 
 以下为**历史原文**（当时未修复）：
 
 - **`focused` 字段的不一致**：`TextInput` 把 `focused` 放在 `state` 里，
   而 `Button` 没有这个概念。需要先确认「focused 是否应作为顶层语义字段」：
   若是，统一提到顶层（与 `disabled` 同规则）；若否，则明确各组件职责边界。
-  在此之前不要新增依赖 `state.focused` 的 Agent 脚本。
+  在此之前不要新增依赖 `state.focused` 的外部脚本。
 
 - **`props` 的 `focused` / `hovered` 双写风险**：`TextInput` 同时在 `props`
-  和 `state` 里输出 `focused`。`props` 不进哈希也不进 Agent 输出，
+  和 `state` 里输出 `focused`。`props` 不进哈希也不进外部输出，
   因此不算 bug，但属于可清理的冗余。
 
 发现新的同类问题时，请追加到本节，而不是就地打补丁——
@@ -302,7 +299,7 @@ panel.editor 里的一切：id~="panel.editor"
 
 **为什么**：revision 机制的哈希时机在 `layout()` 开头（一帧一次）。
 如果组件在 `render()` 里改状态，这次变化**不会被哈希捕获**——
-Agent 看到的 `revision` 不变，但 `get_tree` 的内容变了，
+外部工具看到的 `revision` 不变，但 `get_tree` 的内容变了，
 乐观锁（`if_rev`）就会在错误的时刻放行。
 
 **允许改状态的地方**：`event()`、`on_mount()`、`on_unmount()`。
@@ -320,11 +317,11 @@ Agent 看到的 `revision` 不变，但 `get_tree` 的内容变了，
 | 组件内部 `focused` 字段 | 渲染状态（光标闪烁、按键门控） | 组件自己，靠 `UiEvent::Focus` 同步 |
 
 **规则**
-1. Agent 判断"输入会到哪"应看**顶层** `focused`，不要看 `state`。
+1. 外部工具判断"输入会到哪"应看**顶层** `focused`，不要看 `state`。
 2. 组件**不得**在 `request_focus` 之前就把自己的 `focused` 置 true：
    请求可能被 Modal 作用域拒绝，抢跑会导致"组件自以为聚焦、框架却把按键发给别人"。
    正确做法：只 `request_focus`，等框架的 `Focus(true)` 事件回来再置位。
-3. 顶层 `focused` 参与 revision 哈希：焦点变化 = Agent 可操作对象变化。
+3. 顶层 `focused` 参与 revision 哈希：焦点变化 = 外部工具可操作对象变化。
 4. 订阅 patch 覆盖 `value / state（拍平）/ disabled / focused / label`。
 ## §15 订阅 patch 的形状
 
@@ -504,7 +501,7 @@ Semantics::default()
 
 - 网关按 `ActionSpec::arg_name()` 从 `args` 取键（自定义名优先，否则回退默认名）；
 - `to_json` 只在**自定义**参数名时额外输出 `"arg"` 字段，
-  默认名的动作 JSON 形状不变（既有 Agent 解析不受影响）；
+  默认名的动作 JSON 形状不变（既有外部解析不受影响）；
 - 参数类型校验（`accepts`）不变，仍然按 `InputKind`。
 
 **不要**为了换个参数名而改 `InputKind`——那会同时改变类型校验。
@@ -572,7 +569,7 @@ if need_layout || external > 0 {
 `drain_external_invalidations` 对 `PendingInvalidation::One(id)` 也置
 `DirtyRegion::full()`。这不是遗漏，是**有意的保守策略**：
 
-- 后台任务改的多是内容（SFTP 列表更新、AI 消息追加），需要重排；
+- 后台任务改的多是内容（SFTP 列表更新、流式消息追加），需要重排；
 - 重排后节点位置可能变化，只标旧矩形会漏画新位置的节点；
 - 整窗重绘是唯一能保证"重排后所有变化节点都被画到"的方式。
 
@@ -866,8 +863,8 @@ if need_layout || external > 0 || structural {
 - `cursor` / `anchor` / `len`：**保留**（长度已通过 `*` 的数暴露，这是有意接受的）；
 - `text()`：**仍返回原文**（Host 提交给 SSH / 保存时用）。
 
-**为什么是硬需求**：Agent 通过 `get_tree` / `query` / `subscribe` 读取 `semantics`。
-不 mask 就等于把密码明文交给 AI。这不是便利性，是安全边界。
+**为什么是硬需求**：外部工具通过 `UiTree::find` / `Query::run` 读取 `semantics`。
+不 mask 就等于把密码明文交给外部工具。这不是便利性，是安全边界。
 
 **渲染约束**：
 
@@ -894,7 +891,7 @@ if need_layout || external > 0 || structural {
   "调用方忘了标脏"的实际问题，考虑让 `set_size` 走 `Command` 路径返回 `Relayout`。
 ## §31 Button 的选中态
 
-`Button::selected(bool)` 用于"按钮组单选"场景（主题切换、Agent/QA 模式、SSH 类型等）。
+`Button::selected(bool)` 用于"按钮组单选"场景（主题切换、工具/QA 模式、SSH 类型等）。
 
 - **渲染状态优先级**：`Disabled > Selected > Pressed > Hovered > Normal`。
   `Selected` 是**持久**状态（"当前选中的是哪个"），必须始终可见；
@@ -903,7 +900,7 @@ if need_layout || external > 0 || structural {
   混色 55% 派生（`Style::blend_toward`）——比 Normal 深、比 Pressed 浅。
   这样所有角色自动拥有选中态，不必给两张主题表各加 6 列。
 - **`set_selected` 不自动标脏**：组件碰不到 `UiTree`，调用方必须 `tree.invalidate(id)`。
-- **语义**：`semantics().state["selected"]` 是布尔值，Agent 据此判断
+- **语义**：`semantics().state["selected"]` 是布尔值，外部工具据此判断
   "当前是暗色主题 / 当前是 QA 模式"。
 - **运行时改选中态的唯一路径**：`tree.find_mut(id).as_any_mut().downcast_mut::<Button>()`
   （`Button` 已实现 `as_any_mut`）。
@@ -934,7 +931,7 @@ tree.find_mut(id)?
 
 **规则**：如果你的组件有 `&mut self` 的运行时方法（`set_text` / `set_open` /
 `set_selected` / `push_child` / `write` / `pump` 等），**必须**实现 `as_any_mut`——
-否则 Host / Agent 无法在运行时调用这些方法，功能**静默失效**（不报错、不 panic，
+否则 Host / 外部工具无法在运行时调用这些方法，功能**静默失效**（不报错、不 panic，
 只是什么都不发生）。
 
 **反例（不需要 `as_any_mut`）**：

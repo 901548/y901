@@ -288,3 +288,13 @@
     跳过时打印：`[守卫] Helm-Y901 依赖树无法解析：依赖的本地 crate 已被删除（y901-agent）`。
   - TODO：**下一轮 demo 会话**迁移 `F:\Helm-Y901` 去除 agent/mcp 依赖后，
     删除 `no_c_deps.rs` 里的跳过分支（代码中已标注 `TODO(去 AI 阶段 3)`），恢复对 Helm 的完整零 C 依赖审计。
+
+
+- **文档债：`docs/FRAMEWORK.md` 的"需要真机的测试"一节陈旧**（去 AI 阶段 4b 记录）。
+  原文称"需要真机的测试只有 `rebuild_reuploads_atlas`"，实际 GPU / D3D11 依赖的 `#[ignore]` 有 **13** 个
+  （`snapshot_harness` ×10 + `soft_matches_d3d_within_antialiasing_tolerance` + `pixel_statistics_and_png_baseline` + `rebuild_reuploads_atlas`）。
+  需改为 13 个，或直接指向 `ACCEPTANCE.md` 的分类表。
+- **文档债：`docs/ACCEPTANCE.md` 的"7 个 GPU harness"小节与分类表不一致**（去 AI 阶段 4b 记录）。
+  `snapshot_harness` 现有 **10** 个 `#[ignore]`，小节只列 7 个；余下 3 个（`text_label_paints_visible_non_background_pixels`、
+  `text_inside_scrollview_is_not_clipped_away`、`rebuild_of_cached_target_does_not_leave_black_areas`）是回归用例而非像素 harness。
+  需先澄清"harness"定义，再决定是补进表还是把标题改成"7 个像素对拍 + 3 个回归"。

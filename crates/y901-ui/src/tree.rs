@@ -1,6 +1,6 @@
 //! 语义树：把 Widget 树变成"可查询、可注入、可命中"的结构。
 //!
-//! 这层是 Agent-Native 的核心：外部只能通过 id 操作节点，
+//! 这层是自动化友好的核心：外部只能通过 id 操作节点，
 //! 拿到的矩形与语义与实际渲染完全一致（同一棵树算出来的）。
 
 use std::collections::HashMap;
@@ -21,7 +21,7 @@ pub struct NodeInfo {
     pub rect: Rect,
     /// 是否持有键盘焦点。
     pub focused: bool,
-    /// 语义信息（标签、值、动作）；这就是 Agent 看到的内容。
+    /// 语义信息（标签、值、动作）；这就是外部工具看到的内容。
     pub semantics: Semantics,
     /// 子节点。
     pub children: Vec<NodeInfo>,
@@ -102,7 +102,7 @@ impl DirtyRegion {
         // 1. 新矩形被已有矩形包含  → 什么也不用做；
         // 2. 新矩形包含了已有矩形  → 删掉已有（否则流式增长会无限堆积）；
         // 3. 两者相交                  → 用并集替换（少一个矩形，且不漏画）。
-        // 之前只有 (1)，AI 流式输出这种"逐次变大"的脏区会一直追加，
+        // 之前只有 (1)，流式输出这种"逐次变大"的脏区会一直追加，
         // 然后撞上 MAX_DIRTY_RECTS 降级成整窗重绘。
         let mut i = 0;
         while i < self.rects.len() {
@@ -719,7 +719,7 @@ impl UiTree {
     ///
     /// 输入：`rect`（屏幕坐标，会被裁到视口内）。
     /// 副作用：并入脏区；空矩形或完全在视口外时什么也不做。
-    /// 用在：AI 流式输出、光标闪烁、单行刷新——
+    /// 用在：流式输出、光标闪烁、单行刷新——
     /// 调用方已知那块区域需要重画，不必为了拿到矩形去遍历树。
     /// 注意：它**不会**触发重排；尺寸变了请另外 `mark_layout_dirty(id)`。
     pub fn invalidate_rect(&mut self, rect: Rect) {
@@ -1190,7 +1190,7 @@ impl UiTree {
 
     // ---------- 语义 revision（方案 1'） ----------
 
-    /// 节点对 Agent 的"有效版本"：组件自己的 revision + 框架计数器。
+    /// 节点对外部工具的"有效版本"：组件自己的 revision + 框架计数器。
     ///
     /// 输入：节点 id。失败：id 不存在时返回 0（不 panic）。
     ///
@@ -2403,7 +2403,7 @@ impl UiTree {
     /// 导出语义树为 JSON（RPC get_tree 的返回体）。
     ///
     /// 形状与 [NodeInfo] 一致：id / role / rect / focused / label / value /
-    /// actions / props / children，Agent 可以直接消费。
+    /// actions / props / children，外部工具可以直接消费。
     pub fn snapshot_json(&self) -> crate::json::Json {
         fn node_json(node: &dyn Widget, focus: Option<&str>) -> crate::json::Json {
             use crate::json::Json;
@@ -2466,12 +2466,12 @@ impl UiTree {
             }
         }
         let mut root = walk(self.root.as_ref(), self.focus.as_deref());
-        // 浮层也要进语义树：否则 Agent/无障碍看不见菜单里的项。
+        // 浮层也要进语义树：否则外部工具/无障碍看不见菜单里的项。
         // 挂在根节点的 `children` 末尾（与绘制顺序一致：浮层最后画）。
         for popup in &self.popups {
             let mut info = walk(popup.widget.as_ref(), self.focus.as_deref());
             // 浮层的布局矩形由 `place_popup` 决定，与 `node.rect()` 可能不一致：
-            // 语义树里必须报**真正绘制/命中**的矩形，否则 Agent 点不中。
+            // 语义树里必须报**真正绘制/命中**的矩形，否则外部工具点不中。
             info.rect = popup.rect;
             root.children.push(info);
         }
@@ -2676,7 +2676,7 @@ struct Subscription {
 /// 节点状态指纹：语义面哈希 + 组件 revision。
 ///
 /// 语义面已含 label/value/state/disabled/sensitive/exposed/focused，
-/// 因此任何 Agent 可见变化都会改变指纹 —— 这正是"要不要推送"的判据。
+/// 因此任何对外可见变化都会改变指纹 —— 这正是"要不要推送"的判据。
 fn fingerprint(node: &dyn Widget, focused: bool) -> u64 {
     let mut sem = node.semantics();
     sem.focused = focused;
@@ -2684,7 +2684,7 @@ fn fingerprint(node: &dyn Widget, focused: bool) -> u64 {
         ^ node.revision().wrapping_mul(0x9e37_79b9_7f4a_7c15)
 }
 
-/// 语义差分：只保留 Agent 关心的、且真的变了的字段。
+/// 语义差分：只保留外部工具关心的、且真的变了的字段。
 ///
 /// 覆盖 value / state（**拍平**成顶层键）/ disabled / focused / label。
 /// `role` / `actions` / `sensitive` / `exposed` 很少变，靠 get_tree 兜底。
@@ -2766,7 +2766,7 @@ fn mount_recursive(node: &mut dyn Widget, invalidation: &crate::signal::Invalida
 // revision 辅助：语义面哈希 / generation 登记
 // ---------------------------------------------------------------------------
 
-/// 语义面哈希：**Agent 可见的字段**才参与。
+/// 语义面哈希：**对外可见的字段**才参与。
 ///
 /// 进：role / label / value / actions / state / disabled / sensitive / exposed / focused
 /// 不进：id（身份）、rect（几何）、props（调试信息）

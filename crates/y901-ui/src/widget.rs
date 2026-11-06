@@ -58,7 +58,7 @@ impl MountCtx {
         }
     }
 }
-/// 组件的语义角色。给 Agent 看的那一层。
+/// 组件的语义角色。给外部工具看的那一层。
 ///
 /// **不是枚举**：框架只提供一组约定常量（panel / button / text …），
 /// 业务角色（例如终端、文件树）由组件库或应用自己定义：
@@ -938,7 +938,7 @@ impl EventCtx {
     }
 }
 
-/// 动作参数的形态。网关据此做类型校验，Agent 据此知道该传什么。
+/// 动作参数的形态。网关据此做类型校验，外部工具据此知道该传什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputKind {
     /// 无参数（纯动作，例如"关闭"）。
@@ -974,7 +974,7 @@ impl InputKind {
     }
 }
 
-/// 一个可被 Agent 调用的动作。
+/// 一个可被外部工具调用的动作。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActionSpec {
     /// 动作名。
@@ -1015,7 +1015,7 @@ impl ActionSpec {
 
     /// 语义树里的紧凑表示：`{"name":"click","input":"none"}`。
     ///
-    /// `arg_name` 为 `Some` 时额外输出 `"arg"` 字段（Agent 据此知道参数名）；
+    /// `arg_name` 为 `Some` 时额外输出 `"arg"` 字段（外部工具据此知道参数名）；
     /// 默认参数名的动作**不输出**该字段——保持既有 JSON 形状不变。
     pub fn to_json(&self) -> crate::json::Json {
         let obj = crate::json::Json::obj().set("name", self.name.clone()).set(
@@ -1033,12 +1033,12 @@ impl ActionSpec {
         }
     }
 }
-/// 语义描述：给 Agent 读的节点信息。
+/// 语义描述：给外部工具读的节点信息。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Semantics {
-    /// 给人和 Agent 看的文字标签。
+    /// 给人和外部工具看的文字标签。
     pub label: String,
-    /// 当前值的字符串形式（Agent 直接消费，不做类型推断）。
+    /// 当前值的字符串形式（外部工具直接消费，不做类型推断）。
     pub value: String,
     /// 角色（query 用；由框架在遍历时从 Widget::role() 自动注入）。
     pub role: Role,
@@ -1046,17 +1046,17 @@ pub struct Semantics {
     pub actions: Vec<ActionSpec>,
     /// 额外键值（终端会填 cols/rows/scroll_offset）。
     pub props: Vec<(String, String)>,
-    /// 结构化状态：Agent 直接消费（文本、光标、禁用…）。
+    /// 结构化状态：外部工具直接消费（文本、光标、禁用…）。
     /// 是否被禁用（不参与 Tab 遍历，也不接收事件）。
     pub disabled: bool,
-    /// 是否对 AI 开放（网关据此过滤，false 的节点 AI 不可见也不可操作）。
+    /// 是否对外部开放（网关据此过滤，false 的节点外部不可见也不可操作）。
     pub exposed_to_ai: bool,
     /// 是否敏感（网关返回 JSON 时把 value 打码）。
     pub sensitive: bool,
     /// 是否持有键盘焦点。**框架拥有**：由 `UiTree::focus_path` 注入，
     /// 组件不得自行设置（组件自己的 focused 字段只用于渲染/按键门控）。
     pub focused: bool,
-    /// 结构化状态：Agent 直接消费。
+    /// 结构化状态：外部工具直接消费。
     pub state: crate::json::Json,
 }
 
@@ -1069,7 +1069,7 @@ impl Default for Semantics {
             actions: Vec::new(),
             props: Vec::new(),
             disabled: false,
-            // 默认封禁：组件必须显式 .exposed(true) 才对 AI 可见
+            // 默认封禁：组件必须显式 .exposed(true) 才对外部可见
             exposed_to_ai: false,
             sensitive: false,
             focused: false,
@@ -1097,7 +1097,7 @@ impl Semantics {
         self
     }
 
-    /// 是否向 AI 暴露这个节点（网关据此过滤）。
+    /// 是否向外部暴露这个节点（网关据此过滤）。
     pub fn exposed(mut self, exposed: bool) -> Self {
         self.exposed_to_ai = exposed;
         self
@@ -1167,7 +1167,7 @@ pub trait Widget {
     /// 一旦挂载就不应改变（`step` 会按 id 缓存矩形与 revision）。
     fn id(&self) -> &str;
 
-    /// 语义角色：给 Agent 与 `query` 用的分类标签。
+    /// 语义角色：给外部工具与 `query` 用的分类标签。
     ///
     /// 返回：`Role`（不是枚举，业务可自定义常量）。默认 `PANEL`。
     /// 副作用：无。`role` 会参与语义面哈希，改动它会让 revision +1。
@@ -1278,7 +1278,7 @@ pub trait Widget {
     ///
     /// 返回：`true` 表示不接收键盘焦点、不参与 Tab。
     /// 副作用：无。注意它**不**阻止鼠标事件——组件应在 `event` 里自己判 `disabled`。
-    /// 与 `semantics().disabled` 不一致会导致 Agent 看到的状态与行为不符。
+    /// 与 `semantics().disabled` 不一致会导致外部工具看到的状态与行为不符。
     fn is_disabled(&self) -> bool {
         false
     }
@@ -1410,9 +1410,9 @@ pub trait Widget {
     /// 原因：revision 的哈希时机在 `layout()` 之前，`render` 里改的状态不会被捕获。
     fn render(&mut self, _ctx: &mut dyn RenderCtx);
 
-    /// 语义信息。给 Agent 看的**唯一**来源。
+    /// 语义信息。给外部工具看的**唯一**来源。
     ///
-    /// 返回：`Semantics`；默认 `exposed_to_ai = false`（不给 AI 用）。
+    /// 返回：`Semantics`；默认 `exposed_to_ai = false`（不对外部开放）。
     /// 副作用：无（但会被高频调用：查询、哈希、推送）。
     /// 约束：会参与语义面哈希（label/value/state/disabled/sensitive/exposed/focused），
     /// 因此**不要**把悬停、动画帧等瞬时状态放进去，否则 revision 会被淹没。

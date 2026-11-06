@@ -81,7 +81,7 @@ impl Button {
 
     /// 禁用按钮：不参与 Tab 遍历，点击不再发命令。
     ///
-    /// 返回：自身。副作用：语义里 `disabled=true`（Agent 可见）；
+    /// 返回：自身。副作用：语义里 `disabled=true`（外部工具可见）；
     /// 视觉上使用 `State::Disabled` 的配色。
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
@@ -281,11 +281,11 @@ impl Widget for Button {
             .value(self.command.clone())
             .action("click")
             // disabled 是**顶层语义字段**，不进 state：
-            // 两处重复会让 Agent 困惑"哪个是真的"，也会让哈希范围含糊。
+            // 两处重复会让外部工具困惑"哪个是真的"，也会让哈希范围含糊。
             .disabled(self.disabled)
             .prop("hovered", self.hovered.to_string())
             .prop("pressed", self.pressed.to_string())
-            // 选中态是**持久状态**：放 state（结构化），供 Agent 判断
+            // 选中态是**持久状态**：放 state（结构化），供外部工具判断
             // "当前是哪个主题/模式"。hovered/pressed 是瞬时的，留在 prop。
             .state("selected", self.selected)
     }

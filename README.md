@@ -1,7 +1,7 @@
 # Y901
 
 **纯 Rust 的跨平台桌面 GUI 框架**——双后端（Windows D3D11 / Linux X11 CPU 合成）、自研 TTF 字体引擎、
-**零 C/C++ 编译依赖**（只有 `windows-sys` 一个原生绑定 crate），面向"人能读、Agent 也能读"的界面。
+**零 C/C++ 编译依赖**（只有 `windows-sys` 一个原生绑定 crate），面向"人能读、程序也能读"的界面。
 
 ```
 crates/
@@ -11,8 +11,6 @@ crates/
   y901-extras   子系统组件：终端（VT 解析 + PTY）
   y901-render   平台无关渲染器：软光栅 + 自研 TTF 字形引擎
   y901-runtime  平台契约：Host / EventSource / Presenter / PlatformRuntime
-  y901-agent    语义树 + RPC + 策略（给 AI 用）
-  y901-mcp      MCP 桥
   y901-backend-win32 / y901-backend-x11   两个平台后端
   y901-shell    平台选择 + 密钥 + 剪贴板
 ```
@@ -98,7 +96,7 @@ cargo run --example tree_view    -p y901-app   # TreeView + 虚拟化 + 键盘�
 | **组件** | Button / TextLabel / TextInput / ListView / ScrollView / SplitView / Menu / Dialog / Tabs / ProgressBar / Checkbox / RadioGroup / Slider / Tooltip / ContextMenu / TreeView / Image / 终端 |
 | **动画** | 7 条缓动曲线、时间轴、中途改目标（`retarget` 从当前值续）、完成回调、空闲零 CPU |
 | **交互** | hover（含冒泡）、指针捕获、焦点与 Tab 遍历、IME、剪贴板、右键菜单、拖拽选区 |
-| **Agent** | 语义树 + 差异订阅 + RPC + MCP 桥 + 策略过滤（默认不暴露） |
+| **语义查询** | 语义树（`Semantics`）、按选择器筛选（`query`）、revision 差异、状态订阅 |
 
 ## 文档
 

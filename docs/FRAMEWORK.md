@@ -1,9 +1,9 @@
 # Y901 框架总览
 
-Y901 是一个**零 C/C++ 编译依赖、Agent 原生**的桌面 UI 框架。UI 框架本身不认识任何平台 API，
+Y901 是一个**零 C/C++ 编译依赖**的桌面 UI 框架。UI 框架本身不认识任何平台 API，
 平台能力（Win32 / D3D11 / DirectWrite / PTY）全部收敛在应用层。
 
-## 1. 十二个 crate
+## 1. 十个 crate
 
 | crate | 职责 | 生产依赖 |
 |---|---|---|
@@ -11,11 +11,9 @@ Y901 是一个**零 C/C++ 编译依赖、Agent 原生**的桌面 UI 框架。UI 
 | `y901-ui` | 框架：Widget / UiTree / 布局 / 事件 / Signal / 语义树 / revision | `y901-core`（内部，仅布局原语 `IntervalSet`） |
 | `y901-widgets` | **通用**组件：Button / TextLabel / TextInput / ScrollView / ListView / SplitView / Menu / Dialog / StyledText | `core`, `ui` |
 | `y901-extras` | **扩展**组件：TerminalWidget（Grid + VT + PTY） | `core`, `ui`, `crossbeam-channel`, `portable-pty` |
-| `y901-agent` | 安全网关：语义 API（`dispatch_request`）、Token、作用域、版本锁、脱敏；RPC 与 MCP 协议 | `ui` |
-| `y901-runtime` | 平台无关契约：`Host` / `PlatformRuntime` / `RawEvent` / `translate` / `RenderBackend` | `ui`, `agent` |
-| `y901-mcp` | MCP 桥：stdio + JSON-RPC 2.0，把网关暴露给 Claude Desktop / Cursor | `agent`, `ui`, `widgets` |
+| `y901-runtime` | 平台无关契约：`Host` / `PlatformRuntime` / `RawEvent` / `translate` / `RenderBackend` | `ui` |
 | `y901-backend-win32` | 唯一接触 Win32 的 crate：窗口 / D3D11 / DirectWrite / IME / DPI | `core`, `ui`, `runtime`, `windows-sys` |
-| `y901-app` | 启动器：解析参数、建树、装配 Host、跑事件循环（不实现组件、不定义布局） | `backend-win32`, `runtime`, `mcp`, `agent`, `ui`, `widgets` |
+| `y901-app` | 启动器：解析参数、建树、装配 Host、跑事件循环（不实现组件、不定义布局） | `backend-win32`, `runtime`, `ui`, `widgets` |
 | `y901-render` | 软件光栅化器（SoftBackend）与自研 TTF 字形引擎（图集 / mipmap LOD） | `ui`, `ttf-parser` |
 | `y901-shell` | 应用壳：菜单栏 / 托盘 / 快捷键绑定 | `ui`, `runtime`, `windows-sys`（命令行 / 磁盘操作）|
 | `y901-backend-x11` | Linux X11 后端（Xvfb 下验证，真机待验） | `core`, `ui`, `render`, `runtime`, `x11rb` |
@@ -194,60 +192,24 @@ dlg.open();
 **宿主约定**：Menu / Dialog 需要全屏宿主才有"点外部关闭/吞噬"的几何依据，
 用 `Stack`（所有子节点同尺寸）把它们放在最外层。
 
-## 9. Agent 网关与 MCP
+## 9. 语义树与查询（网关已移除）
 
-`y901-agent` 提供语义 API（不传坐标）。RPC 与 MCP 共用同一个入口
-`dispatch_request(tree, policy, method, params)`，方法名同时接受短名与工具名：
-
-| 工具 | 参数 | 说明 |
-|---|---|---|
-| `ui_click` | `id`, `if_rev?` | 点节点中心 |
-| `ui_type_text` | `id`, `text`, `if_rev?` | 输入文本 |
-| `ui_scroll` | `id`, `delta`, `if_rev?` | 滚动 |
-| `ui_query` | `q` | 按选择器筛选（`role=button & label~="Save" & limit=5`） |
-| `ui_invoke` | `id`, `action`, `args`, `if_rev?` | 调用声明的动作 |
-| `ui_tree` | — | 整棵语义树（已过滤 + 脱敏 + 带 revision/focused） |
-| `ui_node` | `id` | 单节点（MCP resource：`ui://node/{id}`） |
-
-安全检查（顺序即优先级）：
-
-1. **Token**：`--rpc` 每请求校验 `params.token`；`--mcp` 校验**环境变量**
-   `Y901_TOKEN`（MCP 的 `initialize` 没有 token 字段，不能用协议层传递）；
-2. **能力作用域**：`exposed_to_ai` 默认 **false**，组件必须显式 `.exposed(true)`；
-   连 `dispatch` / `focus` / `subscribe` 也过这道闸（`unsubscribe` 例外）；
-3. **版本锁**：`if_rev` 与节点**有效** revision（组件自报 + 框架计数器）不符 → 409；
-4. **脱敏**：`sensitive` 节点的 `label` 与 `value` 一律 `***`，`state` 逐键打码。
-
-
-### Claude Desktop 配置
-
-```json
-{
-  "mcpServers": {
-    "y901": {
-      "command": "F:\\Y901\\target\\release\\y901-app.exe",
-      "args": ["--mcp"],
-      "env": { "Y901_TOKEN": "local-dev-token" }
-    }
-  }
-}
-```
-
-- `--mcp`：把正在运行的窗口挂到 stdio；
-- `--mcp --headless`：不开窗口，纯协议（CI 用）；
-- `--rpc`：启用 TCP 通道（9410），**必须**配置 `Y901_TOKEN`，且每请求校验。
+去 AI 阶段把 `y901-agent` / `y901-mcp` 从工作区物理删除：RPC、MCP、Token / 作用域 / 脱敏那一层不再存在。
+保留在 `y901-ui` 内的是**语义树**本身——`Semantics`（label / value / state / actions / role）、
+`query` 选择器、有效 revision 与语义面哈希。它们服务的是"外部工具/自动化读界面"，
+默认 `exposed_to_ai = false`，组件必须显式 `.exposed(true)` 才会出现在语义输出里。
 
 ## 10. 测试
 
 ```
-cargo test --workspace          # 825 项（另 7 个 GPU harness 需 --ignored）
+cargo test --workspace          # 712 项（另 7 个 GPU harness 需 --ignored）
 cargo build --workspace         # 零警告
 cargo clippy --workspace --all-targets   # 警告必须为 0（建议直接用 scripts/gate.ps1） 零警告
 scripts/test-count.ps1          # 唯一可信的计数方式（把输出写文件再解析）
 ```
 
-绝大多数测试无需窗口/GPU：布局、事件路由、裁剪命中、语义树、网关鉴权、
-MCP 协议往返、图集打包、revision 语义面哈希、RPC 写队列边界都能在 CI 里跑。
+绝大多数测试无需窗口/GPU：布局、事件路由、裁剪命中、语义树、`query` 选择器、
+图集打包、revision 语义面哈希都能在 CI 里跑。
 
 需要真机的测试只有 `rebuild_reuploads_atlas`（D3D11 设备重建后图集重传），
 在无显卡权限的机器上会打印 `[skip]` 并返回。

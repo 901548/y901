@@ -5,7 +5,7 @@
 use std::fmt::Write as _;
 
 #[derive(Clone, Debug, PartialEq, Default)]
-/// 极简 JSON（只做序列化/反序列化，不做模式校验）。为什么不用 serde：框架要求零重量级依赖，而 Agent 协议用到的类型屈指可数。
+/// 极简 JSON（只做序列化/反序列化，不做模式校验）。为什么不用 serde：框架要求零重量级依赖，而外部工具协议用到的类型屈指可数。
 pub enum Json {
     #[default]
     /// null。

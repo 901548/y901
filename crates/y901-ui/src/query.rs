@@ -1,4 +1,4 @@
-//! 极简查询语言：让 Agent 不必拉全树。
+//! 极简查询语言：让外部工具不必拉全树。
 //!
 //! 语法：
 //! ```text
@@ -23,7 +23,7 @@ enum Clause {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Query {
     clauses: Vec<Clause>,
-    /// 结果条数上限；`None` = 不限。上限存在的理由是 Agent 一次拿几千条没有意义。
+    /// 结果条数上限；`None` = 不限。上限存在的理由是外部工具一次拿几千条没有意义。
     pub limit: Option<usize>,
 }
 
@@ -74,7 +74,7 @@ impl Query {
     /// 返回：所有条件同时成立才为 `true`；空查询恒为 `true`。
     /// 副作用：无。
     /// 注意：本方法**不**检查 `exposed_to_ai`——是否把不可见节点纳入结果由调用方决定
-    /// （网关侧会过滤，否则 Agent 能查到不该看的节点）。
+    /// （网关侧会过滤，否则外部工具能查到不该看的节点）。
     pub fn matches(&self, id: &str, sem: &Semantics) -> bool {
         self.clauses.iter().all(|c| match c {
             Clause::Eq(k, v) => match *k {

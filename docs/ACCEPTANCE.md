@@ -14,6 +14,8 @@
 
 含 ignore 的总数是 **763**（默认测试集 + `#[ignore]` 测试的全量结果），不是单独跑的测试集。
 
+差值 **51**（763 − 712）= `#[ignore]` 用例。源码里共有 **55** 处 `#[ignore]`，与 51 的差额有两个来源：
+
 - **2 处在 example**（`y901-ui/examples/hash_bench.rs`）：`cargo test` 不执行 example 里的测试；
 - **2 处在 `y901-backend-x11`**：该 crate 在 Windows 上 suite 存在但 `running 0 tests`（整 crate 被 cfg 掉）。
 
@@ -21,10 +23,10 @@
 |---|---|---|
 | GPU / D3D11 依赖 | **13** | `snapshot_harness` ×10、`soft_matches_d3d_within_antialiasing_tolerance`、`pixel_statistics_and_png_baseline`、`rebuild_reuploads_atlas` |
 | DirectWrite 对拍 | **2** | `compare_with_directwrite_l1_l2`、`l2_best_shift_diagnostic` |
-| 性能基准 | **17** | ui 9（`perf_bench` ×6、`layout_bench`、`perf_alloc`、`rev_snapshot`）、win32 7（`perf_bench` ×3、`breakdown_rasterize_vs_atlas_insert`、`cold_start_500_cjk_glyphs`、`all_phases_reference_cost`、`soft_fill_rate_1280x800`）、widgets 1（`rev_snapshot_agent`） |
+| 性能基准 | **30** | ui 12（`perf_bench` ×6、`perf_dispatch_alloc` ×3、`layout_bench`、`perf_alloc`、`rev_snapshot`）、win32 8（`perf_bench` ×3、`present_bench`、`breakdown_rasterize_vs_atlas_insert`、`cold_start_500_cjk_glyphs`、`all_phases_reference_cost`、`soft_fill_rate_1280x800`）、render 10（`cjk_cold_start` ×3、`mip_latin` ×3、`perf_texture_alloc` ×3、`which_method_is_closer_to_supersampled_truth`） |
 | 调试探针 | **5** | `debug_print_glyphs`、`debug_crossings_for_a`、`debug_print_cjk_frames`、`occupancy_matches_glyph_count_sanity`、`probe_orientation_and_channels` |
 | 压力测试 | **1** | `forced_eviction_thrash_measurement`（图集 eviction 抖动） |
-| **合计** | **38** | |
+| **合计** | **51** | |
 
 ## 7 个 GPU harness（真机 D3D11，全部 ok）
 

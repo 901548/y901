@@ -830,7 +830,7 @@ impl Widget for TextInput {
     }
 
     fn semantics(&self) -> Semantics {
-        // 密码模式：**原文一个字都不能出现在语义里**（Agent 只读语义）。
+        // 密码模式：**原文一个字都不能出现在语义里**（外部工具只读语义）。
         // 掩码长度用字符数而非字节数——"中" 显示 1 个 `*`，不是 3 个。
         let masked: String = if self.password {
             "*".repeat(self.buffer.text().chars().count())

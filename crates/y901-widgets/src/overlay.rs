@@ -209,7 +209,7 @@ impl Widget for Menu {
             return EventResult::Ignored;
         }
         match event {
-            // 语义动作：Agent 不需要坐标，直接选第 index 项
+            // 语义动作：外部工具不需要坐标，直接选第 index 项
             UiEvent::Action { name, args } if name == "select" => {
                 let index = args.get("index").and_then(|v| v.as_f64()).unwrap_or(-1.0);
                 if index < 0.0 || index as usize >= self.items.len() {
@@ -639,7 +639,7 @@ impl Widget for Dialog {
             return EventResult::Ignored;
         }
         match event {
-            // 语义动作：Agent 直接关闭对话框
+            // 语义动作：外部工具直接关闭对话框
             UiEvent::Action { name, .. } if name == "close" => {
                 self.close();
                 // is_open 变化必须触发重建：索引/脏区都基于"打开时"的快照，
