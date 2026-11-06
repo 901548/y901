@@ -7,7 +7,6 @@
 //!
 //! 操作：鼠标点行选中；点行首三角展开/折叠；方向键 ↑↓ 移动、→ 展开或进入子项、← 折叠或回父项。
 
-use y901_agent::Policy;
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
 use y901_ui::{Color, Command, Edges, Flex, FlexItem, UiEvent, UiTree};
@@ -63,9 +62,6 @@ impl Host for TreeDemo {
         false // 这个示例没有应用级命令：交互全在 TreeView 内部
     }
 
-    fn policy(&self) -> Policy {
-        Policy::default()
-    }
 
     fn take_snapshot_request(&mut self) -> bool {
         // 消费式：只请求一次

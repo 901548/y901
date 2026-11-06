@@ -13,9 +13,6 @@ path = "src/main.rs"
 y901-backend-win32 = { path = "../y901-backend-win32" }
 y901-shell = { path = "../y901-shell" }
 y901-runtime = { path = "../y901-runtime" }
-y901-mcp = { path = "../y901-mcp" }
-y901-agent = { path = "../y901-agent" }
 y901-ui = { path = "../y901-ui" }
 y901-widgets = { path = "../y901-widgets" }
-crossbeam-channel = "0.5"
 

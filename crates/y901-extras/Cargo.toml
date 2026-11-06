@@ -10,6 +10,5 @@ crossbeam-channel = "0.5"
 portable-pty = "0.8"
 
 [dev-dependencies]
-y901-agent = { path = "../y901-agent" }
 y901-render = { path = "../y901-render" }
 y901-widgets = { path = "../y901-widgets" }

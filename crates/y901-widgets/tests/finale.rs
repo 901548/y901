@@ -1,9 +1,5 @@
 //! 收尾：RPC 每请求鉴权 + ScrollView 视口外不可命中（走真实 dispatch）。
 
-use std::io::{BufRead, BufReader, Write};
-use std::sync::mpsc::channel;
-use std::time::Duration;
-
 use y901_ui::{
     Constraints, EventCtx, EventResult, Flex, FlexItem, Pos, Rect, RenderCtx, Size, TextMetrics,
     TextStyle, UiEvent, UiTree, Widget,
@@ -21,64 +17,6 @@ impl TextMetrics for Mono {
     fn scale(&self) -> f32 {
         1.0
     }
-}
-
-// ---------- 1. RPC 鉴权 ----------
-
-#[test]
-fn rpc_rejects_requests_without_token() {
-    // 显式传 token，不依赖进程级 env（否则与另一个测试并行时互相干扰）
-    let (tx, _rx) = channel();
-    let (addr, _hub) =
-        y901_agent::rpc::spawn_with_token("127.0.0.1:0", tx, "t0ken".into()).expect("bind");
-
-    let stream = std::net::TcpStream::connect(addr).expect("connect");
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
-    let mut writer = stream.try_clone().unwrap();
-    let mut reader = BufReader::new(stream);
-
-    // 无 token
-    writeln!(writer, r#"{{"id":1,"method":"get_tree"}}"#).unwrap();
-    writer.flush().unwrap();
-    let mut line = String::new();
-    reader.read_line(&mut line).unwrap();
-    assert!(line.contains("unauthorized"), "无 Token 应被拒：{line}");
-    assert!(line.contains("401"), "应返回 401：{line}");
-
-    // 连接应被断开：后续读返回 EOF
-    let mut rest = String::new();
-    let n = reader.read_line(&mut rest).unwrap_or(0);
-    assert_eq!(n, 0, "鉴权失败后应断开连接");
-}
-
-#[test]
-fn rpc_accepts_requests_with_token() {
-    let (tx, rx) = channel();
-    let (addr, _hub) =
-        y901_agent::rpc::spawn_with_token("127.0.0.1:0", tx, "t0ken2".into()).expect("bind");
-
-    let stream = std::net::TcpStream::connect(addr).expect("connect");
-    let mut writer = stream.try_clone().unwrap();
-    let mut reader = BufReader::new(stream);
-
-    writeln!(
-        writer,
-        r#"{{"id":1,"method":"ping","params":{{"token":"t0ken2"}}}}"#
-    )
-    .unwrap();
-    writer.flush().unwrap();
-
-    // UI 侧处理
-    let pending = rx.recv_timeout(Duration::from_secs(10)).expect("request");
-    let _ = y901_agent::rpc::reply_to(pending, Ok(y901_ui::Json::obj().set("pong", true)));
-
-    let mut line = String::new();
-    reader.read_line(&mut line).unwrap();
-    assert!(line.contains("pong"), "带正确 Token 应放行：{line}");
-
-    std::env::remove_var("Y901_TOKEN");
 }
 
 // ---------- 2. ScrollView 视口外不可命中 ----------

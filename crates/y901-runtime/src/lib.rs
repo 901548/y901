@@ -1,19 +1,16 @@
-//! 平台无关的运行时契约。
+//! 运行时公共接口。
 //!
-//! 为什么单独一个 crate：`Host::policy()` 需要 `y901_agent::Policy`，而
-//! `y901-agent` 依赖 `y901-ui`。若把 `Host` 放在 `y901-ui`，就会形成
-//! `ui -> agent -> ui` 的循环。放在这里，依赖方向是单向的：
+//! 本 crate 只定义与 GUI 事件循环相关的抽象（`Host`、`Waker`、`Options`），
+//! 不引入任何 agent / RPC / MCP 依赖。
+//!
+//! 依赖方向：
 //!
 //! ```text
-//! y901-runtime -> y901-agent -> y901-ui
-//!              -> y901-ui
-//! y901-backend-win32 -> y901-runtime
-//! y901-demos         -> y901-runtime -> y901-widgets -> y901-ui
-//! y901-app           -> y901-demos / y901-backend-win32
+//! y901-runtime -> y901-ui
+//! y901-backend-* -> y901-runtime
+//! y901-app      -> y901-shell / y901-backend-win32
 //! ```
-
 #![deny(missing_docs)]
-use y901_agent::Policy;
 use y901_ui::{Command, EventResult, Key, Modifiers, MouseButton, Size, UiEvent, UiTree};
 
 /// 渲染后端抽象（跨平台 v3 阶段 1）。
@@ -48,11 +45,6 @@ pub trait Host {
     /// 事件钩子（在 `tree.dispatch` 之前调用）。
     fn event(&mut self, _tree: &mut UiTree, _ev: &UiEvent) -> EventResult {
         EventResult::Ignored
-    }
-
-    /// Agent 网关使用的安全策略（RPC 与 MCP 共用同一份）。
-    fn policy(&self) -> Policy {
-        Policy::default()
     }
 
     /// 应用请求切换主题（`Host` 表达意图，平台层执行）。

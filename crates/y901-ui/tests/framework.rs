@@ -5,9 +5,6 @@
 //! 2. 无界约束返回**有限**内容尺寸，不产生 inf / NaN；
 //! 3. 脏区能整棵剪掉不相交的子树，悬停只弄脏两个节点。
 
-use std::sync::mpsc::channel;
-use std::time::Duration;
-
 use y901_ui::layout::{flex_measure, Flex, LayoutCache};
 use y901_ui::{
     Axis, Color, Command, Constraints, EventPhase, EventResult, FlexItem, Json, Pos, Rect,
@@ -447,103 +444,6 @@ fn commands_are_routed_not_interpreted() {
     let cmds = tree.drain_commands();
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0], Command::App { name, .. } if name == "pong"));
-}
-
-// ---------- 5. RPC ----------
-
-#[test]
-fn rpc_get_tree_and_dispatch() {
-    let root = Flex::row("root").push(Box::new(Leaf::new("node")));
-    let mut tree = UiTree::new(Box::new(root));
-    tree.layout(Size::new(200.0, 100.0), &MonoMetrics);
-    tree.set_focus(Some("node".to_string()));
-
-    let (tx, rx) = channel();
-    let (addr, _hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind rpc");
-
-    let mut handle_one = || {
-        let pending = rx.recv_timeout(Duration::from_secs(2)).expect("request");
-        let result = match &pending.request {
-            y901_agent::RpcRequest::GetTree => Ok(tree.snapshot_json()),
-            y901_agent::RpcRequest::Query { q } => y901_agent::dispatch_request(
-                &mut tree,
-                &y901_agent::Policy::default(),
-                "query",
-                &Json::obj().set("q", q.clone()),
-            )
-            .map_err(|e| e.code().to_string()),
-            y901_agent::RpcRequest::Ping => Ok(Json::obj().set("pong", true)),
-            y901_agent::RpcRequest::Focus { node } => {
-                if tree.set_focus(Some(node.clone())) {
-                    Ok(Json::obj())
-                } else {
-                    Err(format!("no such node: {node}"))
-                }
-            }
-            y901_agent::RpcRequest::Dispatch { node, .. } => {
-                if tree.find(node).is_some() {
-                    Ok(Json::obj())
-                } else {
-                    Err(format!("no such node: {node}"))
-                }
-            }
-            y901_agent::RpcRequest::Invoke { node, .. } => {
-                if tree.find(node).is_some() {
-                    Ok(Json::obj())
-                } else {
-                    Err(format!("no such node: {node}"))
-                }
-            }
-            y901_agent::RpcRequest::Subscribe { node, interval_ms } => {
-                let ok = tree.subscribe(node, Duration::from_millis(*interval_ms));
-                if ok {
-                    Ok(Json::obj())
-                } else {
-                    Err(format!("unknown node: {node}"))
-                }
-            }
-            y901_agent::RpcRequest::Unsubscribe { node } => {
-                tree.unsubscribe(node);
-                Ok(Json::obj())
-            }
-            y901_agent::RpcRequest::Unknown { method } => Err(format!("unknown method {method}")),
-        };
-        let _ = y901_agent::rpc::reply_to(pending, result);
-    };
-
-    let client = std::thread::spawn(move || {
-        use std::io::{BufRead, BufReader, Write};
-        let stream = std::net::TcpStream::connect(addr).expect("connect");
-        let mut writer = stream.try_clone().unwrap();
-        let mut reader = BufReader::new(stream);
-        let mut call = |line: &str| -> Json {
-            writeln!(writer, "{line}").unwrap();
-            writer.flush().unwrap();
-            let mut buf = String::new();
-            reader.read_line(&mut buf).unwrap();
-            Json::parse(&buf).expect("valid json")
-        };
-        let a = call(r#"{"id":1,"method":"get_tree"}"#);
-        let b = call(r#"{"id":2,"method":"focus","params":{"id":"node"}}"#);
-        let c = call(r#"{"id":3,"method":"focus","params":{"id":"ghost"}}"#);
-        (a, b, c)
-    });
-
-    handle_one();
-    handle_one();
-    handle_one();
-
-    let (tree_resp, focus_ok, focus_bad) = client.join().unwrap();
-    assert_eq!(tree_resp.get("ok").and_then(|v| v.as_bool()), Some(true));
-    assert_eq!(
-        tree_resp
-            .get("result")
-            .and_then(|r| r.get("id"))
-            .and_then(|v| v.as_str()),
-        Some("root")
-    );
-    assert_eq!(focus_ok.get("ok").and_then(|v| v.as_bool()), Some(true));
-    assert_eq!(focus_bad.get("ok").and_then(|v| v.as_bool()), Some(false));
 }
 
 // ---------- 6. 兼容性：Flex 直接测量 ----------
@@ -1191,59 +1091,4 @@ fn paint_order_follows_tree_order() {
         modal_tree.modal_scope().is_some(),
         "模态节点应提供焦点/点击作用域"
     );
-}
-
-// ---------- 9. 广播不阻塞 UI ----------
-
-#[test]
-fn broadcast_never_blocks_ui() {
-    use std::time::{Duration, Instant};
-
-    // 真实监听 + 一个"只连不读"的客户端：写线程会卡在 socket 上，
-    // 队列填满后 `send` 必须丢包而不是阻塞。
-    let (tx, _rx) = std::sync::mpsc::channel();
-    let (addr, hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind");
-    let _client = std::net::TcpStream::connect(addr).expect("connect");
-    std::thread::sleep(Duration::from_millis(50)); // 等连接注册
-
-    // 每条 4KB：几百条就能把内核缓冲 + 1024 深度队列灌满
-    let payload = format!("{{\"event\":\"tick\",\"blob\":\"{}\"}}", "x".repeat(4000));
-    let start = Instant::now();
-    for _ in 0..3000 {
-        hub.send(&payload);
-    }
-    let elapsed = start.elapsed();
-
-    assert!(
-        elapsed < Duration::from_millis(500),
-        "3000 次投递必须立即返回（不阻塞 UI），实际 {elapsed:?}"
-    );
-    assert!(
-        hub.dropped() > 0,
-        "队列应被灌满并丢弃多余推送，实际 dropped={}",
-        hub.dropped()
-    );
-}
-
-#[test]
-fn broadcast_writer_removes_dead_connections() {
-    // 客户端连上后立刻关闭：写线程下一次写失败 → 线程退出 → 连接被注销。
-    let (tx, _rx) = std::sync::mpsc::channel();
-    let (addr, hub) = y901_agent::rpc::spawn("127.0.0.1:0", tx).expect("bind");
-    {
-        let stream = std::net::TcpStream::connect(addr).expect("connect");
-        drop(stream);
-    }
-
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    let mut count = usize::MAX;
-    while std::time::Instant::now() < deadline {
-        hub.send("{\"event\":\"ping\"}");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        count = hub.connection_count();
-        if count == 0 {
-            break;
-        }
-    }
-    assert_eq!(count, 0, "断开连接必须被注销");
 }

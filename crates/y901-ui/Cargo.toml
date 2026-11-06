@@ -13,4 +13,3 @@ y901-core = { path = "../y901-core" }
 
 [dev-dependencies]
 y901-render = { path = "../y901-render" }
-y901-agent = { path = "../y901-agent" }

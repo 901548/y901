@@ -5,7 +5,6 @@ edition.workspace = true
 
 [dependencies]
 y901-ui = { path = "../y901-ui" }
-y901-agent = { path = "../y901-agent" }
 
 [dev-dependencies]
 y901-widgets = { path = "../y901-widgets" }

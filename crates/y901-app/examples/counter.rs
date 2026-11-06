@@ -10,7 +10,6 @@
 //! 2. **应用状态**在 `Host` 里，不在组件里（组件只声明"我被点了"）；
 //! 3. 数字与进度条同步更新。
 
-use y901_agent::Policy;
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
 use y901_ui::{Color, Command, Edges, Flex, FlexItem, Json, UiEvent, UiTree};
@@ -61,9 +60,6 @@ impl Host for CounterApp {
         true
     }
 
-    fn policy(&self) -> Policy {
-        Policy::default()
-    }
 }
 
 fn build() -> UiTree {

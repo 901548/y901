@@ -10,7 +10,6 @@
 //! 2. `Image::from_png` 解码 + `ImageStyle` 的 `Fill` / `Contain` / `Cover` 与 tint；
 //! 3. 图片尺寸由控件自己测量，布局不需要手写坐标。
 
-use y901_agent::Policy;
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
 use y901_ui::grid::{Grid, GridTrack};
@@ -37,9 +36,6 @@ impl Host for GalleryDemo {
         false
     }
 
-    fn policy(&self) -> Policy {
-        Policy::default()
-    }
 }
 
 /// 一种适配模式的图块（图 + 说明文字）。

@@ -2,7 +2,7 @@
 
 - **HEAD**: `112ce18`
 - **tags**: v0.1.0 ~ **v0.1.17**
-- **测试**: **828**（基线 **828**；`#[ignore]` **52**，含 ignore **880**）
+- **测试**: **712**（基线 **712**；`#[ignore]` **51**，含 ignore **n/a**）
 - **门禁**: `scripts/gate.ps1` 六步（MSRV / 测试计数 / clippy / 哈希 / missing_docs / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xDBB308DD1657EF9C` / `400x220`
@@ -114,7 +114,7 @@
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **828**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **712**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 
@@ -199,7 +199,7 @@
 ## 已完成的里程碑
 
 - **v0.1.0 ~ v0.1.12**
-- **828 测试全绿**（基线 **828**；`#[ignore]` **52**；`--include-ignored` **877**）
+- **712 测试全绿**（基线 **712**；`#[ignore]` **51**；`--include-ignored` **n/a**）
 - **审查报告**：12 项可追踪并已处理；11 项原始报告未落盘（见上方更正）
 - **SAFETY 100% 调用点覆盖**（d3d11 / font / window）+ vtable 契约 + context 三段式
 - **文本缩放**（CPU + D3D）与**图片 mipmap LOD** 均有像素/解析真值验证
@@ -260,7 +260,7 @@
 - 平台中立 crate（`y901-core` / `y901-ui` / `y901-render` / `y901-widgets`）可单独 `-p` 跑
 - x11 全量：`DISPLAY=:99 cargo test -p y901-backend-x11 --test real_window -- --test-threads=1`
   （**必须 `--test-threads=1`**：用例共享一个 X 连接与环境变量）
-- 已验证结果：**828 passed / 0 failed / 52 ignored**
+- 已验证结果：**712 passed / 0 failed / 51 ignored**
 
 ## 数字检查的覆盖范围（已知限制）
 
@@ -279,3 +279,12 @@
   当前 `MAX_DIRTY_RECTS = 16` 是**替 D3D 兜底**的临时方案 —— 它不是设计，是巧合地正确。
 - `DirtyRegion::add` 的合并判据已改为"仅真实重叠"（`overlaps`），零重叠（含边/角相贴）不再合并。
   这是唯一不依赖后端常数即可确定净收益的改动。
+- **跨仓迁移债：`F:\Helm-Y901` 仍依赖已删除的 `y901-agent`**（去 AI 阶段 1 物理删除）。
+  - 后果：`crates/y901-app/tests/no_c_deps.rs` 的兄弟仓守卫 `sibling_repo_helm_has_no_c_dependencies`
+    对它跑 `cargo tree` 会失败。
+  - 现状：该守卫已改为**特定错误 + 显式打印 + 跳过**——仅当 stderr 同时满足
+    "`failed to read`/`failed to load source for dependency`"、"路径指向本仓 `crates/`"、
+    "命中的 crate 属于 `y901-agent`/`y901-mcp`" 三个条件时才跳过；其他任何 `cargo tree` 失败仍然红。
+    跳过时打印：`[守卫] Helm-Y901 依赖树无法解析：依赖的本地 crate 已被删除（y901-agent）`。
+  - TODO：**下一轮 demo 会话**迁移 `F:\Helm-Y901` 去除 agent/mcp 依赖后，
+    删除 `no_c_deps.rs` 里的跳过分支（代码中已标注 `TODO(去 AI 阶段 3)`），恢复对 Helm 的完整零 C 依赖审计。

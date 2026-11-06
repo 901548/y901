@@ -8,7 +8,6 @@
 //! 展示的是**用户会怎么写**：建树 → 声明交互（`Button::on_click` → 应用命令）→ 交给运行时。
 //! 没有手写坐标，也没有绕开框架 API。
 
-use y901_agent::Policy;
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
 use y901_ui::{Color, Command, Edges, Flex, FlexItem, Json, UiEvent, UiTree};
@@ -45,9 +44,6 @@ impl Host for DemoHost {
         true
     }
 
-    fn policy(&self) -> Policy {
-        Policy::default()
-    }
 }
 
 /// 建树：一列（标题 + 按钮）。

@@ -3,7 +3,6 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use y901_agent::{handle_call, ApiCall, ApiError, Policy};
 use y901_ui::{
     Command, Flex, FlexItem, Json, Rect, Signal, Size, TextMetrics, TextStyle, UiEvent, UiTree,
 };
@@ -107,56 +106,6 @@ fn dialog_close_action_closes_it() {
         tree.snapshot_json().to_string().contains("\"open\":false"),
         "对话框应关闭"
     );
-}
-
-// ---------- 网关：未处理的动作必须报错 ----------
-
-#[test]
-fn gateway_errors_when_action_not_handled() {
-    // Terminal 的 focus 声明已删除；这里用一个"声明了但 event 不处理"的场景：
-    // Button 声明 click，但 Action("click") 并不是它的语义（它只响应 Action("click")？）
-    // 用 Menu 的 select 传入非法 index：声明存在但组件返回 Ignored。
-    let mut menu = Menu::new("menu").items(vec!["Only".into()]);
-    menu.open();
-    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(menu))));
-    tree.layout(Size::new(400.0, 300.0), &Mono);
-
-    let err = handle_call(
-        &mut tree,
-        &Policy::default(),
-        ApiCall::Invoke {
-            id: "menu".into(),
-            action: "select".into(),
-            args: Json::obj().set("index", 9u32),
-            if_rev: None,
-        },
-    )
-    .unwrap_err();
-    assert!(
-        matches!(err, ApiError::BadRequest(_)),
-        "未处理应返回 400，实际 {err:?}"
-    );
-}
-
-#[test]
-fn undeclared_action_is_rejected() {
-    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(
-        Button::new("ok", "OK").flex_item(FlexItem::height(24.0)),
-    ))));
-    tree.layout(Size::new(300.0, 100.0), &Mono);
-
-    let err = handle_call(
-        &mut tree,
-        &Policy::default(),
-        ApiCall::Invoke {
-            id: "ok".into(),
-            action: "explode".into(),
-            args: Json::obj(),
-            if_rev: None,
-        },
-    )
-    .unwrap_err();
-    assert!(matches!(err, ApiError::BadRequest(_)));
 }
 
 // ---------- add_node 递归挂载 ----------
