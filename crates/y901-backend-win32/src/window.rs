@@ -1448,6 +1448,8 @@ mod present_sync_tests {
 // WindowBackend：把平台差异藏在这里
 // ---------------------------------------------------------------------------
 
+use y901_backend_common::window::RenderOutcome;
+
 impl y901_backend_common::window::WindowBackend for Window {
     /// 先泵一次消息；没有事件且允许等待时，才真的睡一次。
     ///
@@ -1488,9 +1490,17 @@ impl y901_backend_common::window::WindowBackend for Window {
 
     /// **脏区判定在这一层**：`render_inner` 见 `tree.dirty().is_empty()` 就直接返回。
     /// `run_loop` 不再查脏区，所以只有这一层判定。
-    fn render(&mut self, tree: &mut UiTree) -> Result<(), String> {
+    ///
+    /// `had_dirty` 在调用**之前**取一次，仅用于回答“本帧动了没有”；
+    /// 它不参与决策（决策仍在 `render_inner` 里）。
+    fn render(&mut self, tree: &mut UiTree) -> Result<RenderOutcome, String> {
+        let had_dirty = !tree.dirty().is_empty();
         self.render_inner(tree, 1);
-        Ok(())
+        Ok(if had_dirty {
+            RenderOutcome::Presented
+        } else {
+            RenderOutcome::Skipped
+        })
     }
 
     fn set_theme(&mut self, theme: y901_ui::theme::Theme) -> Result<(), String> {

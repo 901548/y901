@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use y901_backend_common::window::WindowBackend;
+use y901_backend_common::window::{RenderOutcome, WindowBackend};
 use y901_render::soft::SoftBackend;
 use y901_runtime::{EventSource, FontConfig, Presenter, RawEvent, Waker};
 use y901_ui::theme::Theme;
@@ -201,10 +201,11 @@ impl X11Window {
         &mut self.soft
     }
 
-    /// 绘制一帧：清屏 → 整树重绘 → 上屏。
+    /// 渲染一帧并提交 —— 先清屏，再画树，最后推送。
     ///
-    /// 脏区判定只在**这一层**（`run_loop` 不再看 `tree.dirty()`）：
-    /// 没有脏区就保留上一帧，避免"每帧都 Present 一个空帧"导致闪黑。
+    /// 为何还要自己查**脏区**：`run_loop` 不再查 `tree.dirty()`，
+    /// 它只看返回的 `RenderOutcome`；而"该不该跳过"的判定留在这个函数里。
+    /// 两条渲染路径都必须有这个守卫，否则空帧也会推一帧 PutImage。
     pub fn render_tree(&mut self, tree: &mut UiTree) -> Result<(), String> {
         if tree.dirty().is_empty() {
             return Ok(());
@@ -455,8 +456,14 @@ impl WindowBackend for X11Window {
     }
 
     /// 脏区判定在 `render_tree` 内部（本层是唯一判定点）。
-    fn render(&mut self, tree: &mut UiTree) -> Result<(), String> {
-        self.render_tree(tree)
+    fn render(&mut self, tree: &mut UiTree) -> Result<RenderOutcome, String> {
+        let had_dirty = !tree.dirty().is_empty();
+        self.render_tree(tree)?;
+        Ok(if had_dirty {
+            RenderOutcome::Presented
+        } else {
+            RenderOutcome::Skipped
+        })
     }
 
     fn set_theme(&mut self, theme: Theme) -> Result<(), String> {

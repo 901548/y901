@@ -21,7 +21,7 @@ use std::time::Instant;
 use y901_runtime::{translate, Host, RawEvent};
 use y901_ui::{Size, UiEvent, UiTree};
 
-use crate::window::WindowBackend;
+use crate::window::{RenderOutcome, WindowBackend};
 
 /// 空闲时的默认等待上限（毫秒）。
 ///
@@ -111,10 +111,10 @@ pub fn run_loop<W: WindowBackend>(
 
         // ---- 6. 渲染 ----
         //
-        // **脏区判定只有一层**：`WindowBackend::render` 自己决定 full/partial/skip。
-        // 这里不再看 `tree.dirty()` —— 否则两层判定会互相掩盖，
-        // 且一旦两边不一致就会出现"有脏区但不画"的难查 bug。
-        window.render(tree)?;
+        // **脏区判定只在 `WindowBackend::render` 内部**；本循环不查 `tree.dirty()`，
+        // 而是用返回的 `RenderOutcome` 判断本帧是否真的提交了像素。
+        // 这样"停留与否"只有一个来源，不会出现两层判定互相掩盖。
+        let outcome = window.render(tree)?;
         if !first_frame_done {
             first_frame_done = true;
             eprintln!(
@@ -140,11 +140,10 @@ pub fn run_loop<W: WindowBackend>(
             }
         }
 
-        let dirty_any = !tree.dirty().is_empty();
-        was_busy = had_work || dirty_any;
+        was_busy = had_work || matches!(outcome, RenderOutcome::Presented);
 
         // ---- 8. 空闲时推一次 Tick（PTY/定时器靠它推进） ----
-        if !had_work && tree.dirty().is_empty() {
+        if !had_work && matches!(outcome, RenderOutcome::Skipped) {
             let _ = tree.dispatch(&UiEvent::Tick);
         }
     }

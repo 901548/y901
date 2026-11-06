@@ -7,6 +7,18 @@ use y901_runtime::{FontConfig, RawEvent};
 use y901_ui::theme::Theme;
 use y901_ui::UiTree;
 
+/// 一次 `render` 调用的结果。
+///
+/// 用于让 `run_loop` 知道本帧是否真的提交了像素，
+/// 而**不需要自己再查 `tree.dirty()`**——脏区判定只有一处：后端 `render` 内部。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderOutcome {
+    /// 没有脏区，后端跳过了本次渲染（保留上一帧）
+    Skipped,
+    /// 后端渲染并提交了本帧（full 还是 partial 由后端自己定）
+    Presented,
+}
+
 /// 一次事件循环迭代需要窗口提供的能力。
 ///
 /// 实现者负责把平台事件循环的差异藏在自己的实现里：
@@ -37,7 +49,15 @@ pub trait WindowBackend {
     ///
     /// **语义**：Win32 内部走 D3D 脏区提交 + Present；X11 走 CPU 光栅器 + PutImage。
     /// 调用方不关心差异，只保证"返回后这一帧已经可见"。
-    fn render(&mut self, tree: &mut UiTree) -> Result<(), String>;
+    ///
+    /// **脏区判定就在这里**：
+    /// - `tree.dirty()` 为空 → 返回 [`RenderOutcome::Skipped`]，不提交。
+    /// - 非空 → 返回 [`RenderOutcome::Presented`]。**用 full 还是 partial 由后端自己决定**，
+    ///   trait 不做统一要求（Win32 D3D 走 partial，Win32 soft 与 X11 走 full）。
+    ///
+    /// **调用方不得自己查 `tree.dirty()`**：两层判定会互相掩盖，
+    /// 一旦两边不一致就会出现"有脏区但不画"的难查 bug。
+    fn render(&mut self, tree: &mut UiTree) -> Result<RenderOutcome, String>;
 
     /// 切换主题。失败不影响后续帧，调用方只记录日志。
     fn set_theme(&mut self, theme: Theme) -> Result<(), String>;
