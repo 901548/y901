@@ -524,6 +524,10 @@ pub struct Window {
     /// 纯 CPU 后端（`Y901_FORCE_SOFT=1` 时启用；与 `backend` 互斥）。
     soft: Option<y901_render::soft::SoftBackend>,
     viewport: (u32, u32),
+    /// 最近一次 `SetCursor` 事件里的鼠标位置；
+    /// 事件消费发生在 `wait_events` 内部，所以在这里记一下，
+    /// 供 `after_frame` 计算光标形状。
+    pending_cursor: Option<y901_ui::Pos>,
 }
 
 impl Window {
@@ -686,6 +690,7 @@ impl Window {
             backend,
             soft,
             viewport,
+            pending_cursor: None,
         })
     }
 
@@ -1436,5 +1441,100 @@ mod present_sync_tests {
         let log = window.take_present_sync_log();
         let tail = &log[before.min(log.len())..];
         assert_eq!(tail.last(), Some(&2), "render_with_sync(2) 应传 2，实测 {tail:?}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WindowBackend：把平台差异藏在这里
+// ---------------------------------------------------------------------------
+
+impl y901_backend_common::window::WindowBackend for Window {
+    /// 先泵一次消息；没有事件且允许等待时，才真的睡一次。
+    ///
+    /// 这与旧循环的“事件 → 处理 → 空闲时 `wait_message`”等价：
+    /// `run_loop` 在上一帧有工作时传 `wait_ms = 0`，因此不会在忙时睡眠。
+    fn wait_events(&mut self, wait_ms: u32) -> Option<Vec<RawEvent>> {
+        if !self.pump() {
+            return None;
+        }
+        let mut evs = self.drain_events();
+        for e in &evs {
+            if let RawEvent::SetCursor { x, y } = e {
+                self.pending_cursor = Some(y901_ui::Pos::new(*x, *y));
+            }
+        }
+        if evs.is_empty() && wait_ms > 0 {
+            let _ = self.wait_message(wait_ms);
+            if !self.pump() {
+                return None;
+            }
+            evs = self.drain_events();
+            for e in &evs {
+                if let RawEvent::SetCursor { x, y } = e {
+                    self.pending_cursor = Some(y901_ui::Pos::new(*x, *y));
+                }
+            }
+        }
+        Some(evs)
+    }
+
+    fn viewport(&self) -> (u32, u32) {
+        self.viewport
+    }
+
+    fn relayout(&mut self, tree: &mut UiTree) {
+        self.resize(tree);
+    }
+
+    /// **脏区判定在这一层**：`render_inner` 见 `tree.dirty().is_empty()` 就直接返回。
+    /// `run_loop` 不再查脏区，所以只有这一层判定。
+    fn render(&mut self, tree: &mut UiTree) -> Result<(), String> {
+        self.render_inner(tree, 1);
+        Ok(())
+    }
+
+    fn set_theme(&mut self, theme: y901_ui::theme::Theme) -> Result<(), String> {
+        Window::set_theme(self, theme)
+    }
+
+    fn set_font(&mut self, font: &y901_runtime::FontConfig) -> Result<(), String> {
+        Window::set_font(self, font)
+    }
+
+    /// 渲染前的平台收尾：IME 定位、字体请求、重绘请求、光标形状、**快照请求**。
+    ///
+    /// ⚠️ **副作用**：`host.take_snapshot_request()` 为真时会调 `tree.invalidate_all()`，
+    /// 因为快照必须拿到一帧**完整**的像素。这个调用改变了 `tree` 的脏区状态，
+    /// 所以它不能放在渲染之后。
+    fn after_frame(&mut self, tree: &mut UiTree, host: &mut dyn y901_runtime::Host) {
+        if let Some((x, y)) = host.ime_position(tree) {
+            self.set_ime_position(x, y);
+        }
+        if let Some(font) = host.take_font_request() {
+            match Window::set_font(self, &font) {
+                Ok(()) => {
+                    self.resize(tree);
+                    tree.invalidate_all();
+                }
+                Err(err) => eprintln!("[y901] 切换字体失败: {err}"),
+            }
+        }
+        if self.take_repaint_request() {
+            tree.invalidate_all();
+        }
+        if let Some(pos) = self.pending_cursor.take() {
+            self.set_cursor(tree.cursor_at(pos));
+        }
+        if host.take_snapshot_request() {
+            tree.invalidate_all();
+            self.request_snapshot();
+        }
+    }
+
+    /// 渲染后：回读快照。
+    fn after_present(&mut self, _tree: &mut UiTree, host: &mut dyn y901_runtime::Host) {
+        if let Some((pixels, w, h)) = self.take_snapshot() {
+            host.on_snapshot(&pixels, w, h);
+        }
     }
 }

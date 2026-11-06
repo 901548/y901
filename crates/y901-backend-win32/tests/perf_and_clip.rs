@@ -3,18 +3,32 @@
 //! 本机无 GPU，无法实测帧时间，所以用结构断言守住两个修复点，
 //! 并用 `clip_quad` 的单元测试证明"越界字形会被裁掉"。
 
-/// 主循环在没有事件、没有脏区时必须阻塞等待（否则 100% CPU 空转）。
 #[test]
 fn runtime_idles_when_nothing_to_do() {
-    let src = include_str!("../src/runtime.rs");
-    let idle = src
-        .find("wait_message(")
-        .expect("主循环必须调用 wait_message 休眠");
-    let render = src.find("window.render(&mut tree)").expect("必须有 render");
-    assert!(idle > render, "休眠必须发生在 render 之后（否则会漏帧）");
+    // 主循环必须休眠，否则空闲时 100% CPU 空转。
+    // 重构后休眠分层了：这里跨两个文件验证（比旧版只看一个文件更强）。
+    let common = include_str!("../../y901-backend-common/src/runtime.rs");
+    let win32 = include_str!("../src/window.rs");
+
     assert!(
-        src.contains("!had_work && tree.dirty().is_empty()"),
-        "只有「没有事件且没有脏区」时才允许休眠（有 PTY 数据时不能睡）"
+        common.contains("window.wait_events(wait_ms)"),
+        "公共循环必须通过 wait_events 取事件"
+    );
+
+    let fn_start = win32
+        .find("fn wait_events(")
+        .expect("Win32 必须实现 wait_events");
+    let body = &win32[fn_start..];
+    let body_end = body.find("fn viewport(").unwrap_or(body.len());
+    let body = &body[..body_end];
+    assert!(
+        body.contains("wait_message("),
+        "Win32 的 wait_events 必须调 wait_message 休眠\n{body}"
+    );
+
+    assert!(
+        common.contains("if was_busy { 0 } else { idle_wait_ms() }"),
+        "只有闲时才能睡；忙时必须传 0"
     );
 }
 

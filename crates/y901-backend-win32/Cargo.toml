@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+y901-backend-common = { path = "../y901-backend-common" }
 y901-core = { path = "../y901-core" }
 y901-ui = { path = "../y901-ui" }
 y901-runtime = { path = "../y901-runtime" }

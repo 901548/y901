@@ -194,17 +194,32 @@ fn wm_paint_requests_full_redraw() {
 
 #[test]
 fn runtime_consumes_repaint_request_before_render() {
-    // 结构断言：runtime 必须在 window.render 之前消费请求并 invalidate_all。
-    let src = include_str!("../src/runtime.rs");
-    let repaint = src
+    // 语义：重绘请求必须在 render 之前被消费，否则这帧会用旧的脏区去画。
+    // 重构后消费点在 Window::after_frame，顺序由公共循环保证：两个事实都验证。
+    let window = include_str!("../src/window.rs");
+    let fn_start = window
+        .find("fn after_frame(")
+        .expect("Window 必须实现 after_frame");
+    let body = &window[fn_start..];
+    let body_end = body.find("fn after_present(").unwrap_or(body.len());
+    let body = &body[..body_end];
+
+    let repaint = body
         .find("take_repaint_request()")
-        .expect("runtime 应消费重绘请求");
-    let render = src
-        .find("window.render(&mut tree)")
-        .expect("runtime 应调用 render");
-    assert!(repaint < render, "必须在 render 之前处理重绘请求");
+        .expect("after_frame 必须消费重绘请求");
+    // 注意：同一函数里还有其他 `invalidate_all()`（字体、快照分支），
+    // 所以不能拿“文件里第一个 invalidate”去比位置；必须看**重绘消费之后**的那段。
     assert!(
-        src[repaint..render].contains("invalidate_all()"),
-        "处理重绘请求时必须 invalidate_all"
+        body[repaint..].contains("tree.invalidate_all()"),
+        "消费重绘请求后必须全量失效"
     );
+
+    let common = include_str!("../../y901-backend-common/src/runtime.rs");
+    let hook = common
+        .find("window.after_frame(tree, host)")
+        .expect("run_loop 必须调 after_frame");
+    let render = common
+        .find("window.render(tree)?")
+        .expect("run_loop 必须调 render");
+    assert!(hook < render, "after_frame 必须在 render 之前");
 }
