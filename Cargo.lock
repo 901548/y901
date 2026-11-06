@@ -484,6 +484,7 @@ dependencies = [
 name = "y901-backend-x11"
 version = "0.1.0"
 dependencies = [
+ "y901-backend-common",
  "y901-render",
  "y901-runtime",
  "y901-ui",

@@ -7,8 +7,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use y901_runtime::{EventSource, Presenter, RawEvent, Waker};
-use y901_ui::{Key, Modifiers, MouseButton};
+use y901_backend_common::window::WindowBackend;
+use y901_render::soft::SoftBackend;
+use y901_runtime::{EventSource, FontConfig, Presenter, RawEvent, Waker};
+use y901_ui::theme::Theme;
+use y901_ui::{Key, Modifiers, MouseButton, Size, UiTree};
 
 use crate::conn::Connection;
 use crate::encode::{encode_create_gc, encode_create_window, encode_map_window, CreateWindowArgs, GcMask, ValueMask, WindowClass};
@@ -34,6 +37,10 @@ pub struct X11Window {
     cursors: Option<Cursors>,
     /// 当前光标形状（避免每帧重发请求）
     cursor_now: CursorShape,
+    /// CPU 光栅器：清屏 + 整树绘制 + 上屏三段都在 [`X11Window::render_tree`] 里。
+    soft: SoftBackend,
+    /// 上屏用的像素暂存（`Present` 要 `&mut self`，不能同时借用 `soft`）。
+    frame: Vec<u8>,
 }
 
 /// 对外可用的光标形状（与 `y901_ui::Cursor` 一一对应）。
@@ -77,8 +84,15 @@ struct ShmState {
 impl X11Window {
     /// 连接、建窗、建 GC、显示。
     ///
+    /// `soft` 由调用方准备好（字体/主题是应用级选择，窗口不替它决定）。
     /// 失败：任一步服务器报错都会把错误原文带回来（而不是吞掉）。
-    pub fn create(display: &str, width: u16, height: u16, title: &str) -> Result<Self, String> {
+    pub fn create(
+        display: &str,
+        width: u16,
+        height: u16,
+        title: &str,
+        soft: SoftBackend,
+    ) -> Result<Self, String> {
         let mut conn = Connection::connect(display)?;
         let info = conn.info().clone();
 
@@ -172,7 +186,41 @@ impl X11Window {
             shm,
             cursors,
             cursor_now: CursorShape::Default,
+            soft,
+            frame: Vec::new(),
         })
+    }
+
+    /// 光栅器尺寸与窗口客户区对齐（启动后由 [`WindowBackend::relayout`] 调用）。
+    pub fn soft(&self) -> &SoftBackend {
+        &self.soft
+    }
+
+    /// 可变光栅器（启动时按真实字体/主题建树后 `tree.layout` 需要它）。
+    pub fn soft_mut(&mut self) -> &mut SoftBackend {
+        &mut self.soft
+    }
+
+    /// 绘制一帧：清屏 → 整树重绘 → 上屏。
+    ///
+    /// 脏区判定只在**这一层**（`run_loop` 不再看 `tree.dirty()`）：
+    /// 没有脏区就保留上一帧，避免"每帧都 Present 一个空帧"导致闪黑。
+    pub fn render_tree(&mut self, tree: &mut UiTree) -> Result<(), String> {
+        if tree.dirty().is_empty() {
+            return Ok(());
+        }
+        // 纯 CPU 路径：整窗重绘（与 Windows 的 --force-soft 一致）
+        tree.invalidate_all();
+        self.soft.clear();
+        tree.render(&mut self.soft);
+        // Present 需要 `&mut self`，而像素在 `self.soft` 里：先拷到暂存再上屏。
+        let (w, h) = (self.soft.width(), self.soft.height());
+        self.frame.clear();
+        self.frame.extend_from_slice(self.soft.pixels());
+        let frame = std::mem::take(&mut self.frame);
+        let result = self.present(&frame, w, h);
+        self.frame = frame;
+        result
     }
 
     /// 窗口尺寸（逻辑像素）。
@@ -385,6 +433,40 @@ impl Presenter for X11Window {
 
         self.conn.put_image_bgra(self.wid, self.gc, w, h, pixels, self.depth)?;
         Ok(())
+    }
+}
+
+impl WindowBackend for X11Window {
+    /// 语义：可阻塞至多 `wait_ms`；关闭（`RawEvent::Close`）由 `run_loop` 判定。
+    fn wait_events(&mut self, wait_ms: u32) -> Option<Vec<RawEvent>> {
+        Some(self.poll(wait_ms))
+    }
+
+    fn viewport(&self) -> (u32, u32) {
+        (self.width as u32, self.height as u32)
+    }
+
+    /// 语义：先把光栅器尺寸对齐窗口，再按新视口整树重排并全量失效。
+    fn relayout(&mut self, tree: &mut UiTree) {
+        let (w, h) = self.size();
+        self.soft.resize(w as u32, h as u32);
+        tree.layout(Size::new(w as f32, h as f32), &mut self.soft);
+        tree.invalidate_all();
+    }
+
+    /// 脏区判定在 `render_tree` 内部（本层是唯一判定点）。
+    fn render(&mut self, tree: &mut UiTree) -> Result<(), String> {
+        self.render_tree(tree)
+    }
+
+    fn set_theme(&mut self, theme: Theme) -> Result<(), String> {
+        self.soft.set_theme(theme)
+    }
+
+    /// X11 后端启动时固定字体（与 Win32 的软后端一致：重建引擎需换字体路径，
+    /// 本轮不做运行时切换）。保留默认实现即可，这里显式说明能力缺省。
+    fn set_font(&mut self, _font: &FontConfig) -> Result<(), String> {
+        Err("X11 后端不支持运行时切换字体（启动时固定）".to_string())
     }
 }
 

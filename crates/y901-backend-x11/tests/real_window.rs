@@ -20,6 +20,7 @@ use y901_backend_x11::encode::{
 use y901_backend_x11::window::X11Window;
 use y901_backend_x11::X11Event;
 use y901_runtime::{EventSource, Presenter};
+use y901_ui::Size;
 
 const W: u16 = 320;
 const H: u16 = 200;
@@ -91,11 +92,29 @@ fn connect() -> (std::sync::MutexGuard<'static, ()>, Connection) {
 }
 
 
+/// 建窗用的软光栅器：文字要真画，所以给一个真实存在的字体。
+///
+/// 只用于**构造**（`X11Window::create` 现在要求带上 `SoftBackend`）；
+/// 断言不依赖它，测试仍只验证协议字节被服务器接受。
+fn soft_for(w: u16, h: u16, size: f32) -> y901_render::soft::SoftBackend {
+    let (cw, ch) = y901_render::cell_metrics_for(size);
+    let cell = Size::new(cw, ch);
+    let path = y901_render::default_test_font_path();
+    let engine = y901_render::MyFontEngine::new(
+        y901_render::load_font(&path).expect("字体可读"),
+        size,
+        cell,
+    )
+    .expect("字形引擎");
+    y901_render::soft::SoftBackend::new(w as u32, h as u32, Box::new(engine), cell, None)
+        .expect("软光栅器")
+}
+
 /// 建窗（带重试）：理由同 [`connect`] —— Xvfb 在高频建连时偶尔 RST。
 fn create_window_retry(d: &str, w: u16, h: u16, title: &str) -> X11Window {
     let mut last = String::new();
     for _ in 0..3 {
-        match X11Window::create(d, w, h, title) {
+        match X11Window::create(d, w, h, title, soft_for(w, h, 15.0)) {
             Ok(x) => return x,
             Err(e) => {
                 last = e;
