@@ -48,7 +48,10 @@ fn build() -> (Tabs, Rc<Cell<usize>>) {
             let a = progress.clamp(0.0, 1.0);
             ctx.fill_rect(rect, Color::rgba(1.0, 1.0, 1.0, a));
         }),
-    );
+    )
+    // 内容区显式给 200px：不给的话 measure 只报最小高度 BAR_H+1，
+    // 采样点就只能落在那 1px 上。
+    .content_height(200.0);
     let handle = tabs.selection();
     (tabs, handle)
 }
@@ -64,11 +67,12 @@ fn shot(window: &mut Window, tree: &mut UiTree) -> (Vec<u8>, u32, u32) {
 
 /// 取内容区**第一行**中点的像素（BGRA 前三个通道）。
 ///
-/// 注意 `Tabs::measure` 只给出 `BAR_H + 1.0` 的高度（内容区固定 1px 高），
-/// 所以内容行就是 y = BAR_H；再往下是窗口清屏色，不是控件绘制结果。
-fn content_center(px: &[u8], w: u32, _h: u32) -> [u8; 3] {
+/// 采样内容区中点。测试里 Tabs 用 `.content_height(200.0)` 撑开，
+/// 所以内容区实际高度是 200px，中点是 `y = BAR_H + 100`。
+fn content_center(px: &[u8], w: u32) -> [u8; 3] {
     let x = w / 2;
-    let y = BAR_H;
+    // 内容区现在有真实高度（200px），采内容区中点。
+    let y = BAR_H + 100;
     let i = ((y * w + x) * 4) as usize;
     [px[i], px[i + 1], px[i + 2]]
 }
@@ -90,7 +94,7 @@ fn tabs_transition_uses_panel_color_on_d3d() {
 
     // 过渡起点（progress≈0，遮罩 alpha≈1）：内容区应被**面板色**盖住
     let (px_dim, w, h) = shot(&mut window, &mut tree);
-    let dim = content_center(&px_dim, w, h);
+    let dim = content_center(&px_dim, w);
 
     // 参照色：默认暗色主题的 PANEL 背景（D3D 在 theme=None 时用的就是 THEME::DARK）
     let panel = Theme::DARK.style(Role::PANEL, State::Normal).bg;
@@ -127,7 +131,7 @@ fn tabs_transition_uses_panel_color_on_d3d() {
     }
     let (px_full, w2, h2) = shot(&mut window, &mut tree);
     assert_eq!((w, h), (w2, h2), "两次快照尺寸应一致");
-    let full = content_center(&px_full, w2, h2);
+    let full = content_center(&px_full, w2);
     eprintln!("[tabs-d3d] 过渡终态内容区像素 BGRA={full:?}");
     assert!(
         full.iter().all(|c| *c >= 200),

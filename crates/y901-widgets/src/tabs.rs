@@ -20,7 +20,8 @@ use std::time::{Duration, Instant};
 
 use y901_ui::{
     animation::{Animate, Easing},
-    Constraints, EventCtx, EventResult, Key, Modifiers, Pos, Rect, RenderCtx, Semantics, Size,
+    Constraints, EventCtx, EventResult, FlexItem, Key, Modifiers, Pos, Rect, RenderCtx, Semantics,
+    Size,
     State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
@@ -53,6 +54,10 @@ pub struct Tabs {
     last_tick: Option<Instant>,
     /// 是否持有键盘焦点
     focused: bool,
+    /// 外部布局偏好（默认 `FlexItem::default()`，**不自动 fill**）。
+    flex: FlexItem,
+    /// 内容区高度；`None` = 使用最小高度 `BAR_H + 1.0`。
+    content_height: Option<f32>,
 }
 
 impl Tabs {
@@ -75,6 +80,8 @@ impl Tabs {
             anim: None,
             last_tick: None,
             focused: false,
+            flex: FlexItem::default(),
+            content_height: None,
         }
     }
 
@@ -178,6 +185,22 @@ impl Tabs {
     fn progress(&self) -> f32 {
         self.anim.as_ref().map(|a| a.progress()).unwrap_or(1.0)
     }
+
+    /// 外部布局偏好（宽/高/填满等）。
+    pub fn flex_item(mut self, item: FlexItem) -> Self {
+        self.flex = item;
+        self
+    }
+
+    /// 指定**内容区**高度；Tabs 总高 = `BAR_H + height`。
+    ///
+    /// 不设置时 measure 返回 `BAR_H + 1.0` —— 那是**最小高度**，不是设计意图。
+    /// 实际应用应用 `flex_item(FlexItem::fill())` 让父容器分配高度，
+    /// 或用本方法显式指定。
+    pub fn content_height(mut self, height: f32) -> Self {
+        self.content_height = Some(height);
+        self
+    }
 }
 
 impl Widget for Tabs {
@@ -191,8 +214,12 @@ impl Widget for Tabs {
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
-        // 标签栏固定高；内容区至少留 1px，避免 0 高度导致的空矩形
-        c.constrain(Size::new(c.max.w, BAR_H + 1.0))
+        // 有显式 `content_height` 就用它；否则保留**最小高度** `BAR_H + 1.0`（保证内容区≥ 1px）。
+        let h = match self.content_height {
+            Some(ch) => BAR_H + ch.max(0.0),
+            None => BAR_H + 1.0,
+        };
+        c.constrain(Size::new(c.max.w, h))
     }
 
     fn arrange(
@@ -206,6 +233,10 @@ impl Widget for Tabs {
 
     fn rect(&self) -> Rect {
         self.rect
+    }
+
+    fn flex(&self) -> FlexItem {
+        self.flex
     }
 
     /// 可获得键盘焦点：树的焦点序列只收录 `focusable() == true` 的节点，
