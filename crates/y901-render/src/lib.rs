@@ -25,6 +25,9 @@
 
 #![deny(missing_docs)]
 pub mod mip;
+
+/// 圆角矩形 SDF（与 D3D 着色器逐字对应）。
+pub mod sdf;
 #[cfg(test)]
 mod supersample;
 pub mod atlas;

@@ -1475,6 +1475,8 @@ float4 ps_main(VSOutput input) : SV_Target
     //   3. 字形：采样图集覆盖率
     // 圆角：SDF（有向距离场）覆盖率。d<0 在内，d>0 在外。
     // 覆盖率 = saturate(0.5 - d / softness)，softness=1 时就是 1px 过渡带（完美 AA）。
+    // 与 y901-render/src/sdf.rs 的 rounded_rect_distance / stroke_coverage 逐字对应。
+    // 改这里必须同步改那里（反之亦然），否则 D3D 与 Soft 的描边会出现肉眼可见的宽度偏差。
     float sdf_cov = 1.0;
     // params = (radius, softness, stroke_width, 0)
     //   radius > 0 或 stroke_width > 0 时走 SDF；

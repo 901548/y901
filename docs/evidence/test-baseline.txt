@@ -5,4 +5,4 @@
 #   default `cargo test --workspace --no-fail-fast`   passed 712, failed 0, ignored 51
 #   binaries                                          114
 #   baseline 828 -> 712 = -116 (y901-agent/-mcp ??? + 10 ???????????+ 4 ???????????
-718
+728

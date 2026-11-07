@@ -581,6 +581,59 @@ impl RenderCtx for SoftBackend {
         }
     }
 
+    /// 圆角矩形描边：与 D3D shader 同公式的 SDF 覆盖率（包含 1px 过渡）。
+    ///
+    /// 与 `fill_rect` 的区别：那里 alpha 恒为 1（硬边），这里每个像素都带一个
+    /// 覆盖率，所以弧线不再锯齿。
+    fn stroke_round_rect(&mut self, rect: Rect, color: Color, width: f32, radius: f32) {
+        if width <= 0.0 || rect.is_empty() {
+            return;
+        }
+        let rect = self.map_rect(rect);
+        // 与 D3D 一致：有 transform 时 radius 与线宽都要跟随缩放。
+        let (radius, width) = if self.transforms.is_empty() {
+            (radius, width)
+        } else {
+            let one = self.map_rect(Rect::new(0.0, 0.0, 1.0, 1.0));
+            let s = one.w.clamp(0.0001, 1000.0);
+            (radius * s, width * s)
+        };
+        let r = self.clip_rect(rect);
+        if r.w <= 0.0 || r.h <= 0.0 {
+            return;
+        }
+        let half = (rect.w * 0.5, rect.h * 0.5);
+        let cx = rect.x + half.0;
+        let cy = rect.y + half.1;
+        // 遍历：只扫环带外扩 width/2 + 1 的包围盒（边界像素需要部分覆盖率）。
+        let pad = width * 0.5 + 1.0;
+        let x0 = ((rect.x - pad).max(r.x)).floor() as i32;
+        let x1 = ((rect.right() + pad).min(r.right())).ceil() as i32;
+        let y0 = ((rect.y - pad).max(r.y)).floor() as i32;
+        let y1 = ((rect.bottom() + pad).min(r.bottom())).ceil() as i32;
+        let px_color = color;
+        for y in y0..y1 {
+            let py = y as f32 + 0.5 - cy; // 像素中心采样，与 shader 的 local 一致
+            let row = (y as u32 * self.width) as usize;
+            for x in x0..x1 {
+                let px = x as f32 + 0.5 - cx;
+                // 便宜剪枝：远离环带的像素直接跳过
+                if px.abs() > half.0 + pad || py.abs() > half.1 + pad {
+                    continue;
+                }
+                let d = crate::sdf::rounded_rect_distance((px, py), half, radius);
+                let cov = crate::sdf::stroke_coverage(d, width, 1.0);
+                if cov <= 0.0 {
+                    continue;
+                }
+                let i = row + x as usize;
+                if let Some(dst) = self.buf.get_mut(i) {
+                    *dst = blend(*dst, pack(px_color, cov));
+                }
+            }
+        }
+    }
+
     fn stroke_rect(&mut self, rect: Rect, color: Color, width: f32) {
         let w = width.max(1.0);
         self.fill_rect(Rect::new(rect.x, rect.y, rect.w, w), color);
