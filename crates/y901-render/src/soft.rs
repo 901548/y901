@@ -20,8 +20,8 @@ use crate::font::FontEngine;
 type Px = u32;
 
 #[inline]
-fn pack(c: Color, cov: f32) -> Px {
-    let a = (c.a.clamp(0.0, 1.0) * cov.clamp(0.0, 1.0) * 255.0).round() as u32;
+fn pack(c: Color, cov: f32, opacity: f32) -> Px {
+    let a = (c.a.clamp(0.0, 1.0) * cov.clamp(0.0, 1.0) * opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
     let r = (c.r.clamp(0.0, 1.0) * 255.0).round() as u32;
     let g = (c.g.clamp(0.0, 1.0) * 255.0).round() as u32;
     let b = (c.b.clamp(0.0, 1.0) * 255.0).round() as u32;
@@ -172,7 +172,7 @@ impl SoftBackend {
 
     /// 清屏（整张缓冲）。
     pub fn clear(&mut self) {
-        let px = pack(self.clear_color, 1.0);
+        let px = pack(self.clear_color, 1.0, 1.0);
         self.buf.fill(px);
     }
 
@@ -533,7 +533,7 @@ impl RenderCtx for SoftBackend {
                 if c[3] <= 0.0 {
                     continue;
                 }
-                let src_px = pack(Color::rgba(c[0], c[1], c[2], c[3]), 1.0);
+                let src_px = pack(Color::rgba(c[0], c[1], c[2], c[3]), 1.0, 1.0);
                 let di = (y as u32 * self.width + x as u32) as usize;
                 if let Some(dst_px) = self.buf.get_mut(di) {
                     *dst_px = blend(*dst_px, src_px);
@@ -553,7 +553,7 @@ impl RenderCtx for SoftBackend {
         if r.w <= 0.0 || r.h <= 0.0 {
             return;
         }
-        let px = pack(color, 1.0);
+        let px = pack(color, 1.0, self.state.current_opacity());
         let x0 = r.x.floor() as i32;
         let x1 = r.right().ceil() as i32;
         let y0 = r.y.floor() as i32;
@@ -616,7 +616,7 @@ impl RenderCtx for SoftBackend {
                 }
                 let i = row + x as usize;
                 if let Some(dst) = self.buf.get_mut(i) {
-                    *dst = blend(*dst, pack(px_color, cov));
+                    *dst = blend(*dst, pack(px_color, cov, self.state.current_opacity()));
                 }
             }
         }
@@ -717,7 +717,7 @@ impl RenderCtx for SoftBackend {
                                 if cov <= 0.0 {
                                     continue;
                                 }
-                                let px = pack(style.fg, cov);
+                                let px = pack(style.fg, cov, self.state.current_opacity());
                                 let di = dy as u32 * self.width + dx as u32;
                                 if let Some(dst) = self.buf.get_mut(di as usize) {
                                     *dst = blend(*dst, px);
@@ -736,6 +736,16 @@ impl RenderCtx for SoftBackend {
             pen_x += span * cell_w;
         }
         pen_x - start
+    }
+
+    /// 压入一层不透明度（委托给 RenderState，嵌套乘积）。
+    fn push_opacity(&mut self, opacity: f32) {
+        self.state.push_opacity(opacity);
+    }
+
+    /// 弹出栈顶不透明度。
+    fn pop_opacity(&mut self) {
+        self.state.pop_opacity();
     }
 
     fn push_clip(&mut self, rect: Rect) {
@@ -781,7 +791,7 @@ impl RenderCtx for SoftBackend {
                 if cov <= 0.0 {
                     continue;
                 }
-                let px = pack(color, cov);
+                let px = pack(color, cov, self.state.current_opacity());
                 let i = row + x as usize;
                 if let Some(dst) = self.buf.get_mut(i) {
                     *dst = blend(*dst, px);
@@ -819,7 +829,7 @@ impl RenderCtx for SoftBackend {
             let row = (y as u32 * self.width) as usize;
             let ly = (y as f32 + 0.5 - rect.y) * inv_h;
             let mut t = ((x0 as f32 + 0.5 - rect.x) * inv_w) * ux + ly * uy;
-            let opaque = a0 >= 1.0 && da == 0.0;
+            let opaque = a0 >= 1.0 && da == 0.0 && self.state.current_opacity() >= 1.0;
             for x in x0..x1 {
                 let tt = t.clamp(0.0, 1.0);
                 let r = (r0 + dr * tt).clamp(0.0, 1.0);
@@ -832,7 +842,7 @@ impl RenderCtx for SoftBackend {
                         | ((g * 255.0 + 0.5) as u32) << 8
                         | (b * 255.0 + 0.5) as u32
                 } else {
-                    pack(Color::rgba(r, g, b, a0 + da * tt), 1.0)
+                    pack(Color::rgba(r, g, b, a0 + da * tt), 1.0, self.state.current_opacity())
                 };
                 let i = row + x as usize;
                 if let Some(dst) = self.buf.get_mut(i) {
@@ -895,7 +905,7 @@ impl RenderCtx for SoftBackend {
                     from.b + (to.b - from.b) * t,
                     from.a + (to.a - from.a) * t,
                 );
-                let px = pack(c, cov);
+                let px = pack(c, cov, self.state.current_opacity());
                 let i = row + x as usize;
                 if let Some(dst) = self.buf.get_mut(i) {
                     *dst = blend(*dst, px);
