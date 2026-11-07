@@ -1509,11 +1509,13 @@ float4 ps_main(VSOutput input) : SV_Target
         float2 px = input.local * input.size;
         float t = saturate(dot(px, input.gradient.xy) + input.gradient.w);
         float4 c = lerp(input.color, input.color_end, t);
-        return float4(c.rgb * sdf_cov, c.a * sdf_cov);
+        // 预乘：blend state 是 SrcBlend=ONE，RGB 必须已乘 alpha。
+        return float4(c.rgb * c.a * sdf_cov, c.a * sdf_cov);
     }
     if (input.solid > 0.5)
     {
-        return float4(input.color.rgb * sdf_cov, input.color.a * sdf_cov);
+        // 预乘：同上。旧版只乘了覆盖率、没乘 alpha，半透明纯色会偏亮。
+        return float4(input.color.rgb * input.color.a * sdf_cov, input.color.a * sdf_cov);
     }
     // 子像素（ClearType）：R/G/B 三个通道是各自的覆盖率，分别调制颜色通道。
     float3 cov = saturate(atlas_texture.Sample(atlas_sampler, input.uv).rgb);
@@ -1525,7 +1527,9 @@ float4 ps_main(VSOutput input) : SV_Target
     // 漏乘 alpha 会让覆盖率=0 的像素变成"不透明黑块"（字形命中框内的
     // 空白区会被涂黑）——这是真实遇到过的 bug。
     float a = input.color.a * dot(cov, float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
-    return float4(input.color.rgb * cov, a * sdf_cov);
+    // 预乘：逐通道覆盖率 cov 保留（ClearType 子像素靠它），
+    // 但 RGB 必须再乘 `input.color.a`，否则半透明文字会偏亮。
+    return float4(input.color.rgb * input.color.a * cov * sdf_cov, a * sdf_cov);
 }
 
 // 图片纹理采样 + 着色（tint）。

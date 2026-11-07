@@ -331,11 +331,15 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
         font: None,
     };
 
+    // **两个场景都跑**：不半透明（回归基线）+ 半透明（预乘回归）。
+    // 历史教训：旧版只跑 translucent=false，于是 D3D 预乘 bug（半透明偏亮）
+    // 在 CI 里永远是绿的。现在两个场景都断言。
+    for translucent in [false, true] {
     // A）D3D11
     let mut win = Window::create(&options).expect("需要 D3D11");
     let mut tree_a = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
-        translucent: false,
+        translucent,
     }));
     win.resize(&mut tree_a);
     tree_a.invalidate_all();
@@ -354,7 +358,7 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
     let mut soft = SoftBackend::new(w, h, engine, cell, None).expect("soft init");
     let mut tree_b = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
-        translucent: false,
+        translucent,
     }));
     tree_b.layout(Size::new(w as f32, h as f32), &soft);
     soft.clear();
@@ -404,10 +408,20 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
     eprintln!(
         "[soft-vs-d3d] {w}x{h}: exact={exact_pct:.1}%  within(|d|<=24)={within_pct:.1}%  max_diff={max_diff} at {worst:?}"
     );
+    // 半透明场景：预乘修复前 max_diff 达 165（半透明块内偏亮），
+    // 修复后为 2（仅剩抗锯齿边缘）。阈值取 8：给浮点与舍入余量，
+    // 但远小于 165 —— 能分辨“偏亮”与“正确”。
+    if translucent {
+        assert!(
+            max_diff <= 8,
+            "半透明场景 max_diff={max_diff} 超过 8（预乘修复前为 165）"
+        );
+    }
     assert!(
         within_pct >= 99.0,
         "纯 CPU 与 D3D11 的差异过大：只有 {within_pct:.1}% 像素在容差内（max_diff={max_diff}）"
     );
+    }
 }
 
 /// 半透明叠加：CPU 必须与 **解析解**一致（source-over）。
