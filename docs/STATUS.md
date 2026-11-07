@@ -298,3 +298,21 @@
   `snapshot_harness` 现有 **10** 个 `#[ignore]`，小节只列 7 个；余下 3 个（`text_label_paints_visible_non_background_pixels`、
   `text_inside_scrollview_is_not_clipped_away`、`rebuild_of_cached_target_does_not_leave_black_areas`）是回归用例而非像素 harness。
   需先澄清"harness"定义，再决定是补进表还是把标题改成"7 个像素对拍 + 3 个回归"。
+
+- **`sync-doc-numbers.ps1` 只保证数字对，不保证句子对**（已第三次改坏派生行）：
+  它会改对 `769` 这个数字，但会把 `--include-ignored` 行的句子结构改坏
+  （写成 `718` 应为 `769`，或出现 `499` 等怪数）。
+  短期：每次 commit 前人工检查 `ACCEPTANCE` 的派生行。
+  长期：删掉 `ACCEPTANCE` 的派生表述，只留一行 `769`，不再列 `718 + 53` 这种二次计算。
+
+- **`\uXXXX` 转义泄漏到新文件**（已发生多次）：
+  生成含中文的新文件时，转义层会把中文写成 `\u4e2d` 形式，
+  而 Rust/PowerShell 不会将它当转义处理，于是文件里出现字面串。
+  **固定动作**：凡是含中文的新文件，落盘后 grep 一次 `\\u[0-9a-f]{4}`，有命中就修。
+
+- **Linux 验收脚本未覆盖 `y901-render` 的 Soft 描边用例**：
+  `/root/Y901/linux_verify_cplan.sh` 只覆盖 x11 的 `check` / `golden` / `real_window`，
+  未覆盖 `y901-render` 的 `stroke_round_aa` 单测（本轮由 demo 手工补跑才发现通过）。
+  应把 `cargo test -p y901-render --test stroke_round_aa` 加进脚本，
+  否则
+后续 Linux 验收会“看不见”这条路径。
