@@ -34,6 +34,9 @@ pub mod sdf;
 
 /// 缺字替身映射（当前只有 U+2212 → '-')。
 pub mod font_fallback;
+
+/// 两个渲染后端共享的渲染状态（剪往栈 / 变换栈 / 主题 / 动画）。
+pub mod render_state;
 pub mod soft;
 #[cfg(test)]
 mod supersample;
