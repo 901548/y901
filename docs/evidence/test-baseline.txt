@@ -1,8 +1,8 @@
 # Test-count baseline for scripts/gate.ps1 (sum of 'N passed' across all test binaries).
 # The gate FAILS when the total drops below this number: that means a test was deleted or #[ignore]d.
 #
-# Measured at 去 AI 阶段 2 (2026-11-06), after physically deleting y901-agent / y901-mcp:
+# Measured at ??AI ??? 2 (2026-11-06), after physically deleting y901-agent / y901-mcp:
 #   default `cargo test --workspace --no-fail-fast`   passed 712, failed 0, ignored 51
 #   binaries                                          114
-#   baseline 828 -> 712 = -116 (y901-agent/-mcp 删除 + 10 个测试文件删除 + 4 个测试文件剪枝)
-715
+#   baseline 828 -> 712 = -116 (y901-agent/-mcp ??? + 10 ???????????+ 4 ???????????
+717

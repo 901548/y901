@@ -58,6 +58,11 @@ pub struct D3dBackend {
     last_occluded: bool,
     /// 渲染主题（启动时由 Options.theme 注入，None 时用 DARK）。
     theme: y901_ui::theme::Theme,
+    /// 动画快照（每帧由 `UiTree::render` 通过 `set_animations` 推入）。
+    ///
+    /// 缺它的话 `RenderCtx::animation` 只能恒返回 1.0，
+    /// 于是 Popup 打开动画在 D3D 上“直接到位”而不渐变。
+    anims: y901_ui::animation::AnimSnapshot,
     /// 图片实例的位置记录：`(start, count, texture_id)`。
     ///
     /// 为什么用"记录区间"而不是逐实例标记：图集实例的顺序就是 Z 序，
@@ -144,6 +149,7 @@ impl D3dBackend {
             size: (width, height),
             last_occluded: false,
             theme,
+            anims: y901_ui::animation::AnimSnapshot::default(),
             cell: Size::new(cell_w, cell_h),
             transforms: Vec::new(),
         };
@@ -743,6 +749,25 @@ impl RenderCtx for D3dBackend {
     /// 主题来自 `Options.theme`（`Window::create` 注入），默认 DARK。
     fn theme(&self) -> &y901_ui::theme::Theme {
         &self.theme
+    }
+
+    /// 与 `SoftBackend` 同源：面板背景色（Tabs 过渡遮罩等处使用）。
+    ///
+    /// 旧版缺失时调用方会回退到黑色，于是遮罩在 D3D 上变成一块黑。
+    fn background_color(&self) -> Color {
+        self.theme
+            .style(y901_ui::Role::PANEL, y901_ui::theme::State::Normal)
+            .bg
+    }
+
+    /// 推入本帧动画快照（与 `SoftBackend` 行为一致）。
+    fn set_animations(&mut self, snapshot: &y901_ui::animation::AnimSnapshot) {
+        self.anims = snapshot.clone();
+    }
+
+    /// 查询动画进度；键不存在时回退到 `1.0`（即“已完成”）。
+    fn animation(&self, key: u64) -> f32 {
+        self.anims.get(key).unwrap_or(1.0)
     }
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {
