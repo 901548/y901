@@ -55,3 +55,37 @@ fn d3d_and_soft_share_the_same_background_color_semantics() {
         );
     }
 }
+
+/// D3D 的 `stroke_round_rect` 必须与 `fill_round_rect` 一样处理 transform。
+///
+/// 为何钉死这三个字符串：旧版只调了 `clip_of`，
+/// 于是 `map_rect`（位置/尺寸）、`radius * scale`、`width * scale`
+/// 三件事全部缺失，有 transform 时描边直接错位，而编译器不会报警。
+/// 这条断言就是为了阻止"将来又把它写回简版"。
+#[test]
+fn d3d_stroke_round_rect_applies_transform() {
+    let src = include_str!("../src/backend/mod.rs");
+    let start = src
+        .find("fn stroke_round_rect(&mut self, rect: Rect, color: Color, width: f32, radius: f32)")
+        .expect("D3dBackend::stroke_round_rect 未找到");
+    let body = &src[start..];
+    let end = body.find("fn stroke_rect(").unwrap_or(body.len());
+    let body = &body[..end];
+
+    assert!(
+        body.contains("self.map_rect(rect)"),
+        "stroke_round_rect 必须先 map_rect，否则有 transform 时描边错位"
+    );
+    assert!(
+        body.contains("self.transforms.is_empty()"),
+        "stroke_round_rect 必须判断是否有 transform（与 fill_round_rect 一致）"
+    );
+    assert!(
+        body.contains("self.current_scale()"),
+        "stroke_round_rect 必须把 radius 与 width 乘上 current_scale()"
+    );
+    assert!(
+        body.contains("radius * s") && body.contains("width * s"),
+        "radius 与 width 都要跟随缩放；只缩一个会让描边变形"
+    );
+}

@@ -862,13 +862,28 @@ impl RenderCtx for D3dBackend {
     ///
     /// 与 CPU 兜底的差别：CPU 版用"直边四条 + 四个圆角逐行弦长" 拼接，
     /// 接缝处有瞬断；GPU 版是同一个 `d`，天然连续且 1 次 draw。
+    /// 描边：GPU SDF 一次 draw（`|d| <= width/2` 的环）。
+    ///
+    /// **必须与 `fill_round_rect` 同步处理 transform**：
+    /// - `map_rect`：位置与尺寸随变换矩阵走
+    /// - `radius * scale`：否则放大后圆角仍是原来那么小
+    /// - `width * scale`：否则线宽不跟随缩放（细到不可见）
+    ///
+    /// 旧版只做了 `clip_of`，上面三件事都没做，于是**有 transform 时描边直接错位**。
     fn stroke_round_rect(&mut self, rect: Rect, color: Color, width: f32, radius: f32) {
-        let Some(r) = self.clip_of(rect) else {
-            return;
-        };
         if width <= 0.0 {
             return;
         }
+        let rect = self.map_rect(rect);
+        let (radius, width) = if self.transforms.is_empty() {
+            (radius, width)
+        } else {
+            let s = self.current_scale();
+            (radius * s, width * s)
+        };
+        let Some(r) = self.clip_of(rect) else {
+            return;
+        };
         self.instances.push(Instance::round_stroke(
             [r.x, r.y],
             [r.w, r.h],
