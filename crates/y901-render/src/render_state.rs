@@ -34,6 +34,11 @@ pub struct RenderState {
     hovered: Option<String>,
     theme: Theme,
     anims: AnimSnapshot,
+    /// 不透明度栈：每一层的值乘积就是当前不透明度（嵌套语义）。
+    ///
+    /// 为何是栈而不是单字段：`push(0.5)` 两次必须得到 0.25，
+    /// 单字段只能表示一层，写成赋值会丢掉外层。
+    opacity_stack: Vec<f32>,
 }
 
 impl RenderState {
@@ -45,6 +50,7 @@ impl RenderState {
             hovered: None,
             theme,
             anims: AnimSnapshot::default(),
+            opacity_stack: Vec::new(),
         }
     }
 
@@ -152,6 +158,30 @@ impl RenderState {
     pub fn animation(&self, key: u64) -> f32 {
         self.anims.get(key).unwrap_or(1.0)
     }
+
+    // ---- 不透明度 ----
+
+    /// 压入一层不透明度（自动 clamp 到 `[0, 1]`）。
+    ///
+    /// 嵌套时是**乘积**：push(0.5) 两次 → `current_opacity() == 0.25`。
+    pub fn push_opacity(&mut self, opacity: f32) {
+        self.opacity_stack.push(opacity.clamp(0.0, 1.0));
+    }
+
+    /// 弹出栈顶不透明度；空栈时无操作。
+    pub fn pop_opacity(&mut self) {
+        self.opacity_stack.pop();
+    }
+
+    /// 当前不透明度 = 栈中所有值的乘积；空栈为 `1.0`。
+    pub fn current_opacity(&self) -> f32 {
+        self.opacity_stack.iter().product::<f32>().clamp(0.0, 1.0)
+    }
+
+    /// 不透明度栈深度（诊断用）。
+    pub fn opacity_depth(&self) -> usize {
+        self.opacity_stack.len()
+    }
 }
 
 #[cfg(test)]
@@ -217,5 +247,31 @@ mod tests {
         s.set_theme(LIGHT);
         let light = s.background_color();
         assert_ne!(dark, light, "换主题后背景色必须变化");
+    }
+
+    #[test]
+    fn opacity_is_a_multiplicative_stack() {
+        let mut s = state();
+        assert_eq!(s.current_opacity(), 1.0, "空栈为 1.0");
+        s.push_opacity(0.5);
+        assert_eq!(s.current_opacity(), 0.5);
+        s.push_opacity(0.5);
+        assert!((s.current_opacity() - 0.25).abs() < 1e-6, "嵌套应乘积");
+        s.pop_opacity();
+        assert_eq!(s.current_opacity(), 0.5);
+        s.pop_opacity();
+        assert_eq!(s.current_opacity(), 1.0);
+        s.pop_opacity(); // 空栈不 panic
+        assert_eq!(s.opacity_depth(), 0);
+    }
+
+    #[test]
+    fn opacity_is_clamped_to_unit_range() {
+        let mut s = state();
+        s.push_opacity(-1.0);
+        assert_eq!(s.current_opacity(), 0.0);
+        s.pop_opacity();
+        s.push_opacity(2.0);
+        assert_eq!(s.current_opacity(), 1.0);
     }
 }

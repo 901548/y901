@@ -122,7 +122,7 @@ cargo run --example tree_view    -p y901-app   # TreeView + 虚拟化 + 键盘�
 
 | 项 | 状态 |
 |---|---|
-| 测试 **741**（`cargo test --workspace`），0 失败 |
+| 测试 **743**（`cargo test --workspace`），0 失败 |
 | clippy | **0 warning / 0 error** |
 | 文档完整性 | **12 个 crate 全部 `#![deny(missing_docs)]`**，`RUSTFLAGS="-W missing_docs"` = 0 |
 | 像素哈希门禁 | 通过（`scripts/hash-gate.ps1`，同会话前后对比） |

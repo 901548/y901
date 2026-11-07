@@ -736,6 +736,16 @@ pub trait RenderCtx: TextMetrics {
     /// 弹出最近一次 `push_clip`。必须与 push 严格配对——不配对会让后续绘制被错误裁剪。
     fn pop_clip(&mut self);
 
+    /// 压入一层不透明度。
+    ///
+    /// 默认空实现：旧后端（以及测试用的 mock）不必实现就能编译。
+    /// 真正支持的后端应将其与栈上其他层**乘积**，
+    /// 并在最终像素输出时作用于 alpha。
+    fn push_opacity(&mut self, _opacity: f32) {}
+
+    /// 弹出栈顶不透明度（默认空实现）。
+    fn pop_opacity(&mut self) {}
+
     /// 当前主题。默认返回内置暗色主题，应用可注入自己的。
     fn theme(&self) -> &crate::theme::Theme {
         &crate::theme::DARK_THEME
