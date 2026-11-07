@@ -122,11 +122,13 @@ impl IntervalSet {
             }
         }
 
-        self.spans
-            .splice(remove_from..remove_from + remove_count, [Span {
+        self.spans.splice(
+            remove_from..remove_from + remove_count,
+            [Span {
                 start: new_start,
                 end: new_end,
-            }]);
+            }],
+        );
         Ok(())
     }
 
@@ -189,9 +191,7 @@ impl IntervalSet {
         if start >= end {
             return false;
         }
-        self.spans
-            .iter()
-            .any(|s| s.start < end && start < s.end)
+        self.spans.iter().any(|s| s.start < end && start < s.end)
     }
 
     /// 已占用的总长度（各段长度之和）。
@@ -204,9 +204,7 @@ impl IntervalSet {
 
     /// 某个位置是否已被占用。
     pub fn contains(&self, point: u32) -> bool {
-        self.spans
-            .iter()
-            .any(|s| s.start <= point && point < s.end)
+        self.spans.iter().any(|s| s.start <= point && point < s.end)
     }
 
     /// 按起点升序返回所有段 `(start, end)`。

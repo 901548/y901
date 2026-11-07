@@ -59,7 +59,6 @@ impl Host for CounterApp {
         self.apply(tree);
         true
     }
-
 }
 
 fn build() -> UiTree {

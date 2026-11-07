@@ -248,15 +248,30 @@ mod tests {
     #[test]
     fn pos_to_cell_zero_rect_returns_none() {
         // 这就是"布局之前收到 MouseDown"的场景
-        assert_eq!(pos_to_cell((10.0, 10.0), (0.0, 0.0, 0.0, 0.0), 10.0, 20.0, 80, 30), None);
+        assert_eq!(
+            pos_to_cell((10.0, 10.0), (0.0, 0.0, 0.0, 0.0), 10.0, 20.0, 80, 30),
+            None
+        );
     }
 
     #[test]
     fn pos_to_cell_outside_rect_returns_none() {
         let rect = (100.0, 100.0, 800.0, 600.0);
-        assert_eq!(pos_to_cell((50.0, 50.0), rect, 10.0, 20.0, 80, 30), None, "左上外");
-        assert_eq!(pos_to_cell((950.0, 120.0), rect, 10.0, 20.0, 80, 30), None, "右外");
-        assert_eq!(pos_to_cell((120.0, 750.0), rect, 10.0, 20.0, 80, 30), None, "下外");
+        assert_eq!(
+            pos_to_cell((50.0, 50.0), rect, 10.0, 20.0, 80, 30),
+            None,
+            "左上外"
+        );
+        assert_eq!(
+            pos_to_cell((950.0, 120.0), rect, 10.0, 20.0, 80, 30),
+            None,
+            "右外"
+        );
+        assert_eq!(
+            pos_to_cell((120.0, 750.0), rect, 10.0, 20.0, 80, 30),
+            None,
+            "下外"
+        );
     }
 
     #[test]
@@ -280,7 +295,17 @@ mod tests {
 
     #[test]
     fn pos_to_cell_zero_cell_size_returns_none() {
-        assert_eq!(pos_to_cell((120.0, 120.0), (100.0, 100.0, 100.0, 100.0), 0.0, 20.0, 10, 10), None);
+        assert_eq!(
+            pos_to_cell(
+                (120.0, 120.0),
+                (100.0, 100.0, 100.0, 100.0),
+                0.0,
+                20.0,
+                10,
+                10
+            ),
+            None
+        );
     }
 
     #[test]
@@ -290,5 +315,4 @@ mod tests {
         let (r, c) = pos_to_cell((950.0, 950.0), rect, 10.0, 20.0, 10, 5).expect("应能映射");
         assert!(r < 5 && c < 10, "行列应被裁剪在网格内，实际 ({r},{c})");
     }
-
 }

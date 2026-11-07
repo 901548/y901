@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use y901_ui::{
     Constraints, DirtyRegion, EventCtx, EventResult, Flex, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 
 struct Mono;
@@ -52,7 +52,12 @@ impl Widget for PlainLeaf {
     ) -> Size {
         c.constrain(Size::new(40.0, 20.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -82,7 +87,12 @@ impl Widget for Leaf {
     ) -> Size {
         c.constrain(Size::new(40.0, 20.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -98,7 +108,11 @@ impl Widget for Leaf {
 }
 
 fn count(n: &dyn Widget) -> usize {
-    1 + n.children().iter().map(|c| count(c.as_ref())).sum::<usize>()
+    1 + n
+        .children()
+        .iter()
+        .map(|c| count(c.as_ref()))
+        .sum::<usize>()
 }
 
 /// 窄而深：`width^depth` 个叶子。
@@ -219,7 +233,12 @@ fn bench_dirty_region_streaming() {
     let mut d2 = DirtyRegion::default();
     let t = Instant::now();
     for i in 0..N {
-        d2.add(Rect::new((i % 100) as f32 * 4.0, (i / 100) as f32 * 4.0, 2.0, 2.0));
+        d2.add(Rect::new(
+            (i % 100) as f32 * 4.0,
+            (i / 100) as f32 * 4.0,
+            2.0,
+            2.0,
+        ));
     }
     let scattered = t.elapsed().as_secs_f64() * 1e6;
     eprintln!(

@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Flex, FlexItem, Modifiers, Pos, Rect, RenderCtx,
-    Semantics, Size, TextStyle, TextMetrics, UiEvent, UiTree,
+    Semantics, Size, TextMetrics, TextStyle, UiEvent, UiTree,
 };
 use y901_widgets::{ListView, ScrollView};
 
@@ -129,7 +129,10 @@ fn invalidate_rect_clamps_and_ignores_empty() {
     // 部分越界：应被裁到视口内
     tree.invalidate_rect(Rect::new(380.0, 280.0, 100.0, 100.0));
     let b = tree.dirty().bounds().expect("应有脏区");
-    assert!(b.right() <= 400.0 && b.bottom() <= 300.0, "必须裁到视口：{b:?}");
+    assert!(
+        b.right() <= 400.0 && b.bottom() <= 300.0,
+        "必须裁到视口：{b:?}"
+    );
 }
 
 // ---------------------------------------------------------------- 任务 2
@@ -246,20 +249,28 @@ fn user_scroll_up_disarms_stick_until_back_at_bottom() {
 fn listview_renders_multiple_columns_and_icon() {
     // 通用列表不存数据：行内容由回调自己画。
     // 这里模拟 Demo 的三列文件行（图标 + 名称 + 大小 + 时间）。
-    let rows: Vec<(&str, &str, &str)> = vec![("src", "4 KiB", "10:20"), ("main.rs", "2 KiB", "10:21")];
-    let lv = ListView::new("list", 20.0).len(rows.len()).painter(move |i, rect, ctx| {
-        let Some((name, size, at)) = rows.get(i) else { return };
-        let fg = ctx.theme().style(y901_ui::Role::TEXT, y901_ui::State::Normal).fg;
-        let st = TextStyle::fg(fg);
-        ctx.fill_round_rect(
-            Rect::new(rect.x + 4.0, rect.y + 4.0, 12.0, 12.0),
-            Color::rgba(0.9, 0.6, 0.2, 1.0),
-            3.0,
-        );
-        ctx.draw_text(Pos::new(rect.x + 24.0, rect.y + 2.0), name, &st);
-        ctx.draw_text(Pos::new(rect.x + 200.0, rect.y + 2.0), size, &st);
-        ctx.draw_text(Pos::new(rect.x + 300.0, rect.y + 2.0), at, &st);
-    });
+    let rows: Vec<(&str, &str, &str)> =
+        vec![("src", "4 KiB", "10:20"), ("main.rs", "2 KiB", "10:21")];
+    let lv = ListView::new("list", 20.0)
+        .len(rows.len())
+        .painter(move |i, rect, ctx| {
+            let Some((name, size, at)) = rows.get(i) else {
+                return;
+            };
+            let fg = ctx
+                .theme()
+                .style(y901_ui::Role::TEXT, y901_ui::State::Normal)
+                .fg;
+            let st = TextStyle::fg(fg);
+            ctx.fill_round_rect(
+                Rect::new(rect.x + 4.0, rect.y + 4.0, 12.0, 12.0),
+                Color::rgba(0.9, 0.6, 0.2, 1.0),
+                3.0,
+            );
+            ctx.draw_text(Pos::new(rect.x + 24.0, rect.y + 2.0), name, &st);
+            ctx.draw_text(Pos::new(rect.x + 200.0, rect.y + 2.0), size, &st);
+            ctx.draw_text(Pos::new(rect.x + 300.0, rect.y + 2.0), at, &st);
+        });
     let mut tree = UiTree::new(Box::new(lv.flex_item(FlexItem::height(120.0))));
     tree.layout(Size::new(400.0, 200.0), &Mono);
 

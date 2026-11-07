@@ -120,7 +120,11 @@ fn arrow_left_collapses_then_jumps_to_parent() {
 
     // 选中子项时按 Left：子项自身不可折叠 → 跳到父节点
     t.dispatch(&key(Key::Left));
-    assert_eq!(selected(&mut t), Some(vec![0]), "子项上按 Left 应跳到父节点");
+    assert_eq!(
+        selected(&mut t),
+        Some(vec![0]),
+        "子项上按 Left 应跳到父节点"
+    );
 
     // 父节点上按 Left：已展开 → 折叠
     t.dispatch(&key(Key::Left));

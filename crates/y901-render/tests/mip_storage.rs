@@ -68,7 +68,12 @@ fn latin_mip_storage_cost_and_fragmentation() {
 
     eprintln!(
         "[mip-storage] 字形 {} 个：L0={} 像素面积，L1={} （{} 个字形生成），L2={} （{} 个）",
-        chars.len(), area_l0, area_l1, with_l1, area_l2, with_l2
+        chars.len(),
+        area_l0,
+        area_l1,
+        with_l1,
+        area_l2,
+        with_l2
     );
     eprintln!(
         "[mip-storage] 总占用 / L0 = {:.3}×（红线 1.6×）；若只保留 L1 = {:.3}×",

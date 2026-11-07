@@ -8,8 +8,8 @@ use std::time::Instant;
 use y901_backend_win32::window::Window;
 use y901_runtime::Options;
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiEvent, UiTree, Widget,
+    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    TextStyle, UiEvent, UiTree, Widget,
 };
 
 /// 一个固定场景：中英文混排文本 + 3 个 SDF 圆角按钮 + 一条渐变。
@@ -29,7 +29,12 @@ impl Widget for Scene {
     ) -> Size {
         c.constrain(Size::new(c.max.w, c.max.h))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -49,7 +54,11 @@ impl Widget for Scene {
         );
         // 中英文混排
         let white = TextStyle::fg(Color::rgba(0.95, 0.96, 1.0, 1.0));
-        ctx.draw_text(Pos::new(r.x + 12.0, r.y + 8.0), "Y901 字体引擎 M3 ready", &white);
+        ctx.draw_text(
+            Pos::new(r.x + 12.0, r.y + 8.0),
+            "Y901 字体引擎 M3 ready",
+            &white,
+        );
         let dim = TextStyle::fg(Color::rgba(0.62, 0.66, 0.74, 1.0));
         ctx.draw_text(
             Pos::new(r.x + 12.0, r.y + 48.0),
@@ -130,7 +139,11 @@ fn crc32(data: &[u8]) -> u32 {
     for b in data {
         c ^= *b as u32;
         for _ in 0..8 {
-            c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            c = if c & 1 != 0 {
+                0xEDB8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
         }
     }
     !c
@@ -258,19 +271,38 @@ fn pixel_statistics_and_png_baseline() {
     }
     let hash = fnv(&px);
     // 用绝对路径：测试的 cwd 是 crate 目录（crates/y901-backend-win32），不是仓库根
-    let png_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/evidence-self-font.png");
+    let png_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../target/evidence-self-font.png"
+    );
     write_png(png_path, &px, w, h).expect("写 PNG 失败");
 
     eprintln!("[3c] 场景 {w}x{h}，首帧 {first_frame:.1}ms");
-    eprintln!("[3c] 非背景像素 {non_bg} / {total} = {:.1}%", 100.0 * non_bg as f64 / total as f64);
+    eprintln!(
+        "[3c] 非背景像素 {non_bg} / {total} = {:.1}%",
+        100.0 * non_bg as f64 / total as f64
+    );
     eprintln!("[3c] 独立颜色数 {} 种（渐变/抗锯证据）", colors.len());
-    eprintln!("[3c] 亮像素（luma>200）{bright} 个 = {:.2}%（文字抗锯）", 100.0 * bright as f64 / total as f64);
+    eprintln!(
+        "[3c] 亮像素（luma>200）{bright} 个 = {:.2}%（文字抗锯）",
+        100.0 * bright as f64 / total as f64
+    );
     eprintln!("[3c] 亮度范围 {min_l}..{max_l}");
     eprintln!("[3c] 像素 FNV 哈希 = 0x{hash:016X}");
-    eprintln!("[3c] PNG 已保存：{png_path}（{} 字节）", std::fs::metadata(png_path).map(|m| m.len()).unwrap_or(0));
+    eprintln!(
+        "[3c] PNG 已保存：{png_path}（{} 字节）",
+        std::fs::metadata(png_path).map(|m| m.len()).unwrap_or(0)
+    );
 
-    assert!(non_bg as f64 / total as f64 > 0.05, "非背景像素过少，可能没画出来");
-    assert!(colors.len() > 50, "独立颜色太少：{}（渐变可能未生效）", colors.len());
+    assert!(
+        non_bg as f64 / total as f64 > 0.05,
+        "非背景像素过少，可能没画出来"
+    );
+    assert!(
+        colors.len() > 50,
+        "独立颜色太少：{}（渐变可能未生效）",
+        colors.len()
+    );
     assert!(bright > 0, "没有亮像素：文字可能没画出来");
 }
 
@@ -310,12 +342,24 @@ fn probe_orientation_and_channels() {
             rows.push((y, n));
         }
     }
-    eprintln!("[probe] 有亮像素的行（前 8）: {:?}", &rows[..rows.len().min(8)]);
-    eprintln!("[probe] 有亮像素的行（后 8）: {:?}", &rows[rows.len().saturating_sub(8)..]);
+    eprintln!(
+        "[probe] 有亮像素的行（前 8）: {:?}",
+        &rows[..rows.len().min(8)]
+    );
+    eprintln!(
+        "[probe] 有亮像素的行（后 8）: {:?}",
+        &rows[rows.len().saturating_sub(8)..]
+    );
 
     // 顶栏渐变：第 3 行 vs 第 30 行 的 B 分量
     for y in [3u32, 20, 35] {
         let i = ((y * w + 5) * 4) as usize;
-        eprintln!("[probe] y={y} x=5 原始字节 = [{}, {}, {}, {}]", px[i], px[i + 1], px[i + 2], px[i + 3]);
+        eprintln!(
+            "[probe] y={y} x=5 原始字节 = [{}, {}, {}, {}]",
+            px[i],
+            px[i + 1],
+            px[i + 2],
+            px[i + 3]
+        );
     }
 }

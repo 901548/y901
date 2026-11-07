@@ -20,34 +20,33 @@
 //! - 事件固定 **32 字节**。
 
 #![deny(missing_docs)]
+#[cfg(unix)]
+pub mod clipboard;
+#[cfg(unix)]
+pub mod conn;
 pub mod decode;
 pub mod encode;
 pub mod keys;
 #[cfg(unix)]
-pub mod clipboard;
+pub mod runtime;
 #[cfg(unix)]
 pub mod shm;
 #[cfg(unix)]
-pub mod runtime;
-#[cfg(unix)]
 pub mod window;
-#[cfg(unix)]
-pub mod conn;
 #[cfg(unix)]
 pub mod xauth;
 
 pub use decode::{decode_event, DecodeError, X11Event};
 pub use encode::{
-    encode_change_property, encode_configure_window, encode_create_gc, encode_create_window,
-    encode_destroy_window, encode_free_gc, encode_get_image, encode_get_input_focus,
-    encode_intern_atom,
-    encode_close_font, encode_convert_selection, encode_create_glyph_cursor,
-    encode_free_cursor, encode_get_property, encode_set_selection_owner,
-    encode_get_keyboard_mapping, encode_map_window, encode_open_font, encode_query_extension, encode_send_event,
+    encode_change_property, encode_close_font, encode_configure_window, encode_convert_selection,
+    encode_create_gc, encode_create_glyph_cursor, encode_create_window, encode_destroy_window,
+    encode_free_cursor, encode_free_gc, encode_get_image, encode_get_input_focus,
+    encode_get_keyboard_mapping, encode_get_property, encode_intern_atom, encode_map_window,
+    encode_no_operation, encode_open_font, encode_put_image, encode_query_extension,
+    encode_send_event, encode_set_input_focus, encode_set_selection_owner, encode_setup_request,
     encode_shm_attach, encode_shm_detach, encode_shm_put_image, encode_shm_query_version,
-    synth_key_event, ShmPutImageArgs, encode_no_operation, encode_put_image,
-    encode_set_input_focus,
-    encode_setup_request, ConfigureMask, GcMask, PropMode, PutImageArgs, ValueMask, WindowClass,
+    synth_key_event, ConfigureMask, GcMask, PropMode, PutImageArgs, ShmPutImageArgs, ValueMask,
+    WindowClass,
 };
 
 /// X11 协议主版本号。
@@ -169,7 +168,8 @@ pub fn put_u32(out: &mut Vec<u8>, v: u32) {
 /// 从字节串读一个 `u16`（小端序）；越界返回 `None`。
 #[inline]
 pub fn get_u16(b: &[u8], off: usize) -> Option<u16> {
-    b.get(off..off + 2).map(|s| u16::from_le_bytes([s[0], s[1]]))
+    b.get(off..off + 2)
+        .map(|s| u16::from_le_bytes([s[0], s[1]]))
 }
 
 /// 从字节串读一个 `u32`（小端序）；越界返回 `None`。

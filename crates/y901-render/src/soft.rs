@@ -12,9 +12,7 @@
 //! 那是 Step 2；本轮先把"图元 + 呈现"这两段彻底搬到 CPU。
 
 use y901_ui::theme::Theme;
-use y901_ui::{
-    Color, Edges, Pos, Rect, RenderCtx, Size, TextStyle, TextMetrics,
-};
+use y901_ui::{Color, Edges, Pos, Rect, RenderCtx, Size, TextMetrics, TextStyle};
 
 use crate::font::FontEngine;
 
@@ -214,11 +212,7 @@ impl SoftBackend {
         // SAFETY: `buf` 是 `u32` 数组，`pixels` 至少 `need` 字节，
         // 且两边长度一致；这是按字节拷贝到已分配的同尺寸内存。
         unsafe {
-            std::ptr::copy_nonoverlapping(
-                pixels.as_ptr(),
-                self.buf.as_mut_ptr() as *mut u8,
-                need,
-            );
+            std::ptr::copy_nonoverlapping(pixels.as_ptr(), self.buf.as_mut_ptr() as *mut u8, need);
         }
     }
 
@@ -318,12 +312,7 @@ impl SoftBackend {
     }
 
     fn clip_rect(&self, r: Rect) -> Rect {
-        let mut out = Rect::new(
-            r.x.max(0.0),
-            r.y.max(0.0),
-            r.w.max(0.0),
-            r.h.max(0.0),
-        );
+        let mut out = Rect::new(r.x.max(0.0), r.y.max(0.0), r.w.max(0.0), r.h.max(0.0));
         out.w = out.w.min(self.width as f32 - out.x);
         out.h = out.h.min(self.height as f32 - out.y);
         if let Some(c) = self.clips.last() {
@@ -333,10 +322,12 @@ impl SoftBackend {
     }
 }
 
-
 impl TextMetrics for SoftBackend {
     fn measure_text(&self, text: &str, _style: &TextStyle) -> Size {
-        let cells: f32 = text.chars().map(|c| self.text.cell_span(c).max(1) as f32).sum();
+        let cells: f32 = text
+            .chars()
+            .map(|c| self.text.cell_span(c).max(1) as f32)
+            .sum();
         Size::new(cells * self.cell.w, self.cell.h)
     }
     fn line_height(&self, _style: &TextStyle) -> f32 {
@@ -387,7 +378,12 @@ impl RenderCtx for SoftBackend {
         self.anims = snapshot.clone();
     }
 
-    fn upload_texture(&mut self, width: u32, height: u32, rgba: &[u8]) -> y901_ui::image::TextureId {
+    fn upload_texture(
+        &mut self,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> y901_ui::image::TextureId {
         if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
             return y901_ui::image::TextureId::INVALID;
         }
@@ -407,7 +403,6 @@ impl RenderCtx for SoftBackend {
         }
         id
     }
-
 
     fn retain_texture(&mut self, id: y901_ui::image::TextureId) {
         // 共享纹理（如图标复用）必须先加一次计数，
@@ -429,7 +424,7 @@ impl RenderCtx for SoftBackend {
         };
         if free {
             self.textures.remove(&id);
-        self.mips.remove(&id);
+            self.mips.remove(&id);
         }
     }
 
@@ -508,7 +503,11 @@ impl RenderCtx for SoftBackend {
             .get(&texture)
             .map(|t| t.2.as_slice())
             .unwrap_or(&[]);
-        let (tw, th, tex_bytes) = match self.mips.get(&texture).and_then(|m| m.get(level.wrapping_sub(1))) {
+        let (tw, th, tex_bytes) = match self
+            .mips
+            .get(&texture)
+            .and_then(|m| m.get(level.wrapping_sub(1)))
+        {
             Some(lv) if level > 0 => (lv.0, lv.1, lv.2.as_slice()),
             _ => (tw / shift, th / shift, tex_bytes),
         };
@@ -556,7 +555,9 @@ impl RenderCtx for SoftBackend {
 
     /// 背景色：取主题 panel 槽位的底色（用于弹层淡入適罩）。
     fn background_color(&self) -> Color {
-        self.theme.style(y901_ui::Role::PANEL, y901_ui::theme::State::Normal).bg
+        self.theme
+            .style(y901_ui::Role::PANEL, y901_ui::theme::State::Normal)
+            .bg
     }
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {
@@ -668,7 +669,8 @@ impl RenderCtx for SoftBackend {
                         let atlas_size = self.text.atlas_size() as usize;
                         // 基线：布局始终用原字号的 bearing，屏幕位置再乘缩放因子
                         let bx = (pen_x + sg.slot.bearing_x * scale).floor() as i32;
-                        let by = (origin.y + ascent * scale + sg.slot.bearing_y * scale).floor() as i32;
+                        let by =
+                            (origin.y + ascent * scale + sg.slot.bearing_y * scale).floor() as i32;
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
                         let dh = (sg.h as f32 * scale).round().max(1.0) as i32;
@@ -707,7 +709,8 @@ impl RenderCtx for SoftBackend {
                                 let ax = sg.slot.atlas_x as usize + sx as usize;
                                 let ay = sg.slot.atlas_y as usize + sy as usize;
                                 let si = (ay * atlas_size + ax) * 4;
-                                let mut cov = self.text.atlas().get(si).copied().unwrap_or(0) as f32 / 255.0;
+                                let mut cov =
+                                    self.text.atlas().get(si).copied().unwrap_or(0) as f32 / 255.0;
                                 if style.bold {
                                     // 合成粗体（synthetic bold）：把当前像素与"左侧一列"的覆盖度取最大值，
                                     // 等价于把字形向右拓宽 1px。
@@ -717,7 +720,8 @@ impl RenderCtx for SoftBackend {
                                     // 取**右侧邻居**的覆盖度取最大值 → 字形向右拓宽 1px。
                                     // （取左邻居是错的：它只会把已有的墨再加深，字形几乎不变宽）。
                                     let right = if (gx as u32) + 1 < g.width && sx + 1 < sw {
-                                        self.text.atlas().get(si + 4).copied().unwrap_or(0) as f32 / 255.0
+                                        self.text.atlas().get(si + 4).copied().unwrap_or(0) as f32
+                                            / 255.0
                                     } else {
                                         0.0
                                     };
@@ -841,10 +845,7 @@ impl RenderCtx for SoftBackend {
                         | ((g * 255.0 + 0.5) as u32) << 8
                         | (b * 255.0 + 0.5) as u32
                 } else {
-                    pack(
-                        Color::rgba(r, g, b, a0 + da * tt),
-                        1.0,
-                    )
+                    pack(Color::rgba(r, g, b, a0 + da * tt), 1.0)
                 };
                 let i = row + x as usize;
                 if let Some(dst) = self.buf.get_mut(i) {
@@ -882,7 +883,11 @@ impl RenderCtx for SoftBackend {
         let (hw, hh) = (rect.w * 0.5, rect.h * 0.5);
         let (dx, dy) = dir;
         let len = (dx * dx + dy * dy).sqrt();
-        let (ux, uy) = if len < 1e-6 { (0.0, 1.0) } else { (dx / len, dy / len) };
+        let (ux, uy) = if len < 1e-6 {
+            (0.0, 1.0)
+        } else {
+            (dx / len, dy / len)
+        };
         let soft = 1.0;
         for y in area.y.floor() as i32..area.bottom().ceil() as i32 {
             let row = (y as u32 * self.width) as usize;

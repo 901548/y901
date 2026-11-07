@@ -104,7 +104,9 @@ fn rgb(px: &[u8], w: u32, x: u32, y: u32) -> (u8, u8, u8) {
 
 #[test]
 fn image_quadrants_sample_correctly_on_gpu() {
-    let _guard = D3D_LOCK.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+    let _guard = D3D_LOCK
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
     let Some(mut win) = window("y901-d3d-image-quad", 240, 200) else {
         eprintln!("[image-d3d] 无 D3D11 设备，跳过");
         return;
@@ -125,7 +127,12 @@ fn image_quadrants_sample_correctly_on_gpu() {
     // 教训：拿"四象限中心"断言纯色是错的——中心正好是四色混合区。
     // 坐标相对快照尺寸计算：窗口客户区尺寸与请求尺寸不完全相等（DPI/边框）。
     for (x, y, want, name) in [
-        (5u32.min(w - 8), 5u32.min(h - 8), (255u8, 0u8, 0u8), "左上 红"),
+        (
+            5u32.min(w - 8),
+            5u32.min(h - 8),
+            (255u8, 0u8, 0u8),
+            "左上 红",
+        ),
         (w - 8, 5, (0, 255, 0), "右上 绿"),
         (5, h - 8, (0, 0, 255), "左下 蓝"),
         (w - 8, h - 8, (255, 255, 255), "右下 白"),
@@ -149,23 +156,29 @@ fn image_quadrants_sample_correctly_on_gpu() {
     let (r, g, b) = rgb(&px, w, mx, h - my);
     assert!(b > r && b > g, "左下区应偏蓝，实际 ({r},{g},{b})");
     let (r, g, b) = rgb(&px, w, w - 8, h - 8);
-    assert!(r > 150 && g > 150 && b > 150, "右下区应偏白，实际 ({r},{g},{b})");
+    assert!(
+        r > 150 && g > 150 && b > 150,
+        "右下区应偏白，实际 ({r},{g},{b})"
+    );
 }
 
 #[test]
 fn image_tint_and_contain_on_gpu() {
-    let _guard = D3D_LOCK.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+    let _guard = D3D_LOCK
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
     let Some(mut win) = window("y901-d3d-image-tint", 240, 200) else {
         eprintln!("[image-d3d] 无 D3D11 设备，跳过");
         return;
     };
     // 白色纹理 × 红 tint → 纯红；Contain 让 8x4 的图垂直居中
-    let img = Image::from_rgba("white", 8, 4, &solid_rgba(8, 4, (255, 255, 255)))
-        .with_style(ImageStyle {
+    let img = Image::from_rgba("white", 8, 4, &solid_rgba(8, 4, (255, 255, 255))).with_style(
+        ImageStyle {
             fit: ImageFit::Contain,
             tint: Some(Color::rgba(1.0, 0.0, 0.0, 1.0)),
             clip: None,
-        });
+        },
+    );
     let mut tree = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
         child: Some(img),

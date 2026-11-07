@@ -409,17 +409,25 @@ pub trait RenderCtx: TextMetrics {
     /// 默认返回 [`crate::image::TextureId::INVALID`]（= 0）：不支持纹理的后端
     /// 会得到一个无效句柄，随后 `draw_image` 什么都不画——**不崩、不报错**。
     /// 这是为什么现有后端与测试 mock 不改一行也不会坏。
-    fn upload_texture(&mut self, _width: u32, _height: u32, _rgba: &[u8]) -> crate::image::TextureId {
+    fn upload_texture(
+        &mut self,
+        _width: u32,
+        _height: u32,
+        _rgba: &[u8],
+    ) -> crate::image::TextureId {
         crate::image::TextureId::INVALID
     }
 
     /// 按适配模式绘制纹理。
     ///
     /// 默认空实现（不画任何东西），与 [`RenderCtx::upload_texture`] 配套。
-    fn draw_image(&mut self, _rect: Rect, _texture: crate::image::TextureId, _style: crate::image::ImageStyle) {
+    fn draw_image(
+        &mut self,
+        _rect: Rect,
+        _texture: crate::image::TextureId,
+        _style: crate::image::ImageStyle,
+    ) {
     }
-
-
 
     /// 增加一次引用计数。
     ///
@@ -449,7 +457,6 @@ pub trait RenderCtx: TextMetrics {
     fn background_color(&self) -> Color {
         Color::rgba(0.0, 0.0, 0.0, 1.0)
     }
-
 
     /// 视口尺寸（逻辑像素）。
     fn size(&self) -> Size;
@@ -889,11 +896,7 @@ impl EventCtx {
     ///
     /// 输入：`factory`（分发结束后才调用）、`anchor`（触发控件屏幕矩形）。
     /// 副作用：追加一条请求并标记重绘。
-    pub fn request_popup(
-        &mut self,
-        factory: Box<dyn FnOnce() -> Box<dyn Widget>>,
-        anchor: Rect,
-    ) {
+    pub fn request_popup(&mut self, factory: Box<dyn FnOnce() -> Box<dyn Widget>>, anchor: Rect) {
         self.popup_requests.push(PopupRequest {
             factory,
             anchor,
@@ -1183,7 +1186,6 @@ pub trait Widget {
         FlexItem::default()
     }
 
-
     /// 是否可以获得键盘焦点（Tab 遍历、Modal 自动聚焦都用它）。
     ///
     /// 返回：`true` 表示愿意接收焦点。默认 `false`。
@@ -1223,8 +1225,6 @@ pub trait Widget {
     /// 卸载时**手里没有 `RenderCtx`**（资源在后端手里），
     /// 所以只能先记下来，等下一帧渲染时由树统一转交后端。
     fn release_textures(&mut self, _out: &mut Vec<crate::image::TextureId>) {}
-
-
 
     /// 是否处于已打开状态。关闭的浮层不参与绘制、命中与索引。
     ///

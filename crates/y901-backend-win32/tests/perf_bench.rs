@@ -6,12 +6,12 @@
 
 use std::time::Instant;
 
-use y901_render::atlas::SkylinePacker;
 use y901_backend_win32::window::Window;
+use y901_render::atlas::SkylinePacker;
 use y901_runtime::Options;
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiTree, Widget,
+    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    TextStyle, UiTree, Widget,
 };
 
 struct Mono;
@@ -92,7 +92,12 @@ impl Widget for ManyRects {
     ) -> Size {
         c.constrain(Size::new(c.max.w, c.max.h))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {

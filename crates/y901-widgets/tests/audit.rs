@@ -85,7 +85,12 @@ impl Widget for Box3 {
     ) -> Size {
         c.constrain(Size::new(c.max.w, 40.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -234,8 +239,8 @@ fn listview_bar_branch_precedes_row_click() {
     let picked = Rc::new(RefCell::new(None));
     let p = picked.clone();
     let items: Vec<String> = (0..100).map(|i| format!("r{i}")).collect();
-    let list = ListView::from_strings("list", items)
-        .on_row_selected(move |i| *p.borrow_mut() = Some(i));
+    let list =
+        ListView::from_strings("list", items).on_row_selected(move |i| *p.borrow_mut() = Some(i));
 
     let mut tree = UiTree::new(Box::new(
         Flex::column("root").push(Box::new(list.flex_item(FlexItem::fill()))),

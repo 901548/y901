@@ -43,7 +43,6 @@ impl Host for DemoHost {
         tree.invalidate_all();
         true
     }
-
 }
 
 /// 建树：一列（标题 + 按钮）。

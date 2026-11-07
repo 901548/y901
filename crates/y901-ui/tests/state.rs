@@ -6,7 +6,7 @@ use std::rc::Rc;
 use y901_ui::state::State;
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Flex, Pos, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 
 struct Mono;
@@ -42,7 +42,12 @@ impl Widget for CellBox {
     ) -> Size {
         c.constrain(Size::new(100.0, 40.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -85,7 +90,12 @@ fn state_change_marks_owner_dirty() {
     let n = tree.drain_invalidation();
     assert!(n >= 1, "应至少标脏一个节点，实际 {n}");
 
-    eprintln!("[diag] n={n} full={} rects={} rect_of={:?}", tree.dirty().is_full(), tree.dirty().rects().len(), tree.rect_of("counter"));
+    eprintln!(
+        "[diag] n={n} full={} rects={} rect_of={:?}",
+        tree.dirty().is_full(),
+        tree.dirty().rects().len(),
+        tree.rect_of("counter")
+    );
     let b = tree.dirty().bounds().expect("应有脏区");
     let r = tree.rect_of("counter").expect("counter");
     assert!(

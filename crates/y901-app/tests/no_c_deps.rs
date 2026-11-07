@@ -182,7 +182,10 @@ fn workspace_root() -> PathBuf {
 fn scan_build_rs(path: &Path, violations: &mut Vec<String>) {
     // 注意：同一个文件可能被"仓库内扫描"与"按 crate 名定位"各命中一次，
     // 这里用路径去重，免得一个违规报两条。
-    if violations.iter().any(|v| v.contains(&path.display().to_string())) {
+    if violations
+        .iter()
+        .any(|v| v.contains(&path.display().to_string()))
+    {
         return;
     }
     let Ok(text) = std::fs::read_to_string(path) else {
@@ -209,10 +212,7 @@ fn audit(manifest_dir: &Path) -> (usize, usize, Vec<String>) {
 }
 
 /// [`audit`] 的主体：依赖树已由调用方解析好（兄弟仓守卫需要先按错误类型分流）。
-fn audit_with_names(
-    manifest_dir: &Path,
-    names: &BTreeSet<String>,
-) -> (usize, usize, Vec<String>) {
+fn audit_with_names(manifest_dir: &Path, names: &BTreeSet<String>) -> (usize, usize, Vec<String>) {
     let mut violations: Vec<String> = Vec::new();
     let mut scanned = 0usize;
 
@@ -291,8 +291,10 @@ fn no_c_or_cpp_toolchain_dependencies() {
 零 C/C++ 依赖守卫失败（{}条）：
 {}",
         violations.len(),
-        violations.join("
-")
+        violations.join(
+            "
+"
+        )
     );
 }
 
@@ -337,7 +339,9 @@ fn sibling_repo_helm_has_no_c_dependencies() {
 Helm-Y901 守卫失败（{}条）：
 {}",
         violations.len(),
-        violations.join("
-")
+        violations.join(
+            "
+"
+        )
     );
 }

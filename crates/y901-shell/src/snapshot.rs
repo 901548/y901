@@ -36,13 +36,13 @@ pub fn write_bgra_png(
     let mut enc = png::Encoder::new(std::io::BufWriter::new(file), width, height);
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
-    let mut writer = enc.write_header().map_err(|e| format!("PNG 头写入失败: {e}"))?;
+    let mut writer = enc
+        .write_header()
+        .map_err(|e| format!("PNG 头写入失败: {e}"))?;
     writer
         .write_image_data(&rgba)
         .map_err(|e| format!("像素写入失败: {e}"))?;
-    writer
-        .finish()
-        .map_err(|e| format!("PNG 收尾失败: {e}"))?;
+    writer.finish().map_err(|e| format!("PNG 收尾失败: {e}"))?;
     let _ = std::io::stdout().flush();
     Ok(())
 }

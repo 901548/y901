@@ -141,7 +141,6 @@ impl MipChain {
         level_for(scale, ink, self.max_level())
     }
 
-
     /// 用盒式滤波逐级生成到 `levels` 级（仅用于**对照组**与测试）。
     ///
     /// 生产路径不这么生成：字形应由 TTF 在小尺寸下重新光栅化（见设计文档 §3.4）。
@@ -178,7 +177,6 @@ impl MipChain {
         Some(sum as f32 / (255.0 * a.coverage.len() as f32))
     }
 }
-
 
 /// 按缩放比与墨迹密度选级（自由函数版，不需要构造链）。
 ///
@@ -311,7 +309,10 @@ mod tests {
 
         let c = MipLevel::new(2, 2, vec![255, 255, 255, 255]);
         let mad = MipChain::mad(&a, &c).expect("同尺寸");
-        assert!((mad - 1.0).abs() < 1e-6, "全黑 vs 全白 MAD 应为 1，实际 {mad}");
+        assert!(
+            (mad - 1.0).abs() < 1e-6,
+            "全黑 vs 全白 MAD 应为 1，实际 {mad}"
+        );
 
         // 尺寸不一致 → None（不该拿不同尺寸比）
         let d = MipLevel::new(1, 1, vec![0]);
@@ -478,12 +479,20 @@ mod image_mip_tests {
         let n = 1024 * 1024;
         let chain = image_mip_chain(MipLevel::new(1024, 1024, vec![0; n]), 2);
         assert_eq!(chain.len(), 3);
-        assert_eq!((chain.get(1).unwrap().width, chain.get(2).unwrap().width), (512, 256));
-        let total: usize = (0..chain.len()).map(|i| {
-            let l = chain.get(i).unwrap();
-            (l.width * l.height) as usize
-        }).sum();
+        assert_eq!(
+            (chain.get(1).unwrap().width, chain.get(2).unwrap().width),
+            (512, 256)
+        );
+        let total: usize = (0..chain.len())
+            .map(|i| {
+                let l = chain.get(i).unwrap();
+                (l.width * l.height) as usize
+            })
+            .sum();
         let factor = total as f64 / n as f64;
-        assert!((factor - 1.3125).abs() < 0.005, "存储倍数应为 1.3125（L0+L1+L2），实测 {factor:.4}");
+        assert!(
+            (factor - 1.3125).abs() < 0.005,
+            "存储倍数应为 1.3125（L0+L1+L2），实测 {factor:.4}"
+        );
     }
 }

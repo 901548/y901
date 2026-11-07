@@ -156,9 +156,7 @@ fn latin_l1_rasterize_vs_box() {
         "[latin-l1] {} 个字符（字号 {} → {}），总耗时 {:?}",
         total_chars, BASE_PX, HALF_PX, elapsed
     );
-    eprintln!(
-        "[latin-l1] | 字形类别 | 样本 | MAD 均值 | 最大 | 最小 | L1 字节 | L0 字节 |"
-    );
+    eprintln!("[latin-l1] | 字形类别 | 样本 | MAD 均值 | 最大 | 最小 | L1 字节 | L0 字节 |");
     for c in &per_class {
         let mean = if c.n == 0 { 0.0 } else { c.sum / c.n as f64 };
         eprintln!(
@@ -204,12 +202,21 @@ fn latin_l1_which_method_is_closer_to_ideal() {
     let mut re_wins = 0usize;
 
     for ch in ('A'..='Z').chain('a'..='z').chain('0'..='9') {
-        let l0 = match extract(&mut base, ch) { Some(l) => l, None => continue };
-        let l1_re = match extract(&mut half, ch) { Some(l) => l, None => continue };
+        let l0 = match extract(&mut base, ch) {
+            Some(l) => l,
+            None => continue,
+        };
+        let l1_re = match extract(&mut half, ch) {
+            Some(l) => l,
+            None => continue,
+        };
         let l1_box = l0.downsample_box();
 
         // 代理真值：4 倍字号 → 降采样 2 次
-        let hi = match extract(&mut quad, ch) { Some(l) => l, None => continue };
+        let hi = match extract(&mut quad, ch) {
+            Some(l) => l,
+            None => continue,
+        };
         let gt = hi.downsample_box().downsample_box();
 
         let (a, b) = match (mad_cropped(&l1_re, &gt), mad_cropped(&l1_box, &gt)) {
@@ -218,7 +225,9 @@ fn latin_l1_which_method_is_closer_to_ideal() {
         };
         sum_re += a as f64;
         sum_box += b as f64;
-        if a <= b { re_wins += 1; }
+        if a <= b {
+            re_wins += 1;
+        }
         n += 1;
     }
 
@@ -263,12 +272,21 @@ fn latin_l2_rasterize_vs_box() {
         let mut b2 = 0usize;
 
         for &ch in chars {
-            let l0 = match extract(&mut base, ch) { Some(l) => l, None => continue };
-            let l2_re = match extract(&mut quarter, ch) { Some(l) => l, None => continue };
+            let l0 = match extract(&mut base, ch) {
+                Some(l) => l,
+                None => continue,
+            };
+            let l2_re = match extract(&mut quarter, ch) {
+                Some(l) => l,
+                None => continue,
+            };
             // 盒式对照组：L0 → 降 1 次 → 降 2 次
             let l2_box = l0.downsample_box().downsample_box();
 
-            let mad = match mad_cropped(&l2_re, &l2_box) { Some(m) => m, None => continue };
+            let mad = match mad_cropped(&l2_re, &l2_box) {
+                Some(m) => m,
+                None => continue,
+            };
             sum += mad as f64;
             max = max.max(mad);
             min = min.min(mad);

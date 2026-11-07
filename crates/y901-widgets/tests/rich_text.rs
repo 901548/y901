@@ -3,9 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use y901_ui::{
-    Color, Pos, Rect, RenderCtx, Size, TextStyle, TextMetrics, UiTree,
-};
+use y901_ui::{Color, Pos, Rect, RenderCtx, Size, TextMetrics, TextStyle, UiTree};
 use y901_widgets::{InlineStyle, RichText, Span};
 
 struct Mono;
@@ -121,9 +119,15 @@ fn paragraphs_and_code_block_render() {
     assert!(joined.contains("fn main()"), "代码块内容应渲染：{joined:?}");
 
     // 粗体与颜色确实进了 TextStyle
-    let bold = texts.iter().find(|(_, t, _)| t == "bold").expect("bold 片段");
+    let bold = texts
+        .iter()
+        .find(|(_, t, _)| t == "bold")
+        .expect("bold 片段");
     assert!(bold.2.bold, "粗体样式应传给文本引擎");
-    let red = texts.iter().find(|(_, t, _)| t == " red").expect("red 片段");
+    let red = texts
+        .iter()
+        .find(|(_, t, _)| t == " red")
+        .expect("red 片段");
     assert_eq!(red.2.fg, Color::rgba(1.0, 0.0, 0.0, 1.0));
 
     // 代码块必须画一个圆角背景
@@ -135,7 +139,9 @@ fn paragraphs_and_code_block_render() {
 #[test]
 fn update_relayouts_and_returns_last_block_rect() {
     let mut rt = RichText::new("rt");
-    rt.update(vec![y901_widgets::Block::Paragraph(vec![Span::new("first line")])]);
+    rt.update(vec![y901_widgets::Block::Paragraph(vec![Span::new(
+        "first line",
+    )])]);
     let mut tree = build(rt);
     tree.invalidate_all();
     tree.render(&mut Sink);

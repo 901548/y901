@@ -35,7 +35,6 @@ impl Host for GalleryDemo {
     fn command(&mut self, _tree: &mut UiTree, _cmd: Command) -> bool {
         false
     }
-
 }
 
 /// 一种适配模式的图块（图 + 说明文字）。

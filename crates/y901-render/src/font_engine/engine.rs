@@ -12,9 +12,9 @@ use std::collections::HashMap;
 
 use y901_ui::Size;
 
+use super::{rasterize_glyph_phased, GlyphBitmap};
 use crate::atlas::SkylinePacker;
 use crate::font::{DirtyRect, FontEngine, GlyphInfo, MipSlot};
-use super::{rasterize_glyph_phased, GlyphBitmap};
 
 /// 一次 "按缩放选级" 的结果：实际用的级、字形信息、对应的图集坐标。
 ///
@@ -71,8 +71,7 @@ impl MyFontEngine {
     /// 输入：`data`（TTF/OTF 字节，必须常驻）、`size_px`、`cell`。
     /// 返回：`Err` = 字体解析失败。副作用：无。
     pub fn new(data: Vec<u8>, size_px: f32, cell: Size) -> Result<Self, String> {
-        let face = ttf_parser::Face::parse(&data, 0)
-            .map_err(|e| format!("字体解析失败: {e}"))?;
+        let face = ttf_parser::Face::parse(&data, 0).map_err(|e| format!("字体解析失败: {e}"))?;
         let units = face.units_per_em() as f32;
         let ascent = face.ascender() as f32 * size_px / units.max(1.0);
         Ok(Self {
@@ -210,7 +209,7 @@ impl MyFontEngine {
             // 墨迹密度（分母 = 字身框）在这里算一次，渲染期直接读
             ink: (bmp.coverage.iter().filter(|c| **c > 0).count() as f32
                 / (self.size * self.size).max(1.0))
-                .min(1.0),
+            .min(1.0),
             // mip 链在 `insert_mips` 里填充；这里先置空
             mips: [None, None, None],
         })
@@ -447,7 +446,6 @@ impl MyFontEngine {
         false
     }
 
-
     /// 图集占用率（0..1）。
     pub fn occupancy(&self) -> f32 {
         let used: u32 = self
@@ -513,7 +511,8 @@ impl MyFontEngine {
     #[cfg(test)]
     pub(crate) fn force_occupancy_for_test(&mut self, ratio: f32) {
         let total = self.packer.size_u64() as f64;
-        self.packer.set_used_area_for_test((total * ratio as f64) as u64);
+        self.packer
+            .set_used_area_for_test((total * ratio as f64) as u64);
     }
 
     /// 已缓存字形数。
@@ -610,7 +609,10 @@ mod mip_guard_tests {
         let mut e = engine_256();
         let sel = e.glyph_at_scale('A', 1.0).expect("A");
         assert_eq!(sel.level, 0, "scale = 1 应选 L0");
-        assert_eq!(sel.slot.atlas_x, sel.glyph.atlas_x, "L0 的 slot 就是字形自身的图集位置");
+        assert_eq!(
+            sel.slot.atlas_x, sel.glyph.atlas_x,
+            "L0 的 slot 就是字形自身的图集位置"
+        );
         assert!(sel.glyph.mips[0].is_none(), "scale = 1 不应生成 mip");
     }
 
@@ -618,7 +620,10 @@ mod mip_guard_tests {
     fn scale_0_75_returns_l0() {
         let mut e = engine_256();
         let sel = e.glyph_at_scale('A', 0.75).expect("A");
-        assert_eq!(sel.level, 0, "0.75 的 LOD 应为 0（floor(log2(1/0.75)) = 0）");
+        assert_eq!(
+            sel.level, 0,
+            "0.75 的 LOD 应为 0（floor(log2(1/0.75)) = 0）"
+        );
         assert!(sel.glyph.mips[0].is_none(), "L0 时不会生成 mip");
     }
 

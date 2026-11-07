@@ -87,7 +87,10 @@ fn calibrate_c_switch() {
         s.pop_clip();
     }
     let ns = t.elapsed().as_secs_f64() * 1e9 / N as f64;
-    eprintln!("[calib] scissor push+pop: {ns:.1} ns/次 => c_switch = {:.4} us", ns / 1000.0);
+    eprintln!(
+        "[calib] scissor push+pop: {ns:.1} ns/次 => c_switch = {:.4} us",
+        ns / 1000.0
+    );
     assert!(ns > 0.0, "c_switch 必须为正");
     assert!(ns < 100_000.0, "c_switch={ns}ns 太大，测量方法可能有问题");
 }
@@ -188,18 +191,35 @@ fn wl_ai_stream() -> Vec<Rect> {
 
 fn wl_terminal_scroll() -> Vec<Rect> {
     // 整屏上移：两行全宽带
-    vec![Rect::new(0.0, 0.0, W as f32, 20.0), Rect::new(0.0, H as f32 - 20.0, W as f32, 20.0)]
+    vec![
+        Rect::new(0.0, 0.0, W as f32, 20.0),
+        Rect::new(0.0, H as f32 - 20.0, W as f32, 20.0),
+    ]
 }
 
 fn wl_multi_widget() -> Vec<Rect> {
     // 8 个散落控件 120×40
-    let pts = [(60.0, 80.0), (400.0, 300.0), (900.0, 150.0), (1500.0, 700.0), (300.0, 900.0), (1200.0, 200.0), (700.0, 600.0), (1700.0, 950.0)];
-    pts.iter().map(|&(x, y)| Rect::new(x, y, 120.0, 40.0)).collect()
+    let pts = [
+        (60.0, 80.0),
+        (400.0, 300.0),
+        (900.0, 150.0),
+        (1500.0, 700.0),
+        (300.0, 900.0),
+        (1200.0, 200.0),
+        (700.0, 600.0),
+        (1700.0, 950.0),
+    ];
+    pts.iter()
+        .map(|&(x, y)| Rect::new(x, y, 120.0, 40.0))
+        .collect()
 }
 
 fn wl_corner_touch() -> Vec<Rect> {
     // 设计文档 §2.1 的病态构造：两条细条在角上相贴
-    vec![Rect::new(0.0, 0.0, 1000.0, 1.0), Rect::new(0.0, 1.0, 1.0, 1000.0)]
+    vec![
+        Rect::new(0.0, 0.0, 1000.0, 1.0),
+        Rect::new(0.0, 1.0, 1.0, 1000.0),
+    ]
 }
 
 fn wl_cursor_blink() -> Vec<Rect> {
@@ -257,7 +277,16 @@ fn strategy_matrix() {
 
     eprintln!(
         "{:<10} {:>10} | {:>5} {:>12} | {:>4} {:>12} | {:>4} {:>12} | {:>5} {:>12}",
-        "负载", "脏面积", "k", "bbox(ns)", "k", "current(ns)", "k", "banded(ns)", "k", "per-rect(ns)"
+        "负载",
+        "脏面积",
+        "k",
+        "bbox(ns)",
+        "k",
+        "current(ns)",
+        "k",
+        "banded(ns)",
+        "k",
+        "per-rect(ns)"
     );
     for r in &rows {
         eprintln!(

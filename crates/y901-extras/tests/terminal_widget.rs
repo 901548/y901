@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use y901_extras::TerminalWidget;
 use y901_ui::{
-    Constraints, Flex, FlexItem, Key, Modifiers, Size, TextStyle, TextMetrics, UiEvent, UiTree,
+    Constraints, Flex, FlexItem, Key, Modifiers, Size, TextMetrics, TextStyle, UiEvent, UiTree,
 };
 
 struct Mono;
@@ -188,7 +188,10 @@ fn selection_after_arrange_maps_coordinates_correctly() {
         }
     }
     // 直接设 rect + 单格尺寸（arrange 需要 TextMetrics，这里用 setter 更直接）
-    t.set_layout_for_test(y901_ui::Rect::new(100.0, 100.0, 200.0, 80.0), y901_ui::Size::new(10.0, 20.0));
+    t.set_layout_for_test(
+        y901_ui::Rect::new(100.0, 100.0, 200.0, 80.0),
+        y901_ui::Size::new(10.0, 20.0),
+    );
 
     // 第 0 行第 0 列
     assert!(t.begin_selection(Pos::new(100.0, 100.0)), "左上角应能选");

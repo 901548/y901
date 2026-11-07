@@ -72,7 +72,13 @@ impl Widget for Probe {
     ) -> Size {
         c.max
     }
-    fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {}
+    fn arrange(
+        &mut self,
+        _r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
+    }
     fn rect(&self) -> Rect {
         self.rect
     }
@@ -286,7 +292,13 @@ impl Widget for CursorBox {
     ) -> Size {
         c.max
     }
-    fn arrange(&mut self, _r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {}
+    fn arrange(
+        &mut self,
+        _r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
+    }
     fn rect(&self) -> Rect {
         self.rect
     }

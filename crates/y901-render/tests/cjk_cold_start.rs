@@ -18,7 +18,9 @@ use y901_ui::{Color, Pos, RenderCtx, Size, TextStyle};
 
 /// 500 个常用 CJK 字（U+4E00 起的连续区间，取舍不为语义、只为规模）。
 fn cjk_chars(n: usize) -> Vec<char> {
-    (0..n).filter_map(|i| char::from_u32(0x4E00 + i as u32)).collect()
+    (0..n)
+        .filter_map(|i| char::from_u32(0x4E00 + i as u32))
+        .collect()
 }
 
 /// 优先用 CJK 字体；找不到就返回 Err（测试会明确报错而不是静默降级）。
@@ -97,8 +99,7 @@ fn cjk_500_cold_start_first_frame() {
 
     // 首帧：把它们画到一个 1200x800 的软后端上
     let (cw, ch) = y901_render::cell_metrics_for(15.0);
-    let mut s =
-        SoftBackend::new_headless(1200, 800, Box::new(e), Size::new(cw, ch)).expect("soft");
+    let mut s = SoftBackend::new_headless(1200, 800, Box::new(e), Size::new(cw, ch)).expect("soft");
     s.clear();
     let style = TextStyle::fg(Color::WHITE);
     for (i, &c) in chars.iter().enumerate() {

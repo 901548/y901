@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, MouseButton, Pos, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 
 struct Mono;
@@ -40,7 +40,12 @@ impl Widget for Trigger {
     ) -> Size {
         c.constrain(Size::new(120.0, 40.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -84,7 +89,12 @@ impl Widget for PaintProbe {
     ) -> Size {
         c.constrain(Size::new(140.0, 90.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -164,7 +174,12 @@ fn modal_popup_survives_outside_click() {
         ) -> Size {
             c.constrain(Size::new(120.0, 40.0))
         }
-        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+        fn arrange(
+            &mut self,
+            r: Rect,
+            _m: &dyn TextMetrics,
+            _cache: &mut y901_ui::layout::LayoutCache,
+        ) {
             self.rect = r;
         }
         fn rect(&self) -> Rect {
@@ -302,7 +317,12 @@ impl Widget for FocusProbe {
     ) -> Size {
         c.constrain(Size::new(80.0, 24.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -497,11 +517,7 @@ fn closing_modal_restores_previous_focus() {
     assert_eq!(tree.focus(), Some("ok"));
 
     tree.close_all_popups();
-    assert_eq!(
-        tree.focus(),
-        Some("bottom"),
-        "关闭弹窗后焦点应还给触发控件"
-    );
+    assert_eq!(tree.focus(), Some("bottom"), "关闭弹窗后焦点应还给触发控件");
 }
 
 #[test]

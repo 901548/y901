@@ -43,7 +43,7 @@ fn take_allocs() -> usize {
 
 use y901_ui::{
     Constraints, EventCtx, EventResult, Flex, Key, Modifiers, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 
 struct Mono;
@@ -77,7 +77,12 @@ impl Widget for Leaf {
     ) -> Size {
         c.constrain(Size::new(40.0, 20.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -129,7 +134,10 @@ fn dispatch_allocs_per_event() {
         "[dispatch] 100 节点树，键盘事件：每帧 {:.2} 次分配（{N} 次共 {total} 次）",
         total as f64 / N as f64
     );
-    assert!(total > 0, "dispatch 至少应有若干次分配，否则说明计数器没接上");
+    assert!(
+        total > 0,
+        "dispatch 至少应有若干次分配，否则说明计数器没接上"
+    );
 }
 
 /// 一次鼠标移动的分配次数（悬停目标变化会走 `focus`/`path` 相关路径）。

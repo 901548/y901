@@ -35,7 +35,6 @@
 //    由调用方提供且保证非空、对齐；返回值负（HRESULT 失败）时不再读取该缓冲。
 // 3. **字体字节生命周期**：`MyFontEngine` 持有所需的字体数据副本，DirectWrite 侧不保留裸指针。
 
-
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
@@ -583,14 +582,14 @@ pub struct TextEngine {
     pub ascent: f32,
     // 诊断 API：`ascent` 字段：自研引擎用它算基线，DirectWrite 路径由 `metrics()` 读
     // 诊断 API：`has_dirty()` 与图集统计：后端据此跳过整张上传，`font_m3_atlas` 测试直接断言
-// 归类：诊断 API —— `descent` 供基线排查，渲染只用 `ascent`
+    // 归类：诊断 API —— `descent` 供基线排查，渲染只用 `ascent`
     #[allow(dead_code)]
     /// 基线到行底的距离；与 `ascent` 一起决定行高。
     pub descent: f32,
     /// 等宽单元格宽度（由字号推出，必须与布局用的一致）。
     pub cell_width: f32,
     // 诊断 API：`descent` 字段：同上，行高计算的一部分
-// 归类：诊断 API —— `cell_height` 与 `ascent` 同源，测试读取
+    // 归类：诊断 API —— `cell_height` 与 `ascent` 同源，测试读取
     #[allow(dead_code)] // 元数据：等宽字体的名义行高，目前用 ascent/descent
     /// 等宽单元格高度。
     pub cell_height: f32,
@@ -611,18 +610,18 @@ impl TextEngine {
         cell_width: f32,
         cell_height: f32,
     ) -> Result<Self, String> {
-    // SAFETY：`DWriteCreateFactory` 的三条前置在此成立（合法枚举 + 常量 GUID 地址 + 栈上对齐出参）；
-    // 违反后果：错误 GUID 拿到类型不符的接口（后续 vtbl 跳错槽）；出参不对齐时 DWrite 写入错位地址、破坏栈。
+        // SAFETY：`DWriteCreateFactory` 的三条前置在此成立（合法枚举 + 常量 GUID 地址 + 栈上对齐出参）；
+        // 违反后果：错误 GUID 拿到类型不符的接口（后续 vtbl 跳错槽）；出参不对齐时 DWrite 写入错位地址、破坏栈。
         unsafe {
             let mut raw: *mut c_void = null_mut();
             // SAFETY：`DWriteCreateFactory` 的三条前置条件在此全部成立 ——
-    // (1) `DWRITE_FACTORY_TYPE_SHARED` 是 SDK 定义的合法枚举；
-    // (2) `IID_IDWRITEFACTORY` 是常量 GUID，`&` 取得的是它的只读地址，调用期间有效；
-    // (3) `raw` 是栈上的 `*mut c_void`，`&mut` 保证出参指针可写且按指针宽度对齐。
-    // 违反后果：传入错误 GUID 会拿到**类型不符的接口**，后续 vtbl 调用跳到错误槽位；
-    // 出参不对齐时 DWrite 会写入错位地址，直接破坏栈。
-    // 成功时工厂对象的所有权归本模块，由 `Factory` 的 `Drop` 释放一次。
-    let hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWRITEFACTORY, &mut raw);
+            // (1) `DWRITE_FACTORY_TYPE_SHARED` 是 SDK 定义的合法枚举；
+            // (2) `IID_IDWRITEFACTORY` 是常量 GUID，`&` 取得的是它的只读地址，调用期间有效；
+            // (3) `raw` 是栈上的 `*mut c_void`，`&mut` 保证出参指针可写且按指针宽度对齐。
+            // 违反后果：传入错误 GUID 会拿到**类型不符的接口**，后续 vtbl 调用跳到错误槽位；
+            // 出参不对齐时 DWrite 会写入错位地址，直接破坏栈。
+            // 成功时工厂对象的所有权归本模块，由 `Factory` 的 `Drop` 释放一次。
+            let hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWRITEFACTORY, &mut raw);
             if hr < 0 {
                 return Err(format!("DWriteCreateFactory failed: 0x{:08X}", hr as u32));
             }
@@ -692,7 +691,7 @@ impl TextEngine {
     }
 
     // 诊断 API：`glyph_count()`：图集占用诊断，`font_m3_atlas` 测试读取
-// 归类：测试 API —— `glyph_count` 只被 font_m2/m3 测试读取
+    // 归类：测试 API —— `glyph_count` 只被 font_m2/m3 测试读取
     #[allow(dead_code)] // 诊断：已缓存字形数
     /// 已缓存字形数（诊断与内存估算用）。
     pub fn glyph_count(&self) -> usize {
@@ -702,9 +701,9 @@ impl TextEngine {
     /// 取字形；未缓存则光栅化并写入图集。
     pub fn glyph(&mut self, ch: char) -> Option<&GlyphInfo> {
         if !self.cache.contains_key(&ch) {
-        // SAFETY：`rasterize` 的前提是字形轮廓已展平且图集已初始化，
-        // 两者在此均成立（调用点处于字形缓存缺失分支，图集已在 `Factory::new` 里建好）。
-        // 违反后果：未展平的曲线点会让扫描线算法读到无效数据 —— 越界或得到错误覆盖率（画面污点）。
+            // SAFETY：`rasterize` 的前提是字形轮廓已展平且图集已初始化，
+            // 两者在此均成立（调用点处于字形缓存缺失分支，图集已在 `Factory::new` 里建好）。
+            // 违反后果：未展平的曲线点会让扫描线算法读到无效数据 —— 越界或得到错误覆盖率（画面污点）。
             match unsafe { self.rasterize(ch) } {
                 Ok(info) => {
                     self.cache.insert(ch, info);
@@ -744,7 +743,7 @@ impl TextEngine {
         (reset, dirty)
     }
 
-// 归类：测试 API —— `has_dirty` 只被 black_screen_regression 读取
+    // 归类：测试 API —— `has_dirty` 只被 black_screen_regression 读取
     #[allow(dead_code)] // 诊断：是否有待上传的图集脏区
     /// 是否有待上传的图集脏区；false 时后端可跳过整张图集上传。
     pub fn has_dirty(&self) -> bool {
@@ -805,7 +804,7 @@ impl TextEngine {
                 atlas_y: 0,
                 last_used: self.frame,
                 ink: 0.0,
-            mips: [None, None, None],
+                mips: [None, None, None],
             });
         };
 

@@ -150,11 +150,8 @@ mod tests {
     }
 
     fn tree_with(hits: StdRc<Cell<usize>>) -> UiTree {
-        let menu = ContextMenu::new(
-            "ctx",
-            vec!["复制".into(), "粘贴".into(), "删除".into()],
-        )
-        .on_select(move |_i, _l| hits.set(hits.get() + 1));
+        let menu = ContextMenu::new("ctx", vec!["复制".into(), "粘贴".into(), "删除".into()])
+            .on_select(move |_i, _l| hits.set(hits.get() + 1));
         let mut t = UiTree::new(Box::new(menu));
         t.layout(Size::new(W as f32, H as f32), &soft());
         t
@@ -248,7 +245,9 @@ mod tests {
         let mut tree = tree_with(hits);
         tree.dispatch(&right_click(Pos::new(40.0, 40.0)));
         // 类型不对 → None（不 panic）
-        assert!(tree.popup_as_mut::<crate::button::Button>("ctx__menu").is_none());
+        assert!(tree
+            .popup_as_mut::<crate::button::Button>("ctx__menu")
+            .is_none());
         // id 不对 → None
         assert!(tree.popup_as_mut::<Menu>("nope").is_none());
         // 正确类型 → Some
@@ -272,7 +271,6 @@ mod tests {
         assert_eq!(tree.popups().len(), 0, "点击外部应关闭菜单");
         assert_eq!(hits.get(), 0, "点击外部不应触发选中回调");
     }
-
 
     #[test]
     fn empty_menu_does_not_open() {

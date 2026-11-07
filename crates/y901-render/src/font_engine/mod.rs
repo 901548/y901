@@ -219,9 +219,15 @@ pub fn load_font(path: &str) -> Result<Vec<u8>, String> {
 pub fn resolve_font_path(family: &str) -> String {
     let f = family.to_ascii_lowercase();
     let candidates: &[&str] = if f.contains("consolas") {
-        &["C:\\Windows\\Fonts\\consola.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"]
+        &[
+            "C:\\Windows\\Fonts\\consola.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        ]
     } else if f.contains("cascadia") {
-        &["C:\\Windows\\Fonts\\CascadiaMono.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"]
+        &[
+            "C:\\Windows\\Fonts\\CascadiaMono.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        ]
     } else if f.contains("nsimsun") || f.contains("simsun") {
         &[
             "C:\\Windows\\Fonts\\simsun.ttc",
@@ -229,7 +235,10 @@ pub fn resolve_font_path(family: &str) -> String {
             "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
         ]
     } else {
-        &["C:\\Windows\\Fonts\\segoeui.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+        &[
+            "C:\\Windows\\Fonts\\segoeui.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
     };
     for c in candidates {
         if std::path::Path::new(c).exists() {

@@ -33,7 +33,9 @@ pub fn system_clipboard() -> Arc<dyn Clipboard> {
     {
         // 这里也保留一个可选的纯内存实现入口（便于测试与无剪贴板环境）
         if std::env::var_os("Y901_NO_CLIPBOARD").is_some() {
-            return Arc::new(NullClipboard("剪贴板已被 Y901_NO_CLIPBOARD 禁用".to_string()));
+            return Arc::new(NullClipboard(
+                "剪贴板已被 Y901_NO_CLIPBOARD 禁用".to_string(),
+            ));
         }
         Arc::new(win::WinClipboard)
     }
@@ -73,7 +75,9 @@ mod win {
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
     };
-    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    use windows_sys::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
+    };
 
     /// `CF_UNICODETEXT`
     const CF_UNICODETEXT: u32 = 13;
@@ -96,8 +100,7 @@ mod win {
                     CloseClipboard();
                     return Ok(String::new()); // 空剪贴板 = 空字符串，不是错误
                 }
-                let p = windows_sys::Win32::System::Memory::GlobalLock(h)
-                    as *const u16;
+                let p = windows_sys::Win32::System::Memory::GlobalLock(h) as *const u16;
                 if p.is_null() {
                     CloseClipboard();
                     return Err("剪贴板内存锁定失败".to_string());

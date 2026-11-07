@@ -207,7 +207,11 @@ mod tests {
         let mut a = Animate::new(0.0, 100.0, Duration::from_millis(100), Easing::Linear);
         assert_eq!(a.value(), 0.0);
         assert!(a.tick(Duration::from_millis(50)));
-        assert!((a.value() - 50.0).abs() < 0.5, "一半时应约为 50，实际 {}", a.value());
+        assert!(
+            (a.value() - 50.0).abs() < 0.5,
+            "一半时应约为 50，实际 {}",
+            a.value()
+        );
         assert!(!a.tick(Duration::from_millis(60)), "超时后应完成");
         assert!(a.is_done());
         assert!((a.value() - 100.0).abs() < 1e-3, "完成后应为终值");

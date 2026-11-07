@@ -36,8 +36,6 @@ const GXCOPY: u32 = 3;
 /// 业务里也本来只会建一个连接。
 static SERVER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-
-
 /// 环境变量守卫：拿全局锁，并在 drop 时**恢复原值**（含“原本不存在”）。
 ///
 /// 为何不直接 `remove_var`：中途 panic 会把污染状态留给后续用例；
@@ -91,7 +89,6 @@ fn connect() -> (std::sync::MutexGuard<'static, ()>, Connection) {
     panic!("连接失败：{last}");
 }
 
-
 /// 建窗用的软光栅器：文字要真画，所以给一个真实存在的字体。
 ///
 /// 只用于**构造**（`X11Window::create` 现在要求带上 `SoftBackend`）；
@@ -144,7 +141,10 @@ fn handshake_reports_screen_and_visual() {
     // Xvfb 至少会给一个合法屏幕
     assert!(info.width >= 64 && info.height >= 64, "屏幕尺寸异常");
     assert!(info.root != 0, "根窗口不能为 0");
-    assert!(info.root_depth == 24 || info.root_depth == 32, "root depth 应为 24/32");
+    assert!(
+        info.root_depth == 24 || info.root_depth == 32,
+        "root depth 应为 24/32"
+    );
     assert!(info.vendor.to_lowercase().contains("xvfb") || !info.vendor.is_empty());
 }
 
@@ -152,7 +152,10 @@ fn handshake_reports_screen_and_visual() {
 fn create_map_and_paint_a_solid_red_window() {
     let (_g, mut c) = connect();
     let info = c.info().clone();
-    eprintln!("[x11] 资源 ID 基域=0x{:X} 掩码=0x{:X}", info.resource_id_base, info.resource_id_mask);
+    eprintln!(
+        "[x11] 资源 ID 基域=0x{:X} 掩码=0x{:X}",
+        info.resource_id_base, info.resource_id_mask
+    );
 
     // 资源 ID 必须落在 基域 | 掩码 的区间里，否则服务器投 BadIDChoice
     let wid = info.resource_id_base | 0x01;
@@ -168,7 +171,8 @@ fn create_map_and_paint_a_solid_red_window() {
         &b"_NET_WM_NAME"[..],
         &b"UTF8_STRING"[..],
     ] {
-        c.send(&encode_intern_atom(name, false)).expect("发 InternAtom");
+        c.send(&encode_intern_atom(name, false))
+            .expect("发 InternAtom");
         atoms.push(String::from_utf8_lossy(name).to_string());
     }
     c.flush().expect("flush");
@@ -177,8 +181,10 @@ fn create_map_and_paint_a_solid_red_window() {
     eprintln!("[x11] {} 个原子已内部化", atoms.len());
 
     // 2) 创建窗口（带事件掩码 + 背景色）
-    const VALUES: &[(ValueMask, u32)] =
-        &[(ValueMask::BackPixel, 0x0000_0000), (ValueMask::EventMask, 0x0000_8003)];
+    const VALUES: &[(ValueMask, u32)] = &[
+        (ValueMask::BackPixel, 0x0000_0000),
+        (ValueMask::EventMask, 0x0000_8003),
+    ];
     c.send(&encode_create_window(&CreateWindowArgs {
         wid,
         parent: info.root,
@@ -193,7 +199,8 @@ fn create_map_and_paint_a_solid_red_window() {
     }))
     .expect("发 CreateWindow");
     c.send(&encode_map_window(wid)).expect("发 MapWindow");
-    c.send(&encode_set_input_focus(wid, 2, 0)).expect("发 SetInputFocus");
+    c.send(&encode_set_input_focus(wid, 2, 0))
+        .expect("发 SetInputFocus");
     c.flush().expect("flush");
     let errs = c.sync().expect("sync");
     assert!(errs.is_empty(), "CreateWindow/MapWindow 报错：{errs:?}");
@@ -224,7 +231,8 @@ fn create_map_and_paint_a_solid_red_window() {
         (GcMask::PlaneMask, 0xFFFF_FFFF),
         (GcMask::GraphicsExposures, 0),
     ];
-    c.send(&encode_create_gc(gc, wid, GC_VALUES)).expect("发 CreateGC");
+    c.send(&encode_create_gc(gc, wid, GC_VALUES))
+        .expect("发 CreateGC");
     c.flush().expect("flush");
     let errs = c.sync().expect("sync");
     assert!(errs.is_empty(), "CreateGC 报错：{errs:?}");
@@ -264,7 +272,8 @@ fn create_map_and_paint_a_solid_red_window() {
     assert_eq!(p0[2], 0xFF, "红分量应为 255（说明 PutImage 真的写进去了）");
 
     // 7) 清理
-    c.send(&encode_destroy_window(wid)).expect("发 DestroyWindow");
+    c.send(&encode_destroy_window(wid))
+        .expect("发 DestroyWindow");
     c.flush().expect("flush");
     let errs = c.sync().expect("sync");
     assert!(errs.is_empty(), "DestroyWindow 报错：{errs:?}");
@@ -306,7 +315,10 @@ fn concurrent_connections_probe() {
     let mut ok = 0;
     for h in handles {
         let (i, good, root) = h.join().expect("线程");
-        eprintln!("[x11] 并发连接 #{i}: {} root={root:?}", if good { "ok" } else { "FAIL" });
+        eprintln!(
+            "[x11] 并发连接 #{i}: {} root={root:?}",
+            if good { "ok" } else { "FAIL" }
+        );
         if good {
             ok += 1;
         }
@@ -319,7 +331,10 @@ fn concurrent_connections_probe() {
 fn keyboard_mapping_covers_ascii() {
     let (_g, mut c) = connect();
     let info = c.info().clone();
-    let count = info.max_keycode.saturating_sub(info.min_keycode).saturating_add(1);
+    let count = info
+        .max_keycode
+        .saturating_sub(info.min_keycode)
+        .saturating_add(1);
     let km = c
         .get_keyboard_mapping(info.min_keycode, count)
         .expect("GetKeyboardMapping");
@@ -338,19 +353,31 @@ fn keyboard_mapping_covers_ascii() {
         "ASCII 可打印字符覆盖不足：{}",
         km.ascii_coverage()
     );
-    let chars: std::collections::HashSet<char> = (0..km.keysyms.len() / km.keysyms_per_keycode as usize)
+    let chars: std::collections::HashSet<char> = (0..km.keysyms.len()
+        / km.keysyms_per_keycode as usize)
         .filter_map(|i| {
             let ks = km.keysyms[i * km.keysyms_per_keycode as usize];
-            if (0x20..=0x7E).contains(&ks) { char::from_u32(ks) } else { None }
+            if (0x20..=0x7E).contains(&ks) {
+                char::from_u32(ks)
+            } else {
+                None
+            }
         })
         .collect();
     for c in ('a'..='z').chain('0'..='9') {
-        assert!(chars.contains(&c), "键盘表缺字符 {c:?}（已有 {} 个）", chars.len());
+        assert!(
+            chars.contains(&c),
+            "键盘表缺字符 {c:?}（已有 {} 个）",
+            chars.len()
+        );
     }
     for c in [' ', ',', '.', '/', '-', '='] {
         assert!(chars.contains(&c), "键盘表缺标点 {c:?}");
     }
-    eprintln!("[x11] 键盘表含 {} 个 ASCII 可打印字符（含全部 a-z / 0-9）", chars.len());
+    eprintln!(
+        "[x11] 键盘表含 {} 个 ASCII 可打印字符（含全部 a-z / 0-9）",
+        chars.len()
+    );
 
     // 具体查几个键：'a' / 'A' / Return / Backspace / Escape / 左右上下
     let mut found = std::collections::HashMap::new();
@@ -390,8 +417,17 @@ fn window_implements_event_source_and_presenter() {
     let _g = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
     let mut w = create_window_retry(&d, 200, 120, "y901 x11 window");
-    eprintln!("[x11] X11Window wid=0x{:X} size={:?} ascii={}", w.wid, w.size(), w.keymap().ascii_coverage());
-    assert!(w.keymap().ascii_coverage() >= 45, "键盘表应已加载（实际 {} 个）", w.keymap().ascii_coverage());
+    eprintln!(
+        "[x11] X11Window wid=0x{:X} size={:?} ascii={}",
+        w.wid,
+        w.size(),
+        w.keymap().ascii_coverage()
+    );
+    assert!(
+        w.keymap().ascii_coverage() >= 45,
+        "键盘表应已加载（实际 {} 个）",
+        w.keymap().ascii_coverage()
+    );
 
     // present 一帧纯红
     let mut px = vec![0u8; 200 * 120 * 4];
@@ -441,7 +477,10 @@ fn keyboard_input_reaches_the_ui_layer() {
     // 等一下窗口真正显示（Expose），否则事件可能被丢
     for _ in 0..20 {
         let evs = w.poll(50);
-        if evs.iter().any(|e| matches!(e, y901_runtime::RawEvent::Resize { .. })) {
+        if evs
+            .iter()
+            .any(|e| matches!(e, y901_runtime::RawEvent::Resize { .. }))
+        {
             break;
         }
     }
@@ -452,7 +491,11 @@ fn keyboard_input_reaches_the_ui_layer() {
         const KEY_PRESS_MASK: u32 = 0x0000_0001;
         let ev = y901_backend_x11::encode::synth_key_event(w.wid, kc, 0, 10, 20, true);
         sender
-            .send(&y901_backend_x11::encode::encode_send_event(w.wid, KEY_PRESS_MASK, &ev))
+            .send(&y901_backend_x11::encode::encode_send_event(
+                w.wid,
+                KEY_PRESS_MASK,
+                &ev,
+            ))
             .expect("发 SendEvent");
         sender.flush().expect("flush");
         // 同步一次，确认服务器没报错
@@ -464,7 +507,10 @@ fn keyboard_input_reaches_the_ui_layer() {
     let mut got = Vec::new();
     for _ in 0..20 {
         got.extend(w.poll(100));
-        if got.iter().any(|e| matches!(e, y901_runtime::RawEvent::KeyDown { .. })) {
+        if got
+            .iter()
+            .any(|e| matches!(e, y901_runtime::RawEvent::KeyDown { .. }))
+        {
             break;
         }
     }
@@ -489,7 +535,11 @@ fn send_event_packet_layout() {
     assert_eq!(pkt[1], 0, "propagate = False");
     assert_eq!(&pkt[2..4], &[0x0B, 0x00], "length = 11");
     assert_eq!(&pkt[4..8], &[0x34, 0x12, 0x00, 0x00], "destination");
-    assert_eq!(&pkt[8..12], &[0x01, 0x00, 0x00, 0x00], "event-mask = KeyPressMask");
+    assert_eq!(
+        &pkt[8..12],
+        &[0x01, 0x00, 0x00, 0x00],
+        "event-mask = KeyPressMask"
+    );
     assert_eq!(pkt[12], 2, "事件码 KeyPress");
     assert_eq!(pkt[13], 38, "keycode");
     assert_eq!(&pkt[40..42], &[0x01, 0x00], "state = Shift");
@@ -508,7 +558,10 @@ fn benchmark_shm_vs_putimage_1080p() {
     // 先看服务器支持不支持（不支持就只测 PutImage）
     let mut probe = Connection::connect(&d).expect("连接");
     let has_shm = probe.query_extension(b"MIT-SHM").ok().flatten();
-    eprintln!("[bench] MIT-SHM 支持：{}", if has_shm.is_some() { "是" } else { "否" });
+    eprintln!(
+        "[bench] MIT-SHM 支持：{}",
+        if has_shm.is_some() { "是" } else { "否" }
+    );
 
     let mut wdw = create_window_retry(&d, w, h, "bench");
     let mut px = vec![0u8; w as usize * h as usize * 4];
@@ -556,7 +609,11 @@ fn benchmark_shm_vs_putimage_1080p() {
     );
 
     // 不做硬断言（虚拟机上不稳），但必须小于 50ms/帧，否则说明路径可能错了
-    assert!(total / (FRAMES as f64) < 50.0, "单帧 {}ms 过慢", total / FRAMES as f64);
+    assert!(
+        total / (FRAMES as f64) < 50.0,
+        "单帧 {}ms 过慢",
+        total / FRAMES as f64
+    );
     assert!(
         total < total_fallback,
         "SHM 应快于分块 PutImage（{total:.1}ms vs {total_fallback:.1}ms）"
@@ -574,9 +631,9 @@ fn shm_and_fallback_produce_identical_pixels() {
     let (w, h) = (64u16, 48u16);
     let mut px = vec![0u8; w as usize * h as usize * 4];
     for (i, p) in px.chunks_exact_mut(4).enumerate() {
-        p[0] = (i % 256) as u8;        // B
-        p[1] = ((i / 3) % 256) as u8;  // G
-        p[2] = ((i / 7) % 256) as u8;  // R
+        p[0] = (i % 256) as u8; // B
+        p[1] = ((i / 3) % 256) as u8; // G
+        p[2] = ((i / 7) % 256) as u8; // R
         p[3] = 0;
     }
 
@@ -606,12 +663,19 @@ fn shm_and_fallback_produce_identical_pixels() {
 
     assert_eq!(depth_a, depth_b, "两路得到的 depth 应相同");
     assert_eq!(got_a.len(), got_b.len(), "像素字节数应相同");
-    let diff = got_a.iter().zip(got_b.iter()).filter(|(x, y)| x != y).count();
+    let diff = got_a
+        .iter()
+        .zip(got_b.iter())
+        .filter(|(x, y)| x != y)
+        .count();
     eprintln!(
         "[shm] SHM vs 回退：depth={depth_a}，像素 {} 字节，不同 {diff} 字节",
         got_a.len()
     );
-    assert_eq!(diff, 0, "SHM 与回退路径的上屏像素应逐字节相同（差 {diff} 字节）");
+    assert_eq!(
+        diff, 0,
+        "SHM 与回退路径的上屏像素应逐字节相同（差 {diff} 字节）"
+    );
 
     // 且不能是全 0（否则说明两边都没画上，相同也无意义）
     let nonzero = got_a.iter().filter(|b| **b != 0).count();
@@ -665,7 +729,13 @@ fn probe_cursor_font() {
     eprintln!("[probe] OpenFont(cursor) fid=0x{fid:X} errors={errs:?}");
 
     let pkt = y901_backend_x11::encode::encode_create_glyph_cursor(
-        base | 0x21, fid, 68, fid, 68, (0, 0, 0), (0xFFFF, 0xFFFF, 0xFFFF),
+        base | 0x21,
+        fid,
+        68,
+        fid,
+        68,
+        (0, 0, 0),
+        (0xFFFF, 0xFFFF, 0xFFFF),
     );
     eprintln!("[probe] CreateGlyphCursor {} 字节：{:02X?}", pkt.len(), pkt);
     c.send(&pkt).expect("send");

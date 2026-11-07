@@ -39,10 +39,9 @@ fn take_allocs() -> (usize, usize) {
     )
 }
 
-
 use y901_ui::{
-    Constraints, EventCtx, EventResult, Flex, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiEvent, UiTree, Widget,
+    Constraints, EventCtx, EventResult, Flex, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    TextStyle, UiEvent, UiTree, Widget,
 };
 
 struct Mono;
@@ -80,7 +79,12 @@ impl Widget for Leaf {
     ) -> Size {
         c.constrain(Size::new(40.0, 20.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {

@@ -68,18 +68,20 @@ impl X11Clipboard {
         let wid = info.resource_id_base | 0x30;
 
         // 1x1 隐藏窗口（不 Map）：只用来持有 selection 与存放属性
-        conn.send(&crate::encode::encode_create_window(&crate::encode::CreateWindowArgs {
-            wid,
-            parent: info.root,
-            x: -10,
-            y: -10,
-            width: 1,
-            height: 1,
-            border_width: 0,
-            class: crate::encode::WindowClass::InputOnly,
-            visual: 0,
-            values: &[(crate::encode::ValueMask::EventMask, 0x0)],
-        }))?;
+        conn.send(&crate::encode::encode_create_window(
+            &crate::encode::CreateWindowArgs {
+                wid,
+                parent: info.root,
+                x: -10,
+                y: -10,
+                width: 1,
+                height: 1,
+                border_width: 0,
+                class: crate::encode::WindowClass::InputOnly,
+                visual: 0,
+                values: &[(crate::encode::ValueMask::EventMask, 0x0)],
+            },
+        ))?;
         conn.flush()?;
         let errs = conn.sync()?;
         if !errs.is_empty() {
@@ -181,7 +183,13 @@ fn clipboard_thread(mut conn: Connection, wid: u32, rx: Receiver<Cmd>) {
         // **必须屏蔽最高位**：send_event 标志（我们自己用 SendEvent 发的 SelectionNotify 就是 159 而不是 31）
         match pkt[0] & 0x7F {
             crate::event_code::SELECTION_REQUEST => {
-                serve_request(&mut conn, &atoms, &pkt, owned_clip.as_deref(), owned_prim.as_deref());
+                serve_request(
+                    &mut conn,
+                    &atoms,
+                    &pkt,
+                    owned_clip.as_deref(),
+                    owned_prim.as_deref(),
+                );
             }
             crate::event_code::SELECTION_CLEAR => {
                 // 被别人抢走了：清掉本地副本（否则会把旧内容当成"当前剪贴板"）
@@ -287,7 +295,10 @@ fn fetch_text(
         Selection::Primary => atoms.primary,
     };
     if std::env::var_os("Y901_CLIP_TRACE").is_some() {
-        eprintln!("[x11] ConvertSelection sel={sel:#x} target={:#x} prop={:#x}", atoms.utf8, atoms.property);
+        eprintln!(
+            "[x11] ConvertSelection sel={sel:#x} target={:#x} prop={:#x}",
+            atoms.utf8, atoms.property
+        );
     }
     conn.send(&crate::encode::encode_convert_selection(
         wid,
@@ -305,7 +316,12 @@ fn fetch_text(
             continue;
         };
         if std::env::var_os("Y901_CLIP_TRACE").is_some() {
-            eprintln!("[x11] 收到包 code={} sel={:#x} prop={:#x}", pkt[0], le32(&pkt, 16), le32(&pkt, 20));
+            eprintln!(
+                "[x11] 收到包 code={} sel={:#x} prop={:#x}",
+                pkt[0],
+                le32(&pkt, 16),
+                le32(&pkt, 20)
+            );
         }
         // **关键**：如果 selection 的 owner 就是我们自己，服务器会把
         // ConvertSelection 转成 SelectionRequest 发回给我们 ——
@@ -323,8 +339,7 @@ fn fetch_text(
             return Err("剪贴板为空或 owner 拒绝提供 UTF8 文本".to_string());
         }
         let (_, data) = conn.get_property(wid, property, 0, 0, 1 << 20, true)?;
-        return String::from_utf8(data)
-            .map_err(|e| format!("剪贴板内容不是合法 UTF-8：{e}"));
+        return String::from_utf8(data).map_err(|e| format!("剪贴板内容不是合法 UTF-8：{e}"));
     }
     Err("等待 SelectionNotify 超时".to_string())
 }

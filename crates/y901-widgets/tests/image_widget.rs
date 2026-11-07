@@ -24,7 +24,11 @@ fn soft() -> SoftBackend {
 
 fn rgb(s: &SoftBackend, x: u32, y: u32) -> (u8, u8, u8) {
     let p = s.pixel(x, y).expect("像素");
-    (((p >> 16) & 0xFF) as u8, ((p >> 8) & 0xFF) as u8, (p & 0xFF) as u8)
+    (
+        ((p >> 16) & 0xFF) as u8,
+        ((p >> 8) & 0xFF) as u8,
+        (p & 0xFF) as u8,
+    )
 }
 
 /// 用 png crate 现场编码一张 `w*h` 的纯色 PNG（避免把二进制测试资源塞进仓库）。
@@ -86,7 +90,10 @@ fn tint_produces_the_tinted_colour() {
     soft.clear();
     img.render(&mut soft);
     let (r, g, b) = rgb(&soft, 16, 16);
-    assert!(b > 230 && r < 20 && g < 20, "白色 × 蓝 tint 应得纯蓝，实际 ({r},{g},{b})");
+    assert!(
+        b > 230 && r < 20 && g < 20,
+        "白色 × 蓝 tint 应得纯蓝，实际 ({r},{g},{b})"
+    );
 }
 
 #[test]

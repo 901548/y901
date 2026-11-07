@@ -24,7 +24,10 @@ fn sample_tree() -> Vec<TreeItem> {
             vec![
                 TreeItem::leaf("main.rs"),
                 TreeItem::leaf("lib.rs"),
-                TreeItem::branch("widgets", vec![TreeItem::leaf("button.rs"), TreeItem::leaf("tree.rs")]),
+                TreeItem::branch(
+                    "widgets",
+                    vec![TreeItem::leaf("button.rs"), TreeItem::leaf("tree.rs")],
+                ),
                 TreeItem::branch("generated", many_files),
             ],
         ),
@@ -62,7 +65,6 @@ impl Host for TreeDemo {
         false // 这个示例没有应用级命令：交互全在 TreeView 内部
     }
 
-
     fn take_snapshot_request(&mut self) -> bool {
         // 消费式：只请求一次
         std::mem::take(&mut self.pending)
@@ -91,8 +93,7 @@ fn build() -> UiTree {
         .padding(Edges::all(16.0))
         .gap(10.0)
         .push(Box::new(
-            TreeView::new("tree", sample_tree())
-                .flex_item(FlexItem::fill()),
+            TreeView::new("tree", sample_tree()).flex_item(FlexItem::fill()),
         ));
     let mut tree = UiTree::new(Box::new(root));
     tree.invalidate_all();

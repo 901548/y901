@@ -10,7 +10,6 @@ fn soft() -> SoftBackend {
     headless(200, 120)
 }
 
-
 /// 造一个测试用的软后端（用自研 TTF 引擎，不依赖 DirectWrite）。
 fn headless(w: u32, h: u32) -> SoftBackend {
     let (cw, ch) = y901_backend_win32::backend::font::cell_metrics_for(15.0);
@@ -28,10 +27,16 @@ fn headless(w: u32, h: u32) -> SoftBackend {
 fn fill_rect_interior_is_exact() {
     let mut b = soft();
     b.clear();
-    b.fill_rect(Rect::new(10.0, 10.0, 100.0, 40.0), Color::rgba(1.0, 0.0, 0.0, 1.0));
+    b.fill_rect(
+        Rect::new(10.0, 10.0, 100.0, 40.0),
+        Color::rgba(1.0, 0.0, 0.0, 1.0),
+    );
 
     let inside = b.pixel(50, 30).expect("像素存在");
-    assert_eq!(inside, 0xFFFF_0000, "纯红应是 0xFFFF0000，实际 {inside:#010X}");
+    assert_eq!(
+        inside, 0xFFFF_0000,
+        "纯红应是 0xFFFF0000，实际 {inside:#010X}"
+    );
 
     let outside = b.pixel(5, 5).expect("像素存在");
     assert_ne!(outside, 0xFFFF_0000, "矩形外不能被填充");
@@ -42,9 +47,15 @@ fn alpha_blend_is_source_over() {
     let mut b = soft();
     // 背景涂白
     b.clear();
-    b.fill_rect(Rect::new(0.0, 0.0, 200.0, 120.0), Color::rgba(1.0, 1.0, 1.0, 1.0));
+    b.fill_rect(
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        Color::rgba(1.0, 1.0, 1.0, 1.0),
+    );
     // 50% 红
-    b.fill_rect(Rect::new(0.0, 0.0, 100.0, 100.0), Color::rgba(1.0, 0.0, 0.0, 0.5));
+    b.fill_rect(
+        Rect::new(0.0, 0.0, 100.0, 100.0),
+        Color::rgba(1.0, 0.0, 0.0, 0.5),
+    );
 
     let p = b.pixel(50, 50).expect("像素");
     let r = (p >> 16) & 0xff;
@@ -98,10 +109,7 @@ fn gradient_endpoints_and_midpoint() {
     let mr = (mid >> 16) & 0xff;
     assert!(lr <= 3, "左端应接近黑，实际 {lr}");
     assert!(rr >= 250, "右端应接近白，实际 {rr}");
-    assert!(
-        (110..=150).contains(&mr),
-        "中点应约 127，实际 {mr}"
-    );
+    assert!((110..=150).contains(&mr), "中点应约 127，实际 {mr}");
 }
 
 #[test]
@@ -110,14 +118,13 @@ fn clip_culls_outside_area() {
     b.clear();
     let bg = b.pixel(150, 100).expect("bg");
     b.push_clip(Rect::new(0.0, 0.0, 50.0, 50.0));
-    b.fill_rect(Rect::new(0.0, 0.0, 200.0, 120.0), Color::rgba(1.0, 0.0, 0.0, 1.0));
+    b.fill_rect(
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+        Color::rgba(1.0, 0.0, 0.0, 1.0),
+    );
     b.pop_clip();
 
-    assert_eq!(
-        b.pixel(10, 10).expect("in"),
-        0xFFFF_0000,
-        "裁剪内应被填"
-    );
+    assert_eq!(b.pixel(10, 10).expect("in"), 0xFFFF_0000, "裁剪内应被填");
     assert_eq!(b.pixel(150, 100).expect("out"), bg, "裁剪外不能被填");
 }
 
@@ -127,7 +134,10 @@ fn frame_hash_is_deterministic() {
     let mut c = soft();
     for b in [&mut a, &mut c] {
         b.clear();
-        b.fill_rect(Rect::new(5.0, 5.0, 50.0, 30.0), Color::rgba(0.3, 0.6, 0.9, 1.0));
+        b.fill_rect(
+            Rect::new(5.0, 5.0, 50.0, 30.0),
+            Color::rgba(0.3, 0.6, 0.9, 1.0),
+        );
         b.fill_round_rect(
             Rect::new(60.0, 40.0, 80.0, 50.0),
             Color::rgba(0.9, 0.4, 0.1, 0.8),
@@ -170,10 +180,7 @@ fn text_draws_visible_pixels() {
             }
         }
     }
-    assert!(
-        bright >= 30,
-        "字形像素太少：{bright}（字形引擎可能未就绪）"
-    );
+    assert!(bright >= 30, "字形像素太少：{bright}（字形引擎可能未就绪）");
 }
 
 #[test]
@@ -182,7 +189,11 @@ fn resize_rebuilds_buffer_and_reports_change() {
     assert!(b.resize(320, 240), "尺寸变了应报告 true");
     assert!(!b.resize(320, 240), "尺寸没变应报告 false");
     assert_eq!(b.size(), y901_ui::Size::new(320.0, 240.0));
-    assert_eq!(b.pixel(319, 239).map(|p| p >> 24), Some(0), "新缓冲应为全 0");
+    assert_eq!(
+        b.pixel(319, 239).map(|p| p >> 24),
+        Some(0),
+        "新缓冲应为全 0"
+    );
 }
 
 /// 吐吐量：1280x800 下各种图元的 CPU 耗时（决定 60fps 是否可行）。
@@ -337,7 +348,8 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
     let (cw, ch) = y901_backend_win32::backend::font::cell_metrics_for(15.0);
     let cell = Size::new(cw, ch);
     let engine = Box::new(
-        y901_backend_win32::backend::font::TextEngine::new("Segoe UI", 15.0, cw, ch).expect("dwrite"),
+        y901_backend_win32::backend::font::TextEngine::new("Segoe UI", 15.0, cw, ch)
+            .expect("dwrite"),
     );
     let mut soft = SoftBackend::new(w, h, engine, cell, None).expect("soft init");
     let mut tree_b = UiTree::new(Box::new(Scene {
@@ -379,8 +391,12 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
         let i = ((y * w + x) * 4) as usize;
         eprintln!(
             "[soft-vs-d3d] ({x},{y}) d3d=({},{},{}) soft=({},{},{})",
-            px_d3d[i], px_d3d[i + 1], px_d3d[i + 2],
-            px_soft[i], px_soft[i + 1], px_soft[i + 2]
+            px_d3d[i],
+            px_d3d[i + 1],
+            px_d3d[i + 2],
+            px_soft[i],
+            px_soft[i + 1],
+            px_soft[i + 2]
         );
     }
     let exact_pct = 100.0 * exact as f64 / total as f64;
@@ -405,8 +421,14 @@ fn translucent_overlay_matches_analytic_source_over() {
 
     let mut b = headless(64, 64);
     b.clear();
-    b.fill_rect(Rect::new(0.0, 0.0, 64.0, 64.0), Color::rgba(0.8, 0.2, 0.1, 1.0));
-    b.fill_rect(Rect::new(0.0, 0.0, 64.0, 64.0), Color::rgba(0.2, 0.8, 0.3, 0.5));
+    b.fill_rect(
+        Rect::new(0.0, 0.0, 64.0, 64.0),
+        Color::rgba(0.8, 0.2, 0.1, 1.0),
+    );
+    b.fill_rect(
+        Rect::new(0.0, 0.0, 64.0, 64.0),
+        Color::rgba(0.2, 0.8, 0.3, 0.5),
+    );
 
     let p = b.pixel(32, 32).expect("像素");
     let (bb, gg, rr) = (p & 0xff, (p >> 8) & 0xff, (p >> 16) & 0xff);

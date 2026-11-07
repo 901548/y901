@@ -116,7 +116,10 @@ fn popup_open_animation_shrinks_the_first_frame() {
 
     // 打开弹层：push_popup 内部会启动 150ms 动画，此刻进度 = 0
     assert!(
-        tree.open_popup(Box::new(WhitePanel { rect: Rect::ZERO }), Rect::new(100.0, 80.0, 10.0, 10.0)),
+        tree.open_popup(
+            Box::new(WhitePanel { rect: Rect::ZERO }),
+            Rect::new(100.0, 80.0, 10.0, 10.0)
+        ),
         "弹层应打开"
     );
     tree.layout(Size::new(W as f32, H as f32), &soft);
@@ -132,7 +135,6 @@ fn popup_open_animation_shrinks_the_first_frame() {
     soft.clear();
     tree.render(&mut soft);
     let first = panel_bbox(&soft).expect("半程应有弹层像素");
-
 
     // 推进到动画结束
     assert!(

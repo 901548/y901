@@ -613,7 +613,8 @@ impl UiTree {
         // 弹出层开启动画：150ms 缓动。
         // key 取该浮层的 id，于是"同一浮层重开"会打断上一次动画而不是叠加。
         // node 传 None：浮层不在普通节点索引里，靠整窗脏区重绘。
-        let key = crate::animation::key_of(&self.popups.last().map(|p| p.id.clone()).unwrap_or_default());
+        let key =
+            crate::animation::key_of(&self.popups.last().map(|p| p.id.clone()).unwrap_or_default());
         self.animate(
             key,
             crate::animation::Animate::new(
@@ -1619,13 +1620,7 @@ impl UiTree {
             order: &mut self.paint_order,
             modal_root: &mut self.modal_root,
         };
-        walk(
-            self.root.as_ref(),
-            &mut path,
-            None,
-            None,
-            &mut outputs,
-        );
+        walk(self.root.as_ref(), &mut path, None, None, &mut outputs);
 
         // 稳定排序：同层内保持树序（即绘制先后）
 
@@ -1754,7 +1749,6 @@ impl UiTree {
         self.dirty.clear();
     }
 
-
     /// 当前 Modal 作用域（根到 Modal 节点的路径）。
     pub fn modal_scope(&self) -> Option<&[usize]> {
         self.modal_root.as_deref()
@@ -1808,9 +1802,7 @@ impl UiTree {
             let c = node.cursor_at(pos);
             if c != Cursor::Default {
                 // `>=` 让同 depth 的**后访问者**胜出（树序靠后者在上）
-                let better = best
-                .map(|(bd, _)| depth >= bd)
-                    .unwrap_or(true);
+                let better = best.map(|(bd, _)| depth >= bd).unwrap_or(true);
                 if better {
                     *best = Some((depth, c));
                 }
@@ -1837,8 +1829,7 @@ impl UiTree {
 
     /// 命中测试（路径形式，会分配一次 Vec；供 RPC/测试使用）。
     pub fn hit_path(&self, pos: Pos) -> Option<Vec<usize>> {
-        self.hit_index(pos)
-            .map(|i| self.path_of(i))
+        self.hit_index(pos).map(|i| self.path_of(i))
     }
 
     /// 命中测试的**零分配**版本：返回 `paint_order` 的下标。
@@ -2088,47 +2079,47 @@ impl UiTree {
             // 若那时切换悬停目标，工具提示会在拖拽中闪现，且与
             // "按住期间所有移动都给捕获者"的语义矛盾。
             if self.captured_pointer.is_none() {
-            let new = self
-                .hit_index(*pos)
-                .and_then(|i| {
-                let p = self.path_of(i);
-                self.node_at_ref(&p)
-            })
-                .map(|n| n.id().to_string());
-            if new != self.hovered {
-                let old = self.hovered.clone();
-                if let Some(ref old_id) = old {
-                    self.invalidate(old_id);
-                }
-                if let Some(ref next) = new {
-                    self.invalidate(next);
-                }
-                self.hovered = new.clone();
+                let new = self
+                    .hit_index(*pos)
+                    .and_then(|i| {
+                        let p = self.path_of(i);
+                        self.node_at_ref(&p)
+                    })
+                    .map(|n| n.id().to_string());
+                if new != self.hovered {
+                    let old = self.hovered.clone();
+                    if let Some(ref old_id) = old {
+                        self.invalidate(old_id);
+                    }
+                    if let Some(ref next) = new {
+                        self.invalidate(next);
+                    }
+                    self.hovered = new.clone();
 
-                // 先发 Leave（旧节点）再发 Enter（新节点）。
-                //
-                // 为什么用 `dispatch_to` 而不是在当前遍历里附带：
-                // Enter/Leave 是**定向**事件，它们不应该像 MouseMove 那样走命中链。
-                // **冒泡到祖先**：包装型控件（如 TooltipHost）的命中点在子控件上，
-                // 若只发给命中节点，它永远不知道自己被悬停。
-                // 顺序：目标 → 根（与 DOM 的 mouseover/mouseout 一致）。
-                if let Some(old_id) = old {
-                    if let Some(path) = self.find_path(&old_id) {
-                        // 从"**目标 → 根**" 逐层派发：`k=0` 就是根，不能省略，
-                        // 否则"包装型控件自己就是根"的情形永远收不到事件。
-                        for k in (0..=path.len()).rev() {
-                            let _ = self.dispatch_target_only(&path[..k], &UiEvent::MouseLeave);
+                    // 先发 Leave（旧节点）再发 Enter（新节点）。
+                    //
+                    // 为什么用 `dispatch_to` 而不是在当前遍历里附带：
+                    // Enter/Leave 是**定向**事件，它们不应该像 MouseMove 那样走命中链。
+                    // **冒泡到祖先**：包装型控件（如 TooltipHost）的命中点在子控件上，
+                    // 若只发给命中节点，它永远不知道自己被悬停。
+                    // 顺序：目标 → 根（与 DOM 的 mouseover/mouseout 一致）。
+                    if let Some(old_id) = old {
+                        if let Some(path) = self.find_path(&old_id) {
+                            // 从"**目标 → 根**" 逐层派发：`k=0` 就是根，不能省略，
+                            // 否则"包装型控件自己就是根"的情形永远收不到事件。
+                            for k in (0..=path.len()).rev() {
+                                let _ = self.dispatch_target_only(&path[..k], &UiEvent::MouseLeave);
+                            }
+                        }
+                    }
+                    if let Some(new_id) = new {
+                        if let Some(path) = self.find_path(&new_id) {
+                            for k in (0..=path.len()).rev() {
+                                let _ = self.dispatch_target_only(&path[..k], &UiEvent::MouseEnter);
+                            }
                         }
                     }
                 }
-                if let Some(new_id) = new {
-                    if let Some(path) = self.find_path(&new_id) {
-                        for k in (0..=path.len()).rev() {
-                            let _ = self.dispatch_target_only(&path[..k], &UiEvent::MouseEnter);
-                        }
-                    }
-                }
-            }
             }
         }
 
@@ -2605,7 +2596,12 @@ fn dispatch_rec(
 }
 
 /// 单遍渲染：Base 就地画，Overlay/Modal 记路径延后画。
-fn render_pass(node: &mut dyn Widget, ctx: &mut dyn RenderCtx, dirty: &DirtyRegion, path: &mut Vec<usize>) {
+fn render_pass(
+    node: &mut dyn Widget,
+    ctx: &mut dyn RenderCtx,
+    dirty: &DirtyRegion,
+    path: &mut Vec<usize>,
+) {
     // 关闭的浮层：整棵子树都不绘制（与 rebuild_indices 共享同一不变量）。
     if !node.is_open() {
         return;

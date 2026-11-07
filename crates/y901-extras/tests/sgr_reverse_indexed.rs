@@ -79,10 +79,7 @@ fn reverse_with_indexed_foreground_and_default_background() {
     eprintln!("[probe A] 正常背景={normal:?} 反色后背景={reversed:?} 预期红={red:?}");
 
     assert_eq!(normal, default_bg, "未反色时背景应为默认背景");
-    assert_eq!(
-        reversed, red,
-        "反色后背景应变成原前景色（索引 1）"
-    );
+    assert_eq!(reversed, red, "反色后背景应变成原前景色（索引 1）");
 }
 
 #[test]
@@ -98,10 +95,7 @@ fn reverse_with_default_foreground_and_indexed_background() {
     eprintln!("[probe B] 正常背景={normal:?} 反色后背景={reversed:?} 预期默认前景={default_fg:?}");
 
     assert_eq!(normal, green, "未反色时背景应为索引色 2");
-    assert_eq!(
-        reversed, default_fg,
-        "反色后背景应变成原前景色（默认前景）"
-    );
+    assert_eq!(reversed, default_fg, "反色后背景应变成原前景色（默认前景）");
 }
 
 #[test]
@@ -139,7 +133,10 @@ fn indexed_colour_bounds_are_well_defined() {
     let all: Vec<u8> = (0..=255).collect();
     for i in all {
         let c = resolve(ColorSpec::Indexed(i), DEFAULT_FG);
-        assert!(c.iter().all(|v| v.is_finite()), "Indexed({i}) 应产生有效颜色");
+        assert!(
+            c.iter().all(|v| v.is_finite()),
+            "Indexed({i}) 应产生有效颜色"
+        );
     }
 }
 
@@ -183,15 +180,19 @@ fn reverse_with_bold_still_swaps_colours_and_thickens_glyphs() {
             }
         }
     }
-    let whole = bold_px.iter().zip(plain_px.iter()).filter(|(a, b)| a != b).count();
-    let nonbg = bold_px.chunks_exact(4).filter(|p| (p[2], p[1], p[0]) != rgb8(DEFAULT_BG)).count();
+    let whole = bold_px
+        .iter()
+        .zip(plain_px.iter())
+        .filter(|(a, b)| a != b)
+        .count();
+    let nonbg = bold_px
+        .chunks_exact(4)
+        .filter(|p| (p[2], p[1], p[0]) != rgb8(DEFAULT_BG))
+        .count();
     eprintln!("[probe F2] 区域差异={diff} 全帧差异={whole} 非背景像素={nonbg}");
     // 用**全帧差异**而不是单元格区域：字形位图会因 bearing 而偏出平方的单元格盒，
     // 区域采样会漏掉它们（实测：区域差异 0，全帧差异 446）。
-    assert!(
-        whole > 0,
-        "合成粗体应改变字形像素（全帧差异 {whole}）"
-    );
+    assert!(whole > 0, "合成粗体应改变字形像素（全帧差异 {whole}）");
 }
 
 /// 反色 + **下划线**：颜色仍交换，且下划线仍被画出。

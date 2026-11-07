@@ -58,7 +58,7 @@ pub struct ImeState {
     /// 光标位置（客户区像素），用于画覆盖层。
     /// 留作后续接线：候选窗定位需要它，当前由组件自绘。
     // 诊断 API：预编辑光标位置，供覆盖层绘制
-// 归类：诊断 API —— `caret` 只被 `Y901_IME_DUMP` 读，供 IME 定位排查
+    // 归类：诊断 API —— `caret` 只被 `Y901_IME_DUMP` 读，供 IME 定位排查
     #[allow(dead_code)]
     pub caret: (f32, f32),
 }

@@ -50,7 +50,6 @@ pub struct Image {
 }
 
 impl Image {
-
     /// 设置在 Flex 中的尺寸约束（链式）。
     pub fn flex_item(mut self, item: y901_ui::FlexItem) -> Self {
         self.item = item;
@@ -160,7 +159,9 @@ impl Image {
     /// **全链纯 Rust**，零 C 依赖守卫测试会替我们继续盯着这一点。
     pub fn from_png(id: impl Into<String>, bytes: &[u8]) -> Result<Self, String> {
         let decoder = png::Decoder::new(bytes);
-        let mut reader = decoder.read_info().map_err(|e| format!("PNG 读取失败: {e}"))?;
+        let mut reader = decoder
+            .read_info()
+            .map_err(|e| format!("PNG 读取失败: {e}"))?;
         let mut buf = vec![0; reader.output_buffer_size()];
         let info = reader
             .next_frame(&mut buf)

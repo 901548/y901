@@ -186,9 +186,7 @@ mod tests {
     /// 为什么必须限定范围：画布背景也"不等于轨道色"，
     /// 不限定就会把整幅画布算成进度（实测踩过：150px vs 预期 50px）。
     fn progress_pixels(s: &SoftBackend, y: u32, track_w: u32, color: (u8, u8, u8)) -> u32 {
-        (0..track_w)
-            .filter(|&x| px(s, x, y) == color)
-            .count() as u32
+        (0..track_w).filter(|&x| px(s, x, y) == color).count() as u32
     }
 
     fn px(s: &SoftBackend, x: u32, y: u32) -> (u8, u8, u8) {
@@ -250,11 +248,7 @@ mod tests {
         let y = (rect.y + rect.h * 0.5) as u32;
         let (lo, r0) = render(-0.5);
         let y0 = (r0.y + r0.h * 0.5) as u32;
-        assert_eq!(
-            px(&hi, 50, y),
-            px(&hi, 2, y),
-            "value=1.5 应 clamp 成满格"
-        );
+        assert_eq!(px(&hi, 50, y), px(&hi, 2, y), "value=1.5 应 clamp 成满格");
         assert_ne!(
             px(&lo, 50, y0),
             px(&hi, 50, y),

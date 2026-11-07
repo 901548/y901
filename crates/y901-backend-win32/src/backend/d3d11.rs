@@ -62,7 +62,6 @@
 //!
 //! 各调用点只写「它自己额外要求什么、违反会怎样」；上面三条不再逐条复述。
 
-
 use std::ffi::{c_void, CString};
 use std::ptr::{null, null_mut, slice_from_raw_parts};
 
@@ -558,10 +557,10 @@ type QueryInterfaceFn =
 type AddRefFn = unsafe extern "system" fn(*mut c_void) -> u32;
 type ReleaseFn = unsafe extern "system" fn(*mut c_void) -> u32;
 
-    /// # Safety
-    ///
-    /// `object` 必须是**未释放的 COM 接口指针**，且它的 vtable 布局与 `T` 逐字段一致。
-    /// 传错类型不会崩（仍是合法指针），但会调到错的方法——那是本文件最危险的一类 bug。
+/// # Safety
+///
+/// `object` 必须是**未释放的 COM 接口指针**，且它的 vtable 布局与 `T` 逐字段一致。
+/// 传错类型不会崩（仍是合法指针），但会调到错的方法——那是本文件最危险的一类 bug。
 unsafe fn vtbl<T>(object: *mut c_void) -> &'static T {
     &*(*(object as *mut *const T))
 }
@@ -1193,7 +1192,7 @@ impl Context {
     /// **`D3D11_MAP_WRITE_DISCARD` 之后旧内容视为未定义**，读到的将是垃圾。
     /// 违反后果：对非 DYNAMIC buffer 调用会失败并返回 `None`（本函数已处理）；
     /// 若把 `Some` 里的指针当成「只写了前半段、后半段仍是旧数据」来用，会读到任意内容。
-unsafe fn map_discard(&self, buffer: &Buffer) -> Option<MappedSubresource> {
+    unsafe fn map_discard(&self, buffer: &Buffer) -> Option<MappedSubresource> {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         let mut mapped: MappedSubresource = std::mem::zeroed();
         let hr = (table.map)(
@@ -1211,7 +1210,7 @@ unsafe fn map_discard(&self, buffer: &Buffer) -> Option<MappedSubresource> {
     ///
     /// 必须与同一次 `map_discard` 严格配对，且**只能调用一次**。
     /// 违反后果：重复 Unmap 是未定义行为 —— 驱动内部状态错乱，可能立即崩溃或静默损坏后续帧。
-unsafe fn unmap(&self, buffer: &Buffer) {
+    unsafe fn unmap(&self, buffer: &Buffer) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.unmap)(self.as_ptr(), buffer.as_ptr(), 0);
     }
@@ -1298,13 +1297,13 @@ unsafe fn unmap(&self, buffer: &Buffer) {
     /// 输入：`rect`（像素，右/下为**开区间**）。
     /// 副作用：之后所有 draw 只影响该矩形内的像素。
     // 诊断 API：com_type! 生成的接口别名只在内部与测试里具名使用；删除会削弱类型检查
-// 归类：诊断 API —— `set_scissor` 只在 `Y901_SCISSOR_TEST` 打开时调用
+    // 归类：诊断 API —— `set_scissor` 只在 `Y901_SCISSOR_TEST` 打开时调用
     #[allow(dead_code)]
     /// # Safety
     ///
     /// 矩形必须非负且不超出当前 RTV 尺寸；调用前 `scissor_enable` 必须为 1，否则此设置不生效。
     /// 违反后果：超出 RTV 的部分被驱动 clamp —— 不报错，但裁剪结果与预期不同（隐蔽的裁切错误）。
-unsafe fn set_scissor(&self, rect: RectI32) {
+    unsafe fn set_scissor(&self, rect: RectI32) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
         (table.rsset_scissor_rects)(self.as_ptr(), 1, &rect);
     }
@@ -1385,10 +1384,10 @@ impl SwapChain {
         Ok(())
     }
 
-        /// # Safety
+    /// # Safety
     ///
     /// 必须在**拥有该交换链窗口的线程**上调用；`sync_interval` 为 0 时不等待帧同步。
-unsafe fn present(&self, sync_interval: u32) -> Hresult {
+    unsafe fn present(&self, sync_interval: u32) -> Hresult {
         let table = vtbl::<SwapChainVtbl>(self.as_ptr());
         (table.present)(self.as_ptr(), sync_interval, 0)
     }
@@ -1548,12 +1547,12 @@ float4 ps_blit(VSOutput input) : SV_Target
 }
 "#;
 
-    /// # Safety
-    ///
-    /// 内部编排：`entry` 必须是 `source` 里真实存在的入口点，`target` 必须是合法的 profile 串，
-    /// 且 HLSL 源码由本模块内置（合法 UTF-8）；这些前置条件外部无法伪造。
-    /// 违反后果：编译失败会返回 `Err`（已处理）；但入口点拼错时错误来自 D3DCompile 的消息而不是
-    /// 我们的类型 —— 排查时容易误以为是着色器逻辑问题。
+/// # Safety
+///
+/// 内部编排：`entry` 必须是 `source` 里真实存在的入口点，`target` 必须是合法的 profile 串，
+/// 且 HLSL 源码由本模块内置（合法 UTF-8）；这些前置条件外部无法伪造。
+/// 违反后果：编译失败会返回 `Err`（已处理）；但入口点拼错时错误来自 D3DCompile 的消息而不是
+/// 我们的类型 —— 排查时容易误以为是着色器逻辑问题。
 unsafe fn compile_shader(entry: &str, target: &str) -> Result<Blob, String> {
     let entry = CString::new(entry).map_err(|_| "invalid entry point".to_string())?;
     let target = CString::new(target).map_err(|_| "invalid target".to_string())?;
@@ -1628,11 +1627,11 @@ struct Atlas {
 //   1. 项目 MSRV 未强制到引入 c-string 字面量的版本（1.77）；
 //   2. 语义名将来要按顶点属性表运行时拼接时，b"" 形式更容易与 fmt 组合。
 #[allow(clippy::manual_c_str_literals)]
-    /// # Safety
-    ///
-    /// 内部编排：所有组件（VS/PS/InputLayout/BlendState/RasterizerState）都由**同一个 `device`** 创建，
-    /// 且 InputLayout 的字段序与 VS 输入签名逐项匹配 —— 这两条由下面的构建代码保证，不在类型里。
-    /// 违反后果：签名不匹配时 D3D11 **不校验**，Draw 时静默丢帧（画面空着但没有错误码）。
+/// # Safety
+///
+/// 内部编排：所有组件（VS/PS/InputLayout/BlendState/RasterizerState）都由**同一个 `device`** 创建，
+/// 且 InputLayout 的字段序与 VS 输入签名逐项匹配 —— 这两条由下面的构建代码保证，不在类型里。
+/// 违反后果：签名不匹配时 D3D11 **不校验**，Draw 时静默丢帧（画面空着但没有错误码）。
 unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
     let vs_blob = compile_shader("vs_main", "vs_5_0")?;
     let ps_blob = compile_shader("ps_main", "ps_5_0")?;
@@ -1790,11 +1789,11 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
 /// 局部时画一个同色背景 quad），并用 scissor 限制后续 draw。
 /// 失败：无返回值；scissor 必须提前开启（`scissor_enable = 1`）。
 #[allow(clippy::too_many_arguments)] // 纯内部函数，参数就是渲染所需的最小集合
-    /// # Safety
-    ///
-    /// 这是内部编排，不是 COM 调用：只能在 **`Gfx` 已完成初始化、且当前线程持有 HWND** 时调用。
-    /// 违反后果：在设备丢失或初始化未完成时进入，会在内部取空指针或提交半成品管线 —— 崩溃点
-    /// 落在很深的绘制循环里，而不是调用者。
+/// # Safety
+///
+/// 这是内部编排，不是 COM 调用：只能在 **`Gfx` 已完成初始化、且当前线程持有 HWND** 时调用。
+/// 违反后果：在设备丢失或初始化未完成时进入，会在内部取空指针或提交半成品管线 —— 崩溃点
+/// 落在很深的绘制循环里，而不是调用者。
 unsafe fn draw_scene(
     context: &Context,
     pipeline: &Pipeline,
@@ -1894,11 +1893,11 @@ unsafe fn draw_scene(
 /// 说明：用**独立的** `blit_buffer`——复用 `instance_buffer` 会 `Map(DISCARD)`
 /// 掉 UI 实例，而 GPU 可能还没执行完 UI 那次 draw（实测表现为只剩背景色）。
 #[allow(clippy::too_many_arguments)]
-    /// # Safety
-    ///
-    /// 内部编排：`cached.rtv` 与 swapchain 后备缓冲的**尺寸必须一致**，且调用时 `cached` 已完整绘制过一帧。
-    /// 违反后果：尺寸不一致时只有重叠区域被绘制，其余区域保持上一帧内容 —— 表现为“画面撕裂/残留”，
-    /// 且不会有任何错误码。
+/// # Safety
+///
+/// 内部编排：`cached.rtv` 与 swapchain 后备缓冲的**尺寸必须一致**，且调用时 `cached` 已完整绘制过一帧。
+/// 违反后果：尺寸不一致时只有重叠区域被绘制，其余区域保持上一帧内容 —— 表现为“画面撕裂/残留”，
+/// 且不会有任何错误码。
 unsafe fn blit_cached(
     context: &Context,
     pipeline: &Pipeline,
@@ -2232,7 +2231,6 @@ impl Gfx {
         }
     }
 
-
     /// 增加一次引用计数（共享纹理用）。
     pub fn retain_image(&mut self, id: u64) {
         if let Some(entry) = self.images.get_mut(&id) {
@@ -2285,8 +2283,11 @@ impl Gfx {
             mip_levels: 1,
             array_size: 1,
             format: 28, // DXGI_FORMAT_R8G8B8A8_UNORM
-            sample_desc: SampleDesc { count: 1, quality: 0 },
-            usage: 0,                          // D3D11_USAGE_DEFAULT
+            sample_desc: SampleDesc {
+                count: 1,
+                quality: 0,
+            },
+            usage: 0, // D3D11_USAGE_DEFAULT
             bind_flags: D3D11_BIND_SHADER_RESOURCE,
             cpu_access_flags: 0,
             misc_flags: 0,
@@ -2375,7 +2376,9 @@ impl Gfx {
                     );
                     context.unmap(&pipeline.instance_buffer);
                 }
-                None => eprintln!("[y901] map_discard 失败：实例缓冲不可写（设备可能丢失，下一帧将重建）"),
+                None => eprintln!(
+                    "[y901] map_discard 失败：实例缓冲不可写（设备可能丢失，下一帧将重建）"
+                ),
             }
         }
 
@@ -2413,7 +2416,11 @@ impl Gfx {
                 instances,
                 count,
                 batches,
-                &self.images, rect, is_full, w, h,
+                &self.images,
+                rect,
+                is_full,
+                w,
+                h,
             );
         }
 
@@ -2434,7 +2441,18 @@ impl Gfx {
                     globals.as_ptr() as *const c_void,
                 );
                 draw_scene(
-                    context, pipeline, atlas, cached, instances, count, batches, &self.images, full, true, w, h,
+                    context,
+                    pipeline,
+                    atlas,
+                    cached,
+                    instances,
+                    count,
+                    batches,
+                    &self.images,
+                    full,
+                    true,
+                    w,
+                    h,
                 );
                 blit_cached(context, pipeline, cached, atlas, rtv, w, h);
                 if let Some((mean, bright)) = self.read_back_stats() {
@@ -2484,7 +2502,11 @@ impl Gfx {
                 instances,
                 count,
                 batches,
-                &self.images, small, false, w, h,
+                &self.images,
+                small,
+                false,
+                w,
+                h,
             );
             blit_cached(context, pipeline, cached, atlas, rtv, w, h);
             let after = self.read_back_hash();
@@ -2504,7 +2526,11 @@ impl Gfx {
                 instances,
                 count,
                 batches,
-                &self.images, full, true, w, h,
+                &self.images,
+                full,
+                true,
+                w,
+                h,
             );
             blit_cached(context, pipeline, cached, atlas, rtv, w, h);
         }
@@ -2822,7 +2848,7 @@ impl Gfx {
 
     /// 调试诊断：当前存活的 COM 对象数（Release 构建恒为 0）。
     // 诊断 API：COM 泄漏计数，仅 `live_objects()` 测试与人工排查调用
-// 归类：诊断 API —— `live_objects` 供泄漏排查（debug 构建计数）
+    // 归类：诊断 API —— `live_objects` 供泄漏排查（debug 构建计数）
     #[allow(dead_code)] // 留给调试/诊断使用，主循环不调用
     pub fn live_objects() -> isize {
         #[cfg(debug_assertions)]

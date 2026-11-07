@@ -334,7 +334,7 @@ impl Widget for ScrollView {
 pub struct Scrollbar {
     pub(crate) id: String,
     // 诊断 API：`target`：ScrollCommand 的目标容器名，仅记录（拆成独立组件前保留）
-// 归类：内部字段 —— `target` 参与滚动目标计算，无直接读取点
+    // 归类：内部字段 —— `target` 参与滚动目标计算，无直接读取点
     #[allow(dead_code)] // 留作把滚动条拆成独立组件时用
     target: String,
     pub(crate) rect: Rect,
@@ -550,7 +550,12 @@ impl Widget for Scrollbar {
         c.constrain(Size::new(BAR_WIDTH, c.max.h))
     }
 
-    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        rect: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = rect;
         self.visible = self.total > self.viewport;
         self.refresh_ratios();

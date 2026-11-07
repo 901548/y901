@@ -71,7 +71,11 @@ fn extra_release_of_unknown_texture_is_harmless() {
     let mut s = soft();
     s.release_texture(TextureId(999));
     s.release_texture(TextureId::INVALID);
-    assert_eq!(s.texture_count(), 0, "释放不存在的纹理不应 panic 也不应新增条目");
+    assert_eq!(
+        s.texture_count(),
+        0,
+        "释放不存在的纹理不应 panic 也不应新增条目"
+    );
 }
 
 /// 场景根：持有一个 Image 子节点，用来走真实的布局与渲染路径。
@@ -154,11 +158,19 @@ fn image_reports_its_texture_when_unmounted() {
 fn image_renders_with_adopted_texture() {
     let mut soft = soft();
     let mut img = image_with_texture(&mut soft);
-    img.arrange(Rect::new(0.0, 0.0, 16.0, 16.0), &soft, &mut LayoutCache::new());
+    img.arrange(
+        Rect::new(0.0, 0.0, 16.0, 16.0),
+        &soft,
+        &mut LayoutCache::new(),
+    );
     soft.clear();
     img.render(&mut soft);
     let p = soft.pixel(8, 8).expect("像素");
-    let (r, g, b) = (((p >> 16) & 0xFF) as u8, ((p >> 8) & 0xFF) as u8, (p & 0xFF) as u8);
+    let (r, g, b) = (
+        ((p >> 16) & 0xFF) as u8,
+        ((p >> 8) & 0xFF) as u8,
+        (p & 0xFF) as u8,
+    );
     assert!(
         r > 200 && g > 200 && b > 200,
         "收养的白纹理应显示为白色，实际 ({r},{g},{b})"

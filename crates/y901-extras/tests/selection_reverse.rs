@@ -67,14 +67,7 @@ fn render_frame(t: &mut TerminalWidget, soft: &mut SoftBackend) -> Vec<u8> {
 /// 为什么不比整块：字形（尤其 g/j/p/q 的下伸部）会溢出单元格，
 /// 把邻行的像素带进来 →— 导致"选区外也变了"的假失败。
 /// 角落 2px 内缩几乎一定是背景，且避开了行与行之间的渗透。
-fn cell_pixels(
-    px: &[u8],
-    rect: Rect,
-    cell: Size,
-    row: usize,
-    col: usize,
-    w: u32,
-) -> Vec<u8> {
+fn cell_pixels(px: &[u8], rect: Rect, cell: Size, row: usize, col: usize, w: u32) -> Vec<u8> {
     let cx0 = (rect.x + col as f32 * cell.w).round() as i32;
     let cy0 = (rect.y + row as f32 * cell.h).round() as i32;
     let cw = cell.w.round() as i32;
@@ -119,10 +112,7 @@ fn assert_inverse_range(
                 );
                 changed_in += 1;
             } else {
-                assert!(
-                    same,
-                    "单元格 ({row},{col}) 在选区外，像素不应变化"
-                );
+                assert!(same, "单元格 ({row},{col}) 在选区外，像素不应变化");
                 changed_out += 1;
             }
         }

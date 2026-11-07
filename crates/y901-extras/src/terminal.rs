@@ -489,7 +489,10 @@ impl Widget for TerminalWidget {
                 }
                 EventResult::Redraw
             }
-            UiEvent::Key { key, modifiers: mods } => {
+            UiEvent::Key {
+                key,
+                modifiers: mods,
+            } => {
                 // Ctrl+Shift+C / V：终端专用剪贴板快捷键
                 // 规则：有选中才复制；没选中时 Ctrl+Shift+C 不拦截（交给 shell 处理 SIGINT）
                 if mods.ctrl && mods.shift {

@@ -165,10 +165,17 @@ fn alpha_half_transparent_red_plus_blue_averages_channels() {
     // s = 0.5 → L1 尺寸 1x1
     s.draw_image(Rect::new(0.0, 0.0, 1.0, 1.0), id, ImageStyle::default());
     let p = s.pixel(0, 0).expect("px");
-    let (r, g, b) = (((p >> 16) & 0xFF) as u8, ((p >> 8) & 0xFF) as u8, (p & 0xFF) as u8);
+    let (r, g, b) = (
+        ((p >> 16) & 0xFF) as u8,
+        ((p >> 8) & 0xFF) as u8,
+        (p & 0xFF) as u8,
+    );
     eprintln!("[img-mip] alpha 均匀 2x2 -> 1x1：({r},{g},{b})");
     // 期望 (127,0,127) 经 alpha=128 混到黑底上 ≈ (64,0,64)；只断言 R≈B 且 G 最小
-    assert!(r.abs_diff(b) <= 2, "R 与 B 应近乎相等（均为半透明原色的平均），实测 ({r},{g},{b})");
+    assert!(
+        r.abs_diff(b) <= 2,
+        "R 与 B 应近乎相等（均为半透明原色的平均），实测 ({r},{g},{b})"
+    );
     assert!(g < r.max(b) / 2 + 1, "G 应最小，实测 ({r},{g},{b})");
 }
 
@@ -187,5 +194,8 @@ fn tiny_texture_quarter_scale_does_not_panic_or_blank() {
     let p = s.pixel(0, 0).expect("px");
     let r = ((p >> 16) & 0xFF) as u8;
     eprintln!("[img-mip] 2x2 @ s=0.25：({r},..)");
-    assert!(p != 0, "1x1 目标上应有像素写入（未 panic、且尺寸 clamp 到 1）");
+    assert!(
+        p != 0,
+        "1x1 目标上应有像素写入（未 panic、且尺寸 clamp 到 1）"
+    );
 }

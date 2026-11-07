@@ -44,7 +44,8 @@ pub fn parse(bytes: &[u8]) -> Vec<XauthEntry> {
     let mut i = 0usize;
     // 读一个 CARD16（大端序），越界返回 None
     let rd16 = |b: &[u8], off: usize| -> Option<u16> {
-        b.get(off..off + 2).map(|s| u16::from_be_bytes([s[0], s[1]]))
+        b.get(off..off + 2)
+            .map(|s| u16::from_be_bytes([s[0], s[1]]))
     };
     // 读一个 "长度 + 字节"字段
     let rd_field = |b: &[u8], off: &mut usize| -> Option<Vec<u8>> {
@@ -110,7 +111,9 @@ pub fn find_cookie(entries: &[XauthEntry], display_number: u32, hostname: &str) 
 pub fn load_cookie_from_home(display_number: u32, hostname: &str) -> Option<Vec<u8>> {
     let path = std::env::var_os("XAUTHORITY")
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".Xauthority")))?;
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".Xauthority"))
+        })?;
     let bytes = std::fs::read(&path).ok()?;
     let entries = parse(&bytes);
     find_cookie(&entries, display_number, hostname)

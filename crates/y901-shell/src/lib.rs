@@ -20,9 +20,9 @@
 
 #![deny(missing_docs)]
 pub mod clipboard;
-pub mod widget_clipboard;
 pub mod secret;
 pub mod snapshot;
+pub mod widget_clipboard;
 pub use widget_clipboard::WidgetClipboard;
 
 use y901_runtime::PlatformRuntime;

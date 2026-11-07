@@ -187,9 +187,7 @@ impl Connection {
                 let reason = String::from_utf8_lossy(&body).to_string();
                 return Err(format!("服务端拒绝连接: {reason}"));
             }
-            2 => {
-                return Err("服务端要求进一步认证（本客户端不支持）".to_string())
-            }
+            2 => return Err("服务端要求进一步认证（本客户端不支持）".to_string()),
             other => return Err(format!("未知的 Setup 状态码 {other}")),
         }
 
@@ -197,8 +195,7 @@ impl Connection {
         if body.len() < 32 {
             return Err(format!("Setup 响应太短：{} 字节", body.len()));
         }
-        let u32at =
-            |b: &[u8], o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
+        let u32at = |b: &[u8], o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
         let u16at = |b: &[u8], o: usize| u16::from_le_bytes([b[o], b[o + 1]]);
 
         let release = u32at(&body, 0);
@@ -272,9 +269,10 @@ impl Connection {
         self.stream
             .set_read_timeout(Some(REPLY_TIMEOUT))
             .map_err(|e| format!("设置读超时失败: {e}"))?;
-        let r = self.stream.read_exact(buf).map_err(|e| {
-            format!("读取失败（对端关闭或等应答超时 5s）：{e}")
-        });
+        let r = self
+            .stream
+            .read_exact(buf)
+            .map_err(|e| format!("读取失败（对端关闭或等应答超时 5s）：{e}"));
         let _ = self.stream.set_read_timeout(None);
         r
     }
@@ -414,7 +412,10 @@ impl Connection {
         let mut head = [0u8; 32];
         self.read_exact(&mut head)?;
         if head[0] != 1 {
-            return Err(format!("ShmQueryVersion 未得到响应（字节 0 = {}）", head[0]));
+            return Err(format!(
+                "ShmQueryVersion 未得到响应（字节 0 = {}）",
+                head[0]
+            ));
         }
         // byte8 = shared_pixmaps；bytes 10-11 = major；12-13 = minor
         let major = u16::from_le_bytes([head[10], head[11]]);
@@ -460,10 +461,7 @@ impl Connection {
         let mut head = [0u8; 32];
         self.read_exact(&mut head)?;
         if head[0] != 1 {
-            return Err(format!(
-                "GetImage 未得到响应（字节 0 = {}）",
-                head[0]
-            ));
+            return Err(format!("GetImage 未得到响应（字节 0 = {}）", head[0]));
         }
         let depth = head[1];
         let units = u16::from_le_bytes([head[4], head[5]]) as usize;
@@ -483,7 +481,10 @@ impl Connection {
         first_keycode: u8,
         count: u8,
     ) -> Result<crate::keys::Keymap, String> {
-        self.send(&crate::encode::encode_get_keyboard_mapping(first_keycode, count))?;
+        self.send(&crate::encode::encode_get_keyboard_mapping(
+            first_keycode,
+            count,
+        ))?;
         self.flush()?;
         let mut head = [0u8; 32];
         self.read_exact(&mut head)?;
@@ -513,7 +514,10 @@ impl Connection {
     /// 非阻塞地读一批事件（`timeout_ms = 0` 表示不等）。
     ///
     /// 返回：事件列表与错误列表（错误不吞掉，交给调用方决定）。
-    pub fn poll_events(&mut self, timeout_ms: u32) -> Result<(Vec<X11Event>, Vec<X11Error>), String> {
+    pub fn poll_events(
+        &mut self,
+        timeout_ms: u32,
+    ) -> Result<(Vec<X11Event>, Vec<X11Error>), String> {
         self.stream
             .set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
             .map_err(|e| format!("set_read_timeout: {e}"))?;
@@ -536,11 +540,7 @@ impl Connection {
                         }
                     }
                 }
-                Ok(n) => {
-                    return Err(format!(
-                        "收到 {n} 字节的不完整包（X11 事件固定 32 字节）"
-                    ))
-                }
+                Ok(n) => return Err(format!("收到 {n} 字节的不完整包（X11 事件固定 32 字节）")),
                 Err(e)
                     if e.kind() == std::io::ErrorKind::WouldBlock
                         || e.kind() == std::io::ErrorKind::TimedOut =>
@@ -616,9 +616,7 @@ fn connect_socket(path: &std::path::Path) -> std::io::Result<UnixStream> {
                 return UnixStream::connect_addr(&addr).map_err(|abs_err| {
                     std::io::Error::new(
                         abs_err.kind(),
-                        format!(
-                            "文件路径失败（{file_err}），抽象命名空间也失败（{abs_err}）"
-                        ),
+                        format!("文件路径失败（{file_err}），抽象命名空间也失败（{abs_err}）"),
                     )
                 });
             }

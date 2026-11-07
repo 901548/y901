@@ -93,7 +93,14 @@ fn supersample_lines(raw: &[Line]) -> Option<Supersampled> {
     // 平移到位图坐标
     let shifted: Vec<(f32, f32, f32, f32)> = lines
         .iter()
-        .map(|&(x0, y0, x1, y1)| (x0 - bearing_x, y0 - bearing_y, x1 - bearing_x, y1 - bearing_y))
+        .map(|&(x0, y0, x1, y1)| {
+            (
+                x0 - bearing_x,
+                y0 - bearing_y,
+                x1 - bearing_x,
+                y1 - bearing_y,
+            )
+        })
         .collect();
 
     let n = SAMPLES;
@@ -156,9 +163,9 @@ fn rect_lines(x0: f32, y0: f32, w: f32, h: f32) -> Vec<Line> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use y901_ui::RenderCtx;
     use crate::mip::MipLevel;
     use crate::MyFontEngine;
+    use y901_ui::RenderCtx;
 
     /// 变异对照：8×8 纯矩形，解析覆盖率已知。
     ///
@@ -174,7 +181,8 @@ mod tests {
         let mut worst_in = 0i32;
         for y in 0..8 {
             for x in 0..8 {
-                worst_in = worst_in.max((255 - s.coverage[(y * s.width + x) as usize] as i32).abs());
+                worst_in =
+                    worst_in.max((255 - s.coverage[(y * s.width + x) as usize] as i32).abs());
             }
         }
         assert!(
@@ -221,7 +229,6 @@ mod tests {
         Some(MipLevel::new(w, h, cov))
     }
 
-
     /// **对齐后**的 MAD：在 ±2 像素窗口里找最小差异。
     ///
     /// 为什么需要：字形位图的包围盒原点由各自的字号决定，直接按左上角对齐会把
@@ -245,7 +252,8 @@ mod tests {
                         }
                         let ia = (ay as u32 * a.width + ax as u32) as usize;
                         let ib = (y * b.width + x) as usize;
-                        sum += (a.coverage[ia] as i16 - b.coverage[ib] as i16).unsigned_abs() as u64;
+                        sum +=
+                            (a.coverage[ia] as i16 - b.coverage[ib] as i16).unsigned_abs() as u64;
                         n += 1;
                     }
                 }
@@ -321,7 +329,8 @@ mod tests {
                     _ => continue,
                 };
                 // 对齐后的对比（允许±2px 整体平移）
-                let (re_a, bx_a) = match (mad_aligned(&l1_re, &truth), mad_aligned(&l1_box, &truth)) {
+                let (re_a, bx_a) = match (mad_aligned(&l1_re, &truth), mad_aligned(&l1_box, &truth))
+                {
                     (Some(a), Some(b)) => (a, b),
                     _ => continue,
                 };
@@ -337,7 +346,11 @@ mod tests {
             }
             let mean_re = s_re / n as f64;
             let mean_box = s_box / n as f64;
-            let winner = if mean_re < mean_box { "重光栅化" } else { "盒式滤波" };
+            let winner = if mean_re < mean_box {
+                "重光栅化"
+            } else {
+                "盒式滤波"
+            };
             let gap = if mean_re.min(mean_box) > 0.0 {
                 100.0 * (mean_box - mean_re).abs() / mean_box.min(mean_re)
             } else {
@@ -353,7 +366,11 @@ mod tests {
                     an,
                     a_re / an as f64,
                     a_box / an as f64,
-                    if a_re < a_box { "重光栅化" } else { "盒式滤波" }
+                    if a_re < a_box {
+                        "重光栅化"
+                    } else {
+                        "盒式滤波"
+                    }
                 );
             }
             aligned_re += a_re;

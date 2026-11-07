@@ -6,14 +6,16 @@
 //! 诚实声明：golden test 验证的是"实现与我理解的规范一致"。
 //! 最终真相只能由 **S2 第二步的真服务器握手**畑开（服务器会拒绝格式错的包）。
 
-use y901_backend_x11::encode::{CreateWindowArgs, ImageFormat, PropMode, PutImageArgs, ValueMask, WindowClass};
+use y901_backend_x11::encode::{
+    CreateWindowArgs, ImageFormat, PropMode, PutImageArgs, ValueMask, WindowClass,
+};
 use y901_backend_x11::keys::{keysym_to_char, keysym_to_key, modifiers_from_state, Keymap};
-use y901_ui::Key;
 use y901_backend_x11::{
     decode_event, encode_change_property, encode_create_window, encode_get_input_focus,
     encode_intern_atom, encode_map_window, encode_no_operation, encode_put_image,
     encode_setup_request, pad4, DecodeError, X11Event,
 };
+use y901_ui::Key;
 
 // ---------------------------------------------------------------- 基础工具
 
@@ -289,7 +291,10 @@ fn put_image_length_field_caps_single_request_at_256kb() {
 
     // 1920x1080 单帧：8,294,400 字节 → 2,073,606 个单位 ≫ 65535，必须分块
     let full = 6 + (1920usize * 1080 * 4) / 4;
-    assert!(full > max_units, "1080p 单帧需 {full} 个单位，超上限 {max_units}");
+    assert!(
+        full > max_units,
+        "1080p 单帧需 {full} 个单位，超上限 {max_units}"
+    );
     assert_eq!(
         full.div_ceil(max_units - 6),
         32,
@@ -298,7 +303,10 @@ fn put_image_length_field_caps_single_request_at_256kb() {
 
     // 255x256 = 65,280 像素 = 261,120 字节 → 在限制内
     let fits = 6 + (255usize * 256 * 4) / 4;
-    assert!(fits <= max_units, "255x256 在限制内（{fits} ≤ {max_units}）");
+    assert!(
+        fits <= max_units,
+        "255x256 在限制内（{fits} ≤ {max_units}）"
+    );
 
     // 256x256 = 65,536 像素 = 262,144 字节 → 就差那么一点点
     let over = 6 + (256usize * 256 * 4) / 4;
@@ -330,7 +338,11 @@ fn change_property_format32_divides_bytes_to_items() {
     // format=32 时，data length 是**项目数** = 字节数 / 4。弄错会把标题写成乱码。
     let data: &[u8] = &[1, 0, 0, 0, 2, 0, 0, 0]; // 两个 u32 → 2 项
     let got = encode_change_property(1, 2, 3, 32, PropMode::Replace, data);
-    assert_eq!(&got[20..24], &[0x02, 0x00, 0x00, 0x00], "应写 2 项而不是 8 字节");
+    assert_eq!(
+        &got[20..24],
+        &[0x02, 0x00, 0x00, 0x00],
+        "应写 2 项而不是 8 字节"
+    );
     assert_eq!(&got[2..4], &[0x08, 0x00], "length = 6 + 2 = 8");
 }
 
@@ -498,7 +510,7 @@ fn decode_client_message_delete_window() {
         32,
         &[
             (4, &[0x01, 0x00, 0xA0, 0x00]),
-            (8, &[0xAB, 0x02, 0x00, 0x00]), // WM_PROTOCOLS
+            (8, &[0xAB, 0x02, 0x00, 0x00]),  // WM_PROTOCOLS
             (12, &[0xAC, 0x02, 0x00, 0x00]), // WM_DELETE_WINDOW
             (16, &[0x00, 0x00, 0x00, 0x00]),
         ],
@@ -577,8 +589,8 @@ fn keysym_ascii_maps_to_char() {
 #[test]
 fn special_keysyms_map_to_function_keys() {
     let cases = [
-        (0xFF0Du32, Key::Enter),   // Return
-        (0xFF8Du32, Key::Enter),   // KP_Enter
+        (0xFF0Du32, Key::Enter), // Return
+        (0xFF8Du32, Key::Enter), // KP_Enter
         (0xFF08u32, Key::Backspace),
         (0xFF09u32, Key::Tab),
         (0xFF1Bu32, Key::Escape),
@@ -627,7 +639,11 @@ fn keymap_lookup_respects_first_keycode_and_columns() {
     };
     assert_eq!(km.plain_and_shift(8), (Some(0x61), Some(0x41)));
     assert_eq!(km.plain_and_shift(9), (Some(0x62), Some(0x42)));
-    assert_eq!(km.plain_and_shift(7), (None, None), "低于 first_keycode 应为 None");
+    assert_eq!(
+        km.plain_and_shift(7),
+        (None, None),
+        "低于 first_keycode 应为 None"
+    );
     assert_eq!(km.keysym(8, 2), None, "列越界应为 None");
     // 表里只有 2 个 keycode（8/9），各一个可打印字符 → 2
     assert_eq!(km.ascii_coverage(), 2);
@@ -641,7 +657,7 @@ fn create_glyph_cursor_is_32_bytes() {
     let got = y901_backend_x11::encode::encode_create_glyph_cursor(
         0x300001,
         0x300002,
-        152,       // XC_xterm
+        152, // XC_xterm
         0x300002,
         152,
         (0, 0, 0),
@@ -651,7 +667,11 @@ fn create_glyph_cursor_is_32_bytes() {
     assert_eq!(got[0], 94, "opcode 94");
     assert_eq!(&got[2..4], &[0x08, 0x00], "length = 8 单位");
     assert_eq!(&got[12..14], &[152, 0], "source char = XC_xterm(152)");
-    assert_eq!(&got[14..18], &[0x02, 0x00, 0x30, 0x00], "mask font 是 4 字节");
+    assert_eq!(
+        &got[14..18],
+        &[0x02, 0x00, 0x30, 0x00],
+        "mask font 是 4 字节"
+    );
     assert_eq!(&got[30..32], &[0xFF, 0xFF], "back blue 在最后");
 }
 

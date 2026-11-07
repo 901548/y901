@@ -312,7 +312,11 @@ fn dialog_can_be_used_as_a_popup_without_double_scrim() {
         .borrow()
         .iter()
         .any(|r| r.w >= 300.0 && r.h >= 200.0);
-    assert!(!big, "关闭遮罩后不应再有满屏填充：{:?}", calls.fills.borrow());
+    assert!(
+        !big,
+        "关闭遮罩后不应再有满屏填充：{:?}",
+        calls.fills.borrow()
+    );
 }
 
 #[test]

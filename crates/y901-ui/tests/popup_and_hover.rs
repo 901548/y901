@@ -9,7 +9,7 @@ use std::rc::Rc;
 use y901_ui::layout::LayoutCache;
 use y901_ui::{
     Constraints, EventCtx, EventResult, MouseButton, Pos, Rect, RenderCtx, Semantics, Size,
-    TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 
 struct Metrics;

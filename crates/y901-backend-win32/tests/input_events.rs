@@ -178,7 +178,10 @@ fn file_drop_translates_and_routes_to_hit_target() {
     use y901_ui::{Pos, Size, UiEvent};
 
     let raw = y901_runtime::RawEvent::FileDrop {
-        paths: vec![PathBuf::from(r"C:\\tmp\\a.txt"), PathBuf::from(r"C:\\tmp\\b.bin")],
+        paths: vec![
+            PathBuf::from(r"C:\\tmp\\a.txt"),
+            PathBuf::from(r"C:\\tmp\\b.bin"),
+        ],
         x: 42.0,
         y: 24.0,
     };

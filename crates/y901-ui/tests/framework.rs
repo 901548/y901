@@ -380,10 +380,7 @@ fn hover_only_dirties_two_nodes() {
     // a 与 b 是相邻兄弟（共用一条边）。边贴边合并之后只剩 1 块脏区——
     // 这是预期行为（合并只会让脏区变大，不会漏画），所以改成断言覆盖范围。
     let b = tree.dirty().bounds().expect("应有脏区");
-    let (ra, rb) = (
-        tree.rect_of("a").expect("a"),
-        tree.rect_of("b").expect("b"),
-    );
+    let (ra, rb) = (tree.rect_of("a").expect("a"), tree.rect_of("b").expect("b"));
     assert!(
         b.contains(y901_ui::Pos::new(ra.x + 1.0, ra.y + 1.0))
             && b.contains(y901_ui::Pos::new(rb.x + 1.0, rb.y + 1.0)),
@@ -408,7 +405,12 @@ fn commands_are_routed_not_interpreted() {
         fn id(&self) -> &str {
             &self.id
         }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _cache: &mut LayoutCache,
+        ) -> Size {
             c.constrain(Size::new(10.0, 10.0))
         }
         fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {

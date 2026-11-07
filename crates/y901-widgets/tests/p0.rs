@@ -81,7 +81,12 @@ impl Widget for Fixed {
     ) -> Size {
         c.constrain(Size::new(c.max.w.min(100.0), 20.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -185,8 +190,7 @@ fn click_selects_row_and_fires_callback() {
     let cb = picked.clone();
 
     let items: Vec<String> = (0..20).map(|i| format!("row {i}")).collect();
-    let list = ListView::from_strings("list", items)
-        .on_row_selected(move |i| cb.set(i));
+    let list = ListView::from_strings("list", items).on_row_selected(move |i| cb.set(i));
 
     let mut tree = UiTree::new(Box::new(
         Flex::column("root").push(Box::new(list.flex_item(FlexItem::fill()))),

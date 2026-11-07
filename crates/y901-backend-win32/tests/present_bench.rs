@@ -12,8 +12,8 @@ use std::time::Instant;
 use y901_backend_win32::window::Window;
 use y901_runtime::Options;
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, Rect, RenderCtx, Semantics, Size, TextMetrics, UiEvent,
-    UiTree, Widget,
+    Color, Constraints, EventCtx, EventResult, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    UiEvent, UiTree, Widget,
 };
 
 struct Scene {
@@ -32,7 +32,12 @@ impl Widget for Scene {
     ) -> Size {
         c.constrain(Size::new(c.max.w, c.max.h))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {

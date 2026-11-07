@@ -34,11 +34,7 @@ fn text_buffer_truncates_at_the_limit_instead_of_panicking() {
 
     // 再塞 10 MiB：应截断到上限，且光标停在边界上
     b.insert_str(&big);
-    assert_eq!(
-        b.len_bytes(),
-        MAX_TEXT_LEN,
-        "总长度应被截断到 MAX_TEXT_LEN"
-    );
+    assert_eq!(b.len_bytes(), MAX_TEXT_LEN, "总长度应被截断到 MAX_TEXT_LEN");
     assert!(
         b.text().is_char_boundary(b.cursor()),
         "截断后光标必须仍在 char 边界（否则后续 insert 会 panic）"

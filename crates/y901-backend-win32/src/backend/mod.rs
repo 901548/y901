@@ -109,7 +109,9 @@ impl D3dBackend {
         let (cell_w, cell_h) = crate::backend::font::cell_metrics_for(font.size);
         // 字形引擎选择：`Y901_FONT=self` 用自研，否则 DirectWrite（默认）。
         // 失败就**自动回退**到 DirectWrite，绝不让应用起不来。
-        let want_self = std::env::var("Y901_FONT").map(|v| v == "self").unwrap_or(false);
+        let want_self = std::env::var("Y901_FONT")
+            .map(|v| v == "self")
+            .unwrap_or(false);
         let (text, engine_name): (Box<dyn crate::backend::font::FontEngine>, &str) = if want_self {
             match crate::font_engine::MyFontEngine::new(
                 crate::font_engine::load_font(&crate::font_engine::resolve_font_path(&font.family))
@@ -123,11 +125,17 @@ impl D3dBackend {
                 }
                 Err(err) => {
                     eprintln!("[y901] 自研引擎初始化失败（{err}），回退 DirectWrite");
-                    (Box::new(TextEngine::new(&font.family, font.size, cell_w, cell_h)?), "legacy")
+                    (
+                        Box::new(TextEngine::new(&font.family, font.size, cell_w, cell_h)?),
+                        "legacy",
+                    )
                 }
             }
         } else {
-            (Box::new(TextEngine::new(&font.family, font.size, cell_w, cell_h)?), "legacy")
+            (
+                Box::new(TextEngine::new(&font.family, font.size, cell_w, cell_h)?),
+                "legacy",
+            )
         };
         eprintln!(
             "[y901] backend ready: engine={engine_name} ascent={:.2} atlas={}",
@@ -136,8 +144,8 @@ impl D3dBackend {
         );
 
         let mut backend = Self {
-        #[cfg(test)]
-        present_sync_log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            #[cfg(test)]
+            present_sync_log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             gfx,
             image_marks,
             hovered: None,
@@ -288,7 +296,9 @@ impl D3dBackend {
         let batches = self.build_batches();
         #[cfg(test)]
         self.present_sync_log.lock().unwrap().push(sync_interval);
-        let mut hr = self.gfx.render_batched(&self.instances, &batches, sync_interval);
+        let mut hr = self
+            .gfx
+            .render_batched(&self.instances, &batches, sync_interval);
 
         if Gfx::device_lost(hr) {
             eprintln!("[y901] device lost: 0x{:08X}, rebuilding", hr as u32);
@@ -303,7 +313,9 @@ impl D3dBackend {
             {
                 eprintln!("[y901] atlas re-upload failed: {err}");
             }
-            hr = self.gfx.render_batched(&self.instances, &batches, sync_interval);
+            hr = self
+                .gfx
+                .render_batched(&self.instances, &batches, sync_interval);
         }
 
         if hr < 0 {
@@ -317,7 +329,6 @@ impl D3dBackend {
     pub fn take_present_sync_log(&self) -> Vec<u32> {
         self.present_sync_log.lock().unwrap().clone()
     }
-
 
     /// 记录新的客户区尺寸并尝试同步交换链。
     ///
@@ -351,14 +362,14 @@ impl D3dBackend {
 
     /// 当前帧的实例数（诊断用）。
     // 诊断 API：`instance_count()`：诊断，测试断言提交实例数
-// 归类：诊断 API —— `instance_count` 供 Y901_PROFILE 输出单帧实例数
+    // 归类：诊断 API —— `instance_count` 供 Y901_PROFILE 输出单帧实例数
     #[allow(dead_code)] // 诊断接口，主循环不调用
     pub fn instance_count(&self) -> usize {
         self.instances.len()
     }
 
     // 诊断 API：`live_objects()`：COM 泄漏诊断，测试断言"用完全部释放"
-// 归类：诊断 API —— 与 d3d11::live_objects 同义，供外部泄漏检查
+    // 归类：诊断 API —— 与 d3d11::live_objects 同义，供外部泄漏检查
     #[allow(dead_code)] // 诊断接口，主循环不调用
     /// 当前存活的 COM 对象计数（只增不减说明有泄漏）。测试用它断言"用完全部释放"，比肉眼看画面可靠。
     pub fn live_objects() -> isize {
@@ -720,7 +731,6 @@ impl RenderCtx for D3dBackend {
         ));
         self.image_marks.push((start, 1, texture.0));
     }
-
 
     fn retain_texture(&mut self, id: y901_ui::image::TextureId) {
         if id.is_valid() {

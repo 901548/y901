@@ -407,7 +407,12 @@ impl Widget for ListView {
         c.constrain(Size::new(c.max.w, c.max.h))
     }
 
-    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        rect: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.ensure_prefix();
         self.viewport = rect;
         self.show_bar = self.content_height() > rect.h;

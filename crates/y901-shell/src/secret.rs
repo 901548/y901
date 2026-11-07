@@ -169,7 +169,10 @@ mod tests {
         if !is_supported() {
             // 这不是"跳过"，而是断言本平台的**正确行为**：明确报错，不降级
             let e = encrypt(b"secret").expect_err("不支持的平台必须返回 Err");
-            assert!(e.contains("HELM_SSH_PASSWORD"), "错误提示要指出替代方案：{e}");
+            assert!(
+                e.contains("HELM_SSH_PASSWORD"),
+                "错误提示要指出替代方案：{e}"
+            );
             return;
         }
         let plain = b"sk-1234567890abcdef";

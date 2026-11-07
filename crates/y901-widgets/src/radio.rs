@@ -4,7 +4,7 @@
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Key, Modifiers, Pos, Rect, RenderCtx, Role,
-    Semantics, Size, State, TextStyle, TextMetrics, UiEvent, Widget,
+    Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 圆框直径。
@@ -212,12 +212,7 @@ impl Widget for RadioGroup {
             if self.selected == Some(i) {
                 // 实心圆点：直径 8，居中
                 let d = 8.0_f32.min(dot.w * 0.5);
-                let c = Rect::new(
-                    dot.x + (dot.w - d) * 0.5,
-                    dot.y + (dot.h - d) * 0.5,
-                    d,
-                    d,
-                );
+                let c = Rect::new(dot.x + (dot.w - d) * 0.5, dot.y + (dot.h - d) * 0.5, d, d);
                 ctx.fill_round_rect(c, normal.fg, d * 0.5);
             }
             let row = self.row_rect(i);
@@ -262,11 +257,7 @@ mod tests {
     fn render(selected: Option<usize>) -> SoftBackend {
         let mut s = soft();
         s.clear();
-        let mut g = RadioGroup::new(
-            "r",
-            vec!["一".into(), "二".into(), "三".into()],
-            selected,
-        );
+        let mut g = RadioGroup::new("r", vec!["一".into(), "二".into(), "三".into()], selected);
         let mut cache = LayoutCache::new();
         g.arrange(Rect::new(0.0, 0.0, 120.0, 60.0), &s, &mut cache);
         g.render(&mut s);

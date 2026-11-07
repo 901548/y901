@@ -46,10 +46,7 @@ impl ShmSegment {
         let size = size.max(1);
         let shmid = unsafe { shmget(IPC_PRIVATE, size, IPC_CREAT | SHM_R | SHM_W) };
         if shmid < 0 {
-            return Err(format!(
-                "shmget 失败: {}",
-                std::io::Error::last_os_error()
-            ));
+            return Err(format!("shmget 失败: {}", std::io::Error::last_os_error()));
         }
         // SAFETY: shmid 刚创建且有效；shmaddr 传 null 让内核选地址。
         let ptr = unsafe { shmat(shmid, std::ptr::null(), 0) } as *mut u8;
@@ -59,10 +56,7 @@ impl ShmSegment {
             unsafe {
                 shmctl(shmid, IPC_RMID, std::ptr::null_mut());
             }
-            return Err(format!(
-                "shmat 失败: {}",
-                std::io::Error::last_os_error()
-            ));
+            return Err(format!("shmat 失败: {}", std::io::Error::last_os_error()));
         }
         Ok(Self { shmid, ptr, size })
     }

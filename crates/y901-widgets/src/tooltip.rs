@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use y901_ui::{
     Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Role, Semantics, Size, State,
-    TextStyle, TextMetrics, UiEvent, Widget,
+    TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 默认延时（毫秒）。
@@ -86,9 +86,7 @@ impl Widget for Tooltip {
     }
 
     fn semantics(&self) -> Semantics {
-        Semantics::default()
-            .exposed(true)
-            .label(self.text.clone())
+        Semantics::default().exposed(true).label(self.text.clone())
     }
 }
 
@@ -173,7 +171,12 @@ impl Widget for TooltipHost {
         c.constrain(size)
     }
 
-    fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        rect: Rect,
+        m: &dyn TextMetrics,
+        cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = rect;
         self.child.arrange(rect, m, cache);
     }
@@ -208,7 +211,10 @@ impl Widget for TooltipHost {
                 // 延时到了：弹浮层。锚点用子控件矩形，`open_popup` 会做边界翻转。
                 let id = self.tooltip_id();
                 let text = self.text.clone();
-                ctx.request_popup(Box::new(move || Box::new(Tooltip::new(id, text))), self.anchor());
+                ctx.request_popup(
+                    Box::new(move || Box::new(Tooltip::new(id, text))),
+                    self.anchor(),
+                );
                 self.tooltip_open = true;
                 EventResult::Redraw
             }
@@ -260,7 +266,12 @@ mod tests {
         fn id(&self) -> &str {
             "box"
         }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _cache: &mut LayoutCache,
+        ) -> Size {
             c.constrain(Size::new(40.0, 20.0))
         }
         fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
@@ -281,20 +292,11 @@ mod tests {
     }
 
     fn host(delay_ms: u64) -> TooltipHost {
-        TooltipHost::new(
-            "h",
-            Box::new(Box40 { rect: Rect::ZERO }),
-            "提示文字",
-        )
-        .delay_ms(delay_ms)
+        TooltipHost::new("h", Box::new(Box40 { rect: Rect::ZERO }), "提示文字").delay_ms(delay_ms)
     }
 
     /// 轮询 Tick 直到条件满足或超时（**不用固定 sleep 赌时间**）。
-    fn poll_until(
-        tree: &mut UiTree,
-        limit: usize,
-        mut done: impl FnMut(&UiTree) -> bool,
-    ) -> bool {
+    fn poll_until(tree: &mut UiTree, limit: usize, mut done: impl FnMut(&UiTree) -> bool) -> bool {
         for _ in 0..limit {
             if done(tree) {
                 return true;
@@ -404,10 +406,7 @@ mod tests {
             tip_rect,
             non_background(&soft)
         );
-        assert!(
-            inside > 0,
-            "提示气泡矩形内应有绘制像素（实测 {inside}）"
-        );
+        assert!(inside > 0, "提示气泡矩形内应有绘制像素（实测 {inside}）");
 
         // 离开后同一区域应回到"没有画东西"
         leave(&mut tree);

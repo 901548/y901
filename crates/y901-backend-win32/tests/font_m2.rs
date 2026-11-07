@@ -144,7 +144,12 @@ fn atlas_pixels_are_coverage_with_opaque_alpha() {
     for y in 0..g.height as usize {
         for x in 0..g.width as usize {
             let i = ((g.atlas_y as usize + y) * asz + (g.atlas_x as usize + x)) * 4;
-            let (r, gg, b, a) = (e.atlas()[i], e.atlas()[i + 1], e.atlas()[i + 2], e.atlas()[i + 3]);
+            let (r, gg, b, a) = (
+                e.atlas()[i],
+                e.atlas()[i + 1],
+                e.atlas()[i + 2],
+                e.atlas()[i + 3],
+            );
             assert_eq!(a, 255, "图集 alpha 必须是 255");
             assert_eq!(r, gg, "RGB 应相等（灰度覆盖度）");
             assert_eq!(r, b, "RGB 应相等");
@@ -165,7 +170,10 @@ fn four_phases_produce_distinct_bitmaps() {
         let mut hashes = Vec::new();
         for phase in 0u8..4 {
             e.begin_frame();
-            let g = e.glyph_phased(ch, phase).unwrap_or_else(|| panic!("取字形失败 {ch:?} p{phase}")).clone();
+            let g = e
+                .glyph_phased(ch, phase)
+                .unwrap_or_else(|| panic!("取字形失败 {ch:?} p{phase}"))
+                .clone();
             // 对该字形在图集里的区域做 FNV 哈希
             let mut h: u64 = 0xcbf2_9ce4_8422_2325;
             for y in 0..g.height as usize {

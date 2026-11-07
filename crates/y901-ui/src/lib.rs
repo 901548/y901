@@ -32,13 +32,13 @@
 //! ```
 
 #![deny(missing_docs)]
+pub mod animation;
 pub mod color;
 pub mod command;
-pub mod animation;
 pub mod event;
+pub mod geometry;
 pub mod grid;
 pub mod image;
-pub mod geometry;
 pub mod invalidate;
 pub mod json;
 pub mod layout;
@@ -53,7 +53,7 @@ pub mod widget;
 pub use color::{Color, TextStyle};
 pub use command::Command;
 pub use event::{EventPhase, EventResult, Key, Modifiers, MouseButton, PointerCapture, UiEvent};
-pub use geometry::{Edges,Pos,Rect,Size, place_popup};
+pub use geometry::{place_popup, Edges, Pos, Rect, Size};
 pub use invalidate::{InvalidationHandle, PendingInvalidation};
 pub use json::Json;
 pub use layout::{flex_arrange, flex_measure, layout_tree, Flex, Stack};

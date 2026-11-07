@@ -76,10 +76,7 @@ fn popup_shifts_left_when_right_space_is_short() {
     let bounds = Rect::new(0.0, 0.0, 400.0, 400.0);
     let anchor = Rect::new(350.0, 50.0, 40.0, 24.0);
     let r = place_popup(anchor, Size::new(120.0, 100.0), bounds);
-    assert!(
-        r.right() <= bounds.right(),
-        "右侧放不下时应向左平移：{r:?}"
-    );
+    assert!(r.right() <= bounds.right(), "右侧放不下时应向左平移：{r:?}");
     assert!(r.x >= bounds.x);
 }
 

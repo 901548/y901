@@ -22,7 +22,6 @@ impl TextMetrics for Mono {
     }
 }
 
-
 /// 声明"我要自己处理 Tab"的通用探针。
 ///
 /// 之前用 TerminalWidget 充当这个角色；终端搬到 `y901-extras` 之后，
@@ -78,16 +77,14 @@ impl y901_ui::Widget for TabConsumer {
 fn tree() -> UiTree {
     let mut tree = UiTree::new(Box::new(
         Flex::column("root")
-            .push(Box::new(
-                {
-                    let _ = FlexItem::height(200.0);
-                    TabConsumer {
-                        id: "term",
-                        rect: y901_ui::Rect::ZERO,
-                        hits: std::rc::Rc::new(std::cell::Cell::new(0)),
-                    }
-                },
-            ))
+            .push(Box::new({
+                let _ = FlexItem::height(200.0);
+                TabConsumer {
+                    id: "term",
+                    rect: y901_ui::Rect::ZERO,
+                    hits: std::rc::Rc::new(std::cell::Cell::new(0)),
+                }
+            }))
             .push(Box::new(
                 Button::new("btn", "OK").flex_item(FlexItem::height(40.0)),
             )),

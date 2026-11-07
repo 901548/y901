@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use y901_ui::{
-    Constraints, EventCtx, EventResult, FlexItem, Pos, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiEvent, UiTree, Widget,
+    Constraints, EventCtx, EventResult, FlexItem, Pos, Rect, RenderCtx, Semantics, Size,
+    TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 
 struct Mono;
@@ -42,7 +42,12 @@ impl Widget for DropZone {
     ) -> Size {
         c.constrain(Size::new(c.max.w, 100.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -54,11 +59,12 @@ impl Widget for DropZone {
                 self.hits.set(self.hits.get() + 1);
                 let mut names = self.last_names.borrow_mut();
                 names.clear();
-                names.extend(
-                    paths
-                        .iter()
-                        .map(|p| p.file_name().unwrap_or_default().to_string_lossy().into_owned()),
-                );
+                names.extend(paths.iter().map(|p| {
+                    p.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                }));
                 EventResult::Handled
             }
             _ => EventResult::Ignored,
@@ -95,7 +101,10 @@ fn file_drop_routes_to_control_under_cursor() {
     assert!(r.h > 0.0);
 
     let ev = UiEvent::FileDrop {
-        paths: vec![PathBuf::from(r"C:\a\one.txt"), PathBuf::from(r"C:\a\two.png")],
+        paths: vec![
+            PathBuf::from(r"C:\a\one.txt"),
+            PathBuf::from(r"C:\a\two.png"),
+        ],
         pos: Pos::new(r.x + 10.0, r.y + 10.0),
     };
     let result = tree.dispatch(&ev);

@@ -66,7 +66,12 @@ impl Widget for OverflowLeaf {
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
         // 从自己的左上角开始，画得比自己的矩形更宽（模拟"内容溢出"）
         ctx.fill_rect(
-            Rect::new(self.rect.x, self.rect.y, self.rect.w + self.extra, self.rect.h),
+            Rect::new(
+                self.rect.x,
+                self.rect.y,
+                self.rect.w + self.extra,
+                self.rect.h,
+            ),
             Color::from_rgb8(255, 0, 0),
         );
     }
@@ -107,7 +112,6 @@ impl Widget for PlainLeaf {
         ctx.fill_rect(self.rect, Color::from_rgb8(0, 200, 0));
     }
 }
-
 
 /// 本地等宽度量：每个字符 8px 宽、15px 行高。
 struct Mono;

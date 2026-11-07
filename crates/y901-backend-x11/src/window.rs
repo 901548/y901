@@ -14,7 +14,10 @@ use y901_ui::theme::Theme;
 use y901_ui::{Key, Modifiers, MouseButton, Size, UiTree};
 
 use crate::conn::Connection;
-use crate::encode::{encode_create_gc, encode_create_window, encode_map_window, CreateWindowArgs, GcMask, ValueMask, WindowClass};
+use crate::encode::{
+    encode_create_gc, encode_create_window, encode_map_window, CreateWindowArgs, GcMask, ValueMask,
+    WindowClass,
+};
 use crate::keys::{keysym_to_key, modifiers_from_state, Keymap};
 use crate::X11Event;
 
@@ -143,13 +146,21 @@ impl X11Window {
         }
 
         // 键盘映射表（一次拿全，后面就不用再问服务器）
-        let count = info.max_keycode.saturating_sub(info.min_keycode).saturating_add(1);
+        let count = info
+            .max_keycode
+            .saturating_sub(info.min_keycode)
+            .saturating_add(1);
         let keymap = conn.get_keyboard_mapping(info.min_keycode, count)?;
 
         // MIT-SHM 探测：支持就用，不支持（或失败）静默回退
         let shm = match try_enable_shm(&mut conn, base | 0x10, width, height, info.root_depth) {
             Ok(Some(state)) => {
-                eprintln!("[y901] MIT-SHM 已启用（{}x{}，共享内存 {}字节）", width, height, state.seg.size());
+                eprintln!(
+                    "[y901] MIT-SHM 已启用（{}x{}，共享内存 {}字节）",
+                    width,
+                    height,
+                    state.seg.size()
+                );
                 Some(state)
             }
             Ok(None) => {
@@ -247,7 +258,12 @@ impl X11Window {
                 w: *width as u32,
                 h: *height as u32,
             },
-            X11Event::Key { pressed, keycode, state, .. } => {
+            X11Event::Key {
+                pressed,
+                keycode,
+                state,
+                ..
+            } => {
                 let (plain, shifted) = self.keymap.plain_and_shift(*keycode);
                 let shift = state & 1 != 0;
                 let ks = if shift { shifted.or(plain) } else { plain }?;
@@ -262,7 +278,14 @@ impl X11Window {
                     return None;
                 }
             }
-            X11Event::Button { pressed, button, event_x, event_y, state, .. } => {
+            X11Event::Button {
+                pressed,
+                button,
+                event_x,
+                event_y,
+                state,
+                ..
+            } => {
                 let (x, y) = (*event_x as f32, *event_y as f32);
                 match (*button, *pressed) {
                     (4, true) | (5, true) => RawEvent::Wheel {
@@ -293,12 +316,16 @@ impl X11Window {
                     },
                 }
             }
-            X11Event::Motion { event_x, event_y, .. } => RawEvent::MouseMove {
+            X11Event::Motion {
+                event_x, event_y, ..
+            } => RawEvent::MouseMove {
                 x: *event_x as f32,
                 y: *event_y as f32,
             },
             X11Event::Destroy { .. } => RawEvent::Close,
-            X11Event::ClientMessage { message_type, data, .. } => {
+            X11Event::ClientMessage {
+                message_type, data, ..
+            } => {
                 // WM_DELETE_WINDOW 的第一个 data 项是那个原子名，
                 // 本轮只要收到 ClientMessage 就当关窗处理（WM_PROTOCOLS 协商已完成）
                 if *message_type != 0 && data[0] != 0 {
@@ -353,7 +380,8 @@ impl EventSource for X11Window {
     fn poll(&mut self, timeout_ms: u32) -> Vec<RawEvent> {
         // 为什么用"短轮询 + 标志：没有 `poll(2)` 就无法同时等 socket 与自管管道；
         // 这里用 8ms 超时反复读，CPU 代价极小（空循环 125 次/秒）。
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
         let mut out = Vec::new();
         loop {
             let slice = if timeout_ms == 0 { 0 } else { 8 };
@@ -432,7 +460,8 @@ impl Presenter for X11Window {
             }
         }
 
-        self.conn.put_image_bgra(self.wid, self.gc, w, h, pixels, self.depth)?;
+        self.conn
+            .put_image_bgra(self.wid, self.gc, w, h, pixels, self.depth)?;
         Ok(())
     }
 }
@@ -488,7 +517,14 @@ fn intern(conn: &mut Connection, name: &[u8]) -> Result<u32, String> {
 
 /// 编码 `ChangeProperty`（WM_NAME，UTF8）。
 fn encode_change_title(wid: u32, name_atom: u32, type_atom: u32, title: &str) -> Vec<u8> {
-    crate::encode_change_property(wid, name_atom, type_atom, 8, crate::PropMode::Replace, title.as_bytes())
+    crate::encode_change_property(
+        wid,
+        name_atom,
+        type_atom,
+        8,
+        crate::PropMode::Replace,
+        title.as_bytes(),
+    )
 }
 
 /// `Key` 的调试名（报告与测试用）。
@@ -548,7 +584,9 @@ fn try_enable_shm(
     let bytes = width as usize * height as usize * 4;
     let seg = crate::shm::ShmSegment::new(bytes)?;
     let shmid = seg.id() as u32;
-    conn.send(&crate::encode::encode_shm_attach(major, seg_id, shmid, false))?;
+    conn.send(&crate::encode::encode_shm_attach(
+        major, seg_id, shmid, false,
+    ))?;
     conn.flush()?;
     let errs = conn.sync()?;
     if !errs.is_empty() {

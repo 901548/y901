@@ -109,7 +109,6 @@ pub struct Grid {
 }
 
 impl Grid {
-
     /// 设置在 Flex 中的尺寸约束（链式）。
     pub fn flex_item(mut self, item: crate::FlexItem) -> Self {
         self.item = item;
@@ -280,7 +279,11 @@ impl Grid {
                 }
             }
             let got_span = placed.is_some() && (w > 1 || h > 1);
-            effective.push(if got_span { (w as u32, h as u32) } else { (1, 1) });
+            effective.push(if got_span {
+                (w as u32, h as u32)
+            } else {
+                (1, 1)
+            });
             out.push(placed.unwrap_or((0, 0)));
         }
 
@@ -553,7 +556,12 @@ impl std::fmt::Display for PlacementError {
                 write!(f, "{axis} 超出范围：请求 {end} 列/行，上限 {limit}")
             }
             PlacementError::UnknownChild { id } => write!(f, "不存在的子控件 id：{id}"),
-            PlacementError::Overlap { id, with, requested, .. } => {
+            PlacementError::Overlap {
+                id,
+                with,
+                requested,
+                ..
+            } => {
                 write!(f, "定位冲突：{id}")?;
                 if let Some(w) = with {
                     write!(f, " 与 {w}")?;
@@ -676,7 +684,12 @@ impl Grid {
     ///
     /// 放不下时的行为（布局阶段，无法返回 `Err`）：**退化为 1×1 并警告一次**。
     /// 不动态加行——那会让声明式布局的结果不可预测。
-    pub fn span(&mut self, id: impl Into<String>, cols: u32, rows: u32) -> Result<(), PlacementError> {
+    pub fn span(
+        &mut self,
+        id: impl Into<String>,
+        cols: u32,
+        rows: u32,
+    ) -> Result<(), PlacementError> {
         let id = id.into();
         if cols == 0 {
             return Err(PlacementError::EmptyRange {
@@ -848,7 +861,8 @@ impl Widget for Grid {
         let mut col_spans: Vec<(usize, usize, f32)> = Vec::new();
         let mut row_spans: Vec<(usize, usize, f32)> = Vec::new();
         // 先把每个子控件的 (col,row) 算好：循环内再调 `cell_of` 会同时借 self。
-        let cells: Vec<(usize, usize)> = (0..self.children.len()).map(|i| self.cell_of(i)).collect();
+        let cells: Vec<(usize, usize)> =
+            (0..self.children.len()).map(|i| self.cell_of(i)).collect();
         for ((child, cell_w), (col, row)) in self.children.iter_mut().zip(widths).zip(cells) {
             let size = child.measure(
                 metrics,
@@ -872,21 +886,13 @@ impl Widget for Grid {
                     row_end: row as u32 + 1,
                 });
             if span.col_span() > 1 {
-                col_spans.push((
-                    span.col_start as usize,
-                    span.col_end as usize,
-                    size.w,
-                ));
+                col_spans.push((span.col_start as usize, span.col_end as usize, size.w));
             } else {
                 col_content[col] = col_content[col].max(size.w);
             }
             if row < rows {
                 if span.row_span() > 1 {
-                    row_spans.push((
-                        span.row_start as usize,
-                        span.row_end as usize,
-                        size.h,
-                    ));
+                    row_spans.push((span.row_start as usize, span.row_end as usize, size.h));
                 } else {
                     row_content[row] = row_content[row].max(size.h);
                 }
@@ -1020,7 +1026,12 @@ mod tests {
         fn id(&self) -> &str {
             &self.id
         }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _cache: &mut LayoutCache,
+        ) -> Size {
             c.constrain(Size::new(10.0, 10.0))
         }
         fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
@@ -1140,8 +1151,16 @@ mod tests {
 
         let r = g.child_rects();
         assert_eq!(r[0], Rect::new(100.0, 200.0, 50.0, 20.0), "左上");
-        assert_eq!(r[1], Rect::new(160.0, 200.0, 50.0, 20.0), "右上（含列间距 10）");
-        assert_eq!(r[2], Rect::new(100.0, 225.0, 50.0, 20.0), "左下（含行间距 5）");
+        assert_eq!(
+            r[1],
+            Rect::new(160.0, 200.0, 50.0, 20.0),
+            "右上（含列间距 10）"
+        );
+        assert_eq!(
+            r[2],
+            Rect::new(100.0, 225.0, 50.0, 20.0),
+            "左下（含行间距 5）"
+        );
         assert_eq!(r[3], Rect::new(160.0, 225.0, 50.0, 20.0), "右下");
     }
 
@@ -1358,19 +1377,12 @@ mod tests {
     #[test]
     fn spanning_columns_distribute_min_content_across_tracks() {
         // 跨 2 列，内在宽 150：两列总和必须 >= 150，且不得让第一列独吞。
-        let mut g = auto_grid(
-            2,
-            1,
-            vec![Box::new(SizedLeaf::new("wide", 150.0, 10.0))],
-        );
+        let mut g = auto_grid(2, 1, vec![Box::new(SizedLeaf::new("wide", 150.0, 10.0))]);
         g.place("wide", 0..2, 0..1).expect("跨两列");
         let g = measured(g, 400.0, 100.0);
 
         let total: f32 = g.col_widths.iter().sum();
-        assert!(
-            total >= 149.9,
-            "两列总宽应 >= 150，实测 {total}"
-        );
+        assert!(total >= 149.9, "两列总宽应 >= 150，实测 {total}");
         assert!(
             g.col_widths[0] <= 150.1 && g.col_widths[1] <= 150.1,
             "不应把 150 全塞进一列：{:?}",
@@ -1451,7 +1463,10 @@ mod tests {
         let mut cache = LayoutCache::new();
         let c = Constraints::loose(Size::new(100.0, 100.0));
         let size = g.measure(&Mono, c, &mut cache);
-        assert!(size.w.is_finite() && size.h.is_finite(), "尺寸必须有限：{size:?}");
+        assert!(
+            size.w.is_finite() && size.h.is_finite(),
+            "尺寸必须有限：{size:?}"
+        );
         assert!(size.w >= 0.0 && size.h >= 0.0);
         g.arrange(Rect::new(0.0, 0.0, 100.0, 100.0), &Mono, &mut cache);
         assert!(g.child_rects().is_empty());
@@ -1460,9 +1475,13 @@ mod tests {
     #[test]
     fn single_cell_grid_gives_the_child_the_content_area() {
         // 1x1 网格 + 1 个子控件：子控件应占满内容区（扣除 padding）
-        let mut g = Grid::new("g", vec![GridTrack::Fraction(1.0)], vec![GridTrack::Fraction(1.0)])
-            .padding(Edges::all(10.0))
-            .with_children(vec![Box::new(SizedLeaf::new("only", 10.0, 10.0))]);
+        let mut g = Grid::new(
+            "g",
+            vec![GridTrack::Fraction(1.0)],
+            vec![GridTrack::Fraction(1.0)],
+        )
+        .padding(Edges::all(10.0))
+        .with_children(vec![Box::new(SizedLeaf::new("only", 10.0, 10.0))]);
         let mut cache = LayoutCache::new();
         let c = Constraints::loose(Size::new(100.0, 50.0));
         let _ = g.measure(&Mono, c, &mut cache);
@@ -1494,7 +1513,11 @@ mod tests {
         let _ = g.auto_cells(); // 生产中由 measure 调用；单元测试需显式跑一次
         let rects = g.child_rects();
         // x = 0 + (50+10)*2 = 120
-        assert_eq!(rects[1], Rect::new(120.0, 0.0, 110.0, 20.0), "b 应落在 (2,0)");
+        assert_eq!(
+            rects[1],
+            Rect::new(120.0, 0.0, 110.0, 20.0),
+            "b 应落在 (2,0)"
+        );
     }
 
     #[test]
@@ -1516,18 +1539,26 @@ mod tests {
         g.span("b", 2, 1).expect("b 要 2 列");
         let _ = g.auto_cells();
         let rects = g.child_rects();
-        assert_eq!(rects[1], Rect::new(0.0, 20.0, 100.0, 20.0), "b 应换行到 (0,1)");
+        assert_eq!(
+            rects[1],
+            Rect::new(0.0, 20.0, 100.0, 20.0),
+            "b 应换行到 (0,1)"
+        );
     }
 
     #[test]
     fn span_falls_back_to_1x1_when_the_grid_is_full() {
         // 场景设计（2x1 网格）：a 声明 2x1 占满两列；b 也要 2x1，但已无连续空位 →
         // 退化 1x1；而 1x1 也已没空格 → 按现有兜底落在 (0,0)。
-        let mut g = Grid::new("g", vec![GridTrack::Fixed(50.0); 2], vec![GridTrack::Fixed(20.0); 1])
-            .with_children(vec![
-                Box::new(TestLeaf::new("a")),
-                Box::new(TestLeaf::new("b")),
-            ]);
+        let mut g = Grid::new(
+            "g",
+            vec![GridTrack::Fixed(50.0); 2],
+            vec![GridTrack::Fixed(20.0); 1],
+        )
+        .with_children(vec![
+            Box::new(TestLeaf::new("a")),
+            Box::new(TestLeaf::new("b")),
+        ]);
         g.rect = Rect::ZERO;
         g.col_widths = vec![50.0, 50.0];
         g.row_heights = vec![20.0];
@@ -1536,13 +1567,21 @@ mod tests {
         let _ = g.auto_cells();
         let rects = g.child_rects();
         assert_eq!(rects[0], Rect::new(0.0, 0.0, 100.0, 20.0), "a 应占满");
-        assert_eq!(rects[1], Rect::new(0.0, 0.0, 50.0, 20.0), "b 退化为 1×1 并兜底到 (0,0)");
+        assert_eq!(
+            rects[1],
+            Rect::new(0.0, 0.0, 50.0, 20.0),
+            "b 退化为 1×1 并兜底到 (0,0)"
+        );
     }
 
     #[test]
     fn span_warns_only_once_per_id() {
-        let mut g = Grid::new("g", vec![GridTrack::Fixed(50.0); 2], vec![GridTrack::Fixed(20.0); 1])
-            .with_children(vec![Box::new(TestLeaf::new("a"))]);
+        let mut g = Grid::new(
+            "g",
+            vec![GridTrack::Fixed(50.0); 2],
+            vec![GridTrack::Fixed(20.0); 1],
+        )
+        .with_children(vec![Box::new(TestLeaf::new("a"))]);
         g.col_widths = vec![50.0, 50.0];
         g.row_heights = vec![20.0];
         g.span("a", 2, 1).expect("ok");
@@ -1550,11 +1589,15 @@ mod tests {
         assert!(g.warned_span_ids.is_empty(), "能放下时不应警告");
 
         // 再放一个放不下的
-        let mut g2 = Grid::new("g", vec![GridTrack::Fixed(50.0); 2], vec![GridTrack::Fixed(20.0); 1])
-            .with_children(vec![
-                Box::new(TestLeaf::new("a")),
-                Box::new(TestLeaf::new("b")),
-            ]);
+        let mut g2 = Grid::new(
+            "g",
+            vec![GridTrack::Fixed(50.0); 2],
+            vec![GridTrack::Fixed(20.0); 1],
+        )
+        .with_children(vec![
+            Box::new(TestLeaf::new("a")),
+            Box::new(TestLeaf::new("b")),
+        ]);
         g2.col_widths = vec![50.0, 50.0];
         g2.row_heights = vec![20.0];
         g2.span("a", 2, 1).expect("ok");
@@ -1599,6 +1642,10 @@ mod tests {
         g.place("a", 1..2, 0..1).expect("a 在 (1,0)");
         g.span("a", 2, 1).expect("span 不报错，但被忽略");
         assert_eq!(g.span_of("a"), None, "place 优先，span 不生效");
-        assert_eq!(rect_of(&g, "a"), Rect::new(160.0, 200.0, 50.0, 20.0), "a 位置不变");
+        assert_eq!(
+            rect_of(&g, "a"),
+            Rect::new(160.0, 200.0, 50.0, 20.0),
+            "a 位置不变"
+        );
     }
 }

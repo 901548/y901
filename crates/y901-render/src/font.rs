@@ -16,7 +16,6 @@ pub struct DirtyRect {
     pub height: u32,
 }
 
-
 /// 一级 mip 在**图集里的位置**。
 ///
 /// 为什么不直接存 [`crate::mip::MipLevel`]：那会把覆盖率像素复制一份进 `GlyphInfo`，
@@ -185,7 +184,6 @@ pub trait FontEngine {
     /// 格高度。
     fn cell_height(&self) -> f32;
 }
-
 
 /// 由字号推出等宽单元格尺寸 `(宽, 高)`。
 /// 为什么要独立函数：布局、字形引擎、后端必须用同一套格尺寸，否则文字与光标会错位。

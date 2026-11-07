@@ -68,14 +68,8 @@ fn sgr7_swaps_default_colours_with_exact_rgb() {
     t.render(&mut soft);
     let px = soft.pixels().to_vec();
 
-    let normal = rgb_of(resolve(
-        y901_core::ColorSpec::Default,
-        DEFAULT_BG,
-    )); // 默认背景
-    let inverted = rgb_of(resolve(
-        y901_core::ColorSpec::Default,
-        DEFAULT_FG,
-    )); // 默认前景
+    let normal = rgb_of(resolve(y901_core::ColorSpec::Default, DEFAULT_BG)); // 默认背景
+    let inverted = rgb_of(resolve(y901_core::ColorSpec::Default, DEFAULT_FG)); // 默认前景
 
     // "abc" 保持默认背景
     for col in 0..3 {

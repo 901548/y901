@@ -25,7 +25,11 @@ fn soft() -> SoftBackend {
 /// 取像素的 RGB（BGRA 存储）。
 fn rgb(s: &SoftBackend, x: u32, y: u32) -> (u8, u8, u8) {
     let p = s.pixel(x, y).expect("像素");
-    (((p >> 16) & 0xFF) as u8, ((p >> 8) & 0xFF) as u8, (p & 0xFF) as u8)
+    (
+        ((p >> 16) & 0xFF) as u8,
+        ((p >> 8) & 0xFF) as u8,
+        (p & 0xFF) as u8,
+    )
 }
 
 /// 造一张 w×h 的纯色纹理。
@@ -59,11 +63,7 @@ fn solid_texture_fills_the_rect_with_exact_colour() {
     let mut s = soft();
     s.clear();
     let id = solid(&mut s, 2, 2, (200, 40, 60));
-    s.draw_image(
-        Rect::new(8.0, 8.0, 32.0, 32.0),
-        id,
-        ImageStyle::default(),
-    );
+    s.draw_image(Rect::new(8.0, 8.0, 32.0, 32.0), id, ImageStyle::default());
     // 中心与四角都应接近原色（双线性对纯色是恒等映射）
     for (x, y) in [(10, 10), (39, 10), (10, 39), (39, 39), (24, 24)] {
         let (r, g, b) = rgb(&s, x, y);
@@ -174,6 +174,10 @@ fn invalid_texture_draws_nothing() {
     let mut s = soft();
     s.clear();
     let before = rgb(&s, 10, 10);
-    s.draw_image(Rect::new(0.0, 0.0, 20.0, 20.0), TextureId::INVALID, ImageStyle::default());
+    s.draw_image(
+        Rect::new(0.0, 0.0, 20.0, 20.0),
+        TextureId::INVALID,
+        ImageStyle::default(),
+    );
     assert_eq!(rgb(&s, 10, 10), before, "无效句柄不应改动任何像素");
 }

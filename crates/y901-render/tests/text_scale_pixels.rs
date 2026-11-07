@@ -88,7 +88,10 @@ fn scale_one_is_pixel_identical_to_the_unscaled_path() {
             }
         }
     }
-    assert_eq!(diff, 0, "s = 1.0 必须与不缩放逐像素一致，实测差异 {diff} 像素");
+    assert_eq!(
+        diff, 0,
+        "s = 1.0 必须与不缩放逐像素一致，实测差异 {diff} 像素"
+    );
 
     // 变异对照：改一个像素应该被发现（否则这个比较没有区分力）
     let mut c = soft();
@@ -119,9 +122,7 @@ fn half_scale_ink_is_about_a_quarter() {
     draw_at(&mut b2, "A", Some(0.5));
     let mass_half = ink_mass(&b2);
     let ratio = mass_half as f64 / mass_full as f64;
-    eprintln!(
-        "[text-scale] s=0.5 墨量比 = {ratio:.3}（像素个数比 = {count_ratio:.3}）"
-    );
+    eprintln!("[text-scale] s=0.5 墨量比 = {ratio:.3}（像素个数比 = {count_ratio:.3}）");
     // 面积缩小到 1/4，允许 ±30% 的抗锯钽边误差
     assert!(
         (0.175..=0.325).contains(&ratio),

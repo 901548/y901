@@ -84,7 +84,12 @@ impl Slider {
     /// 轨道矩形（水平铺满、垂直居中）。
     fn track(&self) -> Rect {
         let h = TRACK_H.min(self.rect.h);
-        Rect::new(self.rect.x, self.rect.y + (self.rect.h - h) * 0.5, self.rect.w.max(0.0), h)
+        Rect::new(
+            self.rect.x,
+            self.rect.y + (self.rect.h - h) * 0.5,
+            self.rect.w.max(0.0),
+            h,
+        )
     }
 
     /// 滑块中心 x。
@@ -116,13 +121,11 @@ impl Slider {
     /// 目前只在测试里用：鼠标按下时整个矩形都算命中（点轨道也要跳转），
     /// 但"点滑块只跟随拖拽、点轨道直接跳"这种更细的手感分支需要它。
     // 测试 API：仅 slider 单元测试调用，作为“命中判定语义”的可执行文档。
-// 归类：内部实现 —— `hits_thumb` 已被等价逻辑取代，保留作对照
+    // 归类：内部实现 —— `hits_thumb` 已被等价逻辑取代，保留作对照
     #[allow(dead_code)]
     fn hits_thumb(&self, x: f32, y: f32) -> bool {
         let t = self.thumb();
-        x >= t.x - 2.0
-            && x <= t.right() + 2.0
-            && (y - (t.y + t.h * 0.5)).abs() <= HIT_R
+        x >= t.x - 2.0 && x <= t.right() + 2.0 && (y - (t.y + t.h * 0.5)).abs() <= HIT_R
     }
 }
 
@@ -226,7 +229,11 @@ impl Widget for Slider {
         // 已填充部分（从左侧到滑块中心）
         let filled = (self.thumb_center_x() - track.x).clamp(0.0, track.w);
         if filled > 0.0 {
-            ctx.fill_round_rect(Rect::new(track.x, track.y, filled, track.h), accent.bg, TRACK_H * 0.5);
+            ctx.fill_round_rect(
+                Rect::new(track.x, track.y, filled, track.h),
+                accent.bg,
+                TRACK_H * 0.5,
+            );
         }
 
         // 滑块：外圈边框 + 内圆，焦点时边框用焦点色

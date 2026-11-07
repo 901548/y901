@@ -26,19 +26,18 @@
 #![deny(missing_docs)]
 pub mod mip;
 
-/// 圆角矩形 SDF（与 D3D 着色器逐字对应）。
-pub mod sdf;
-#[cfg(test)]
-mod supersample;
 pub mod atlas;
 pub mod font;
 pub mod font_engine;
+/// 圆角矩形 SDF（与 D3D 着色器逐字对应）。
+pub mod sdf;
 pub mod soft;
+#[cfg(test)]
+mod supersample;
 
 pub use font::{cell_metrics_for, DirtyRect, FontEngine, GlyphInfo};
 pub use font_engine::{
-    debug_ascii, default_test_font_path, glyph_geometry, load_font, polygon_area,
-    rasterize_glyph, rasterize_glyph_phased, resolve_font_path, GlyphBitmap, GlyphGeometry, Line,
-    MyFontEngine,
+    debug_ascii, default_test_font_path, glyph_geometry, load_font, polygon_area, rasterize_glyph,
+    rasterize_glyph_phased, resolve_font_path, GlyphBitmap, GlyphGeometry, Line, MyFontEngine,
 };
 pub use soft::SoftBackend;

@@ -4,8 +4,8 @@
 //! 于是它们的 rect 就是整个视口 —— 这样"点外部关闭/吞掉"才有几何依据。
 
 use y901_ui::{
-    Command, Constraints, Edges, EventCtx, EventResult, FlexItem, Json, Pos, Rect,
-    RenderCtx, Role, Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
+    Command, Constraints, Edges, EventCtx, EventResult, FlexItem, Json, Pos, Rect, RenderCtx, Role,
+    Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 菜单项高度。
@@ -186,7 +186,12 @@ impl Widget for Menu {
         c.constrain(c.max)
     }
 
-    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        rect: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = rect;
         let w = 220.0_f32.min((rect.w - 16.0).max(0.0));
         let h = PAD * 2.0 + self.items.len() as f32 * ITEM_H;
@@ -537,7 +542,6 @@ impl Widget for Dialog {
     fn is_modal(&self) -> bool {
         self.open
     }
-
 
     fn is_open(&self) -> bool {
         self.open

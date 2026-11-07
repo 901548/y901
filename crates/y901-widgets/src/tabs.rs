@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use y901_ui::{
     animation::{Animate, Easing},
     Constraints, EventCtx, EventResult, Key, Modifiers, Pos, Rect, RenderCtx, Semantics, Size,
-    State, TextStyle, TextMetrics, UiEvent, Widget,
+    State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 标签栏高度（逻辑像素）。
@@ -112,7 +112,12 @@ impl Tabs {
 
     /// 标签栏矩形。
     fn bar_rect(&self) -> Rect {
-        Rect::new(self.rect.x, self.rect.y, self.rect.w, BAR_H.min(self.rect.h))
+        Rect::new(
+            self.rect.x,
+            self.rect.y,
+            self.rect.w,
+            BAR_H.min(self.rect.h),
+        )
     }
 
     /// 内容区矩形。

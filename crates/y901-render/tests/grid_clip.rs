@@ -18,8 +18,8 @@ use y901_render::MyFontEngine;
 use y901_ui::grid::{Grid, GridTrack};
 use y901_ui::layout::LayoutCache;
 use y901_ui::{
-    Color, Constraints, Edges, EventCtx, EventResult, Rect, RenderCtx, Semantics, Size, TextMetrics,
-    UiEvent, Widget,
+    Color, Constraints, Edges, EventCtx, EventResult, Rect, RenderCtx, Semantics, Size,
+    TextMetrics, UiEvent, Widget,
 };
 
 const W: u32 = 200;
@@ -60,7 +60,10 @@ impl Widget for Overflow {
         EventResult::Ignored
     }
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
-        ctx.fill_rect(Rect::new(self.rect.x, self.rect.y, 100.0, 100.0), Color::WHITE);
+        ctx.fill_rect(
+            Rect::new(self.rect.x, self.rect.y, 100.0, 100.0),
+            Color::WHITE,
+        );
     }
     fn semantics(&self) -> Semantics {
         Semantics::default()
@@ -100,10 +103,7 @@ fn overflow_is_clipped_to_the_cell() {
 
     assert!(white(25, 25), "单元格内应被内容覆盖");
     // 单元格高 50，子控件画到 100：y=75 已在格子之外，必须被裁掉。
-    assert!(
-        !white(25, 75),
-        "格子之外的内容应被裁剪（children_clip）"
-    );
+    assert!(!white(25, 75), "格子之外的内容应被裁剪（children_clip）");
 
     eprintln!("[grid-clip] 溢出内容已被裁到单元格内（children_clip）");
 }

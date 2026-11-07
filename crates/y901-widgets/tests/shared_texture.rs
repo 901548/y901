@@ -44,7 +44,10 @@ fn two_images_share_one_texture_until_both_unmount() {
     // 首次渲染时各自 retain（构造时拿不到 RenderCtx）
     arrange_render(&mut a, &mut s);
     arrange_render(&mut b, &mut s);
-    eprintln!("[share] 渲染两个控件后 refcount = {:?}", s.texture_refcount(tex));
+    eprintln!(
+        "[share] 渲染两个控件后 refcount = {:?}",
+        s.texture_refcount(tex)
+    );
     assert_eq!(
         s.texture_refcount(tex),
         Some(3),

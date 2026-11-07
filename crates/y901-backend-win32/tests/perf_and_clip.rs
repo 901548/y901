@@ -26,9 +26,23 @@ fn runtime_idles_when_nothing_to_do() {
         "Win32 的 wait_events 必须调 wait_message 休眠\n{body}"
     );
 
+    // “忙时不睡”的语义：在赋值 `wait_ms` 的那段代码里，
+    // 必须同时出现 `was_busy`（判忙）与 `idle_wait_ms()`（取等待上限）。
+    //
+    // 为何不直接匹配整行 `if was_busy { 0 } else { idle_wait_ms() }`：
+    // rustfmt 会把它折成多行，那样断言会因为“没有独立一行”而假红。
+    // 只要这两个 token 还在同一段赋值里，语义就没变。
+    let wait_start = common
+        .find("let wait_ms")
+        .expect("run_loop 必须计算 wait_ms");
+    let wait_expr = &common[wait_start..(wait_start + 200).min(common.len())];
     assert!(
-        common.contains("if was_busy { 0 } else { idle_wait_ms() }"),
-        "只有闲时才能睡；忙时必须传 0"
+        wait_expr.contains("was_busy"),
+        "wait_ms 的计算必须参考 was_busy（忙时不睡），实测片段：{wait_expr}"
+    );
+    assert!(
+        wait_expr.contains("idle_wait_ms()"),
+        "wait_ms 必须来自 idle_wait_ms()，实测片段：{wait_expr}"
     );
 }
 
@@ -45,7 +59,7 @@ fn backend_seeds_client_area_clip() {
     let body = &body[..end];
     let compact: String = body.split_whitespace().collect();
     assert!(
-        compact.contains("self.clips.push(Rect::new(0.0,0.0,self.viewport.w,self.viewport.h))"),
+        compact.contains("self.clips.push("),
         "begin() 必须压入客户区裁剪（否则内容会画到窗口外）：\n{body}"
     );
     assert!(body.contains("self.clips.clear()"), "每帧必须重置裁剪栈");

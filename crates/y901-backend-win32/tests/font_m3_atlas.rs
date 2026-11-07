@@ -33,7 +33,10 @@ fn atlas_2048_holds_1200_cjk_times_four_phases() {
     for ch in &chars {
         for phase in 0u8..4 {
             e.begin_frame();
-            assert!(e.glyph_phased(*ch, phase).is_some(), "取字形失败 {ch:?} p{phase}");
+            assert!(
+                e.glyph_phased(*ch, phase).is_some(),
+                "取字形失败 {ch:?} p{phase}"
+            );
         }
     }
     let build = t.elapsed().as_secs_f64() * 1e3;
@@ -57,8 +60,10 @@ fn atlas_2048_holds_1200_cjk_times_four_phases() {
         }
     }
     let steady = t2.elapsed().as_secs_f64() * 1e3;
-    eprintln!("[3b2] 稳态（3 轮×1200 字命中）：{steady:.1}ms，最坏驱逐={worst_evict}",
-        worst_evict = worst_evict);
+    eprintln!(
+        "[3b2] 稳态（3 轮×1200 字命中）：{steady:.1}ms，最坏驱逐={worst_evict}",
+        worst_evict = worst_evict
+    );
     assert_eq!(worst_evict, 0, "稳态不应驱逐");
 }
 
@@ -71,7 +76,10 @@ fn atlas_2048_holds_1200_cjk_times_four_phases() {
 fn forced_eviction_thrash_measurement() {
     let mut e = engine(512);
     let chars = cjk_1200();
-    eprintln!("[3b2] 图集 512²（容量约 200 槽），工作集 {} 字", chars.len());
+    eprintln!(
+        "[3b2] 图集 512²（容量约 200 槽），工作集 {} 字",
+        chars.len()
+    );
 
     // 第一轮：建立（必然持续驱逐）
     let mut total_evict = 0usize;

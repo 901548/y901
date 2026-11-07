@@ -111,7 +111,10 @@ impl Flattener {
             return;
         }
         let mid = |a: (i32, i32), b: (i32, i32)| -> (i32, i32) {
-            (((a.0 as i64 + b.0 as i64) / 2) as i32, ((a.1 as i64 + b.1 as i64) / 2) as i32)
+            (
+                ((a.0 as i64 + b.0 as i64) / 2) as i32,
+                ((a.1 as i64 + b.1 as i64) / 2) as i32,
+            )
         };
         let p01 = mid(p0, p1);
         let p12 = mid(p1, p2);
@@ -138,7 +141,10 @@ impl Flattener {
             return;
         }
         let mid = |a: (i32, i32), b: (i32, i32)| -> (i32, i32) {
-            (((a.0 as i64 + b.0 as i64) / 2) as i32, ((a.1 as i64 + b.1 as i64) / 2) as i32)
+            (
+                ((a.0 as i64 + b.0 as i64) / 2) as i32,
+                ((a.1 as i64 + b.1 as i64) / 2) as i32,
+            )
         };
         let p01 = mid(p0, p1);
         let p12 = mid(p1, p2);
@@ -169,12 +175,7 @@ impl Flattener {
     }
 
     /// 三次平坦度：两个控制点都足够近弦。
-    fn cubic_flat_enough(
-        p0: (i32, i32),
-        p1: (i32, i32),
-        p2: (i32, i32),
-        p3: (i32, i32),
-    ) -> bool {
+    fn cubic_flat_enough(p0: (i32, i32), p1: (i32, i32), p2: (i32, i32), p3: (i32, i32)) -> bool {
         let (dx, dy) = (p3.0 - p0.0, p3.1 - p0.1);
         let len2 = dx as i64 * dx as i64 + dy as i64 * dy as i64;
         if len2 == 0 {
@@ -355,6 +356,10 @@ mod limit_tests {
         f.curve_to(1.0, 1.0, 2.0, 2.0, 3.0, 3.0);
         f.close();
         assert!(f.overflowed);
-        assert_eq!(f.lines.len(), MAX_LINES, "再多的回调也不应使 lines 继续增长");
+        assert_eq!(
+            f.lines.len(),
+            MAX_LINES,
+            "再多的回调也不应使 lines 继续增长"
+        );
     }
 }

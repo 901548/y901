@@ -23,7 +23,9 @@ fn d3d_and_soft_share_the_same_animation_semantics() {
             "{name} 缺少 RenderCtx::animation —— Popup 动画会恒为 1.0"
         );
         assert!(
-            src.contains("fn set_animations(&mut self, snapshot: &y901_ui::animation::AnimSnapshot)"),
+            src.contains(
+                "fn set_animations(&mut self, snapshot: &y901_ui::animation::AnimSnapshot)"
+            ),
             "{name} 缺少 RenderCtx::set_animations —— 动画快照无法推入"
         );
     }
@@ -66,7 +68,7 @@ fn d3d_and_soft_share_the_same_background_color_semantics() {
 fn d3d_stroke_round_rect_applies_transform() {
     let src = include_str!("../src/backend/mod.rs");
     let start = src
-        .find("fn stroke_round_rect(&mut self, rect: Rect, color: Color, width: f32, radius: f32)")
+        .find("fn stroke_round_rect(")
         .expect("D3dBackend::stroke_round_rect 未找到");
     let body = &src[start..];
     let end = body.find("fn stroke_rect(").unwrap_or(body.len());

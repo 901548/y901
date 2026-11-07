@@ -34,7 +34,7 @@ pub fn sanitize(text: &str) -> String {
             '\n' => out.push('\r'),
             '\t' => out.push('\t'),
             c if (c as u32) < 0x20 => {} // 其余控制字符一律丢弃
-            '' => {} // DEL
+            '' => {}                    // DEL
             c => out.push(c),
         }
     }

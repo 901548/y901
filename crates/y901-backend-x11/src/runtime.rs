@@ -45,28 +45,15 @@ impl PlatformRuntime for X11Runtime {
         let font = options.font.clone().unwrap_or_default();
         let (cw, ch) = y901_render::cell_metrics_for(font.size);
         let cell = Size::new(cw, ch);
-        let engine: Box<dyn y901_render::FontEngine> = Box::new(
-            MyFontEngine::new(
-                y901_render::load_font(&y901_render::resolve_font_path(&font.family))?,
-                font.size,
-                cell,
-            )?,
-        );
-        let soft = SoftBackend::new(
-            width.max(1),
-            height.max(1),
-            engine,
+        let engine: Box<dyn y901_render::FontEngine> = Box::new(MyFontEngine::new(
+            y901_render::load_font(&y901_render::resolve_font_path(&font.family))?,
+            font.size,
             cell,
-            options.theme,
-        )?;
+        )?);
+        let soft = SoftBackend::new(width.max(1), height.max(1), engine, cell, options.theme)?;
 
-        let mut window = X11Window::create(
-            &display,
-            width as u16,
-            height as u16,
-            &options.title,
-            soft,
-        )?;
+        let mut window =
+            X11Window::create(&display, width as u16, height as u16, &options.title, soft)?;
         eprintln!(
             "[y901] X11 后端就绪：display={display} {}x{}，字形引擎=自研 TTF",
             options.width, options.height

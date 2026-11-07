@@ -12,8 +12,8 @@
 //!   或回到父项。到头/到尾不循环（树里循环会让人失去方向感）。
 
 use y901_ui::{
-    Constraints, EventCtx, EventResult, Key, Modifiers, Pos, Rect, RenderCtx, Role,
-    Semantics, Size, State, TextStyle, TextMetrics, UiEvent, Widget,
+    Constraints, EventCtx, EventResult, Key, Modifiers, Pos, Rect, RenderCtx, Role, Semantics,
+    Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 每层缩进。
@@ -72,7 +72,6 @@ pub struct TreeView {
 }
 
 impl TreeView {
-
     /// 设置在 Flex 中的尺寸约束（链式）。
     pub fn flex_item(mut self, item: y901_ui::FlexItem) -> Self {
         self.item = item;
@@ -450,7 +449,12 @@ impl Widget for TreeView {
             .value(
                 self.selected
                     .as_ref()
-                    .map(|p| p.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("."))
+                    .map(|p| {
+                        p.iter()
+                            .map(|i| i.to_string())
+                            .collect::<Vec<_>>()
+                            .join(".")
+                    })
                     .unwrap_or_default(),
             )
             .prop("visible_rows", self.visible.len().to_string())
@@ -520,15 +524,17 @@ mod tests {
 
     #[test]
     fn visible_range_follows_scroll() {
-        let children: Vec<TreeItem> = (0..100)
-            .map(|i| TreeItem::leaf(format!("i{i}")))
-            .collect();
+        let children: Vec<TreeItem> = (0..100).map(|i| TreeItem::leaf(format!("i{i}"))).collect();
         let mut t = TreeView::new("t", vec![TreeItem::branch("root", children)]);
         t.rect = Rect::new(0.0, 0.0, 200.0, 96.0);
         let r0 = t.visible_range();
         t.scroll_offset = ROW_H * 10.0;
         let r1 = t.visible_range();
-        assert!(r1.start >= 10, "滚动 10 行后起始行应 >= 10，实际 {}", r1.start);
+        assert!(
+            r1.start >= 10,
+            "滚动 10 行后起始行应 >= 10，实际 {}",
+            r1.start
+        );
         assert!(r0.start < r1.start);
     }
 

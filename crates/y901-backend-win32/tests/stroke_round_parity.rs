@@ -42,11 +42,7 @@ impl y901_ui::Widget for Scene {
     fn rect(&self) -> Rect {
         self.rect
     }
-    fn event(
-        &mut self,
-        _c: &mut y901_ui::EventCtx,
-        _e: &y901_ui::UiEvent,
-    ) -> y901_ui::EventResult {
+    fn event(&mut self, _c: &mut y901_ui::EventCtx, _e: &y901_ui::UiEvent) -> y901_ui::EventResult {
         y901_ui::EventResult::Ignored
     }
     fn render(&mut self, ctx: &mut dyn RenderCtx) {

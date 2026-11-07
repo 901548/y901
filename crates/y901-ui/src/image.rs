@@ -133,7 +133,10 @@ mod tests {
         }
         .layout(Rect::new(0.0, 0.0, 50.0, 50.0), 100, 50);
         assert_eq!(dst, Rect::new(0.0, 0.0, 50.0, 50.0), "目标被填满");
-        assert!(close(src.w, 50.0) && close(src.h, 50.0), "源图裁成 50x50，实际 {src:?}");
+        assert!(
+            close(src.w, 50.0) && close(src.h, 50.0),
+            "源图裁成 50x50，实际 {src:?}"
+        );
         assert!(close(src.x, 25.0), "水平居中裁剪，实际 x={}", src.x);
     }
 
@@ -144,7 +147,10 @@ mod tests {
             ..Default::default()
         }
         .layout(Rect::new(0.0, 0.0, 200.0, 200.0), 40, 20);
-        assert!(close(dst.x, 80.0) && close(dst.y, 90.0), "应居中，实际 {dst:?}");
+        assert!(
+            close(dst.x, 80.0) && close(dst.y, 90.0),
+            "应居中，实际 {dst:?}"
+        );
         assert!(close(dst.w, 40.0) && close(dst.h, 20.0), "原始尺寸");
         assert_eq!(src, Rect::new(0.0, 0.0, 40.0, 20.0));
     }

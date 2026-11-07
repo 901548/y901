@@ -8,8 +8,8 @@
 //!   限制在最后一块。
 
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiEvent, Widget,
+    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    TextStyle, UiEvent, Widget,
 };
 
 /// 行内样式（缺省 = 继承主题正文色、常规字重）。
@@ -251,12 +251,8 @@ impl StyledText {
         let index = self.blocks.len() - 1;
         let (y, _) = self.layout[index];
         let h = match &self.blocks[index] {
-            Block::Paragraph(spans) => {
-                self.wrap(spans, per_line).len().max(1) as f32 * line_h
-            }
-            Block::Code { lines, .. } => {
-                lines.len().max(1) as f32 * line_h + self.code_pad * 2.0
-            }
+            Block::Paragraph(spans) => self.wrap(spans, per_line).len().max(1) as f32 * line_h,
+            Block::Code { lines, .. } => lines.len().max(1) as f32 * line_h + self.code_pad * 2.0,
         };
         self.layout[index] = (y, h);
         self.content_h = y + h + self.pad;
@@ -332,7 +328,9 @@ impl Widget for StyledText {
                     let lines = self.wrap(spans, per_line);
                     lines.len().max(1) as f32 * line_h
                 }
-                Block::Code { lines, .. } => lines.len().max(1) as f32 * line_h + self.code_pad * 2.0,
+                Block::Code { lines, .. } => {
+                    lines.len().max(1) as f32 * line_h + self.code_pad * 2.0
+                }
             };
             self.layout.push((y, h));
             y += h;
@@ -341,7 +339,12 @@ impl Widget for StyledText {
         c.constrain(Size::new(width, self.content_h))
     }
 
-    fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        rect: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = rect;
     }
 
@@ -368,9 +371,11 @@ impl Widget for StyledText {
         let fg = theme.style(y901_ui::Role::TEXT, y901_ui::State::Normal).fg;
         let line_h = ctx.line_height(&TextStyle::default());
         let per_line = self.chars_per_line(ctx, self.rect.w);
-        let code_bg = self
-            .code_bg
-            .unwrap_or_else(|| theme.style(y901_ui::Role::PANEL, y901_ui::State::Hovered).bg);
+        let code_bg = self.code_bg.unwrap_or_else(|| {
+            theme
+                .style(y901_ui::Role::PANEL, y901_ui::State::Hovered)
+                .bg
+        });
 
         for (bi, block) in self.blocks.iter().enumerate() {
             let Some((by, bh)) = self.layout.get(bi).copied() else {
@@ -391,14 +396,23 @@ impl Widget for StyledText {
                 }
                 Block::Code { lines, .. } => {
                     ctx.fill_round_rect(
-                        Rect::new(self.rect.x + self.pad, top, self.rect.w - self.pad * 2.0, bh),
+                        Rect::new(
+                            self.rect.x + self.pad,
+                            top,
+                            self.rect.w - self.pad * 2.0,
+                            bh,
+                        ),
                         code_bg,
                         6.0,
                     );
                     let style = TextStyle::fg(fg);
                     for (li, text) in lines.iter().enumerate() {
                         let y = top + self.code_pad + li as f32 * line_h;
-                        ctx.draw_text(Pos::new(self.rect.x + self.pad + self.code_pad, y), text, &style);
+                        ctx.draw_text(
+                            Pos::new(self.rect.x + self.pad + self.code_pad, y),
+                            text,
+                            &style,
+                        );
                     }
                 }
             }
@@ -411,7 +425,9 @@ impl Widget for StyledText {
             .blocks
             .iter()
             .map(|b| match b {
-                Block::Paragraph(spans) => spans.iter().map(|s| s.text.as_str()).collect::<String>(),
+                Block::Paragraph(spans) => {
+                    spans.iter().map(|s| s.text.as_str()).collect::<String>()
+                }
                 Block::Code { lines, .. } => lines.join("\n"),
             })
             .collect::<Vec<_>>()

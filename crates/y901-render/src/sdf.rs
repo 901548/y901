@@ -84,7 +84,10 @@ mod tests {
     fn stroke_coverage_hits_half_at_the_band_edge() {
         // 环的边缘是 |d| = w/2；w=2 时 d=1.0 → cov = 0.5
         let cov = stroke_coverage(1.0, 2.0, 1.0);
-        assert!((cov - 0.5).abs() < 1e-6, "|d|=w/2 时 cov 应为 0.5，实测 {cov}");
+        assert!(
+            (cov - 0.5).abs() < 1e-6,
+            "|d|=w/2 时 cov 应为 0.5，实测 {cov}"
+        );
     }
 
     #[test]
@@ -98,7 +101,10 @@ mod tests {
     fn stroke_coverage_is_full_inside_band() {
         // width=2 → 环半宽 1；d=0.5 在环内 → cov = 1
         let cov = stroke_coverage(0.5, 2.0, 1.0);
-        assert!((cov - 1.0).abs() < 1e-6, "d=0.5,width=2 时 cov 应为 1，实测 {cov}");
+        assert!(
+            (cov - 1.0).abs() < 1e-6,
+            "d=0.5,width=2 时 cov 应为 1，实测 {cov}"
+        );
     }
 
     #[test]

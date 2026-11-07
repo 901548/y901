@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Modifiers, Pos, Rect, RenderCtx, Role, Semantics,
-    Size, TextStyle, TextMetrics, UiEvent, UiTree, Widget,
+    Size, TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
 
 struct Mono;
@@ -299,7 +299,12 @@ impl Widget for PaintProbe {
         };
         c.constrain(s)
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         if self.rect.is_empty() {
             self.rect = r;
         }

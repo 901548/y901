@@ -11,8 +11,8 @@
 use y901_backend_win32::window::Window;
 use y901_runtime::Options;
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextStyle,
-    TextMetrics, UiEvent, UiTree, Widget,
+    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    TextStyle, UiEvent, UiTree, Widget,
 };
 
 const W: u32 = 240;
@@ -48,7 +48,12 @@ impl Widget for GlyphScene {
     ) -> Size {
         c.constrain(Size::new(c.max.w, c.max.h))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
     }
     fn rect(&self) -> Rect {
@@ -176,7 +181,8 @@ fn record_skip(reason: &str) {
         .unwrap_or_else(|e| panic!("SKIP log write failed: {e}"));
     {
         use std::io::Write as _;
-        writeln!(f, "SKIP: {reason}").expect("SKIP log write failed -- gate will not see this skip");
+        writeln!(f, "SKIP: {reason}")
+            .expect("SKIP log write failed -- gate will not see this skip");
     }
 }
 
@@ -196,7 +202,9 @@ fn fnv(bytes: &[u8]) -> u64 {
 
 #[test]
 fn d3d_scale_one_is_pixel_identical_and_identity_is_observable() {
-    let _guard = D3D_LOCK.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+    let _guard = D3D_LOCK
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
     let (base, w, h) = match render_d3d(None) {
         Some(v) => v,
         None => {
@@ -233,7 +241,9 @@ fn d3d_scale_one_is_pixel_identical_and_identity_is_observable() {
 
 #[test]
 fn d3d_half_scale_ink_ratios_are_sane() {
-    let _guard = D3D_LOCK.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+    let _guard = D3D_LOCK
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
     let (full, w, h) = match render_d3d(None) {
         Some(v) => v,
         None => {
@@ -281,7 +291,9 @@ fn d3d_half_scale_ink_ratios_are_sane() {
 
 #[test]
 fn d3d_matches_soft_backend_within_tolerance() {
-    let _guard = D3D_LOCK.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+    let _guard = D3D_LOCK
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
     let (d3d, w, h) = match render_d3d(Some(0.5)) {
         Some(v) => v,
         None => {

@@ -36,7 +36,12 @@ impl Widget for Scene {
     ) -> Size {
         c.constrain(Size::new(640.0, 240.0))
     }
-    fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+    fn arrange(
+        &mut self,
+        r: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
         self.rect = r;
         self.text_rect = Rect::new(r.x + 16.0, r.y + 16.0, r.w - 32.0, r.h - 32.0);
     }
@@ -505,7 +510,12 @@ fn invalidate_rect_partial_equals_full() {
         ) -> Size {
             c.constrain(Size::new(c.max.w, c.max.h))
         }
-        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+        fn arrange(
+            &mut self,
+            r: Rect,
+            _m: &dyn TextMetrics,
+            _cache: &mut y901_ui::layout::LayoutCache,
+        ) {
             self.rect = r;
             // 流式行固定在左上角一块小区域
             self.line = Rect::new(r.x + 8.0, r.y + 8.0, 320.0, 20.0);
@@ -590,7 +600,6 @@ fn invalidate_rect_partial_equals_full() {
     eprintln!("[invalidate_rect] 局部刷新 == 全量重绘（{w1}x{h1}，0 差异）");
 }
 
-
 /// 两块**不相邻**的脏区分别更新：局部重绘必须与整窗重绘逐像素一致。
 ///
 /// 这是 "dirty.bounds() 合并包围盒" 这个 bug 的回归测试。
@@ -620,7 +629,12 @@ fn two_disjoint_dirty_rects_match_full_redraw() {
         ) -> Size {
             c.constrain(Size::new(40.0, 20.0))
         }
-        fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut y901_ui::layout::LayoutCache) {
+        fn arrange(
+            &mut self,
+            r: Rect,
+            _m: &dyn TextMetrics,
+            _cache: &mut y901_ui::layout::LayoutCache,
+        ) {
             self.rect = r;
         }
         fn rect(&self) -> Rect {
@@ -856,9 +870,7 @@ fn text_label_paints_visible_non_background_pixels() {
         bright >= 40,
         "文字没画出来：与背景差异的像素只有 {bright} 个（背景 {bg:?}，{w}x{h}）"
     );
-    eprintln!(
-        "[text] 文字像素 {bright} 个，首个差异 {first:?}，背景 {bg:?}"
-    );
+    eprintln!("[text] 文字像素 {bright} 个，首个差异 {first:?}，背景 {bg:?}");
 }
 
 /// 同一句话，但放在 `ScrollView`（带裁剪）里。
@@ -886,9 +898,7 @@ fn text_inside_scrollview_is_not_clipped_away() {
                 .flex_item(y901_ui::FlexItem::height(30.0)),
         ),
     );
-    let mut tree = UiTree::new(Box::new(
-        y901_ui::Flex::column("root").push(Box::new(sv)),
-    ));
+    let mut tree = UiTree::new(Box::new(y901_ui::Flex::column("root").push(Box::new(sv))));
     window.resize(&mut tree);
     tree.invalidate_all();
     window.request_snapshot();

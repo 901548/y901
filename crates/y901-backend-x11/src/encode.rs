@@ -2,7 +2,7 @@
 //!
 //! 每个函数都在注释里标注了字段偏移与长度计算方式，这是后续对照规范审查的唯一依据。
 
-use crate::{opcode, pad4, put_u16, put_u32, push_padded, PROTOCOL_MAJOR, PROTOCOL_MINOR};
+use crate::{opcode, pad4, push_padded, put_u16, put_u32, PROTOCOL_MAJOR, PROTOCOL_MINOR};
 
 /// 窗口类型。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -490,7 +490,16 @@ pub fn encode_get_image(
 /// 为什么要单独发它：`KeyPress` 事件只给**keycode**（物理键位），
 /// 不给字符。必须先拿到这张表，才能把 keycode 译成 keysym → 字符。
 pub fn encode_get_keyboard_mapping(first_keycode: u8, count: u8) -> Vec<u8> {
-    vec![opcode::GET_KEYBOARD_MAPPING, 0, 2, 0, first_keycode, count, 0, 0]
+    vec![
+        opcode::GET_KEYBOARD_MAPPING,
+        0,
+        2,
+        0,
+        first_keycode,
+        count,
+        0,
+        0,
+    ]
 }
 
 /// 编码 `SendEvent`（opcode 25）—— 把一个**构造好的 32 字节事件**发给某个窗口。
