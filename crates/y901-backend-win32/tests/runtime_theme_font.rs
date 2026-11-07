@@ -90,7 +90,12 @@ fn set_theme_does_not_touch_atlas() {
         .unwrap_or(body.len());
     let body = &body[..end];
 
-    assert!(body.contains("self.theme = theme"), "必须更新主题字段");
+    // P2 起委托给 RenderState：断言“确实调了 state.set_theme”，
+    // 仍保留下面那个“不得碰图集”的反向断言。
+    assert!(
+        body.contains("self.state.set_theme(theme)"),
+        "set_theme 必须委托给 RenderState"
+    );
     for forbidden in ["take_dirty", "TextEngine::new", "update_atlas", "gfx"] {
         assert!(
             !body.contains(forbidden),

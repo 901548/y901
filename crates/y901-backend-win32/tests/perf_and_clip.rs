@@ -59,10 +59,10 @@ fn backend_seeds_client_area_clip() {
     let body = &body[..end];
     let compact: String = body.split_whitespace().collect();
     assert!(
-        compact.contains("self.clips.push("),
+        compact.contains("self.state.push_clip("),
         "begin() 必须压入客户区裁剪（否则内容会画到窗口外）：\n{body}"
     );
-    assert!(body.contains("self.clips.clear()"), "每帧必须重置裁剪栈");
+    assert!(body.contains("self.state.clear_clips()"), "每帧必须重置裁剪栈");
 }
 
 /// 字形必须走 `clip_quad` 裁剪（`clip_of` 只覆盖 fill_rect）。

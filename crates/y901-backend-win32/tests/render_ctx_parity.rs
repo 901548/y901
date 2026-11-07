@@ -31,13 +31,22 @@ fn d3d_and_soft_share_the_same_animation_semantics() {
     }
 
     // 语义必须同源：键不存在时回退 1.0。
+    // P2 起两个后端都委托给 RenderState：只要求“确实委托”、
+    // 且共享模块里保留回退语义。从“两份文本一致”升级为“单一真源”。
     assert!(
-        d3d.contains("self.anims.get(key).unwrap_or(1.0)"),
-        "d3d 的 animation 必须与 SoftBackend 一样回退到 1.0"
+        d3d.contains("self.state.animation(key)") && soft.contains("self.state.animation(key)"),
+        "d3d 与 soft 都必须将 animation 委托给 RenderState"
     );
+    // P2 起 soft 委托给 RenderState，语义唯一源在 render_state.rs。
+    // 这是**更强**的断言：不再要求两份实现长得一样，而是要求 soft 确实委托、且共享模块里有那个回退语义。
     assert!(
-        soft.contains("self.anims.get(key).unwrap_or(1.0)"),
-        "soft 的 animation 语义发生变化（本条断言用于对拍）"
+        soft.contains("self.state.animation(key)"),
+        "soft 的 animation 必须委托给 RenderState"
+    );
+    let state = include_str!("../../y901-render/src/render_state.rs");
+    assert!(
+        state.contains("self.anims.get(key).unwrap_or(1.0)"),
+        "RenderState::animation 必须回退到 1.0"
     );
 }
 
@@ -51,10 +60,23 @@ fn d3d_and_soft_share_the_same_background_color_semantics() {
             src.contains("fn background_color(&self) -> Color"),
             "{name} 缺少 RenderCtx::background_color —— Tabs 过渡遮罩会退化成黑色"
         );
-        assert!(
-            src.contains(".style(y901_ui::Role::PANEL, y901_ui::theme::State::Normal)"),
-            "{name} 的 background_color 必须取面板背景色，而不是别的角色"
-        );
+        if name == "d3d" {
+            assert!(
+                src.contains(".style(y901_ui::Role::PANEL, y901_ui::theme::State::Normal)"),
+                "d3d 的 background_color 必须取面板背景色"
+            );
+        } else {
+            // soft 委托给 RenderState：只要求它委托，含式在 state 里验证
+            assert!(
+                src.contains("self.state.background_color()"),
+                "soft 的 background_color 必须委托给 RenderState"
+            );
+            let state = include_str!("../../y901-render/src/render_state.rs");
+            assert!(
+                state.contains(".style(Role::PANEL, y901_ui::theme::State::Normal)"),
+                "RenderState::background_color 必须取 PANEL 背景"
+            );
+        }
     }
 }
 
@@ -79,11 +101,11 @@ fn d3d_stroke_round_rect_applies_transform() {
         "stroke_round_rect 必须先 map_rect，否则有 transform 时描边错位"
     );
     assert!(
-        body.contains("self.transforms.is_empty()"),
+        body.contains("self.state.transforms_empty()"),
         "stroke_round_rect 必须判断是否有 transform（与 fill_round_rect 一致）"
     );
     assert!(
-        body.contains("self.current_scale()"),
+        body.contains("self.state.current_scale()"),
         "stroke_round_rect 必须把 radius 与 width 乘上 current_scale()"
     );
     assert!(

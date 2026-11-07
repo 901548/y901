@@ -62,10 +62,8 @@ pub struct SoftBackend {
     height: u32,
     /// 帧缓冲：`0xAARRGGBB`。
     buf: Vec<Px>,
-    clips: Vec<Rect>,
-    transforms: Vec<(y901_ui::Pos, f32)>,
-    anims: y901_ui::animation::AnimSnapshot,
-    hovered: Option<String>,
+    /// 剪辀栈 / 变换栈 / 悬停 / 主题 / 动画：与 D3D 后端共用。
+    state: crate::render_state::RenderState,
     textures: std::collections::HashMap<y901_ui::image::TextureId, (u32, u32, Vec<u8>, u32)>,
     /// 静态图片的 mip 级（**只存 L1 及以上**：L0 就是 `textures` 里的原始字节）。
     ///
@@ -75,7 +73,6 @@ pub struct SoftBackend {
     next_texture: u64,
     text: Box<dyn super::font::FontEngine>,
     cell: Size,
-    theme: Theme,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
     clear_color: Color,
 }
@@ -108,16 +105,12 @@ impl SoftBackend {
             width: width.max(1),
             height: height.max(1),
             buf: vec![0; (width.max(1) * height.max(1)) as usize],
-            clips: Vec::new(),
-            transforms: Vec::new(),
-            anims: y901_ui::animation::AnimSnapshot::default(),
-            hovered: None,
             textures: std::collections::HashMap::new(),
             mips: std::collections::HashMap::new(),
             next_texture: 0,
             text: font,
             cell,
-            theme: theme.unwrap_or(Theme::DARK),
+            state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
         })
     }
@@ -135,16 +128,12 @@ impl SoftBackend {
             width: w,
             height: h,
             buf: vec![0; (w * h) as usize],
-            clips: Vec::new(),
-            transforms: Vec::new(),
-            anims: y901_ui::animation::AnimSnapshot::default(),
-            hovered: None,
+            state: crate::render_state::RenderState::new(Theme::DARK),
             textures: std::collections::HashMap::new(),
             mips: std::collections::HashMap::new(),
             next_texture: 0,
             text: font,
             cell,
-            theme: Theme::DARK,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
         })
     }
@@ -171,7 +160,7 @@ impl SoftBackend {
 
     /// 切换主题（只影响后续绘制的槽位色）。
     pub fn set_theme(&mut self, theme: Theme) -> Result<(), String> {
-        self.theme = theme;
+        self.state.set_theme(theme);
         Ok(())
     }
 
@@ -250,7 +239,7 @@ impl SoftBackend {
     /// 没有变换时返回 1.0（调用方无需特别判断）。
     fn map_scale(&self) -> f32 {
         let mut s = 1.0f32;
-        for (_, scale) in &self.transforms {
+        for (_, scale) in self.state.transforms() {
             s *= *scale;
         }
         if s.is_finite() && s > 0.0 {
@@ -263,7 +252,7 @@ impl SoftBackend {
     fn map_point(&self, p: y901_ui::Pos) -> y901_ui::Pos {
         let mut x = p.x;
         let mut y = p.y;
-        for (o, s) in self.transforms.iter().rev() {
+        for (o, s) in self.state.transforms().iter().rev() {
             x = o.x + (x - o.x) * s;
             y = o.y + (y - o.y) * s;
         }
@@ -272,7 +261,7 @@ impl SoftBackend {
 
     /// 变换一个矩形（位置与尺寸同时缩放）。
     fn map_rect(&self, r: Rect) -> Rect {
-        if self.transforms.is_empty() {
+        if self.state.transforms_empty() {
             return r;
         }
         let a = self.map_point(y901_ui::Pos::new(r.x, r.y));
@@ -315,8 +304,8 @@ impl SoftBackend {
         let mut out = Rect::new(r.x.max(0.0), r.y.max(0.0), r.w.max(0.0), r.h.max(0.0));
         out.w = out.w.min(self.width as f32 - out.x);
         out.h = out.h.min(self.height as f32 - out.y);
-        if let Some(c) = self.clips.last() {
-            out = out.intersect(*c);
+        if let Some(c) = self.state.current_clip() {
+            out = out.intersect(c);
         }
         out
     }
@@ -344,7 +333,7 @@ impl RenderCtx for SoftBackend {
     }
 
     fn theme(&self) -> &Theme {
-        &self.theme
+        self.state.theme()
     }
 
     /// 压入一层缩放变换（以 `origin` 为中心）。
@@ -355,27 +344,27 @@ impl RenderCtx for SoftBackend {
         if !(scale.is_finite() && scale > 0.0) {
             return;
         }
-        self.transforms.push((origin, scale));
+        self.state.push_transform(origin, scale);
     }
 
     fn pop_transform(&mut self) {
-        self.transforms.pop();
+        self.state.pop_transform();
     }
 
     fn is_hovered(&self, id: &str) -> bool {
-        self.hovered.as_deref() == Some(id)
+        self.state.is_hovered(id)
     }
 
     fn set_hovered(&mut self, id: Option<&str>) {
-        self.hovered = id.map(|s| s.to_string());
+        self.state.set_hovered(id);
     }
 
     fn animation(&self, key: u64) -> f32 {
-        self.anims.get(key).unwrap_or(1.0)
+        self.state.animation(key)
     }
 
     fn set_animations(&mut self, snapshot: &y901_ui::animation::AnimSnapshot) {
-        self.anims = snapshot.clone();
+        self.state.set_animations(snapshot);
     }
 
     fn upload_texture(
@@ -555,9 +544,7 @@ impl RenderCtx for SoftBackend {
 
     /// 背景色：取主题 panel 槽位的底色（用于弹层淡入適罩）。
     fn background_color(&self) -> Color {
-        self.theme
-            .style(y901_ui::Role::PANEL, y901_ui::theme::State::Normal)
-            .bg
+        self.state.background_color()
     }
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {
@@ -592,7 +579,7 @@ impl RenderCtx for SoftBackend {
         }
         let rect = self.map_rect(rect);
         // 与 D3D 一致：有 transform 时 radius 与线宽都要跟随缩放。
-        let (radius, width) = if self.transforms.is_empty() {
+        let (radius, width) = if self.state.transforms_empty() {
             (radius, width)
         } else {
             let one = self.map_rect(Rect::new(0.0, 0.0, 1.0, 1.0));
@@ -698,7 +685,7 @@ impl RenderCtx for SoftBackend {
                                 if dx < 0 || dx >= self.width as i32 {
                                     continue;
                                 }
-                                if let Some(clip) = self.clips.last() {
+                                if let Some(clip) = self.state.current_clip() {
                                     if !clip.contains(Pos::new(dx as f32 + 0.5, dy as f32 + 0.5)) {
                                         continue;
                                     }
@@ -752,15 +739,15 @@ impl RenderCtx for SoftBackend {
     }
 
     fn push_clip(&mut self, rect: Rect) {
-        let clipped = match self.clips.last() {
-            Some(outer) => rect.intersect(*outer),
+        let clipped = match self.state.current_clip() {
+            Some(outer) => rect.intersect(outer),
             None => rect,
         };
-        self.clips.push(clipped);
+        self.state.push_clip(clipped);
     }
 
     fn pop_clip(&mut self) {
-        self.clips.pop();
+        self.state.pop_clip();
     }
 
     fn fill_round_rect(&mut self, rect: Rect, color: Color, radius: f32) {

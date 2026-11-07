@@ -49,7 +49,8 @@ pub struct D3dBackend {
     text: Box<dyn crate::backend::font::FontEngine>,
     instances: Vec<Instance>,
     viewport: Size,
-    clips: Vec<Rect>,
+    /// 剪辀栈 / 变换栈 / 悬停 / 主题 / 动画：与 SoftBackend 共用。
+    state: y901_render::render_state::RenderState,
     /// 窗口句柄：`RenderBackend::present` 无参，必须记住它。
     hwnd: HWND,
     /// 当前尺寸：trait 的 `present` 无参，必须记住它。
@@ -57,25 +58,21 @@ pub struct D3dBackend {
     /// 上一次 `present` 是否被遮挡（D3D11 只能从 `Present` 返回值得知）。
     last_occluded: bool,
     /// 渲染主题（启动时由 Options.theme 注入，None 时用 DARK）。
-    theme: y901_ui::theme::Theme,
     /// 动画快照（每帧由 `UiTree::render` 通过 `set_animations` 推入）。
     ///
     /// 缺它的话 `RenderCtx::animation` 只能恒返回 1.0，
     /// 于是 Popup 打开动画在 D3D 上“直接到位”而不渐变。
-    anims: y901_ui::animation::AnimSnapshot,
     /// 图片实例的位置记录：`(start, count, texture_id)`。
     ///
     /// 为什么用"记录区间"而不是逐实例标记：图集实例的顺序就是 Z 序，
     /// 只需在帧末把这些区间与中间的图集段交替排开即可，实例数组本身不动。
     image_marks: Vec<(usize, usize, u64)>,
-    hovered: Option<String>,
     /// 当前单元格尺寸（由字号推出；set_font 会更新它）。
     ///
     /// **必须与 TextEngine 使用的 cell 尺寸一致**：measure_text/line_height/glyph_offset/draw_text 都读它。
     cell: Size,
     /// 变换栈。第 1 步只建空栈：所有出图路径都过 `map_pos`/`map_size`，
     /// 但**栈为空时纯透传**——先证明恒等（像素哈希不变），再接真变换。
-    transforms: Vec<(y901_ui::Pos, f32)>,
     /// 仅测试：每次 `present` 前记下的 `sync_interval`。
     #[cfg(test)]
     pub present_sync_log: std::sync::Arc<std::sync::Mutex<Vec<u32>>>,
@@ -148,18 +145,14 @@ impl D3dBackend {
             present_sync_log: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             gfx,
             image_marks,
-            hovered: None,
             text,
             instances: Vec::with_capacity(4096),
             viewport: Size::new(width as f32, height as f32),
-            clips: Vec::new(),
             hwnd,
             size: (width, height),
             last_occluded: false,
-            theme,
-            anims: y901_ui::animation::AnimSnapshot::default(),
+            state: y901_render::render_state::RenderState::new(theme),
             cell: Size::new(cell_w, cell_h),
-            transforms: Vec::new(),
         };
         backend.sync_atlas()?;
         Ok(backend)
@@ -175,7 +168,7 @@ impl D3dBackend {
     ///
     /// 说明：主题只含颜色，不含字形信息，因此**不需要重建图集**。
     pub fn set_theme(&mut self, theme: y901_ui::theme::Theme) -> Result<(), String> {
-        self.theme = theme;
+        self.state.set_theme(theme);
         Ok(())
     }
 
@@ -207,9 +200,9 @@ impl D3dBackend {
         // **基座裁剪 = 客户区**：之后所有 fill_rect / 字形都必须落在窗口内。
         // 少了这一层，组件只要把内容画到负坐标（例如终端多算了一行），
         // 就会画到窗口标题栏缝隙里。
-        self.clips.clear();
-        self.clips
-            .push(Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h));
+        self.state.clear_clips();
+        self.state
+            .push_clip(Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h));
         self.text.begin_frame();
     }
 
@@ -377,9 +370,9 @@ impl D3dBackend {
     }
 
     fn clip_of(&self, rect: Rect) -> Option<Rect> {
-        match self.clips.last() {
+        match self.state.current_clip() {
             Some(clip) => {
-                let r = rect.intersect(*clip);
+                let r = rect.intersect(clip);
                 if r.is_empty() {
                     None
                 } else {
@@ -401,12 +394,12 @@ impl D3dBackend {
     /// **栈为空时直接返回原值**，不做任何浮点运算——
     /// `* 1.0` 或 `+ 0.0` 足以让像素哈希漂移，而哈希门禁会把它判成渲染回归。
     fn map_pos(&self, p: y901_ui::Pos) -> y901_ui::Pos {
-        if self.transforms.is_empty() {
+        if self.state.transforms_empty() {
             return p;
         }
         let mut x = p.x;
         let mut y = p.y;
-        for (o, s) in self.transforms.iter().rev() {
+        for (o, s) in self.state.transforms().iter().rev() {
             x = o.x + (x - o.x) * s;
             y = o.y + (y - o.y) * s;
         }
@@ -415,7 +408,7 @@ impl D3dBackend {
 
     /// 把尺寸过一遍变换栈（只乘缩放，不加平移）。栈为空时直接返回。
     fn map_size(&self, sz: y901_ui::Size) -> y901_ui::Size {
-        if self.transforms.is_empty() {
+        if self.state.transforms_empty() {
             return sz;
         }
         let k = self.current_scale();
@@ -424,7 +417,7 @@ impl D3dBackend {
 
     /// 把一个矩形过一遍变换栈。栈为空时**逐位原样返回**。
     fn map_rect(&self, r: Rect) -> Rect {
-        if self.transforms.is_empty() {
+        if self.state.transforms_empty() {
             return r;
         }
         let o = self.map_pos(y901_ui::Pos::new(r.x, r.y));
@@ -434,15 +427,7 @@ impl D3dBackend {
 
     /// 当前缩放乘积（栈为空时恒为 1.0）。
     fn current_scale(&self) -> f32 {
-        if self.transforms.is_empty() {
-            return 1.0;
-        }
-        let k: f32 = self.transforms.iter().map(|(_, s)| *s).product();
-        if k.is_finite() && k > 0.0 {
-            k
-        } else {
-            1.0
-        }
+        self.state.current_scale()
     }
 
     fn push_glyph(&mut self, x: f32, y: f32, span: f32, ch: char, color: Color, bold: bool) {
@@ -481,7 +466,7 @@ impl D3dBackend {
 
         // 字形也要裁剪：`clip_of` 只作用于 fill_rect，字形是带 UV 的矩形，
         // 必须按裁剪框缩放并重映射 UV（否则会画到客户区外，见 §34）。
-        let Some(clip) = self.clips.last().copied() else {
+        let Some(clip) = self.state.current_clip() else {
             return;
         };
         let Some(quad) = clip_quad(pos, size, uv, clip) else {
@@ -745,11 +730,11 @@ impl RenderCtx for D3dBackend {
     }
 
     fn is_hovered(&self, id: &str) -> bool {
-        self.hovered.as_deref() == Some(id)
+        self.state.is_hovered(id)
     }
 
     fn set_hovered(&mut self, id: Option<&str>) {
-        self.hovered = id.map(|s| s.to_string());
+        self.state.set_hovered(id);
     }
 
     fn size(&self) -> Size {
@@ -758,26 +743,26 @@ impl RenderCtx for D3dBackend {
 
     /// 主题来自 `Options.theme`（`Window::create` 注入），默认 DARK。
     fn theme(&self) -> &y901_ui::theme::Theme {
-        &self.theme
+        self.state.theme()
     }
 
     /// 与 `SoftBackend` 同源：面板背景色（Tabs 过渡遮罩等处使用）。
     ///
     /// 旧版缺失时调用方会回退到黑色，于是遮罩在 D3D 上变成一块黑。
     fn background_color(&self) -> Color {
-        self.theme
+        self.state.theme()
             .style(y901_ui::Role::PANEL, y901_ui::theme::State::Normal)
             .bg
     }
 
     /// 推入本帧动画快照（与 `SoftBackend` 行为一致）。
     fn set_animations(&mut self, snapshot: &y901_ui::animation::AnimSnapshot) {
-        self.anims = snapshot.clone();
+        self.state.set_animations(snapshot);
     }
 
     /// 查询动画进度；键不存在时回退到 `1.0`（即“已完成”）。
     fn animation(&self, key: u64) -> f32 {
-        self.anims.get(key).unwrap_or(1.0)
+        self.state.animation(key)
     }
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {
@@ -822,7 +807,7 @@ impl RenderCtx for D3dBackend {
     fn fill_round_rect(&mut self, rect: Rect, color: Color, radius: f32) {
         let rect = self.map_rect(rect);
         // 空栈时 `current_scale()` 恒为 1.0，不会引入浮点往返
-        let radius = if self.transforms.is_empty() {
+        let radius = if self.state.transforms_empty() {
             radius
         } else {
             radius * self.current_scale()
@@ -885,10 +870,10 @@ impl RenderCtx for D3dBackend {
             return;
         }
         let rect = self.map_rect(rect);
-        let (radius, width) = if self.transforms.is_empty() {
+        let (radius, width) = if self.state.transforms_empty() {
             (radius, width)
         } else {
-            let s = self.current_scale();
+            let s = self.state.current_scale();
             (radius * s, width * s)
         };
         let Some(r) = self.clip_of(rect) else {
@@ -947,23 +932,23 @@ impl RenderCtx for D3dBackend {
         if !scale.is_finite() || scale <= 0.0 {
             return;
         }
-        self.transforms.push((origin, scale));
+        self.state.push_transform(origin, scale);
     }
 
     fn pop_transform(&mut self) {
-        self.transforms.pop();
+        self.state.pop_transform();
     }
 
     fn push_clip(&mut self, rect: Rect) {
-        let clipped = match self.clips.last() {
-            Some(outer) => rect.intersect(*outer),
+        let clipped = match self.state.current_clip() {
+            Some(outer) => rect.intersect(outer),
             None => rect,
         };
-        self.clips.push(clipped);
+        self.state.push_clip(clipped);
     }
 
     fn pop_clip(&mut self) {
-        self.clips.pop();
+        self.state.pop_clip();
     }
 }
 
