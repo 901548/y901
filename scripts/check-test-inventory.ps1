@@ -10,20 +10,24 @@ $inv = Join-Path $root 'docs\evidence\test-inventory.txt'
 
 function Invoke-ListWithTimeout {
     param([string]$exePath, [int]$timeoutSec = 10)
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $exePath
-    $psi.Arguments = '--list'
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    if (-not $proc.WaitForExit($timeoutSec * 1000)) {
-        try { $proc.Kill() } catch {}
-        Write-Host "[inv] TIMEOUT: $(Split-Path $exePath -Leaf) did not respond within ${timeoutSec}s"
-        return $null
+    # 用**临时文件**重定向，而不用管道：
+    # 管道有 4KB 缓冲区，输出超过就会子进程写满阻塞、父进程等不到退出。
+    # 写文件不存在这个问题。
+    $tmpOut = [System.IO.Path]::GetTempFileName()
+    $tmpErr = [System.IO.Path]::GetTempFileName()
+    try {
+        $proc = Start-Process -FilePath $exePath -ArgumentList '--list' `
+            -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr `
+            -NoNewWindow -PassThru
+        if (-not $proc.WaitForExit($timeoutSec * 1000)) {
+            try { $proc.Kill() } catch {}
+            Write-Host "[inv] TIMEOUT: $(Split-Path $exePath -Leaf) did not respond within ${timeoutSec}s"
+            return $null
+        }
+        return Get-Content $tmpOut -Raw
+    } finally {
+        Remove-Item $tmpOut, $tmpErr -ErrorAction SilentlyContinue
     }
-    return $proc.StandardOutput.ReadToEnd()
 }
 
 # 只取**测试**二进制：`cargo test --no-run` 会把 example 也编出来（hello.exe / y901.exe …），
