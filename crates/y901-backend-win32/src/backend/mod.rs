@@ -158,6 +158,16 @@ impl D3dBackend {
         Ok(backend)
     }
 
+    /// 入队一个实例，并在这里统一写入**当前不透明度**到 `params.w`。
+    ///
+    /// 为何在入队处统一处理：六类构造点各自写一遍容易漏（已有
+    /// `stroke_round_rect` 漏 `map_rect` 的教训）；同时避开了 gradient 的
+    /// `color_end` 问题——不提前乘 alpha，而在 shader 的**最终输出**上乘一次。
+    fn push_instance(&mut self, mut inst: Instance) {
+        inst.params[3] = self.state.current_opacity();
+        self.instances.push(inst);
+    }
+
     /// 运行时切换主题：只改字段，**不碰图集**。
     ///
     /// 输入：新主题（`Theme` 是 `Copy`，开销可忽略）。
@@ -473,7 +483,7 @@ impl D3dBackend {
             return;
         };
 
-        self.instances.push(Instance {
+        self.push_instance(Instance {
             pos: [quad.pos.x, quad.pos.y],
             size: quad.size,
             uv_rect: quad.uv,
@@ -483,7 +493,7 @@ impl D3dBackend {
 
         // 假粗体：右移 1px 再画一遍（比加载粗体字形便宜，且等宽不变）
         if bold {
-            self.instances.push(Instance {
+            self.push_instance(Instance {
                 pos: [pos.x + 1.0, pos.y],
                 size,
                 uv_rect: uv,
@@ -708,7 +718,7 @@ impl RenderCtx for D3dBackend {
         ];
         let tint = style.tint.unwrap_or(Color::WHITE);
         let start = self.instances.len();
-        self.instances.push(Instance::solid(
+        self.push_instance(Instance::solid(
             [dst.x, dst.y],
             [dst.w, dst.h],
             uv,
@@ -771,7 +781,7 @@ impl RenderCtx for D3dBackend {
         let Some(r) = self.clip_of(rect) else {
             return;
         };
-        self.instances.push(Instance::solid(
+        self.push_instance(Instance::solid(
             [r.x, r.y],
             [r.w, r.h],
             // 纯色哨兵：uv 两端相等，PS 直接输出 color
@@ -790,7 +800,7 @@ impl RenderCtx for D3dBackend {
         let Some(r) = self.clip_of(rect) else {
             return;
         };
-        self.instances.push(Instance::gradient_rect(
+        self.push_instance(Instance::gradient_rect(
             [r.x, r.y],
             [r.w, r.h],
             [from.r, from.g, from.b, from.a],
@@ -819,7 +829,7 @@ impl RenderCtx for D3dBackend {
             self.fill_rect(r, color);
             return;
         }
-        self.instances.push(Instance::round_rect(
+        self.push_instance(Instance::round_rect(
             [r.x, r.y],
             [r.w, r.h],
             [color.r, color.g, color.b, color.a],
@@ -843,7 +853,7 @@ impl RenderCtx for D3dBackend {
             self.fill_gradient_rect_dir(r, from, to, dir);
             return;
         }
-        self.instances.push(Instance::gradient_round_rect(
+        self.push_instance(Instance::gradient_round_rect(
             [r.x, r.y],
             [r.w, r.h],
             [from.r, from.g, from.b, from.a],
@@ -879,7 +889,7 @@ impl RenderCtx for D3dBackend {
         let Some(r) = self.clip_of(rect) else {
             return;
         };
-        self.instances.push(Instance::round_stroke(
+        self.push_instance(Instance::round_stroke(
             [r.x, r.y],
             [r.w, r.h],
             [color.r, color.g, color.b, color.a],
@@ -937,6 +947,16 @@ impl RenderCtx for D3dBackend {
 
     fn pop_transform(&mut self) {
         self.state.pop_transform();
+    }
+
+    /// 压入一层不透明度（委托给 RenderState，嵌套乘积）。
+    fn push_opacity(&mut self, opacity: f32) {
+        self.state.push_opacity(opacity);
+    }
+
+    /// 弹出栈顶不透明度。
+    fn pop_opacity(&mut self) {
+        self.state.pop_opacity();
     }
 
     fn push_clip(&mut self, rect: Rect) {

@@ -321,3 +321,12 @@
   若未来需支持任意 Unicode（emoji、其他脚本、用户输入的特殊字符），
   需要实现完整字体回退：DirectWrite 用 `IDWriteFontFallback`，自研 TTF 需多字体 atlas + source 标记。
   当前不做，因为只有 1 个已知缺失字符。替身表在 `y901-render/src/font_fallback.rs`。
+
+- **乘数型参数的默认值必须是 1.0，不能是 0.0**（opacity 阶段踩坑）：
+  `Instance.params[3]` 原来是 0（因为从没人用），变成 opacity 乘数后，
+  字形 quad（`mod.rs:486/496`）绕过 `push_instance` 导致 `params.w = 0`，
+  shader 里 `* 0` 让**文字整体消失**（哈希 `0xDBB308DD1657EF9C → 0xA076219E89C1EDFD`）。
+  **哈希门禁是唯一能抓住“语法正确但画错了”的手段**——结构断言发现不了，普通测试也发现不了。
+  规则：凡是将来会变成“乘数”的字段，默认值从一开始就设 1.0，不要设 0.0。
+  反向修复也要做：新建实例的统一入口（如 `push_instance`）必须**无法被绕过**，
+  否则两套保护都会在下一个新构造点上失效。

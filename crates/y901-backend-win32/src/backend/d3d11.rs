@@ -149,7 +149,7 @@ impl Instance {
             color,
             color_end: color,
             gradient: [0.0, 0.0, 0.0, 0.0],
-            params: [0.0, 1.0, 0.0, 0.0],
+            params: [0.0, 1.0, 0.0, 1.0],
         }
     }
 
@@ -159,7 +159,7 @@ impl Instance {
     pub fn round_rect(pos: [f32; 2], size: [f32; 2], color: [f32; 4], radius: f32) -> Self {
         let r = radius.clamp(0.0, size[0].min(size[1]) * 0.5);
         let mut inst = Self::solid(pos, size, [0.0, 0.0, 0.0, 0.0], color);
-        inst.params = [r, 1.0, 0.0, 0.0];
+        inst.params = [r, 1.0, 0.0, 1.0];
         inst
     }
 
@@ -176,7 +176,7 @@ impl Instance {
     ) -> Self {
         let mut inst = Self::gradient_rect(pos, size, from, to, dir);
         let r = radius.clamp(0.0, size[0].min(size[1]) * 0.5);
-        inst.params = [r, 1.0, 0.0, 0.0];
+        inst.params = [r, 1.0, 0.0, 1.0];
         inst
     }
 
@@ -192,7 +192,7 @@ impl Instance {
     ) -> Self {
         let r = radius.clamp(0.0, size[0].min(size[1]) * 0.5);
         let mut inst = Self::solid(pos, size, [0.0, 0.0, 0.0, 0.0], color);
-        inst.params = [r, 1.0, width.max(0.0), 0.0];
+        inst.params = [r, 1.0, width.max(0.0), 1.0];
         inst
     }
 
@@ -1510,12 +1510,13 @@ float4 ps_main(VSOutput input) : SV_Target
         float t = saturate(dot(px, input.gradient.xy) + input.gradient.w);
         float4 c = lerp(input.color, input.color_end, t);
         // 预乘：blend state 是 SrcBlend=ONE，RGB 必须已乘 alpha。
-        return float4(c.rgb * c.a * sdf_cov, c.a * sdf_cov);
+        // 不透明度在**最终输出**上乘一次（params.w）：lerp 之后才乘，所以 color/color_end 都不用提前处理。
+        return float4(c.rgb * c.a, c.a) * sdf_cov * input.params.w;
     }
     if (input.solid > 0.5)
     {
         // 预乘：同上。旧版只乘了覆盖率、没乘 alpha，半透明纯色会偏亮。
-        return float4(input.color.rgb * input.color.a * sdf_cov, input.color.a * sdf_cov);
+        return float4(input.color.rgb * input.color.a, input.color.a) * sdf_cov * input.params.w;
     }
     // 子像素（ClearType）：R/G/B 三个通道是各自的覆盖率，分别调制颜色通道。
     float3 cov = saturate(atlas_texture.Sample(atlas_sampler, input.uv).rgb);
@@ -1529,7 +1530,7 @@ float4 ps_main(VSOutput input) : SV_Target
     float a = input.color.a * dot(cov, float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
     // 预乘：逐通道覆盖率 cov 保留（ClearType 子像素靠它），
     // 但 RGB 必须再乘 `input.color.a`，否则半透明文字会偏亮。
-    return float4(input.color.rgb * input.color.a * cov * sdf_cov, a * sdf_cov);
+    return float4(input.color.rgb * input.color.a * cov, a) * sdf_cov * input.params.w;
 }
 
 // 图片纹理采样 + 着色（tint）。
@@ -1540,7 +1541,7 @@ float4 ps_image(VSOutput input) : SV_Target
 {
     float4 tex = image_texture.Sample(atlas_sampler, input.uv);
     float a = input.color.a * tex.a;
-    return float4(input.color.rgb * tex.rgb * a, a);
+    return float4(input.color.rgb * tex.rgb * a, a) * input.params.w;
 }
 
 // 全屏 blit：把自持 RT 原样搬到交换链后备缓冲（1:1，线性采样精确）。
