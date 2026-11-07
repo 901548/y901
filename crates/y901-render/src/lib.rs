@@ -31,6 +31,9 @@ pub mod font;
 pub mod font_engine;
 /// 圆角矩形 SDF（与 D3D 着色器逐字对应）。
 pub mod sdf;
+
+/// 缺字替身映射（当前只有 U+2212 → '-')。
+pub mod font_fallback;
 pub mod soft;
 #[cfg(test)]
 mod supersample;

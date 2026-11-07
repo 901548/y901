@@ -3,16 +3,16 @@
 生成时间：2026-11-02
 命令：`cargo test --workspace -- --include-ignored`
 日志：`docs/evidence/correctness/final-760-include-ignored.log`（**历史记录**，文件名沿用旧口径 760）。
-当前口径以 `scripts/gate.ps1` 为准：**728 passed / 0 failed**（baseline 见 `docs/evidence/test-baseline.txt`）。
+当前口径以 `scripts/gate.ps1` 为准：**733 passed / 0 failed**（baseline 见 `docs/evidence/test-baseline.txt`）。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **728 passed / 0 failed** |
-| 加上 `--include-ignored` | **728 passed / 0 failed**（含默认测试集与 `#[ignore]` 测试） |
+| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **733 passed / 0 failed** |
+| 加上 `--include-ignored` | **733 passed / 0 failed**（含默认测试集与 `#[ignore]` 测试） |
 
-含 ignore 的总数是 **783**（默认测试集 + `#[ignore]` 测试的全量结果），不是单独跑的测试集。
+含 ignore 的总数是 **788**（默认测试集 + `#[ignore]` 测试的全量结果），不是单独跑的测试集。
 
 差值 **51**（763 − 712）= `#[ignore]` 用例。源码里共有 **55** 处 `#[ignore]`，与 51 的差额有两个来源：
 

@@ -2,7 +2,7 @@
 
 - **HEAD**: `112ce18`
 - **tags**: v0.1.0 ~ **v0.1.17**
-- **测试**: **728**（基线 **728**；`#[ignore]` **55**，含 ignore **n/a**）
+- **测试**: **733**（基线 **733**；`#[ignore]` **55**，含 ignore **n/a**）
 - **门禁**: `scripts/gate.ps1` 六步（MSRV / 测试计数 / clippy / 哈希 / missing_docs / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xDBB308DD1657EF9C` / `400x220`
@@ -114,7 +114,7 @@
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **728**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **733**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 
@@ -199,7 +199,7 @@
 ## 已完成的里程碑
 
 - **v0.1.0 ~ v0.1.12**
-- **728 测试全绿**（基线 **728**；`#[ignore]` **55**；`--include-ignored` **n/a**）
+- **733 测试全绿**（基线 **733**；`#[ignore]` **55**；`--include-ignored` **n/a**）
 - **审查报告**：12 项可追踪并已处理；11 项原始报告未落盘（见上方更正）
 - **SAFETY 100% 调用点覆盖**（d3d11 / font / window）+ vtable 契约 + context 三段式
 - **文本缩放**（CPU + D3D）与**图片 mipmap LOD** 均有像素/解析真值验证
@@ -260,7 +260,7 @@
 - 平台中立 crate（`y901-core` / `y901-ui` / `y901-render` / `y901-widgets`）可单独 `-p` 跑
 - x11 全量：`DISPLAY=:99 cargo test -p y901-backend-x11 --test real_window -- --test-threads=1`
   （**必须 `--test-threads=1`**：用例共享一个 X 连接与环境变量）
-- 已验证结果：**728 passed / 0 failed / 55 ignored**
+- 已验证结果：**733 passed / 0 failed / 55 ignored**
 
 ## 数字检查的覆盖范围（已知限制）
 
@@ -316,3 +316,8 @@
   应把 `cargo test -p y901-render --test stroke_round_aa` 加进脚本，
   否则
 后续 Linux 验收会“看不见”这条路径。
+
+- **字体回退链未实现（P2）**：当前 NSimSun 只缺 U+2212，已用替身映射（→ `-`）解决。
+  若未来需支持任意 Unicode（emoji、其他脚本、用户输入的特殊字符），
+  需要实现完整字体回退：DirectWrite 用 `IDWriteFontFallback`，自研 TTF 需多字体 atlas + source 标记。
+  当前不做，因为只有 1 个已知缺失字符。替身表在 `y901-render/src/font_fallback.rs`。

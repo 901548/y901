@@ -758,9 +758,20 @@ impl TextEngine {
     unsafe fn rasterize(&mut self, ch: char) -> Result<GlyphInfo, String> {
         // **不要用 `encode_utf16()[0]`**：非 BMP 字符（emoji 等）会得到代理项，
         // 查不到字形；DWrite 的 GetGlyphIndices 本来就要 32 位码点。
-        let glyph = self.face.glyph_index(ch as u32)?;
+        let mut glyph = self.face.glyph_index(ch as u32)?;
         if glyph == 0 {
-            return Err(format!("glyph missing ({:?}, U+{:04X})", ch, ch as u32));
+            // 字体缺字时先试**替身字符**（当前只有 U+2212 → '-'）。
+            // 只替换 glyph，不改 measure_text / cell_span：宽度仍按**原字符**算，
+            // 避免因替身字形宽度不同而让布局跳动。
+            if let Some(sub) = y901_render::font_fallback::substitute(ch) {
+                let g = self.face.glyph_index(sub as u32)?;
+                if g != 0 {
+                    glyph = g;
+                }
+            }
+            if glyph == 0 {
+                return Err(format!("glyph missing ({:?}, U+{:04X})", ch, ch as u32));
+            }
         }
 
         let design = self.face.design_metrics(glyph);

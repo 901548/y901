@@ -113,7 +113,14 @@ pub fn rasterize_glyph_phased(
     phase: u8,
 ) -> Option<GlyphBitmap> {
     let face = ttf_parser::Face::parse(font_data, 0).ok()?;
-    let gid = face.glyph_index(ch)?;
+    // 缺字时先试替身字符（当前只有 U+2212 → '-' 一条）。
+    let gid = match face.glyph_index(ch) {
+        Some(g) => g,
+        None => match crate::font_fallback::substitute(ch) {
+            Some(sub) => face.glyph_index(sub)?,
+            None => return None,
+        },
+    };
     let units = face.units_per_em() as f32;
     if units <= 0.0 || size_px <= 0.0 {
         return None;
