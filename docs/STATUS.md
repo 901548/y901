@@ -2,7 +2,7 @@
 
 - **HEAD**: `112ce18`
 - **tags**: v0.1.0 ~ **v0.1.17**
-- **测试**: **728**（基线 **728**；`#[ignore]` **53**，含 ignore **n/a**）
+- **测试**: **728**（基线 **728**；`#[ignore]` **55**，含 ignore **n/a**）
 - **门禁**: `scripts/gate.ps1` 六步（MSRV / 测试计数 / clippy / 哈希 / missing_docs / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xDBB308DD1657EF9C` / `400x220`
@@ -199,7 +199,7 @@
 ## 已完成的里程碑
 
 - **v0.1.0 ~ v0.1.12**
-- **728 测试全绿**（基线 **728**；`#[ignore]` **53**；`--include-ignored` **n/a**）
+- **728 测试全绿**（基线 **728**；`#[ignore]` **55**；`--include-ignored` **n/a**）
 - **审查报告**：12 项可追踪并已处理；11 项原始报告未落盘（见上方更正）
 - **SAFETY 100% 调用点覆盖**（d3d11 / font / window）+ vtable 契约 + context 三段式
 - **文本缩放**（CPU + D3D）与**图片 mipmap LOD** 均有像素/解析真值验证
@@ -260,7 +260,7 @@
 - 平台中立 crate（`y901-core` / `y901-ui` / `y901-render` / `y901-widgets`）可单独 `-p` 跑
 - x11 全量：`DISPLAY=:99 cargo test -p y901-backend-x11 --test real_window -- --test-threads=1`
   （**必须 `--test-threads=1`**：用例共享一个 X 连接与环境变量）
-- 已验证结果：**728 passed / 0 failed / 53 ignored**
+- 已验证结果：**728 passed / 0 failed / 55 ignored**
 
 ## 数字检查的覆盖范围（已知限制）
 

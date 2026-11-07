@@ -66,7 +66,7 @@ fn build() -> UiTree {
         .gap(8.0)
         .flex_item(FlexItem::height(36.0))
         .push(Box::new(
-            Button::new("dec", "−10")
+            Button::new("dec", "-10")
                 .on_click("counter.dec", Json::obj())
                 .flex_item(FlexItem::width(90.0)),
         ))
