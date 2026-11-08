@@ -583,7 +583,24 @@ impl Connection {
                         0 => errors.push(parse_error(&buf)),
                         // 字节 0 == 1 是**响应**（reply），不是事件。
                         // 不区分的话，InternAtom/GetInputFocus 的响应会被当成 Unknown 事件丢给上层。
-                        1 => {}
+                        1 => {
+                            // **防御性 drain**：正常情况下主连接的 reply 都在
+                            // `read_reply_packet` / `sync` 里已读完，不会到这里；
+                            // 但若将来加运行期请求（如实时查 `_NET_WM_STATE`），
+                            // 它的 reply 可能先被 `poll_events` 摸到。
+                            // 若不 drain，剩下的 `units*4` 字节会把后续每一包都错位
+                            // （与 64c6088 修的是同一类灾难）。
+                            //
+                            // 选**drain 而不是报错**：poll_events 的调用方只想要事件，
+                            // reply 对它没用；报错会让一个"无害的并发"升级成启动失败。
+                            let units = u16::from_le_bytes([buf[4], buf[5]]) as usize;
+                            let mut extra = vec![0u8; units * 4];
+                            if !extra.is_empty() {
+                                self.stream.read_exact(&mut extra).map_err(|e| {
+                                    format!("poll_events 收到 reply，drain 附加数据失败: {e}")
+                                })?;
+                            }
+                        }
                         _ => {
                             if let Ok(ev) = decode_event(&buf) {
                                 events.push(ev);

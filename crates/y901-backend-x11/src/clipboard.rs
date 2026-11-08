@@ -104,7 +104,7 @@ impl X11Clipboard {
         self.tx
             .send(Cmd::Get { which, reply: tx })
             .map_err(|_| "剪贴板线程已退出".to_string())?;
-        rx.recv_timeout(Duration::from_secs(3))
+        rx.recv_timeout(Duration::from_millis(500))
             .map_err(|_| "读剪贴板超时（owner 未响应）".to_string())?
     }
 
@@ -118,7 +118,7 @@ impl X11Clipboard {
                 reply: tx,
             })
             .map_err(|_| "剪贴板线程已退出".to_string())?;
-        rx.recv_timeout(Duration::from_secs(3))
+        rx.recv_timeout(Duration::from_millis(500))
             .map_err(|_| "写剪贴板超时".to_string())?
     }
 }
