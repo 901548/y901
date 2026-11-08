@@ -53,7 +53,10 @@ use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW,
 use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
     MONITOR_DEFAULTTONEAREST};
-use windows_sys::Win32::UI::WindowsAndMessaging::{MoveWindow, WS_POPUP, WS_VISIBLE};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetWindowRect, MoveWindow, SetWindowPos, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, WS_POPUP, WS_VISIBLE,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, LoadCursorW,
     MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassExW,
@@ -371,6 +374,9 @@ fn is_fullscreen_window() -> bool {
 /// 若将来支持多窗口，改为从 `GWLP_USERDATA` 取实例指针。
 static FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// 全屏下按 Esc：`wndproc`（自由函数）置位，`wait_events`（`&mut self`）消费。
+static WANT_EXIT_FS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_NCCREATE => {
@@ -446,10 +452,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_CHAR => {
+            // 临时诊断：确认 wndproc 到底收到了什么键。
+            eprintln!(
+            );
             // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
             // 只在全屏下生效：普通窗口的 Esc 仍作为普通按键上报（用户可能用它取消输入）。
             if is_fullscreen_window() && msg == WM_KEYDOWN && wparam as u32 == VK_ESCAPE as u32 {
-                push(RawEvent::Close);
+                // 全屏下 Esc = **退出全屏**（不关进程）。
+                // `wndproc` 是自由函数、拿不到 `&mut self`，
+                // 所以只置全局标志，由 `wait_events`（`&mut self`）消费。
+                WANT_EXIT_FS.store(true, std::sync::atomic::Ordering::Relaxed);
                 return 0;
             }
             // 键盘消息统一走纯函数 `handle_wm_msg`（可单测）：它负责去重，
@@ -549,6 +561,12 @@ pub struct Window {
     /// 事件消费发生在 `wait_events` 内部，所以在这里记一下，
     /// 供 `after_frame` 计算光标形状。
     pending_cursor: Option<y901_ui::Pos>,
+    /// 进全屏前的 `GWL_STYLE`（恢复用）。
+    saved_style: isize,
+    /// 进全屏前的 `GetWindowRect`（x, y, w, h）；`None` = 退回默认位置。
+    saved_rect: Option<(i32, i32, i32, i32)>,
+    /// 当前是否全屏（状态机，避免重复切换）。
+    fullscreen: bool,
 }
 
 impl Window {
@@ -622,12 +640,10 @@ impl Window {
         // 为何用环境变量：不想在 SPIKE 阶段动 `Options` 公开字段（会破十几处构造点）。
         // 正式 API：`options.fullscreen`；环境变量保留作为**测试覆盖**（OR）。
         let fullscreen = options.fullscreen || std::env::var_os("Y901_FULLSCREEN").is_some();
-        FULLSCREEN.store(fullscreen, std::sync::atomic::Ordering::Relaxed);
-        let style = if fullscreen {
-            WS_POPUP | WS_VISIBLE
-        } else {
-            WS_OVERLAPPEDWINDOW
-        };
+        // **先创建普通窗口，需要全屏再切换**：
+        // 这样 `set_fullscreen(true)` 能保存到**真实的"进全屏前"样式与 rect**。
+        // 若直接用 `WS_POPUP` 创建，退出全屏时就只能重建一个几何。
+        let style = WS_OVERLAPPEDWINDOW;
         let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
@@ -644,40 +660,6 @@ impl Window {
         );
         if hwnd.is_null() {
             return Err("CreateWindowExW failed".into());
-        }
-        if fullscreen {
-            // 取当前窗口所在监视器的**全屏矩形**（不含任务栏），然后把窗口撞过去。
-            // SAFETY：只传入刚创建的合法 HWND，并保证 MONITORINFO.cbSize 正确。
-            unsafe {
-                let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-                let mut mi = MONITORINFO {
-                    cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-                    rcMonitor: RECT {
-                        left: 0,
-                        top: 0,
-                        right: 0,
-                        bottom: 0,
-                    },
-                    rcWork: RECT {
-                        left: 0,
-                        top: 0,
-                        right: 0,
-                        bottom: 0,
-                    },
-                    dwFlags: 0,
-                };
-                if GetMonitorInfoW(mon, &mut mi) != 0 {
-                    let r = mi.rcMonitor;
-                    MoveWindow(
-                        hwnd,
-                        r.left,
-                        r.top,
-                        r.right - r.left,
-                        r.bottom - r.top,
-                        1,
-                    );
-                }
-            }
         }
         // 接受 OS 级文件拖放：没这一步 WM_DROPFILES 永远不会来。
         DragAcceptFiles(hwnd, 1);
@@ -757,13 +739,139 @@ impl Window {
 
         ShowWindow(hwnd, SW_SHOW);
 
-        Ok(Self {
+        let mut win = Self {
             hwnd,
             backend,
             soft,
             viewport,
             pending_cursor: None,
-        })
+            saved_style: 0,
+            saved_rect: None,
+            fullscreen: false,
+        };
+        // 此时窗口已以普通样式存在，`set_fullscreen` 能保存到真实原状态。
+        if fullscreen {
+            win.set_fullscreen(true)?;
+        }
+        Ok(win)
+    }
+
+    /// 运行时切换 borderless fullscreen。
+    ///
+    /// 进全屏：保存 `GWL_STYLE` 与 `GetWindowRect`，改为 `WS_POPUP | WS_VISIBLE`，
+    /// 再 `SetWindowPos(.., SWP_FRAMECHANGED)`。
+    /// 退全屏：恢复样式与 rect。
+    ///
+    /// **`SWP_FRAMECHANGED` 必须有**：否则系统不重算非客户区，
+    /// 标题栏与关闭按钮不会出现。
+    ///
+    /// # Safety
+    ///
+    /// 只在 GUI 线程调用，且 `hwnd` 在调用期间有效（与 `Window` 同生命周期）。
+    fn set_fullscreen(&mut self, on: bool) -> Result<(), String> {
+        if self.fullscreen == on {
+            return Ok(()); // 状态机：不重复切换
+        }
+        // SAFETY：下面全部只使用本实例的合法 `hwnd`；
+        // `MONITORINFO.cbSize` 按结构体实际大小填写。
+        unsafe {
+            if on {
+                // 保存当前状态（`SetWindowLongPtrW` 的返回值就是旧样式）
+                // 提取当前样式：`SetWindowLongPtrW` 同时是读取器（传相同值返回旧值）。
+                let old = SetWindowLongPtrW(self.hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW as isize);
+                self.saved_style = old;
+                let mut rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                let gr_ok = GetWindowRect(self.hwnd, &mut rect) != 0;
+                self.saved_rect = if gr_ok {
+                    Some((
+                        rect.left,
+                        rect.top,
+                        rect.right - rect.left,
+                        rect.bottom - rect.top,
+                    ))
+                } else {
+                    None
+                };
+
+                SetWindowLongPtrW(self.hwnd, GWL_STYLE, (WS_POPUP | WS_VISIBLE) as isize);
+                SetWindowPos(
+                    self.hwnd,
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+                );
+
+                let mon = MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST);
+                let mut mi = MONITORINFO {
+                    cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                    rcMonitor: RECT {
+                        left: 0,
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                    },
+                    rcWork: RECT {
+                        left: 0,
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                    },
+                    dwFlags: 0,
+                };
+                if GetMonitorInfoW(mon, &mut mi) != 0 {
+                    let r = mi.rcMonitor;
+                    MoveWindow(self.hwnd, r.left, r.top, r.right - r.left, r.bottom - r.top, 1);
+                    let mut q = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                    if GetWindowRect(self.hwnd, &mut q) != 0 {
+                        eprintln!(
+                        );
+                    }
+                }
+            } else {
+                // `SetWindowLongPtrW` 返回 0 既可能是“旧样式本就是 0”也可能是失败，
+                // 所以用 `saved_style != 0` 做兜底：拿不到就用普通窗口样式。
+                let style = if self.saved_style != 0 {
+                    self.saved_style
+                } else {
+                    WS_OVERLAPPEDWINDOW as isize
+                };
+                SetWindowLongPtrW(self.hwnd, GWL_STYLE, style);
+                SetWindowPos(
+                    self.hwnd,
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+                );
+
+                if let Some((x, y, w, h)) = self.saved_rect {
+                    MoveWindow(self.hwnd, x, y, w, h, 1);
+                } else {
+                    // **不能用 `CW_USEDEFAULT`**：它只对 `CreateWindowExW` 有效，
+                    // 传给 `MoveWindow` 会得到巨大负坐标（实测窗口变成 -127x0）。
+                    let (w, h) = self.viewport;
+                    MoveWindow(self.hwnd, 100, 100, w as i32, h as i32, 1);
+                }
+                let mut q = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                if GetWindowRect(self.hwnd, &mut q) != 0 {
+                    eprintln!(
+                    );
+                }
+            }
+        }
+        self.fullscreen = on;
+        FULLSCREEN.store(on, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
     }
 
     /// 运行时切换主题（转发到后端）。
@@ -1529,6 +1637,14 @@ impl y901_backend_common::window::WindowBackend for Window {
     /// 这与旧循环的“事件 → 处理 → 空闲时 `wait_message`”等价：
     /// `run_loop` 在上一帧有工作时传 `wait_ms = 0`，因此不会在忙时睡眠。
     fn wait_events(&mut self, wait_ms: u32) -> Option<Vec<RawEvent>> {
+        // 全屏下的 Esc：`wndproc` 只能置标志，在这里（`&mut self`）执行切换。
+        // 放在 `pump` 之前：切换应在本次事件交付前完成。
+        let want_exit_fs = WANT_EXIT_FS.swap(false, std::sync::atomic::Ordering::Relaxed);
+        if want_exit_fs && self.fullscreen {
+            if let Err(e) = self.set_fullscreen(false) {
+                eprintln!("[y901] 退出全屏失败：{e}");
+            }
+        }
         if !self.pump() {
             return None;
         }

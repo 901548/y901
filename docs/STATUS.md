@@ -350,3 +350,15 @@
   `·` 变成乱码，按标题找不到窗口 → `hwnd = 0` → PostMessage 发到空句柄 → **假失败**。
   修法不是"记得写 BOM"，而是**改成按 PID 找窗口**，脚本对编码完全不敏感。
   同类教训：改 `.ps1` / `.bat` 必须保留原编码 BOM（`check-test-inventory` 那次）。
+
+- **改 `#[cfg(unix)]` 下的文件必须同时确认"引用闭合"**（第三次盲区返工）：
+  Windows 的 `cargo check` 对 `#[cfg(unix)]` 代码是"全部通过"的假象。
+  三次返工：
+  1. X11 `RenderOutcome` 未导入；
+  2. `create` 签名改了，`runtime.rs` + `real_window.rs` 调用点没改；
+  3. 删 diag 时连带删掉 `WANT_EXIT_FS` 静态声明 + `create` 的
+     `fullscreen_atoms` 调用漏参数。
+  **固定动作**：改 `#[cfg(unix)]` 文件后，用 `grep` 列出该文件里所有 `fn X(` 的定义与调用，
+  逐个核对参数个数；或让 demo 在每次改动后立即跑 `cargo check -p y901-backend-x11`。
+  另：删诊断代码时**按行/按关键字删块会误伤上下文**（实际把绝对多行的
+  `static` 与紧邻注释一起删掉）；应先 `cargo check` 再删，或按 AST/锚点删整块。

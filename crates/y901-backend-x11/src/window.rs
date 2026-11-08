@@ -31,6 +31,10 @@ fn is_fullscreen_window() -> bool {
 /// （射窗消息处理拿不到 `&self`，需通过实例句柄取回）。
 static FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Esc 请求退出全屏：事件转换层（`&self`）置位，
+/// 事件循环（`&mut self`）消费，一次性。
+static WANT_EXIT_FS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 use crate::keys::{keysym_to_key, modifiers_from_state, Keymap};
 use crate::X11Event;
 
@@ -57,6 +61,8 @@ pub struct X11Window {
     soft: SoftBackend,
     /// 上屏用的像素暂存（`Present` 要 `&mut self`，不能同时借用 `soft`）。
     frame: Vec<u8>,
+    /// 当前是否处于 fullscreen（状态机，避免重复发 EWMH）。
+    fullscreen: bool,
 }
 
 /// 对外可用的光标形状（与 `y901_ui::Cursor` 一一对应）。
@@ -154,7 +160,7 @@ impl X11Window {
         if fullscreen {
             // best-effort：全屏请求失败（无 WM、属性不受支持、协议序列异常）
             // 不应阻止窗口启动 —— 用户至少能看到一个普通窗口。
-            if let Err(e) = fullscreen_atoms(&mut conn, wid, info.root) {
+            if let Err(e) = fullscreen_atoms(&mut conn, wid, info.root, true) {
                 eprintln!("[y901] EWMH fullscreen 请求失败（无 WM 或协议时序问题）：{e}");
             }
         }
@@ -231,6 +237,7 @@ impl X11Window {
             cursor_now: CursorShape::Default,
             soft,
             frame: Vec::new(),
+            fullscreen,
         })
     }
 
@@ -304,7 +311,10 @@ impl X11Window {
                     // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
                     // 与 Win32 一致：**只在全屏下**生效；普通窗口的 Esc 仍作为普通按键上报。
                     if is_fullscreen_window() && key == Key::Escape {
-                        return Some(RawEvent::Close);
+                        // 全屏下 Esc = **退出全屏**（标题栏由 WM 恢复），不再关窗。
+                        // `translate` 是 `&self`，所以用全局标志，由 `wait_events` 消费。
+                        WANT_EXIT_FS.store(true, std::sync::atomic::Ordering::Relaxed);
+                        return None;
                     }
                     RawEvent::KeyDown {
                         key,
@@ -506,6 +516,12 @@ impl Presenter for X11Window {
 impl WindowBackend for X11Window {
     /// 语义：可阻塞至多 `wait_ms`；关闭（`RawEvent::Close`）由 `run_loop` 判定。
     fn wait_events(&mut self, wait_ms: u32) -> Option<Vec<RawEvent>> {
+        // 全屏下的 Esc：`translate`（`&self`）只能置标志，在这里（`&mut self`）执行切换。
+        if WANT_EXIT_FS.swap(false, std::sync::atomic::Ordering::Relaxed) && self.fullscreen {
+            if let Err(e) = self.set_fullscreen(false) {
+                eprintln!("[y901] 退出全屏失败：{e}");
+            }
+        }
         Some(self.poll(wait_ms))
     }
 
@@ -531,6 +547,20 @@ impl WindowBackend for X11Window {
         } else {
             RenderOutcome::Skipped
         })
+    }
+
+    /// 运行时切换全屏（EWMH）。
+    ///
+    /// 只发 ClientMessage，边框/几何由 WM 恢复。无 WM 时消息被忽略（不报错）。
+    fn set_fullscreen(&mut self, on: bool) -> Result<(), String> {
+        if self.fullscreen == on {
+            return Ok(()); // 状态机：不重复发
+        }
+        let root = self.conn.info().root;
+        fullscreen_atoms(&mut self.conn, self.wid, root, on)?;
+        self.fullscreen = on;
+        FULLSCREEN.store(on, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
     }
 
     fn set_theme(&mut self, theme: Theme) -> Result<(), String> {
@@ -680,10 +710,12 @@ fn create_cursors(conn: &mut Connection, base: u32) -> Result<Cursors, String> {
 ///
 /// **注意**：若没有 WM（如 Xvfb），本消息会被忽略，窗口不会真的全屏 ——
 /// 这是 EWMH 的设计（全屏由 WM 实施），不是实现缺陷。
-fn fullscreen_atoms(conn: &mut Connection, wid: u32, root: u32) -> Result<(), String> {
+fn fullscreen_atoms(conn: &mut Connection, wid: u32, root: u32, add: bool) -> Result<(), String> {
     let state_atom = intern(conn, b"_NET_WM_STATE")?;
     let fs_atom = intern(conn, b"_NET_WM_STATE_FULLSCREEN")?;
-    let ev = crate::encode::client_message_event(wid, state_atom, [1, fs_atom, 0, 0, 0]);
+    // data[0]: 1 = _NET_WM_STATE_ADD，0 = _NET_WM_STATE_REMOVE（EWMH §7.6）
+    let action = if add { 1 } else { 0 };
+    let ev = crate::encode::client_message_event(wid, state_atom, [action, fs_atom, 0, 0, 0]);
     // SubstructureRedirectMask = 1<<20, SubstructureNotifyMask = 1<<19
     conn.send(&crate::encode::encode_send_event(root, (1 << 20) | (1 << 19), &ev))?;
     Ok(())

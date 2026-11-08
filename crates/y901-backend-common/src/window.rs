@@ -59,6 +59,19 @@ pub trait WindowBackend {
     /// 一旦两边不一致就会出现"有脏区但不画"的难查 bug。
     fn render(&mut self, tree: &mut UiTree) -> Result<RenderOutcome, String>;
 
+    /// 运行时切换 borderless fullscreen。
+    ///
+    /// 默认实现为空操作（供 mock / 旧后端编译通过）。
+    ///
+    /// 后端实现时注意：
+    /// - **Win32**：需保存/恢复窗口样式与位置
+    ///   （`SetWindowLongPtrW` + `SetWindowPos(.., SWP_FRAMECHANGED)` + `MoveWindow`）
+    /// - **X11**：发 EWMH `_NET_WM_STATE` ClientMessage（`data[0]` = 1 ADD / 0 REMOVE），
+    ///   边框与几何由 WM 负责恢复
+    fn set_fullscreen(&mut self, _on: bool) -> Result<(), String> {
+        Ok(())
+    }
+
     /// 切换主题。失败不影响后续帧，调用方只记录日志。
     fn set_theme(&mut self, theme: Theme) -> Result<(), String>;
 
