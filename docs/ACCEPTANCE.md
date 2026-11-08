@@ -12,7 +12,7 @@
 | `cargo test --workspace`（默认，跳过 `#[ignore]`） | **746 passed / 0 failed** |
 | 加上 `--include-ignored` | **746 passed / 0 failed**（含默认测试集与 `#[ignore]` 测试） |
 
-含 ignore 的总数是 **801**（默认测试集 + `#[ignore]` 测试的全量结果），不是单独跑的测试集。
+含 ignore 的总数是 **804**（默认测试集 + `#[ignore]` 测试的全量结果），不是单独跑的测试集。
 
 差值 **51**（763 − 712）= `#[ignore]` 用例。源码里共有 **55** 处 `#[ignore]`，与 51 的差额有两个来源：
 
