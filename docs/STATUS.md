@@ -362,3 +362,13 @@
   逐个核对参数个数；或让 demo 在每次改动后立即跑 `cargo check -p y901-backend-x11`。
   另：删诊断代码时**按行/按关键字删块会误伤上下文**（实际把绝对多行的
   `static` 与紧邻注释一起删掉）；应先 `cargo check` 再删，或按 AST/锚点删整块。
+
+- **X11 读包：只有 reply（byte0=1）和 GenericEvent（byte0=35）带附加数据**：
+  Error（byte0=0）的 byte4-5 是 `bad_value`，Event（byte0>=2 且 !=35）的 byte4 起是事件体，
+  **都不是长度字段**。无条件按 byte4-5 当长度 drain 会多读字节、流错位。
+  本轮踩坑：`sync()` 的 drain 放在 `match` 之前、对所有包执行 →
+  **修前 5/20 失败变成修坏后 12/20**，real_window 从 11 passed 变 6 failed。
+  修正：drain 移进 reply 分支，事件分支只对 35 drain；`read_reply_packet` 同样修。
+  另：`read_exact` 的 `WouldBlock`/`TimedOut` 不应直接当致命错误——
+  改为 200ms 轮询 + 5s deadline，EAGAIN 时继续等而不是报错。
+  **教训：协议细节没确认就动手，会从“修一个 bug”变成“引入一个回归”。**

@@ -264,17 +264,46 @@ impl Connection {
     }
 
     fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), String> {
-        // 等应答必须有上界：协议错位时对端不会再回应答，而 `read_exact` 默认无限阻塞。
+        // 等应答必须有上界：协议错位时对端不会再回应答。
+        //
+        // **WouldBlock/EAGAIN 不应当成读取失败**：
+        // 它只是“本次 set_read_timeout 内没数据”，看上去像错误（实测报
+        // `Resource temporarily unavailable`）。应在总时间上限内**继续等**，
+        // 直到取满整个 `buf`，超时才报“读超时”。
         const REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+        let deadline = Instant::now() + REPLY_TIMEOUT;
         self.stream
-            .set_read_timeout(Some(REPLY_TIMEOUT))
+            .set_read_timeout(Some(std::time::Duration::from_millis(200)))
             .map_err(|e| format!("设置读超时失败: {e}"))?;
-        let r = self
-            .stream
-            .read_exact(buf)
-            .map_err(|e| format!("读取失败（对端关闭或等应答超时 5s）：{e}"));
+
+        let mut filled = 0usize;
+        let mut result = Ok(());
+        while filled < buf.len() {
+            match self.stream.read(&mut buf[filled..]) {
+                Ok(0) => {
+                    result = Err("对端关闭连接".to_string());
+                    break;
+                }
+                Ok(n) => filled += n,
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    if Instant::now() >= deadline {
+                        result = Err("读超时（5s 内未收到完整包）".to_string());
+                        break;
+                    }
+                    // 短睡避免空转；总时间仍受 deadline 限制。
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(e) => {
+                    result = Err(format!("读取失败：{e}"));
+                    break;
+                }
+            }
+        }
         let _ = self.stream.set_read_timeout(None);
-        r
+        result
     }
 
     /// 发送一个已编码的请求（不 flush）。
@@ -311,6 +340,13 @@ impl Connection {
             match buf[0] {
                 0 => errors.push(parse_error(&buf)),
                 1 => {
+                    // **只有 reply 的 byte4-5 是附加数据长度**（单位 4 字节）。
+                    // 必须 drain，否则剩下的字节会把后续每一包都错位。
+                    let units = u16::from_le_bytes([buf[4], buf[5]]) as usize;
+                    let mut extra = vec![0u8; units * 4];
+                    if !extra.is_empty() {
+                        self.read_exact(&mut extra)?;
+                    }
                     // 响应：序列号在字节 2-3
                     let seq = u16::from_le_bytes([buf[2], buf[3]]);
                     if seq == want {
@@ -318,10 +354,19 @@ impl Connection {
                         return Ok(errors);
                     }
                     // 它是**旧响应**（如 InternAtom 的 reply），丢弃即可——
-                    // 不能当事件丢给上层，否则 UI 会收到一堆假事件。
+                    // 不能当事件丢给上层，否则 UI 会收到一堆假事件；
+                    // 但它的**附加数据已在上面 drain 过**，不会污染流。
                 }
                 _ => {
-                    // 事件：先存起来，不丢
+                    // 事件：**固定 32 字节**（byte4 起是事件体，不是长度）。
+                    // 例外：GenericEvent（byte0 = 35）的 byte4-5 才是附加长度。
+                    if buf[0] == 35 {
+                        let units = u16::from_le_bytes([buf[4], buf[5]]) as usize;
+                        let mut extra = vec![0u8; units * 4];
+                        if !extra.is_empty() {
+                            self.read_exact(&mut extra)?;
+                        }
+                    }
                     events.push(decode_event(&buf).unwrap_or(X11Event::Unknown { code: buf[0] }));
                 }
             }
@@ -418,27 +463,31 @@ impl Connection {
         loop {
             let mut head = [0u8; 32];
             self.read_exact(&mut head)?;
-            let units = u16::from_le_bytes([head[4], head[5]]) as usize;
-            let mut extra = vec![0u8; units * 4];
             match head[0] {
-                // 响应
+                // 响应：byte4-5 = 附加数据长度（单位 4 字节）→ **drain**
                 1 => {
+                    let units = u16::from_le_bytes([head[4], head[5]]) as usize;
+                    let mut extra = vec![0u8; units * 4];
                     if !extra.is_empty() {
                         self.read_exact(&mut extra)?;
                     }
                     return Ok((head, extra));
                 }
-                // 错误包（固定 32 字节）：不吞掉
+                // 错误包：**固定 32 字节**（byte4 是 bad_value，不是长度）
                 0 => {
                     return Err(format!(
                         "X11 错误包（字节 0 = 0，错误码 = {}）",
                         head[1]
                     ))
                 }
-                // 事件包：drain 后收起来，继续等响应
+                // 事件包：**固定 32 字节**；只有 GenericEvent(35) 带附加数据
                 _ => {
-                    if !extra.is_empty() {
-                        self.read_exact(&mut extra)?;
+                    if head[0] == 35 {
+                        let units = u16::from_le_bytes([head[4], head[5]]) as usize;
+                        let mut extra = vec![0u8; units * 4];
+                        if !extra.is_empty() {
+                            self.read_exact(&mut extra)?;
+                        }
                     }
                     if let Ok(ev) = decode_event(&head) {
                         self.pending.push(ev);
