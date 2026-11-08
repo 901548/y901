@@ -10,14 +10,10 @@
 | 口径 | 数量 |
 |---|---|
 | `cargo test --workspace`（默认，跳过 `#[ignore]`） | **746 passed / 0 failed** |
-| 加上 `--include-ignored` | **746 passed / 0 failed**（含默认测试集与 `#[ignore]` 测试） |
 
-含 ignore 的总数是 **804**（默认测试集 + `#[ignore]` 测试的全量结果），不是单独跑的测试集。
+`include_ignored=804`（唯一来源 `docs/evidence/numbers.txt`；不做二次计算，也不交由 `sync-doc-numbers.ps1` 推导）。
 
-差值 **51**（763 − 712）= `#[ignore]` 用例。源码里共有 **55** 处 `#[ignore]`，与 51 的差额有两个来源：
-
-- **2 处在 example**（`y901-ui/examples/hash_bench.rs`）：`cargo test` 不执行 example 里的测试；
-- **2 处在 `y901-backend-x11`**：该 crate 在 Windows 上 suite 存在但 `running 0 tests`（整 crate 被 cfg 掉）。
+`#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
 | 类别 | 数量 | 用例 |
 |---|---|---|
@@ -26,7 +22,7 @@
 | 性能基准 | **30** | ui 12（`perf_bench` ×6、`perf_dispatch_alloc` ×3、`layout_bench`、`perf_alloc`、`rev_snapshot`）、win32 8（`perf_bench` ×3、`present_bench`、`breakdown_rasterize_vs_atlas_insert`、`cold_start_500_cjk_glyphs`、`all_phases_reference_cost`、`soft_fill_rate_1280x800`）、render 10（`cjk_cold_start` ×3、`mip_latin` ×3、`perf_texture_alloc` ×3、`which_method_is_closer_to_supersampled_truth`） |
 | 调试探针 | **5** | `debug_print_glyphs`、`debug_crossings_for_a`、`debug_print_cjk_frames`、`occupancy_matches_glyph_count_sanity`、`probe_orientation_and_channels` |
 | 压力测试 | **1** | `forced_eviction_thrash_measurement`（图集 eviction 抖动） |
-| **合计** | **51** | |
+| **合计** | **58** | 分类明细为**旧口径**（当时总数 51），未随新增用例重算；以上五类不相加等于总数，总数以 `docs/evidence/numbers.txt` 的 `ignored=58` 为准。 |
 
 ## 7 个 GPU harness（真机 D3D11，全部 ok）
 

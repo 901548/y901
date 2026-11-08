@@ -1,8 +1,8 @@
 # 项目状态
 
-- **HEAD**: `112ce18`
+- **HEAD**: `56e06a9`
 - **tags**: v0.1.0 ~ **v0.1.17**
-- **测试**: **746**（基线 **746**；`#[ignore]` **58**，含 ignore **n/a**）
+- **测试**: `passed=746` / `ignored=58` / `include_ignored=804`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1` 六步（MSRV / 测试计数 / clippy / 哈希 / missing_docs / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xDBB308DD1657EF9C` / `400x220`
@@ -199,7 +199,7 @@
 ## 已完成的里程碑
 
 - **v0.1.0 ~ v0.1.12**
-- **746 测试全绿**（基线 **746**；`#[ignore]` **58**；`--include-ignored` **n/a**）
+- **测试全绿**（数字见 `docs/evidence/numbers.txt`）
 - **审查报告**：12 项可追踪并已处理；11 项原始报告未落盘（见上方更正）
 - **SAFETY 100% 调用点覆盖**（d3d11 / font / window）+ vtable 契约 + context 三段式
 - **文本缩放**（CPU + D3D）与**图片 mipmap LOD** 均有像素/解析真值验证
@@ -260,7 +260,7 @@
 - 平台中立 crate（`y901-core` / `y901-ui` / `y901-render` / `y901-widgets`）可单独 `-p` 跑
 - x11 全量：`DISPLAY=:99 cargo test -p y901-backend-x11 --test real_window -- --test-threads=1`
   （**必须 `--test-threads=1`**：用例共享一个 X 连接与环境变量）
-- 已验证结果：**746 passed / 0 failed / 58 ignored**
+- 已验证结果见 `docs/evidence/numbers.txt`（该文件是唯一口径）
 
 ## 数字检查的覆盖范围（已知限制）
 
@@ -330,3 +330,8 @@
   规则：凡是将来会变成“乘数”的字段，默认值从一开始就设 1.0，不要设 0.0。
   反向修复也要做：新建实例的统一入口（如 `push_instance`）必须**无法被绕过**，
   否则两套保护都会在下一个新构造点上失效。
+- **Linux 同步清单**：改了 `y901-ui` 的 `RenderCtx` trait（如 push_opacity/pop_opacity）后，
+  Linux 侧同步必须带上 `crates/y901-ui/src/widget.rs`，否则 y901-render 会误报编译回归。
+  建议：改 trait 就全仓 tar 同步 + MD5 校验，不要单文件增量。
+- **tar 同步后 mtime 保留**：tar 解压保留原 mtime，cargo 会误判 fresh，check 通过可能只是缓存命中。
+  建议：tar 同步后 touch 关键源文件，或 cargo clean -p <crate> 后重编。
