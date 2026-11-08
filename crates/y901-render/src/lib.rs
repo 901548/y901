@@ -24,10 +24,14 @@
 //! ```
 
 #![deny(missing_docs)]
+/// 图像缩放（mipmap 生成与采样）。
 pub mod mip;
 
+/// 图集存储与 LRU 驱逐。
 pub mod atlas;
+/// 字体管理（加载、指标、字形缓存）。
 pub mod font;
+/// 自研 TrueType 光栅器（不依赖 DirectWrite）。
 pub mod font_engine;
 /// 圆角矩形 SDF（与 D3D 着色器逐字对应）。
 pub mod sdf;
@@ -37,6 +41,7 @@ pub mod font_fallback;
 
 /// 两个渲染后端共享的渲染状态（剪往栈 / 变换栈 / 主题 / 动画）。
 pub mod render_state;
+/// CPU 光栅后端（SoftBackend）。
 pub mod soft;
 #[cfg(test)]
 mod supersample;

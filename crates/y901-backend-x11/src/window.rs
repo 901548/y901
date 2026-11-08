@@ -18,6 +18,14 @@ use crate::encode::{
     encode_create_gc, encode_create_window, encode_map_window, CreateWindowArgs, GcMask, ValueMask,
     WindowClass,
 };
+/// 是否处于 borderless fullscreen（由环境变量控制，与 Win32 一致）。
+///
+/// 只读一次：事件转换每帧都调，不能反复读环境变量。
+fn is_fullscreen_window() -> bool {
+    static FS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FS.get_or_init(|| std::env::var_os("Y901_FULLSCREEN").is_some())
+}
+
 use crate::keys::{keysym_to_key, modifiers_from_state, Keymap};
 use crate::X11Event;
 
@@ -278,6 +286,11 @@ impl X11Window {
                 let ks = if shift { shifted.or(plain) } else { plain }?;
                 let key = keysym_to_key(ks)?;
                 if *pressed {
+                    // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
+                    // 与 Win32 一致：**只在全屏下**生效；普通窗口的 Esc 仍作为普通按键上报。
+                    if is_fullscreen_window() && key == Key::Escape {
+                        return Some(RawEvent::Close);
+                    }
                     RawEvent::KeyDown {
                         key,
                         mods: modifiers_from_state(*state),

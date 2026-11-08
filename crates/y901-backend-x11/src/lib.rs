@@ -21,19 +21,28 @@
 
 #![deny(missing_docs)]
 #[cfg(unix)]
+/// X11 剪贴板（PRIMARY / CLIPBOARD 选择属主）。
 pub mod clipboard;
 #[cfg(unix)]
+/// X11 连接、请求发送与响应/事件读取。
 pub mod conn;
+/// X11 事件与错误包的解码。
 pub mod decode;
+/// X11 请求与事件的编码。
 pub mod encode;
+/// keycode → keysym → 平台无关 `Key` 的映射。
 pub mod keys;
 #[cfg(unix)]
+/// X11 后端的 `run_loop` 接线。
 pub mod runtime;
 #[cfg(unix)]
+/// MIT-SHM 共享内存优化（可选，失败回退到 PutImage）。
 pub mod shm;
 #[cfg(unix)]
+/// X11 窗口与事件循环。
 pub mod window;
 #[cfg(unix)]
+/// Xauthority 读取（用于连接需认证的 X server）。
 pub mod xauth;
 
 pub use decode::{decode_event, DecodeError, X11Event};

@@ -364,18 +364,9 @@ impl Connection {
             delete_after,
         ))?;
         self.flush()?;
-        let mut head = [0u8; 32];
-        self.read_exact(&mut head)?;
-        if head[0] != 1 {
-            return Err(format!("GetProperty 未得到响应（字节 0 = {}）", head[0]));
-        }
+        let (head, mut data) = self.read_reply_packet()?;
         let format = head[1];
         let n_items = u32::from_le_bytes([head[16], head[17], head[18], head[19]]) as usize;
-        let units = u16::from_le_bytes([head[4], head[5]]) as usize;
-        let mut data = vec![0u8; units * 4];
-        if !data.is_empty() {
-            self.read_exact(&mut data)?;
-        }
         // format=8 时每项 1 字节；32 时每项 4 字节
         let bytes = match format {
             8 => n_items,
@@ -394,12 +385,9 @@ impl Connection {
     pub fn query_extension(&mut self, name: &[u8]) -> Result<Option<u8>, String> {
         self.send(&crate::encode::encode_query_extension(name))?;
         self.flush()?;
-        let mut head = [0u8; 32];
-        self.read_exact(&mut head)?;
-        if head[0] != 1 {
-            return Err(format!("期待响应，收到字节 0 = {}", head[0]));
-        }
-        // 响应布局：byte8 = present，byte9 = major-opcode
+        let (head, _extra) = self.read_reply_packet()?;
+        // QueryExtension 响应布局（X11 规范）：
+        //   byte8 = present，byte9 = major-opcode，byte10 = first-event，byte11 = first-error
         Ok(if head[8] != 0 { Some(head[9]) } else { None })
     }
 
@@ -409,24 +397,63 @@ impl Connection {
     pub fn shm_query_version(&mut self, major_opcode: u8) -> Result<(u16, u16), String> {
         self.send(&crate::encode::encode_shm_query_version(major_opcode))?;
         self.flush()?;
-        let mut head = [0u8; 32];
-        self.read_exact(&mut head)?;
-        if head[0] != 1 {
-            return Err(format!(
-                "ShmQueryVersion 未得到响应（字节 0 = {}）",
-                head[0]
-            ));
-        }
+        let (head, _extra) = self.read_reply_packet()?;
         // byte8 = shared_pixmaps；bytes 10-11 = major；12-13 = minor
         let major = u16::from_le_bytes([head[10], head[11]]);
         let minor = u16::from_le_bytes([head[12], head[13]]);
         Ok((major, minor))
     }
 
-    /// 读一个"只带一个 u32 结果"的响应（`InternAtom` 的原子 ID 在字节 8-11）。
+    /// 读一个"必须是响应"的包，中途插入的事件收进 `pending`。
     ///
-    /// 为什么单独写：`sync()` 会丢弃"不属于当前序列"的响应，
+    /// 返回：`(32 字节响应头, 附加数据)`。附加数据已按
+    /// `head[4..8]`（单位：4 字节）**drain 干净**，调用方不用再读。
+    ///
+    /// 为何要统一：X11 允许事件与响应任意交错。有 WM 时
+    /// metacity 的 `ReparentNotify`（字节 0 = 21）会插在响应前面，
+    /// 旧实现直接报“未得到响应”，导致启动失败。
+    ///
+    /// 注意：事件包一般 `units = 0`，但协议没保证，所以同样 drain。
+    fn read_reply_packet(&mut self) -> Result<([u8; 32], Vec<u8>), String> {
+        loop {
+            let mut head = [0u8; 32];
+            self.read_exact(&mut head)?;
+            let units = u16::from_le_bytes([head[4], head[5]]) as usize;
+            let mut extra = vec![0u8; units * 4];
+            match head[0] {
+                // 响应
+                1 => {
+                    if !extra.is_empty() {
+                        self.read_exact(&mut extra)?;
+                    }
+                    return Ok((head, extra));
+                }
+                // 错误包（固定 32 字节）：不吞掉
+                0 => {
+                    return Err(format!(
+                        "X11 错误包（字节 0 = 0，错误码 = {}）",
+                        head[1]
+                    ))
+                }
+                // 事件包：drain 后收起来，继续等响应
+                _ => {
+                    if !extra.is_empty() {
+                        self.read_exact(&mut extra)?;
+                    }
+                    if let Ok(ev) = decode_event(&head) {
+                        self.pending.push(ev);
+                    }
+                }
+            }
+        }
+    }
+
+    /// 读一个 32 位回复（`InternAtom` 等）；遇到事件包先解码存入 `pending`。
+    ///
+    /// 为何单独写：`sync()` 会丢弃"不属于当前序列"的响应，
     /// 而 `InternAtom` 的响应正好需要拿回来用，不能丢。
+    ///
+    /// 实现委托给 `read_reply_packet`（它负责跳事件与 drain 附加数据）。
     pub fn read_reply_u32(&mut self) -> Result<u32, String> {
         // **事件与响应可任意交错**：X11 协议不保证"下一个包就是响应"。
         // 实例：metacity 接管窗口时会发 `ReparentNotify`（字节 0 = 21），
@@ -434,27 +461,8 @@ impl Connection {
         //
         // 修法：遇到事件包就**解码后存进 `pending`**（与 `poll_events` 共用同一队列），
         // 然后继续读，直到真正的响应或错误包。
-        let mut head = [0u8; 32];
-        loop {
-            self.read_exact(&mut head)?;
-            match head[0] {
-                // 响应（reply）：InternAtom 的原子 ID 在字节 8-11
-                1 => return Ok(u32::from_le_bytes([head[8], head[9], head[10], head[11]])),
-                // 错误包：不吞掉，交给上层看真实原因
-                0 => {
-                    return Err(format!(
-                        "X11 错误包（字节 0 = 0，错误码 = {}）",
-                        head[1]
-                    ))
-                }
-                // 事件包（如 ReparentNotify = 21）：收起来，继续等响应
-                _ => {
-                    if let Ok(ev) = decode_event(&head) {
-                        self.pending.push(ev);
-                    }
-                }
-            }
-        }
+        let (head, _extra) = self.read_reply_packet()?;
+        Ok(u32::from_le_bytes([head[8], head[9], head[10], head[11]]))
     }
 
     /// 回读一块像素（`GetImage`）。
@@ -479,17 +487,8 @@ impl Connection {
         ))?;
         self.flush()?;
         // 读 32 字节响应头
-        let mut head = [0u8; 32];
-        self.read_exact(&mut head)?;
-        if head[0] != 1 {
-            return Err(format!("GetImage 未得到响应（字节 0 = {}）", head[0]));
-        }
+        let (head, data) = self.read_reply_packet()?;
         let depth = head[1];
-        let units = u16::from_le_bytes([head[4], head[5]]) as usize;
-        let mut data = vec![0u8; units * 4];
-        if !data.is_empty() {
-            self.read_exact(&mut data)?;
-        }
         Ok((depth, data))
     }
 
@@ -507,20 +506,8 @@ impl Connection {
             count,
         ))?;
         self.flush()?;
-        let mut head = [0u8; 32];
-        self.read_exact(&mut head)?;
-        if head[0] != 1 {
-            return Err(format!(
-                "GetKeyboardMapping 未得到响应（字节 0 = {}）",
-                head[0]
-            ));
-        }
+        let (head, raw) = self.read_reply_packet()?;
         let per = head[1];
-        let n_keysyms = u16::from_le_bytes([head[4], head[5]]) as usize;
-        let mut raw = vec![0u8; n_keysyms * 4];
-        if !raw.is_empty() {
-            self.read_exact(&mut raw)?;
-        }
         let keysyms = raw
             .chunks_exact(4)
             .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
