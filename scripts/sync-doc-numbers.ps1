@@ -13,31 +13,61 @@ function Get-Count([string]$pattern, [string]$text) {
     return -1
 }
 
-$defaultOut = & cargo test --workspace --offline 2>&1 | Out-String
-$passed = 0; $failed = 0; $ignored = 0
-foreach ($m in [regex]::Matches($defaultOut, 'test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored')) {
-    $passed += [int]$m.Groups[1].Value; $failed += [int]$m.Groups[2].Value; $ignored += [int]$m.Groups[3].Value
+# **-Check 不跑测试**。
+#
+# 原因：- Check 原本也会实跑 `--include-ignored`，而那一轮包含依赖**进程内全局计数器**
+# 的基准用例，并行时互相污染，实测会得到 560 这种半截值（应为 804）。
+# gate 每次都调 `-Check`，于是门禁随机报 "doc numbers out of sync"。
+#
+# 现在分工明确：
+#   - `-Check`：**只读** `docs/evidence/numbers.txt`，比对文档与它是否一致（确定、快、无并行噪声）。
+#   - 无 `-Check`：实跑测试重新测量并重写 numbers.txt（这是唯一会改数字的路径）。
+$numbersFromFile = @{}
+if (Test-Path $numbersPath) {
+    foreach ($line in Get-Content $numbersPath) {
+        if ($line -match '^\s*([a-z_]+)\s*=\s*(-?\d+)\s*$') {
+            $numbersFromFile[$matches[1]] = [int]$matches[2]
+        }
+    }
 }
-# include-ignored 跑的是**全部**用例（含并行基准），而部分 `#[ignore]` 基准依赖**进程内全局计数器**，
-# 并行时会把别的用例的分配记到自己头上（实测：每帧应 0 却测到 4）。
-# 所以这个口径**只在全部通过时**才记录，否则写 n/a —— 不拿一个失真的数字去充数。
-$includeOut = & cargo test --workspace --offline -- --include-ignored 2>&1 | Out-String
-$includeCode = $LASTEXITCODE
-$includePassed = 0
-foreach ($m in [regex]::Matches($includeOut, 'test result: \w+\. (\d+) passed')) { $includePassed += [int]$m.Groups[1].Value }
-$includeText = if ($includeCode -eq 0) { "$includePassed" } else { "n/a (full run has failures: parallel fixtures break allocation-counter tests)" }
 
-$baselineLine = (Get-Content (Join-Path $root 'docs\evidence\test-baseline.txt') | Where-Object { $_ -notmatch '^#' -and $_.Trim() -ne '' } | Select-Object -First 1)
-$baseline = [int]$baselineLine.Trim()
-if ($passed -ne $baseline) {
-    Write-Host "[sync] FAIL: actual passed=$passed but baseline=$baseline (update test-baseline.txt first)"
-    exit 1
+if ($Check) {
+    # 只读真值，不跑测试
+    $passed   = if ($numbersFromFile.ContainsKey('passed')) { $numbersFromFile['passed'] } else { -1 }
+    $ignored  = if ($numbersFromFile.ContainsKey('ignored')) { $numbersFromFile['ignored'] } else { -1 }
+    $failed   = 0
+    $includePassed = if ($numbersFromFile.ContainsKey('include_ignored')) { $numbersFromFile['include_ignored'] } else { -1 }
+    $includeText = "$includePassed"
+    if ($numbersFromFile.ContainsKey('baseline')) { $script:baselineFromFile = $numbersFromFile['baseline'] }
+} else {
+    $defaultOut = & cargo test --workspace --offline 2>&1 | Out-String
+    $passed = 0; $failed = 0; $ignored = 0
+    foreach ($m in [regex]::Matches($defaultOut, 'test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored')) {
+        $passed += [int]$m.Groups[1].Value; $failed += [int]$m.Groups[2].Value; $ignored += [int]$m.Groups[3].Value
+    }
+    # include-ignored 跑的是**全部**用例（含并行基准），而部分 `#[ignore]` 基准依赖**进程内全局计数器**，
+    # 并行时会把别的用例的分配记到自己头上（实测：每帧应 0 却测到 4）。
+    # 所以这个口径**只在全部通过时**才记录，否则写 n/a —— 不拿一个失真的数字去充数。
+    $includeOut = & cargo test --workspace --offline -- --include-ignored 2>&1 | Out-String
+    $includeCode = $LASTEXITCODE
+    $includePassed = 0
+    foreach ($m in [regex]::Matches($includeOut, 'test result: \w+\. (\d+) passed')) { $includePassed += [int]$m.Groups[1].Value }
+    $includeText = if ($includeCode -eq 0) { "$includePassed" } else { "n/a (full run has failures: parallel fixtures break allocation-counter tests)" }
+
+    $baselineLine = (Get-Content (Join-Path $root 'docs\evidence\test-baseline.txt') | Where-Object { $_ -notmatch '^#' -and $_.Trim() -ne '' } | Select-Object -First 1)
+    $baseline = [int]$baselineLine.Trim()
+    if ($passed -ne $baseline) {
+        Write-Host "[sync] FAIL: actual passed=$passed but baseline=$baseline (update test-baseline.txt first)"
+        exit 1
+    }
+
 }
 Write-Host "[sync] measured: passed=$passed failed=$failed ignored=$ignored include_ignored=$includeText baseline=$baseline"
 
 $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 # 时间戳不进 numbers.txt：那会让“纯数据文件”每次 sync 都变脏，
 # 把工具输出和运行日志混在一起。时间戳改写到 target/（已被 gitignore）。
+if (-not $Check) {
 $logPath = Join-Path $root 'target\doc-numbers-last-sync.txt'
 if (-not (Test-Path (Split-Path $logPath -Parent))) {
     New-Item -ItemType Directory -Force -Path (Split-Path $logPath -Parent) | Out-Null
@@ -56,6 +86,8 @@ $numbers = @(
 
 $docFiles = @('README.md','docs\STATUS.md','docs\FRAMEWORK.md','docs\PERFORMANCE.md','docs\ACCEPTANCE.md')
 $changes = 0
+}
+
 $stale = 0
 foreach ($f in $docFiles) {
     $p = Join-Path $root $f

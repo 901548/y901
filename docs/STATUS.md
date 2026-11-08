@@ -335,3 +335,12 @@
   建议：改 trait 就全仓 tar 同步 + MD5 校验，不要单文件增量。
 - **tar 同步后 mtime 保留**：tar 解压保留原 mtime，cargo 会误判 fresh，check 通过可能只是缓存命中。
   建议：tar 同步后 touch 关键源文件，或 cargo clean -p <crate> 后重编。
+
+- **`-Check` 只读，不跑测试**：`sync-doc-numbers.ps1 -Check` 只验证 docs ↔ `numbers.txt` 一致。
+  “台账 ↔ 代码”一致由 gate 的 `passed vs baseline` 硬比对保证。
+  **约束**：不要把任何测试测量塞回 `-Check`，否则 gate 会重新变成“每次跑都赌博”。
+
+- **完整 sync 是唯一测量源**：只有无 `-Check` 的完整 sync 会跑测试并写 `numbers.txt`。
+  **注意**：`--include-ignored` 在并行负载下仍可能被 allocation-counter 污染（实测漂到 560）。
+  完整 sync 的守卫：**测试全部通过（exit 0）才写 `include_ignored`**，否则写 `n/a`。
+  如果 `numbers.txt` 的 `include_ignored` 是 `n/a`，说明上次完整 sync 时有测试失败 —— 先修测试再跑完整 sync。
