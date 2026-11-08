@@ -22,9 +22,14 @@ use crate::encode::{
 ///
 /// 只读一次：事件转换每帧都调，不能反复读环境变量。
 fn is_fullscreen_window() -> bool {
-    static FS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FS.get_or_init(|| std::env::var_os("Y901_FULLSCREEN").is_some())
+    FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed)
 }
+
+/// 进程级全局：当前每进程单窗口，`create` 时 store，事件转换时读。
+///
+/// 若将来支持多窗口，应改为 `X11Window` 实例字段
+/// （射窗消息处理拿不到 `&self`，需通过实例句柄取回）。
+static FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 use crate::keys::{keysym_to_key, modifiers_from_state, Keymap};
 use crate::X11Event;
@@ -97,12 +102,20 @@ impl X11Window {
     ///
     /// `soft` 由调用方准备好（字体/主题是应用级选择，窗口不替它决定）。
     /// 失败：任一步服务器报错都会把错误原文带回来（而不是吞掉）。
+    /// # 调用点（改动签名时同步更新）
+    ///
+    /// - `crates/y901-backend-x11/src/runtime.rs`
+    /// - `crates/y901-backend-x11/tests/real_window.rs`
+    ///
+    /// 为何写在这里：本函数在 `#[cfg(unix)]` 下，Windows 编译机**看不到**调用点，
+    /// 改签名时极容易漏改测试里的那一处（已发生一次）。
     pub fn create(
         display: &str,
         width: u16,
         height: u16,
         title: &str,
         soft: SoftBackend,
+        fullscreen: bool,
     ) -> Result<Self, String> {
         let mut conn = Connection::connect(display)?;
         let info = conn.info().clone();
@@ -136,7 +149,9 @@ impl X11Window {
         conn.send(&encode_map_window(wid))?;
         // SPIKE: `Y901_FULLSCREEN=1` 时走 EWMH 全屏。
         // 必须在 Map 之后发：窗口还未映射时部分 WM 会忽略该消息。
-        if std::env::var_os("Y901_FULLSCREEN").is_some() {
+        let fullscreen = fullscreen || std::env::var_os("Y901_FULLSCREEN").is_some();
+        FULLSCREEN.store(fullscreen, std::sync::atomic::Ordering::Relaxed);
+        if fullscreen {
             // best-effort：全屏请求失败（无 WM、属性不受支持、协议序列异常）
             // 不应阻止窗口启动 —— 用户至少能看到一个普通窗口。
             if let Err(e) = fullscreen_atoms(&mut conn, wid, info.root) {

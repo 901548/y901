@@ -182,6 +182,11 @@ pub struct Options {
     pub theme: Option<y901_ui::theme::Theme>,
     /// 字体（`None` = NSimSun / 16px）。
     pub font: Option<FontConfig>,
+    /// borderless fullscreen（无边框全屏）。
+    ///
+    /// 与环境变量 `Y901_FULLSCREEN` 取 **OR**：
+    /// 环境变量保留为测试覆盖手段（无需改代码即可跑全屏场景）。
+    pub fullscreen: bool,
 }
 
 /// 字体配置：族名 + 逻辑像素字号。
@@ -214,6 +219,7 @@ impl Default for Options {
             height: 800,
             theme: None,
             font: None,
+            fullscreen: false,
         }
     }
 }

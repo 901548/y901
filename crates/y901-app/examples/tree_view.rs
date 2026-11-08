@@ -106,6 +106,6 @@ fn main() -> Result<(), String> {
         width: 640,
         height: 520,
         ..Default::default()
-    };
+        };
     create_runtime().run(Box::new(TreeDemo::new()), Box::new(build), options)
 }

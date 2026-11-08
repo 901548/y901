@@ -83,7 +83,9 @@ fn window(title: &str, w: u32, h: u32) -> Option<Window> {
         height: h,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     Window::create(&options).ok()
 }
 

@@ -111,7 +111,7 @@ fn soft_for(w: u16, h: u16, size: f32) -> y901_render::soft::SoftBackend {
 fn create_window_retry(d: &str, w: u16, h: u16, title: &str) -> X11Window {
     let mut last = String::new();
     for _ in 0..3 {
-        match X11Window::create(d, w, h, title, soft_for(w, h, 15.0)) {
+        match X11Window::create(d, w, h, title, soft_for(w, h, 15.0), false) {
             Ok(x) => return x,
             Err(e) => {
                 last = e;

@@ -91,7 +91,9 @@ fn render_d3d(scale: Option<f32>) -> Option<(Vec<u8>, u32, u32)> {
         height: H,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).ok()?;
     let mut tree = UiTree::new(Box::new(GlyphScene::new(scale)));
     window.resize(&mut tree);

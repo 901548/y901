@@ -91,7 +91,9 @@ fn compare(depth: usize) -> (i32, i32) {
         height: 160,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
 
     // ---- A：D3D11 ----
     let mut win = Window::create(&options).expect("需要 D3D11 设备");

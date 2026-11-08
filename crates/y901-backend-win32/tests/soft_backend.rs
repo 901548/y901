@@ -329,7 +329,9 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
         height: 200,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
 
     // **两个场景都跑**：不半透明（回归基线）+ 半透明（预乘回归）。
     // 历史教训：旧版只跑 translucent=false，于是 D3D 预乘 bug（半透明偏亮）

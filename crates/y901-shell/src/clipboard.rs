@@ -219,20 +219,57 @@ mod linux {
 mod tests {
     use super::*;
 
+    /// 进程内串行锁：剪贴板是**系统全局资源**，两个测试并行跑会互相抢占。
+    ///
+    /// 锁中毒（前一个测试 panic 带着锁）不应让后续测试连带失败，
+    /// 所以一律用 `unwrap_or_else(|e| e.into_inner())` 取回内部值。
+    static CLIPBOARD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 写入后重试读取：其他进程可能在我们读之前抢占剪贴板。
+    ///
+    /// 返回：`Some(true)` = 第几次成功就返回成功；`None` = 环境不支持（`set_text` 失败）。
+    fn roundtrip_with_retry(cb: &dyn Clipboard, text: &str) -> Option<bool> {
+        for attempt in 0..3 {
+            // **每次重试都重新写**：若上一次读之前内容已被其他进程接管，
+            // 只重复读是拿不回所有权的（这是旧实现的真缺陷）。
+            if cb.set_text(text).is_err() {
+                return None; // 环境不支持：不能假装通过，也不能因环境假红
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            match cb.get_text() {
+                Ok(got) if got == text => return Some(true),
+                Ok(got) => eprintln!(
+                    "[clipboard] 第 {} 次读回不匹配: 期望 {:?}，实际 {:?}",
+                    attempt + 1,
+                    text,
+                    got
+                ),
+                Err(e) => eprintln!("[clipboard] 第 {} 次读取失败: {}", attempt + 1, e),
+            }
+            if attempt < 2 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+        Some(false)
+    }
+
     #[test]
     fn roundtrip_on_supported_platforms() {
+        let _guard = CLIPBOARD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let cb = system_clipboard();
         let text = "y901 剪贴板测试 ABC 123 中文";
-        if cb.set_text(text).is_err() {
-            // 不支持的平台 / 无 X 会话：照旧不能假装通过，但也不能因环境而假红
-            eprintln!("[跳过] 本环境剪贴板不可用");
-            return;
+        match roundtrip_with_retry(cb.as_ref(), text) {
+            None => eprintln!("[跳过] 本环境剪贴板不可用"),
+            Some(true) => {}
+            Some(false) => panic!(
+                "3 次重试都失败：剪贴板可能被其他进程持续占用（测试本身未断定失败，但环境不可信）"
+            ),
         }
-        assert_eq!(cb.get_text().expect("读取"), text);
     }
 
     #[test]
     fn get_text_on_empty_clipboard_is_ok_or_err_but_never_panics() {
+        let _guard = CLIPBOARD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let cb = system_clipboard();
         let _ = cb.get_text();
     }

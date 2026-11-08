@@ -362,9 +362,14 @@ impl CharFilter {
 ///
 /// 只读一次：`wndproc` 每帧都会调，不能反复读环境变量。
 fn is_fullscreen_window() -> bool {
-    static FS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FS.get_or_init(|| std::env::var_os("Y901_FULLSCREEN").is_some())
+    FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed)
 }
+
+/// 进程级全局：当前每进程单窗口，`create_inner` 时 store，`wndproc` 里读。
+///
+/// `wndproc` 是自由函数，拿不到 `Options`；单窗口架构下一个标志就够。
+/// 若将来支持多窗口，改为从 `GWLP_USERDATA` 取实例指针。
+static FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
@@ -615,7 +620,9 @@ impl Window {
         let title = wide(&options.title);
         // SPIKE：`Y901_FULLSCREEN=1` 时用 borderless 样式。
         // 为何用环境变量：不想在 SPIKE 阶段动 `Options` 公开字段（会破十几处构造点）。
-        let fullscreen = std::env::var_os("Y901_FULLSCREEN").is_some();
+        // 正式 API：`options.fullscreen`；环境变量保留作为**测试覆盖**（OR）。
+        let fullscreen = options.fullscreen || std::env::var_os("Y901_FULLSCREEN").is_some();
+        FULLSCREEN.store(fullscreen, std::sync::atomic::Ordering::Relaxed);
         let style = if fullscreen {
             WS_POPUP | WS_VISIBLE
         } else {
@@ -1440,7 +1447,9 @@ mod present_sync_tests {
             height: 200,
             theme: None,
             font: None,
-        };
+        
+                fullscreen: false,
+            };
         let mut window = match Window::create(&opts) {
             Ok(w) => w,
             Err(e) => {

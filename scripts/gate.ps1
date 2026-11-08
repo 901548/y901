@@ -1,4 +1,4 @@
-# Unified gate: MSRV + tests(count) + clippy + pixel-hash + docs + audit.
+﻿# Unified gate: MSRV + tests(count) + clippy + pixel-hash + docs + audit.
 #
 # Four ways this gate used to lie, all fixed here:
 #   1. audit missing   -> said "skipped" and still printed GATE OK;
@@ -51,7 +51,11 @@ if (-not $SkipTest) {
     $expected = [int]$baselineLine.Trim()
     $skipLog = Join-Path ([System.IO.Path]::GetTempPath()) 'y901-test-skips.txt'
     Remove-Item $skipLog -ErrorAction SilentlyContinue
-    $testOut = & cargo test --workspace --offline 2>&1 | Out-String
+    # --no-fail-fast：不得因一条失败就停调度后续二进制，否则 passed 数会变成“半截值”
+    # （曾出现 passed=335 而实际应为 746），且只能看到第一个失败。
+    $testOut = & cargo test --workspace --offline --no-fail-fast 2>&1 | Out-String
+    # 保存完整输出：否则失败用例名丢掉，下次只能重跑猜。
+    $testOut | Out-File -FilePath (Join-Path $root 'target\gate-test.log') -Encoding utf8
     $skipCount = 0
     if (Test-Path $skipLog) {
         $skipCount = (Get-Content $skipLog | Where-Object { $_.Trim().StartsWith('SKIP:') } | Measure-Object).Count

@@ -119,6 +119,6 @@ fn main() -> Result<(), String> {
         width: 780,
         height: 420,
         ..Default::default()
-    };
+        };
     create_runtime().run(Box::new(GalleryDemo), Box::new(build), options)
 }

@@ -109,6 +109,7 @@ fn options() -> Options {
         height: H,
         theme: None,
         font: None,
+        fullscreen: false,
     }
 }
 

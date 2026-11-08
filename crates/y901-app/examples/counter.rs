@@ -107,6 +107,6 @@ fn main() -> Result<(), String> {
         width: 520,
         height: 260,
         ..Default::default()
-    };
+        };
     create_runtime().run(Box::new(CounterApp { value: 0 }), Box::new(build), options)
 }

@@ -344,3 +344,9 @@
   **注意**：`--include-ignored` 在并行负载下仍可能被 allocation-counter 污染（实测漂到 560）。
   完整 sync 的守卫：**测试全部通过（exit 0）才写 `include_ignored`**，否则写 `n/a`。
   如果 `numbers.txt` 的 `include_ignored` 是 `n/a`，说明上次完整 sync 时有测试失败 —— 先修测试再跑完整 sync。
+
+- **自动化验证脚本里不要出现非 ASCII 字符**（Win32 Esc 验证踩坑）：
+  `FindWindow("Y901 · hello")` 在无 BOM 的 UTF-8 脚本里被 PowerShell 5.1 按 ANSI 解码，
+  `·` 变成乱码，按标题找不到窗口 → `hwnd = 0` → PostMessage 发到空句柄 → **假失败**。
+  修法不是"记得写 BOM"，而是**改成按 PID 找窗口**，脚本对编码完全不敏感。
+  同类教训：改 `.ps1` / `.bat` 必须保留原编码 BOM（`check-test-inventory` 那次）。

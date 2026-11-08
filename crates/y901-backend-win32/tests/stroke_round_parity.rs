@@ -90,7 +90,9 @@ fn compare(scale: Option<f32>) -> f64 {
         height: 200,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
 
     // ---- A：D3D11 ----
     let mut win = Window::create(&options).expect("需要 D3D11 设备");

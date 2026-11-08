@@ -114,7 +114,9 @@ fn snapshot_harness_is_deterministic() {
         height: 240,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
     let mut tree = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
@@ -148,7 +150,9 @@ fn gradient_matches_math_at_45_degrees() {
         height: 240,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
     let mut tree = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
@@ -241,7 +245,9 @@ fn round_rect_sdf_matches_math() {
         height: 240,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
     let mut tree = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
@@ -306,7 +312,9 @@ fn round_stroke_draws_ring_only() {
         height: 240,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
     let mut tree = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
@@ -399,7 +407,9 @@ fn gradient_round_rect_matches_math() {
         height: 240,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
     let mut tree = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
@@ -557,7 +567,9 @@ fn invalidate_rect_partial_equals_full() {
         height: 200,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
     let (mut tree, cell) = make(4);
     window.resize(&mut tree);
@@ -741,7 +753,9 @@ fn two_disjoint_dirty_rects_match_full_redraw() {
         height: 220,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
 
     // A：整窗画（c2 宽 40）
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
@@ -830,7 +844,9 @@ fn text_label_paints_visible_non_background_pixels() {
         height: 120,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
     let mut tree = UiTree::new(Box::new(
         y901_ui::Flex::column("root").push(Box::new(
@@ -888,7 +904,9 @@ fn text_inside_scrollview_is_not_clipped_away() {
         height: 160,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
     let sv = ScrollView::new(
         "sv",
@@ -945,7 +963,9 @@ fn rebuild_of_cached_target_does_not_leave_black_areas() {
         height: 160,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
     let mut tree = UiTree::new(Box::new(
         y901_ui::Flex::column("root")

@@ -229,7 +229,9 @@ fn pixel_statistics_and_png_baseline() {
         height: 220,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let t0 = Instant::now();
     // 注意：`Options.width/height` 是**窗口尺寸**（含边框与标题栏），
     // 而下面回读的 `w`/`h` 是 `GetClientRect` 的**客户区**尺寸。
@@ -317,7 +319,9 @@ fn probe_orientation_and_channels() {
         height: 220,
         theme: None,
         font: None,
-    };
+    
+            fullscreen: false,
+        };
     let mut window = Window::create(&options).expect("d3d");
     let mut tree = UiTree::new(Box::new(Scene { rect: Rect::ZERO }));
     window.resize(&mut tree);
