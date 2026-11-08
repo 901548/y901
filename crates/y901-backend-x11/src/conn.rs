@@ -428,12 +428,33 @@ impl Connection {
     /// 为什么单独写：`sync()` 会丢弃"不属于当前序列"的响应，
     /// 而 `InternAtom` 的响应正好需要拿回来用，不能丢。
     pub fn read_reply_u32(&mut self) -> Result<u32, String> {
+        // **事件与响应可任意交错**：X11 协议不保证"下一个包就是响应"。
+        // 实例：metacity 接管窗口时会发 `ReparentNotify`（字节 0 = 21），
+        // 而旧版直接报 "期待响应，收到字节 0 = 21" 导致启动失败。
+        //
+        // 修法：遇到事件包就**解码后存进 `pending`**（与 `poll_events` 共用同一队列），
+        // 然后继续读，直到真正的响应或错误包。
         let mut head = [0u8; 32];
-        self.read_exact(&mut head)?;
-        if head[0] != 1 {
-            return Err(format!("期待响应，收到字节 0 = {}", head[0]));
+        loop {
+            self.read_exact(&mut head)?;
+            match head[0] {
+                // 响应（reply）：InternAtom 的原子 ID 在字节 8-11
+                1 => return Ok(u32::from_le_bytes([head[8], head[9], head[10], head[11]])),
+                // 错误包：不吞掉，交给上层看真实原因
+                0 => {
+                    return Err(format!(
+                        "X11 错误包（字节 0 = 0，错误码 = {}）",
+                        head[1]
+                    ))
+                }
+                // 事件包（如 ReparentNotify = 21）：收起来，继续等响应
+                _ => {
+                    if let Ok(ev) = decode_event(&head) {
+                        self.pending.push(ev);
+                    }
+                }
+            }
         }
-        Ok(u32::from_le_bytes([head[8], head[9], head[10], head[11]]))
     }
 
     /// 回读一块像素（`GetImage`）。

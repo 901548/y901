@@ -126,6 +126,15 @@ impl X11Window {
         }))?;
         conn.send(&encode_change_title(wid, name_atom, utf8_atom, title))?;
         conn.send(&encode_map_window(wid))?;
+        // SPIKE: `Y901_FULLSCREEN=1` 时走 EWMH 全屏。
+        // 必须在 Map 之后发：窗口还未映射时部分 WM 会忽略该消息。
+        if std::env::var_os("Y901_FULLSCREEN").is_some() {
+            // best-effort：全屏请求失败（无 WM、属性不受支持、协议序列异常）
+            // 不应阻止窗口启动 —— 用户至少能看到一个普通窗口。
+            if let Err(e) = fullscreen_atoms(&mut conn, wid, info.root) {
+                eprintln!("[y901] EWMH fullscreen 请求失败（无 WM 或协议时序问题）：{e}");
+            }
+        }
         conn.flush()?;
         let errs = conn.sync()?;
         if !errs.is_empty() {
@@ -633,4 +642,21 @@ fn create_cursors(conn: &mut Connection, base: u32) -> Result<Cursors, String> {
         return Err(format!("CreateGlyphCursor 报错：{errs:?}"));
     }
     Ok(Cursors { font, ids })
+}
+
+/// 发 EWMH 全屏消息（`_NET_WM_STATE` + `_NET_WM_STATE_FULLSCREEN`）。
+///
+/// 依据 freedesktop EWMH §7.6：发一个 `ClientMessage` 到 root，
+/// `data[0] = 1`（`_NET_WM_STATE_ADD`）、`data[1]` 为要新增的属性 atom。
+/// 事件掩码用 `SubstructureRedirect | SubstructureNotify`（EWMH 规定的发送对象是 root）。
+///
+/// **注意**：若没有 WM（如 Xvfb），本消息会被忽略，窗口不会真的全屏 ——
+/// 这是 EWMH 的设计（全屏由 WM 实施），不是实现缺陷。
+fn fullscreen_atoms(conn: &mut Connection, wid: u32, root: u32) -> Result<(), String> {
+    let state_atom = intern(conn, b"_NET_WM_STATE")?;
+    let fs_atom = intern(conn, b"_NET_WM_STATE_FULLSCREEN")?;
+    let ev = crate::encode::client_message_event(wid, state_atom, [1, fs_atom, 0, 0, 0]);
+    // SubstructureRedirectMask = 1<<20, SubstructureNotifyMask = 1<<19
+    conn.send(&crate::encode::encode_send_event(root, (1 << 20) | (1 << 19), &ev))?;
+    Ok(())
 }

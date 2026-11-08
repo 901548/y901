@@ -524,6 +524,34 @@ pub fn encode_send_event(destination: u32, event_mask: u32, event: &[u8; 32]) ->
     out
 }
 
+/// 构造一个 32 字节的 `ClientMessage` 事件（用于 SendEvent 给 root，EWMH 就是这么发的）。
+///
+/// 格式来源：X11 协议“ClientMessage Events”一节（事件类型 33），
+/// EWMH `_NET_WM_STATE` 的发送方式见 freedesktop EWMH 规范 §7.6。
+///
+/// 字节布局（均为小端）：
+/// ```text
+/// 0     : type = 33 (ClientMessage)
+/// 1     : format = 32
+/// 2-3   : sequence（由服务器填充，发送时写 0）
+/// 4-7   : window
+/// 8-11  : message_type（atom，如 `_NET_WM_STATE`）
+/// 12-31 : data[5]（每个 4 字节）
+/// ```
+pub fn client_message_event(window: u32, message_type: u32, data: [u32; 5]) -> [u8; 32] {
+    let mut ev = [0u8; 32];
+    ev[0] = 33; // ClientMessage
+    ev[1] = 32; // format = 32
+    // ev[2..4] 序号：服务器会覆写，保持 0
+    ev[4..8].copy_from_slice(&window.to_ne_bytes());
+    ev[8..12].copy_from_slice(&message_type.to_ne_bytes());
+    for (i, v) in data.iter().enumerate() {
+        let o = 12 + i * 4;
+        ev[o..o + 4].copy_from_slice(&v.to_ne_bytes());
+    }
+    ev
+}
+
 /// 构造一个 32 字节的 `KeyPress`/`KeyRelease` 事件（用于 SendEvent）。
 ///
 /// 字段布局与真实事件完全一致（见 `decode_event`）；
