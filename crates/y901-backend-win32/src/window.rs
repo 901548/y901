@@ -48,9 +48,12 @@ use windows_sys::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, GetDpiForSystem, SetProcessDpiAwarenessContext,
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_ESCAPE};
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, DragQueryPoint};
 use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
+    MONITOR_DEFAULTTONEAREST};
+use windows_sys::Win32::UI::WindowsAndMessaging::{MoveWindow, WS_POPUP, WS_VISIBLE};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, LoadCursorW,
     MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassExW,
@@ -355,6 +358,14 @@ impl CharFilter {
 ///
 /// 违反后果：返回错误的 `LRESULT` 会让系统消息处理异常（窗口不响应或无法关闭）；
 /// 跨线程触碰状态会在 `Box` 已释放后读写它 —— 典型的 use-after-free，崩溃点通常在消息回调深处。
+/// 当前窗口是否处于 borderless fullscreen（SPIKE 期间由环境变量控制）。
+///
+/// 只读一次：`wndproc` 每帧都会调，不能反复读环境变量。
+fn is_fullscreen_window() -> bool {
+    static FS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FS.get_or_init(|| std::env::var_os("Y901_FULLSCREEN").is_some())
+}
+
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_NCCREATE => {
@@ -430,6 +441,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_CHAR => {
+            // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
+            // 只在全屏下生效：普通窗口的 Esc 仍作为普通按键上报（用户可能用它取消输入）。
+            if is_fullscreen_window() && msg == WM_KEYDOWN && wparam as u32 == VK_ESCAPE as u32 {
+                push(RawEvent::Close);
+                return 0;
+            }
             // 键盘消息统一走纯函数 `handle_wm_msg`（可单测）：它负责去重，
             // wndproc 只做"取状态 + 投递"。
             if let Ok(mut slot) = CHAR_FILTER.lock() {
@@ -596,11 +613,19 @@ impl Window {
         }
 
         let title = wide(&options.title);
+        // SPIKE：`Y901_FULLSCREEN=1` 时用 borderless 样式。
+        // 为何用环境变量：不想在 SPIKE 阶段动 `Options` 公开字段（会破十几处构造点）。
+        let fullscreen = std::env::var_os("Y901_FULLSCREEN").is_some();
+        let style = if fullscreen {
+            WS_POPUP | WS_VISIBLE
+        } else {
+            WS_OVERLAPPEDWINDOW
+        };
         let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
             title.as_ptr(),
-            WS_OVERLAPPEDWINDOW,
+            style,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             win_w,
@@ -612,6 +637,40 @@ impl Window {
         );
         if hwnd.is_null() {
             return Err("CreateWindowExW failed".into());
+        }
+        if fullscreen {
+            // 取当前窗口所在监视器的**全屏矩形**（不含任务栏），然后把窗口撞过去。
+            // SAFETY：只传入刚创建的合法 HWND，并保证 MONITORINFO.cbSize 正确。
+            unsafe {
+                let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                let mut mi = MONITORINFO {
+                    cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                    rcMonitor: RECT {
+                        left: 0,
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                    },
+                    rcWork: RECT {
+                        left: 0,
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                    },
+                    dwFlags: 0,
+                };
+                if GetMonitorInfoW(mon, &mut mi) != 0 {
+                    let r = mi.rcMonitor;
+                    MoveWindow(
+                        hwnd,
+                        r.left,
+                        r.top,
+                        r.right - r.left,
+                        r.bottom - r.top,
+                        1,
+                    );
+                }
+            }
         }
         // 接受 OS 级文件拖放：没这一步 WM_DROPFILES 永远不会来。
         DragAcceptFiles(hwnd, 1);
