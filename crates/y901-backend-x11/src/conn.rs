@@ -330,44 +330,27 @@ impl Connection {
         let want = self.seq;
         let mut errors = Vec::new();
         let mut events = Vec::new();
-        let mut buf = [0u8; 32];
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             if Instant::now() > deadline {
                 return Err("等待 GetInputFocus 响应超时".to_string());
             }
-            self.read_exact(&mut buf)?;
-            match buf[0] {
-                0 => errors.push(parse_error(&buf)),
+            // 读包与 drain 由 `read_packet` 负责；本函数只做**序列号匹配**与分派。
+            let (head, _extra) = self.read_packet()?;
+            match head[0] {
+                0 => errors.push(parse_error(&head)),
                 1 => {
-                    // **只有 reply 的 byte4-5 是附加数据长度**（单位 4 字节）。
-                    // 必须 drain，否则剩下的字节会把后续每一包都错位。
-                    let units = u16::from_le_bytes([buf[4], buf[5]]) as usize;
-                    let mut extra = vec![0u8; units * 4];
-                    if !extra.is_empty() {
-                        self.read_exact(&mut extra)?;
-                    }
                     // 响应：序列号在字节 2-3
-                    let seq = u16::from_le_bytes([buf[2], buf[3]]);
+                    let seq = u16::from_le_bytes([head[2], head[3]]);
                     if seq == want {
                         self.pending.extend(events);
                         return Ok(errors);
                     }
-                    // 它是**旧响应**（如 InternAtom 的 reply），丢弃即可——
-                    // 不能当事件丢给上层，否则 UI 会收到一堆假事件；
-                    // 但它的**附加数据已在上面 drain 过**，不会污染流。
+                    // 旧响应（如 InternAtom 的 reply）：丢弃即可。
+                    // 附加数据已在 `read_packet` 里 drain，不会污染流。
                 }
                 _ => {
-                    // 事件：**固定 32 字节**（byte4 起是事件体，不是长度）。
-                    // 例外：GenericEvent（byte0 = 35）的 byte4-5 才是附加长度。
-                    if buf[0] == 35 {
-                        let units = u16::from_le_bytes([buf[4], buf[5]]) as usize;
-                        let mut extra = vec![0u8; units * 4];
-                        if !extra.is_empty() {
-                            self.read_exact(&mut extra)?;
-                        }
-                    }
-                    events.push(decode_event(&buf).unwrap_or(X11Event::Unknown { code: buf[0] }));
+                    events.push(decode_event(&head).unwrap_or(X11Event::Unknown { code: head[0] }));
                 }
             }
         }
@@ -458,37 +441,48 @@ impl Connection {
     /// metacity 的 `ReparentNotify`（字节 0 = 21）会插在响应前面，
     /// 旧实现直接报“未得到响应”，导致启动失败。
     ///
+    /// 读**一个完整的 X11 包**（32 字节头 + 附加数据）。
+    ///
+    /// 只做"读"，不做任何业务判断（不存 `pending`、不收集错误、
+    /// 不匹配序列号）——那些留给调用方。
+    ///
+    /// **只有 reply（byte0=1）和 GenericEvent（byte0=35）带附加数据**：
+    /// Error（byte0=0）的 byte4-5 是 `bad_value`，Event（byte0>=2 且 !=35）的 byte4 起是事件体，
+    /// 都**不是长度**。把它们当长度 drain 会多读字节、流错位（已踩过坑）。
+    ///
+    /// 超时：由 `read_exact` 提供（200ms 轮询 + 5s 总限）；本函数**不另设 deadline**，
+    /// 否则会与调用方（如 `sync`）的 deadline 重叠。
+    fn read_packet(&mut self) -> Result<([u8; 32], Vec<u8>), String> {
+        let mut head = [0u8; 32];
+        self.read_exact(&mut head)?;
+        let units = if head[0] == 1 || head[0] == 35 {
+            u16::from_le_bytes([head[4], head[5]]) as usize
+        } else {
+            0
+        };
+        let mut extra = vec![0u8; units * 4];
+        if !extra.is_empty() {
+            self.read_exact(&mut extra)?;
+        }
+        Ok((head, extra))
+    }
+
     /// 注意：事件包一般 `units = 0`，但协议没保证，所以同样 drain。
     fn read_reply_packet(&mut self) -> Result<([u8; 32], Vec<u8>), String> {
         loop {
-            let mut head = [0u8; 32];
-            self.read_exact(&mut head)?;
+            let (head, extra) = self.read_packet()?;
             match head[0] {
-                // 响应：byte4-5 = 附加数据长度（单位 4 字节）→ **drain**
-                1 => {
-                    let units = u16::from_le_bytes([head[4], head[5]]) as usize;
-                    let mut extra = vec![0u8; units * 4];
-                    if !extra.is_empty() {
-                        self.read_exact(&mut extra)?;
-                    }
-                    return Ok((head, extra));
-                }
-                // 错误包：**固定 32 字节**（byte4 是 bad_value，不是长度）
+                // 响应：直接交给调用方（附加数据已在 `read_packet` 里 drain）
+                1 => return Ok((head, extra)),
+                // 错误包：不吞掉，交给上层看真实原因
                 0 => {
                     return Err(format!(
                         "X11 错误包（字节 0 = 0，错误码 = {}）",
                         head[1]
                     ))
                 }
-                // 事件包：**固定 32 字节**；只有 GenericEvent(35) 带附加数据
+                // 事件包：解码后存 `pending`（不丢），继续等响应
                 _ => {
-                    if head[0] == 35 {
-                        let units = u16::from_le_bytes([head[4], head[5]]) as usize;
-                        let mut extra = vec![0u8; units * 4];
-                        if !extra.is_empty() {
-                            self.read_exact(&mut extra)?;
-                        }
-                    }
                     if let Ok(ev) = decode_event(&head) {
                         self.pending.push(ev);
                     }
