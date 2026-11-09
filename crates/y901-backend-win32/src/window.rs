@@ -107,8 +107,27 @@ impl WakeHandle {
     }
 }
 
-/// 平台事件队列：wndproc 写，宿主读。
-static QUEUE: Mutex<Vec<RawEvent>> = Mutex::new(Vec::new());
+/// 每个窗口的共享状态，按 `HWND` 索引。
+///
+/// **为何用表而非裸指针**：`wndproc` 是自由函数，只拿得到 `hwnd`；
+/// 表项在 `WM_NCCREATE` 插入、`WM_NCDESTROY` 移除，与窗口生死一一对应，
+/// 没有裸指针就没有悬垂和 double free。
+struct WindowShared {
+    /// 平台事件队列：wndproc 写，宿主读。
+    queue: Vec<RawEvent>,
+}
+
+impl WindowShared {
+    fn new() -> Self {
+        Self { queue: Vec::new() }
+    }
+}
+
+/// `HWND` → 窗口共享状态。
+///
+/// 键用 `isize`（`HWND` 的裸整数值）而非 `HWND`：`HWND` 本身是
+/// `*mut c_void`，**不能直接做 `HashMap` 键**（没有 `Hash`/`Eq` 实现）。
+static TABLE: Mutex<Option<std::collections::HashMap<isize, WindowShared>>> = Mutex::new(None);
 
 /// 当前存活的窗口数（多窗口下用来判断"是否最后一个窗口）。
 ///
@@ -122,12 +141,27 @@ static SIZE: Mutex<(u32, u32)> = Mutex::new((0, 0));
 static IME: OnceLock<Mutex<ImeState>> = OnceLock::new();
 static CLASS_READY: OnceLock<bool> = OnceLock::new();
 
-fn queue() -> std::sync::MutexGuard<'static, Vec<RawEvent>> {
-    QUEUE.lock().unwrap_or_else(|e| e.into_inner())
+/// 取表的锁。
+///
+/// 为何是 `Option<HashMap>`：`HashMap::new()` 不是 `const fn`，
+/// 无法在 `static` 初始化器里直接构造（E0015）；
+/// 用 `None` 起始、第一次访问时建表。
+fn with_table<R>(f: impl FnOnce(&mut std::collections::HashMap<isize, WindowShared>) -> R) -> R {
+    let mut guard = TABLE.lock().unwrap_or_else(|e| e.into_inner());
+    let map = guard.get_or_insert_with(std::collections::HashMap::new);
+    f(map)
 }
 
-fn push(ev: RawEvent) {
-    queue().push(ev);
+/// 把一个平台事件塞进**该窗口自己**的队列。
+///
+/// 表项已在 `WM_NCDESTROY` 移除后，这里会**静默丢弃**（`get_mut` 返 `None`）——
+/// 那是正确行为：窗口已死，再收集事件没意义。
+fn push(hwnd: HWND, ev: RawEvent) {
+    with_table(|map| {
+        if let Some(shared) = map.get_mut(&(hwnd as isize)) {
+            shared.queue.push(ev);
+        }
+    });
 }
 
 fn wide(text: &str) -> Vec<u16> {
@@ -392,6 +426,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if create.is_null() {
                 return 0;
             }
+            // 建表项：与窗口生死一一对应（`WM_NCDESTROY` 移除）。
+            with_table(|map| {
+                map.insert(hwnd as isize, WindowShared::new());
+            });
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, hwnd as isize);
             1
         }
@@ -399,13 +437,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let w = (lparam as u32) & 0xFFFF;
             let h = ((lparam as u32) >> 16) & 0xFFFF;
             *SIZE.lock().unwrap_or_else(|e| e.into_inner()) = (w, h);
-            push(RawEvent::Resize { w, h });
+            push(hwnd, RawEvent::Resize { w, h });
             0
         }
         WM_MOUSEMOVE => {
             let x = (lparam as u32 & 0xFFFF) as i16 as f32;
             let y = ((lparam as u32 >> 16) & 0xFFFF) as i16 as f32;
-            push(RawEvent::MouseMove { x, y });
+            push(hwnd, RawEvent::MouseMove { x, y });
             0
         }
         WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN
@@ -415,14 +453,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 if let Some(ev) =
                     handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter)
                 {
-                    push(ev);
+                    push(hwnd, ev);
                 }
             }
             0
         }
         WM_MOUSEWHEEL => {
             let pos = client_pos(hwnd);
-            push(wheel_event(pos.x, pos.y, wparam as u64, modifiers()));
+            push(hwnd, wheel_event(pos.x, pos.y, wparam as u64, modifiers()));
             0
         }
         WM_DROPFILES => {
@@ -449,11 +487,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             DragQueryPoint(drop, &mut pt);
             DragFinish(drop);
             if !paths.is_empty() {
-                push(RawEvent::FileDrop {
-                    paths,
-                    x: pt.x as f32,
-                    y: pt.y as f32,
-                });
+                push(
+                    hwnd,
+                    RawEvent::FileDrop {
+                        paths,
+                        x: pt.x as f32,
+                        y: pt.y as f32,
+                    },
+                );
                 // 拖放后要求重绘（高亮状态可能需要更新）
                 request_full_redraw();
             }
@@ -478,7 +519,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 if let Some(ev) =
                     handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter)
                 {
-                    push(ev);
+                    push(hwnd, ev);
                 }
             }
             0
@@ -496,17 +537,23 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 ImeAction::Redraw => {
                     let text = ime_state().composing_text();
                     let composing = !text.is_empty();
-                    push(RawEvent::Ime {
-                        text,
-                        composition: composing,
-                    });
+                    push(
+                        hwnd,
+                        RawEvent::Ime {
+                            text,
+                            composition: composing,
+                        },
+                    );
                     0
                 }
                 ImeAction::Commit(text) => {
-                    push(RawEvent::Ime {
-                        text,
-                        composition: false,
-                    });
+                    push(
+                        hwnd,
+                        RawEvent::Ime {
+                            text,
+                            composition: false,
+                        },
+                    );
                     0
                 }
             }
@@ -515,7 +562,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let hit = (lparam as u32) & 0xFFFF;
             if hit == HTCLIENT {
                 let pos = client_pos(hwnd);
-                push(RawEvent::SetCursor { x: pos.x, y: pos.y });
+                push(hwnd, RawEvent::SetCursor { x: pos.x, y: pos.y });
                 1
             } else {
                 DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -545,13 +592,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_DESTROY => {
-            push(RawEvent::Close);
+            push(hwnd, RawEvent::Close);
             // 不再无条件 `PostQuitMessage`：多窗口下那会让"关一个窗口"变成
             // "杀整个进程"。退出由 `WM_NCDESTROY` 的计数归零触发。
             0
         }
         WM_NCDESTROY => {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            // 移除表项（与 `WM_NCCREATE` 的插入配对）。
+            with_table(|map| {
+                map.remove(&(hwnd as isize));
+            });
             // 此时窗口已真正销毁，减计数是安全的。
             let before = WINDOW_COUNT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
             if before == 0 {
@@ -1016,7 +1067,11 @@ impl Window {
 
     /// 取走本轮平台事件。
     pub fn drain_events(&mut self) -> Vec<RawEvent> {
-        std::mem::take(&mut queue())
+        with_table(|map| match map.get_mut(&(self.hwnd as isize)) {
+            Some(shared) => std::mem::take(&mut shared.queue),
+            // 窗口已销毁（表项已移除）：没有新事件
+            None => Vec::new(),
+        })
     }
 
     /// 把 UI 树画到交换链。
