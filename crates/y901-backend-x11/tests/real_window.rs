@@ -17,7 +17,7 @@ use y901_backend_x11::encode::{
     encode_create_gc, encode_create_window, encode_destroy_window, encode_intern_atom,
     encode_map_window, encode_set_input_focus, CreateWindowArgs, GcMask, ValueMask, WindowClass,
 };
-use y901_backend_x11::window::X11Window;
+use y901_backend_x11::window::{CreateArgs, X11Window};
 use y901_backend_x11::X11Event;
 use y901_runtime::{EventSource, Presenter};
 use y901_ui::Size;
@@ -176,7 +176,14 @@ fn connect_opt(d: &str, retries: u32) -> Option<Connection> {
 fn create_window_retry(d: &str, w: u16, h: u16, title: &str) -> X11Window {
     let mut last = String::new();
     for _ in 0..3 {
-        match X11Window::create(d, w, h, title, soft_for(w, h, 15.0), false) {
+        match X11Window::create(CreateArgs {
+            display: d,
+            width: w,
+            height: h,
+            title,
+            soft: soft_for(w, h, 15.0),
+            fullscreen: false,
+        }) {
             Ok(x) => return x,
             Err(e) => {
                 last = e;

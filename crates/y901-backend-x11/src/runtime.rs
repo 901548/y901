@@ -52,14 +52,14 @@ impl PlatformRuntime for X11Runtime {
         )?);
         let soft = SoftBackend::new(width.max(1), height.max(1), engine, cell, options.theme)?;
 
-        let mut window = X11Window::create(
-            &display,
-            width as u16,
-            height as u16,
-            &options.title,
+        let mut window = X11Window::create(crate::window::CreateArgs {
+            display: &display,
+            width: width as u16,
+            height: height as u16,
+            title: &options.title,
             soft,
-            options.fullscreen,
-        )?;
+            fullscreen: options.fullscreen,
+        })?;
         eprintln!(
             "[y901] X11 后端就绪：display={display} {}x{}，字形引擎=自研 TTF",
             options.width, options.height

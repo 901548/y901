@@ -392,3 +392,14 @@
   **固定动作**：新增任何"防御性 / 错误处理 / 日志"代码时，先问一句**"这条路径怎么触发"**：
   能触发的，写一条测试或用环境变量强制触发（如 `DISPLAY=:4321` 触发连接失败）；
   不能触发的，在注释里写明**"未覆盖，触发条件是什么"**，并在 commit message 里标注。
+
+- **改动 `#[cfg(unix)]` 文件的 `use` 清单或引入新类型，必须在 Linux 上跑
+  `cargo check -p y901-backend-x11 --all-targets` 并看到 exit 0，才算完成**：
+  Windows 的 `cargo check` 对该 crate 是"全部通过"的假象（`#[cfg(unix)]` 整体为空）。
+  三次返工都源于此：
+  1. X11 `RenderOutcome` 未导入；
+  2. `X11Window::create` 签名改了，`runtime.rs` + `real_window.rs` 调用点没改；
+  3. `CreateArgs` 改了 `real_window.rs` 的构造，但漏了 `use CreateArgs`。
+  **结构体参数能保证"字段漏写会红"（E0560/E0063），但保证不了"名字没 import 会红"**。
+  **固定动作**：改 `#[cfg(unix)]` 文件后，**立即**让 demo 跑 `cargo check --all-targets`，
+  不要等下次整体验证。

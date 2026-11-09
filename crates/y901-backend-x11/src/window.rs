@@ -103,6 +103,29 @@ struct ShmState {
     h: u16,
 }
 
+/// [`X11Window::create`] 的参数。
+///
+/// **为何用结构体而非位置参数**：加字段时所有调用点都会**编译失败**，
+/// 不会漏改。之前用 6 个位置参数时，加 `fullscreen` 就漏改了
+/// `tests/real_window.rs` 的一个调用点（而它在 `#[cfg(unix)]` 下，
+/// Windows 编译机看不到）。
+///
+/// 生命周期：`display` 与 `title` 是借用的字符串，其余均为值（`soft` 为所有权）。
+pub struct CreateArgs<'a> {
+    /// 上屏用的 X display（如 `":99"`；空字符串 = 读 `DISPLAY`）。
+    pub display: &'a str,
+    /// 窗口宽度（像素）。
+    pub width: u16,
+    /// 窗口高度（像素）。
+    pub height: u16,
+    /// 窗口标题。
+    pub title: &'a str,
+    /// 光栅器（由调用方构造；字体/主题是应用级选择）。
+    pub soft: SoftBackend,
+    /// 是否以 borderless fullscreen 创建。
+    pub fullscreen: bool,
+}
+
 impl X11Window {
     /// 连接、建窗、建 GC、显示。
     ///
@@ -115,14 +138,15 @@ impl X11Window {
     ///
     /// 为何写在这里：本函数在 `#[cfg(unix)]` 下，Windows 编译机**看不到**调用点，
     /// 改签名时极容易漏改测试里的那一处（已发生一次）。
-    pub fn create(
-        display: &str,
-        width: u16,
-        height: u16,
-        title: &str,
-        soft: SoftBackend,
-        fullscreen: bool,
-    ) -> Result<Self, String> {
+    pub fn create(args: CreateArgs<'_>) -> Result<Self, String> {
+        let CreateArgs {
+            display,
+            width,
+            height,
+            title,
+            soft,
+            fullscreen,
+        } = args;
         let mut conn = Connection::connect(display)?;
         let info = conn.info().clone();
 
