@@ -107,6 +107,29 @@ fn soft_for(w: u16, h: u16, size: f32) -> y901_render::soft::SoftBackend {
         .expect("软光栅器")
 }
 
+/// 带重试的连接，**失败返回 `None` 而不 panic**。
+///
+/// 为什么要有它：Xvfb 在高频建连时会做**偶发 RST**（`Connection reset` / `os error 104`）。
+/// 测试断言用它不合适（那是正确性断言，不该因环境假红），
+/// 但**基准测试**用它合适：基准不是正确性断言，环境噪声不应弄红 CI。
+fn connect_opt(d: &str, retries: u32) -> Option<Connection> {
+    let mut last = String::new();
+    for attempt in 0..=retries {
+        match Connection::connect(d) {
+            Ok(c) => return Some(c),
+            Err(e) => {
+                last = e;
+                if attempt < retries {
+                    eprintln!("[x11] 连接重试 #{}: {last}", attempt + 1);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        }
+    }
+    eprintln!("[SKIP] connect_opt 失败（已重试 {retries} 次）：{last}");
+    None
+}
+
 /// 建窗（带重试）：理由同 [`connect`] —— Xvfb 在高频建连时偶尔 RST。
 fn create_window_retry(d: &str, w: u16, h: u16, title: &str) -> X11Window {
     let mut last = String::new();
@@ -556,7 +579,13 @@ fn benchmark_shm_vs_putimage_1080p() {
     let (w, h) = (1920u16, 1080u16);
 
     // 先看服务器支持不支持（不支持就只测 PutImage）
-    let mut probe = Connection::connect(&d).expect("连接");
+    let Some(mut probe) = connect_opt(&d, 1) else {
+        // RST 是 Xvfb 高频建连的环境问题，不是代码问题。
+        // 基准测试不是正确性断言 —— **跳过而不红**，避免周期性噪声。
+        // [SKIP] 前缀用于 grep：CI 日志里能搜到，skip 频繁时人工排查。
+        eprintln!("[SKIP] benchmark_shm_vs_putimage_1080p: 连接失败（Xvfb RST），跳过本次基准");
+        return;
+    };
     let has_shm = probe.query_extension(b"MIT-SHM").ok().flatten();
     eprintln!(
         "[bench] MIT-SHM 支持：{}",
