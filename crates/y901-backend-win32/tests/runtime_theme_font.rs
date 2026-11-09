@@ -135,7 +135,7 @@ fn options_carry_theme_and_font_for_startup() {
             size: 20.0,
         }),
         ..Options::default()
-        };
+    };
     assert_eq!(custom.theme, Some(y901_ui::theme::LIGHT));
     assert_eq!(custom.font.as_ref().map(|f| f.size), Some(20.0));
 }

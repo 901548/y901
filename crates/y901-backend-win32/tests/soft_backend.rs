@@ -329,100 +329,100 @@ fn soft_matches_d3d_within_antialiasing_tolerance() {
         height: 200,
         theme: None,
         font: None,
-    
-            fullscreen: false,
-        };
+
+        fullscreen: false,
+    };
 
     // **两个场景都跑**：不半透明（回归基线）+ 半透明（预乘回归）。
     // 历史教训：旧版只跑 translucent=false，于是 D3D 预乘 bug（半透明偏亮）
     // 在 CI 里永远是绿的。现在两个场景都断言。
     for translucent in [false, true] {
-    // A）D3D11
-    let mut win = Window::create(&options).expect("需要 D3D11");
-    let mut tree_a = UiTree::new(Box::new(Scene {
-        rect: Rect::ZERO,
-        translucent,
-    }));
-    win.resize(&mut tree_a);
-    tree_a.invalidate_all();
-    win.request_snapshot();
-    win.render(&mut tree_a);
-    let (px_d3d, w, h) = win.take_snapshot().expect("快照");
-    let _hwnd = win.hwnd();
+        // A）D3D11
+        let mut win = Window::create(&options).expect("需要 D3D11");
+        let mut tree_a = UiTree::new(Box::new(Scene {
+            rect: Rect::ZERO,
+            translucent,
+        }));
+        win.resize(&mut tree_a);
+        tree_a.invalidate_all();
+        win.request_snapshot();
+        win.render(&mut tree_a);
+        let (px_d3d, w, h) = win.take_snapshot().expect("快照");
+        let _hwnd = win.hwnd();
 
-    // B）纯 CPU（同一窗口句柄、同一尺寸）
-    let (cw, ch) = y901_backend_win32::backend::font::cell_metrics_for(15.0);
-    let cell = Size::new(cw, ch);
-    let engine = Box::new(
-        y901_backend_win32::backend::font::TextEngine::new("Segoe UI", 15.0, cw, ch)
-            .expect("dwrite"),
-    );
-    let mut soft = SoftBackend::new(w, h, engine, cell, None).expect("soft init");
-    let mut tree_b = UiTree::new(Box::new(Scene {
-        rect: Rect::ZERO,
-        translucent,
-    }));
-    tree_b.layout(Size::new(w as f32, h as f32), &soft);
-    soft.clear();
-    tree_b.invalidate_all();
-    tree_b.render(&mut soft);
-    let px_soft = soft.pixels().to_vec();
-
-    assert_eq!(px_d3d.len(), px_soft.len(), "两边尺寸应一致");
-
-    // 逐像素比较（BGRA，只比 RGB）
-    let total = (w * h) as usize;
-    let mut exact = 0usize;
-    let mut within = 0usize; // 容差 <= 8
-    let mut max_diff = 0i32;
-    let mut worst = (0u32, 0u32);
-    for i in 0..total {
-        let (a, b) = (i * 4, i * 4);
-        let d = (px_d3d[a] as i32 - px_soft[b] as i32).abs()
-            + (px_d3d[a + 1] as i32 - px_soft[b + 1] as i32).abs()
-            + (px_d3d[a + 2] as i32 - px_soft[b + 2] as i32).abs();
-        if d == 0 {
-            exact += 1;
-        }
-        if d <= 24 {
-            within += 1;
-        }
-        if d > max_diff {
-            max_diff = d;
-            worst = ((i as u32) % w, (i as u32) / w);
-        }
-    }
-    // 诊断：打印几个关键点的两边像素
-    for (x, y) in [(80u32, 30u32), (50, 20), (100, 90), (200, 60)] {
-        let i = ((y * w + x) * 4) as usize;
-        eprintln!(
-            "[soft-vs-d3d] ({x},{y}) d3d=({},{},{}) soft=({},{},{})",
-            px_d3d[i],
-            px_d3d[i + 1],
-            px_d3d[i + 2],
-            px_soft[i],
-            px_soft[i + 1],
-            px_soft[i + 2]
+        // B）纯 CPU（同一窗口句柄、同一尺寸）
+        let (cw, ch) = y901_backend_win32::backend::font::cell_metrics_for(15.0);
+        let cell = Size::new(cw, ch);
+        let engine = Box::new(
+            y901_backend_win32::backend::font::TextEngine::new("Segoe UI", 15.0, cw, ch)
+                .expect("dwrite"),
         );
-    }
-    let exact_pct = 100.0 * exact as f64 / total as f64;
-    let within_pct = 100.0 * within as f64 / total as f64;
-    eprintln!(
+        let mut soft = SoftBackend::new(w, h, engine, cell, None).expect("soft init");
+        let mut tree_b = UiTree::new(Box::new(Scene {
+            rect: Rect::ZERO,
+            translucent,
+        }));
+        tree_b.layout(Size::new(w as f32, h as f32), &soft);
+        soft.clear();
+        tree_b.invalidate_all();
+        tree_b.render(&mut soft);
+        let px_soft = soft.pixels().to_vec();
+
+        assert_eq!(px_d3d.len(), px_soft.len(), "两边尺寸应一致");
+
+        // 逐像素比较（BGRA，只比 RGB）
+        let total = (w * h) as usize;
+        let mut exact = 0usize;
+        let mut within = 0usize; // 容差 <= 8
+        let mut max_diff = 0i32;
+        let mut worst = (0u32, 0u32);
+        for i in 0..total {
+            let (a, b) = (i * 4, i * 4);
+            let d = (px_d3d[a] as i32 - px_soft[b] as i32).abs()
+                + (px_d3d[a + 1] as i32 - px_soft[b + 1] as i32).abs()
+                + (px_d3d[a + 2] as i32 - px_soft[b + 2] as i32).abs();
+            if d == 0 {
+                exact += 1;
+            }
+            if d <= 24 {
+                within += 1;
+            }
+            if d > max_diff {
+                max_diff = d;
+                worst = ((i as u32) % w, (i as u32) / w);
+            }
+        }
+        // 诊断：打印几个关键点的两边像素
+        for (x, y) in [(80u32, 30u32), (50, 20), (100, 90), (200, 60)] {
+            let i = ((y * w + x) * 4) as usize;
+            eprintln!(
+                "[soft-vs-d3d] ({x},{y}) d3d=({},{},{}) soft=({},{},{})",
+                px_d3d[i],
+                px_d3d[i + 1],
+                px_d3d[i + 2],
+                px_soft[i],
+                px_soft[i + 1],
+                px_soft[i + 2]
+            );
+        }
+        let exact_pct = 100.0 * exact as f64 / total as f64;
+        let within_pct = 100.0 * within as f64 / total as f64;
+        eprintln!(
         "[soft-vs-d3d] {w}x{h}: exact={exact_pct:.1}%  within(|d|<=24)={within_pct:.1}%  max_diff={max_diff} at {worst:?}"
     );
-    // 半透明场景：预乘修复前 max_diff 达 165（半透明块内偏亮），
-    // 修复后为 2（仅剩抗锯齿边缘）。阈值取 8：给浮点与舍入余量，
-    // 但远小于 165 —— 能分辨“偏亮”与“正确”。
-    if translucent {
+        // 半透明场景：预乘修复前 max_diff 达 165（半透明块内偏亮），
+        // 修复后为 2（仅剩抗锯齿边缘）。阈值取 8：给浮点与舍入余量，
+        // 但远小于 165 —— 能分辨“偏亮”与“正确”。
+        if translucent {
+            assert!(
+                max_diff <= 8,
+                "半透明场景 max_diff={max_diff} 超过 8（预乘修复前为 165）"
+            );
+        }
         assert!(
-            max_diff <= 8,
-            "半透明场景 max_diff={max_diff} 超过 8（预乘修复前为 165）"
+            within_pct >= 99.0,
+            "纯 CPU 与 D3D11 的差异过大：只有 {within_pct:.1}% 像素在容差内（max_diff={max_diff}）"
         );
-    }
-    assert!(
-        within_pct >= 99.0,
-        "纯 CPU 与 D3D11 的差异过大：只有 {within_pct:.1}% 像素在容差内（max_diff={max_diff}）"
-    );
     }
 }
 

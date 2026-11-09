@@ -70,6 +70,6 @@ fn main() -> Result<(), String> {
         width: 520,
         height: 220,
         ..Default::default()
-        };
+    };
     create_runtime().run(Box::new(DemoHost { clicks: 0 }), Box::new(build), options)
 }

@@ -144,7 +144,9 @@ impl RenderState {
 
     /// 面板背景色（Tabs 过渡遮罩等处使用）。
     pub fn background_color(&self) -> Color {
-        self.theme.style(Role::PANEL, y901_ui::theme::State::Normal).bg
+        self.theme
+            .style(Role::PANEL, y901_ui::theme::State::Normal)
+            .bg
     }
 
     // ---- 动画 ----

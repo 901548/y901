@@ -717,6 +717,10 @@ fn fullscreen_atoms(conn: &mut Connection, wid: u32, root: u32, add: bool) -> Re
     let action = if add { 1 } else { 0 };
     let ev = crate::encode::client_message_event(wid, state_atom, [action, fs_atom, 0, 0, 0]);
     // SubstructureRedirectMask = 1<<20, SubstructureNotifyMask = 1<<19
-    conn.send(&crate::encode::encode_send_event(root, (1 << 20) | (1 << 19), &ev))?;
+    conn.send(&crate::encode::encode_send_event(
+        root,
+        (1 << 20) | (1 << 19),
+        &ev,
+    ))?;
     Ok(())
 }

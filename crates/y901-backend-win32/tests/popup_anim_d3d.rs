@@ -190,9 +190,7 @@ fn popup_animation_progresses_on_d3d() {
         .filter(|(a, b)| a != b)
         .count();
 
-    eprintln!(
-        "[popup-d3d] 半程 {mw}x{mh} @{mid:?}，终态 {ew}x{eh} @{end:?}，差异像素 {diff}"
-    );
+    eprintln!("[popup-d3d] 半程 {mw}x{mh} @{mid:?}，终态 {ew}x{eh} @{end:?}，差异像素 {diff}");
 
     assert!(
         mw < ew && mh < eh,

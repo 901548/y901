@@ -45,11 +45,7 @@ impl y901_ui::Widget for Scene {
     fn rect(&self) -> Rect {
         self.rect
     }
-    fn event(
-        &mut self,
-        _c: &mut y901_ui::EventCtx,
-        _e: &y901_ui::UiEvent,
-    ) -> y901_ui::EventResult {
+    fn event(&mut self, _c: &mut y901_ui::EventCtx, _e: &y901_ui::UiEvent) -> y901_ui::EventResult {
         y901_ui::EventResult::Ignored
     }
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
@@ -91,9 +87,9 @@ fn compare(depth: usize) -> (i32, i32) {
         height: 160,
         theme: None,
         font: None,
-    
-            fullscreen: false,
-        };
+
+        fullscreen: false,
+    };
 
     // ---- A：D3D11 ----
     let mut win = Window::create(&options).expect("需要 D3D11 设备");
@@ -145,10 +141,7 @@ fn compare(depth: usize) -> (i32, i32) {
     eprintln!(
         "[opacity-parity] depth={depth} {w}x{h}: d3d_center_red={d3d_center} soft_center_red={soft_center} max_diff={max_diff}"
     );
-    (
-        (d3d_center as i32 - soft_center as i32).abs(),
-        max_diff,
-    )
+    ((d3d_center as i32 - soft_center as i32).abs(), max_diff)
 }
 
 #[test]

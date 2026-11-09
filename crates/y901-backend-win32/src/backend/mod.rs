@@ -760,7 +760,8 @@ impl RenderCtx for D3dBackend {
     ///
     /// 旧版缺失时调用方会回退到黑色，于是遮罩在 D3D 上变成一块黑。
     fn background_color(&self) -> Color {
-        self.state.theme()
+        self.state
+            .theme()
             .style(y901_ui::Role::PANEL, y901_ui::theme::State::Normal)
             .bg
     }

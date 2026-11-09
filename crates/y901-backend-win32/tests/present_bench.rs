@@ -88,9 +88,9 @@ fn present_bench_sync0_vs_sync1() {
         height: 600,
         theme: None,
         font: None,
-    
-            fullscreen: false,
-        };
+
+        fullscreen: false,
+    };
     let mut window = Window::create(&options).expect("需要 D3D11");
     let mut tree = UiTree::new(Box::new(Scene { rect: Rect::ZERO }));
     window.resize(&mut tree);

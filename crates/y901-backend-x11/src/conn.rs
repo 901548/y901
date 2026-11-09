@@ -501,12 +501,7 @@ impl Connection {
                 // 响应：直接交给调用方（附加数据已在 `read_packet` 里 drain）
                 1 => return Ok((head, extra)),
                 // 错误包：不吞掉，交给上层看真实原因
-                0 => {
-                    return Err(format!(
-                        "X11 错误包（字节 0 = 0，错误码 = {}）",
-                        head[1]
-                    ))
-                }
+                0 => return Err(format!("X11 错误包（字节 0 = 0，错误码 = {}）", head[1])),
                 // 事件包：解码后存 `pending`（不丢），继续等响应
                 _ => {
                     if let Ok(ev) = decode_event(&head) {
@@ -770,7 +765,9 @@ mod tests {
         reply[0] = 1;
         reply[4] = 1;
         theirs.write_all(&reply).expect("write reply");
-        theirs.write_all(&[0xAA, 0xBB, 0xCC, 0xDD]).expect("write extra");
+        theirs
+            .write_all(&[0xAA, 0xBB, 0xCC, 0xDD])
+            .expect("write extra");
 
         // 2) 紧跟一个 32 字节事件包（byte0=2 = KeyPress，无附加数据）
         let mut event = [0u8; 32];

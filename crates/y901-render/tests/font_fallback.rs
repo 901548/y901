@@ -11,7 +11,9 @@ use y901_render::font_fallback::substitute;
 fn substitute_is_exhaustive_about_the_one_known_gap() {
     // 已确认：默认字体 NSimSun 缺 U+2212，其它常见标点都有。
     assert_eq!(substitute('\u{2212}'), Some('-'));
-    for ch in ['-', '\u{2013}', '\u{2014}', '\u{2018}', '\u{2026}', '\u{00d7}'] {
+    for ch in [
+        '-', '\u{2013}', '\u{2014}', '\u{2018}', '\u{2026}', '\u{00d7}',
+    ] {
         assert_eq!(substitute(ch), None, "{ch:?} 不应被映射（实测字体里有）");
     }
 }
@@ -27,8 +29,8 @@ fn minus_sign_rasterizes_through_substitute() {
 
     // 先确认基线：若字体本身有 U+2212，本测试就退化为"同字形"检查，仍然成立。
     let direct = y901_render::font_engine::rasterize_glyph(&data, '\u{2212}', 16.0);
-    let hyphen = y901_render::font_engine::rasterize_glyph(&data, '-', 16.0)
-        .expect("ASCII '-' 必须有字形");
+    let hyphen =
+        y901_render::font_engine::rasterize_glyph(&data, '-', 16.0).expect("ASCII '-' 必须有字形");
 
     match direct {
         Some(g) => {

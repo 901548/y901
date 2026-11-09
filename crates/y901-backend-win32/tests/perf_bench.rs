@@ -192,9 +192,9 @@ fn bench_instance_submission_10k() {
         height: 600,
         theme: None,
         font: None,
-    
-            fullscreen: false,
-        };
+
+        fullscreen: false,
+    };
     let mut window = Window::create(&options).expect("需要 D3D11");
     window.resize(&mut tree);
     tree.invalidate_all();
@@ -238,9 +238,9 @@ fn bench_empty_frame_baseline() {
         height: 600,
         theme: None,
         font: None,
-    
-            fullscreen: false,
-        };
+
+        fullscreen: false,
+    };
     let mut window = Window::create(&options).expect("需要 D3D11");
     window.resize(&mut tree);
     tree.invalidate_all();

@@ -542,7 +542,7 @@ pub fn client_message_event(window: u32, message_type: u32, data: [u32; 5]) -> [
     let mut ev = [0u8; 32];
     ev[0] = 33; // ClientMessage
     ev[1] = 32; // format = 32
-    // ev[2..4] 序号：服务器会覆写，保持 0
+                // ev[2..4] 序号：服务器会覆写，保持 0
     ev[4..8].copy_from_slice(&window.to_ne_bytes());
     ev[8..12].copy_from_slice(&message_type.to_ne_bytes());
     for (i, v) in data.iter().enumerate() {

@@ -21,7 +21,8 @@ type Px = u32;
 
 #[inline]
 fn pack(c: Color, cov: f32, opacity: f32) -> Px {
-    let a = (c.a.clamp(0.0, 1.0) * cov.clamp(0.0, 1.0) * opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let a = (c.a.clamp(0.0, 1.0) * cov.clamp(0.0, 1.0) * opacity.clamp(0.0, 1.0) * 255.0).round()
+        as u32;
     let r = (c.r.clamp(0.0, 1.0) * 255.0).round() as u32;
     let g = (c.g.clamp(0.0, 1.0) * 255.0).round() as u32;
     let b = (c.b.clamp(0.0, 1.0) * 255.0).round() as u32;
@@ -842,7 +843,11 @@ impl RenderCtx for SoftBackend {
                         | ((g * 255.0 + 0.5) as u32) << 8
                         | (b * 255.0 + 0.5) as u32
                 } else {
-                    pack(Color::rgba(r, g, b, a0 + da * tt), 1.0, self.state.current_opacity())
+                    pack(
+                        Color::rgba(r, g, b, a0 + da * tt),
+                        1.0,
+                        self.state.current_opacity(),
+                    )
                 };
                 let i = row + x as usize;
                 if let Some(dst) = self.buf.get_mut(i) {

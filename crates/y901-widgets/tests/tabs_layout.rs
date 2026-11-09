@@ -7,14 +7,20 @@
 //!
 //! 不设置时仍返回 `BAR_H + 1.0`，但文档已写明那是**最小高度**。
 
-use y901_ui::{layout::LayoutCache, Constraints, FlexItem, Rect, RenderCtx, Size, TextMetrics, Widget};
+use y901_ui::{
+    layout::LayoutCache, Constraints, FlexItem, Rect, RenderCtx, Size, TextMetrics, Widget,
+};
 use y901_widgets::Tabs;
 
 /// 极简内容绘制器：什么都不画，只用于触发布局。
 fn noop_painter(_idx: usize, _ctx: &mut dyn RenderCtx, _rect: Rect, _t: f32) {}
 
 fn tabs(id: &str) -> Tabs {
-    Tabs::new(id, vec!["one".to_string(), "two".to_string()], Box::new(noop_painter))
+    Tabs::new(
+        id,
+        vec!["one".to_string(), "two".to_string()],
+        Box::new(noop_painter),
+    )
 }
 
 /// 断言当前 Tabs 组件的 `BAR_H`（与 `tabs.rs` 内常量一致）。
@@ -39,7 +45,11 @@ fn tabs_with_content_height_measures_correctly() {
     let c = Constraints::loose(Size::new(400.0, 500.0));
     let mut cache = LayoutCache::default();
     let size = t.measure(&ZeroMetrics, c, &mut cache);
-    assert_eq!(size.h, BAR_H + 200.0, "content_height(200) 应得到 BAR_H + 200");
+    assert_eq!(
+        size.h,
+        BAR_H + 200.0,
+        "content_height(200) 应得到 BAR_H + 200"
+    );
 }
 
 #[test]
@@ -50,7 +60,11 @@ fn tabs_without_any_setting_falls_back_to_minimum() {
     let mut cache = LayoutCache::default();
     let size = t.measure(&ZeroMetrics, c, &mut cache);
     assert_eq!(size.h, BAR_H + 1.0, "未设置时应保留最小高度 BAR_H + 1.0");
-    assert_eq!(t.flex(), FlexItem::default(), "未设置 flex_item 时不得自动 fill");
+    assert_eq!(
+        t.flex(),
+        FlexItem::default(),
+        "未设置 flex_item 时不得自动 fill"
+    );
 }
 
 #[test]

@@ -35,11 +35,17 @@ fn red(s: &SoftBackend, x: u32, y: u32) -> u32 {
 fn red_square_alpha(opacities: &[f32]) -> u32 {
     let mut s = backend();
     s.clear();
-    s.fill_rect(Rect::new(0.0, 0.0, W as f32, H as f32), Color::rgba(0.0, 0.0, 0.0, 1.0));
+    s.fill_rect(
+        Rect::new(0.0, 0.0, W as f32, H as f32),
+        Color::rgba(0.0, 0.0, 0.0, 1.0),
+    );
     for &o in opacities {
         s.push_opacity(o);
     }
-    s.fill_rect(Rect::new(16.0, 16.0, 32.0, 32.0), Color::rgba(1.0, 0.0, 0.0, 1.0));
+    s.fill_rect(
+        Rect::new(16.0, 16.0, 32.0, 32.0),
+        Color::rgba(1.0, 0.0, 0.0, 1.0),
+    );
     let a = red(&s, 32, 32);
     for _ in opacities {
         s.pop_opacity();

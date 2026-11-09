@@ -43,6 +43,9 @@ fn plan_dirty_rects(dirty: &y901_ui::DirtyRegion) -> Option<Vec<(i32, i32, i32, 
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+use windows_sys::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, GetDpiForSystem, SetProcessDpiAwarenessContext,
@@ -51,12 +54,6 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_ESCAPE};
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, DragQueryPoint};
 use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
-    MONITOR_DEFAULTTONEAREST};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetWindowRect, MoveWindow, SetWindowPos, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_NOZORDER, WS_POPUP, WS_VISIBLE,
-};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, LoadCursorW,
     MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassExW,
@@ -67,6 +64,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
     WM_NCCREATE, WM_NCDESTROY, WM_NULL, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP,
     WM_SETCURSOR, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetWindowRect, MoveWindow, SetWindowPos, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, WS_POPUP, WS_VISIBLE,
 };
 
 use y901_runtime::{Options, RawEvent};
@@ -453,8 +454,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_CHAR => {
             // 临时诊断：确认 wndproc 到底收到了什么键。
-            eprintln!(
-            );
+            eprintln!();
             // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
             // 只在全屏下生效：普通窗口的 Esc 仍作为普通按键上报（用户可能用它取消输入）。
             if is_fullscreen_window() && msg == WM_KEYDOWN && wparam as u32 == VK_ESCAPE as u32 {
@@ -828,11 +828,22 @@ impl Window {
                 };
                 if GetMonitorInfoW(mon, &mut mi) != 0 {
                     let r = mi.rcMonitor;
-                    MoveWindow(self.hwnd, r.left, r.top, r.right - r.left, r.bottom - r.top, 1);
-                    let mut q = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                    MoveWindow(
+                        self.hwnd,
+                        r.left,
+                        r.top,
+                        r.right - r.left,
+                        r.bottom - r.top,
+                        1,
+                    );
+                    let mut q = RECT {
+                        left: 0,
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                    };
                     if GetWindowRect(self.hwnd, &mut q) != 0 {
-                        eprintln!(
-                        );
+                        eprintln!();
                     }
                 }
             } else {
@@ -862,10 +873,14 @@ impl Window {
                     let (w, h) = self.viewport;
                     MoveWindow(self.hwnd, 100, 100, w as i32, h as i32, 1);
                 }
-                let mut q = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                let mut q = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
                 if GetWindowRect(self.hwnd, &mut q) != 0 {
-                    eprintln!(
-                    );
+                    eprintln!();
                 }
             }
         }
@@ -1555,9 +1570,9 @@ mod present_sync_tests {
             height: 200,
             theme: None,
             font: None,
-        
-                fullscreen: false,
-            };
+
+            fullscreen: false,
+        };
         let mut window = match Window::create(&opts) {
             Ok(w) => w,
             Err(e) => {

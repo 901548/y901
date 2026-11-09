@@ -135,7 +135,11 @@ fn record_skip(test_name: &str, reason: &str) {
     // 之后按 Tab 分列解析就会错位。洗成空格是最小侵入的做法。
     let test_name = test_name.replace(['\t', '\n', '\r'], " ");
     let reason = reason.replace(['\t', '\n', '\r'], " ");
-    match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         Ok(mut f) => {
             let _ = writeln!(f, "{secs}\t{test_name}\t{reason}");
         }
