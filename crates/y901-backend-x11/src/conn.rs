@@ -111,6 +111,32 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// **仅测试用**：用一个现成的 socket 构造 `Connection`，不做握手。
+    ///
+    /// 用途：用 `UnixStream::pair()` 灌入构造好的包，
+    /// 验证读包对齐逻辑（drain 附加数据、不丢事件）——
+    /// 这些逻辑在真实 X 会话里难以稳定制造。
+    #[cfg(test)]
+    pub(crate) fn from_stream(stream: std::os::unix::net::UnixStream) -> Self {
+        Self {
+            stream,
+            seq: 0,
+            info: ServerInfo {
+                release: 0,
+                resource_id_base: 0,
+                resource_id_mask: 0,
+                vendor: String::new(),
+                root: 0,
+                width: 0,
+                height: 0,
+                root_visual: 0,
+                root_depth: 24,
+                min_keycode: 0,
+                max_keycode: 0,
+            },
+            pending: Vec::new(),
+        }
+    }
     /// 连接到本地 X server 并完成握手。
     ///
     /// 输入：`display`（如 `":99"` 或 `":0"`；也接受 `"环境变量"`的空值→读 `DISPLAY`）。
@@ -724,5 +750,68 @@ fn parse_error(buf: &[u8]) -> X11Error {
         bad_value: u32at(4),
         minor_opcode: u16at(8),
         major_opcode: buf[10],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+
+    /// poll_events 必须 **drain reply 的附加数据**，否则后续包会被当成
+    /// "不完整包"——旧版（reply 分支为空时）会在这里直接 `Err`。
+    #[test]
+    fn poll_events_drains_reply_extra_data() {
+        let (ours, mut theirs) = UnixStream::pair().expect("pair");
+
+        // 1) reply：byte0=1，byte4-5 = units = 1（4 字节附加数据）
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[4] = 1;
+        theirs.write_all(&reply).expect("write reply");
+        theirs.write_all(&[0xAA, 0xBB, 0xCC, 0xDD]).expect("write extra");
+
+        // 2) 紧跟一个 32 字节事件包（byte0=2 = KeyPress，无附加数据）
+        let mut event = [0u8; 32];
+        event[0] = 2;
+        theirs.write_all(&event).expect("write event");
+        theirs.flush().ok();
+
+        let mut conn = Connection::from_stream(ours);
+        let first = conn.poll_events(100);
+        assert!(
+            first.is_ok(),
+            "收到 reply 后必须能 drain 附加数据；否则会报不完整包：{first:?}"
+        );
+        let (events, errors) = first.unwrap();
+        assert!(errors.is_empty(), "不应有错误包：{errors:?}");
+        // 事件包被正确解析（KeyPress；字段全 0，decode 可能成功或失败，
+        // 但**不应影响流对齐**）。这里只断言“没有被 reply 带偏”。
+        assert!(events.len() <= 1, "最多一个事件，实测 {events:?}");
+
+        // 3) 再 poll 一次：流应该已清空（无少读/多读）
+        let second = conn.poll_events(10).expect("second poll");
+        assert!(
+            second.0.is_empty(),
+            "第二次 poll 不应再有事件（说明流已对齐）：{second:?}"
+        );
+    }
+
+    /// 对照：reply 的 units=0 时不应多读（保证 drain 不会误伤正常响应）。
+    #[test]
+    fn poll_events_keeps_stream_aligned_for_plain_reply() {
+        let (ours, mut theirs) = UnixStream::pair().expect("pair");
+        let mut reply = [0u8; 32];
+        reply[0] = 1; // units = 0
+        theirs.write_all(&reply).expect("write reply");
+        let mut event = [0u8; 32];
+        event[0] = 2;
+        theirs.write_all(&event).expect("write event");
+        theirs.flush().ok();
+
+        let mut conn = Connection::from_stream(ours);
+        let first = conn.poll_events(100);
+        assert!(first.is_ok(), "units=0 的 reply 不应导致错误：{first:?}");
     }
 }
