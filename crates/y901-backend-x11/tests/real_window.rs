@@ -130,6 +130,11 @@ fn record_skip(test_name: &str, reason: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    // **洗掉 Tab / 换行**：文件格式是 Tab 分隔的三列，
+    // 若 reason 里带 Tab 或换行（例如将来错误文本变化），一行会被拆成两行/多列，
+    // 之后按 Tab 分列解析就会错位。洗成空格是最小侵入的做法。
+    let test_name = test_name.replace(['\t', '\n', '\r'], " ");
+    let reason = reason.replace(['\t', '\n', '\r'], " ");
     match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
         Ok(mut f) => {
             let _ = writeln!(f, "{secs}\t{test_name}\t{reason}");
@@ -616,8 +621,10 @@ fn benchmark_shm_vs_putimage_1080p() {
         // RST 是 Xvfb 高频建连的环境问题，不是代码问题。
         // 基准测试不是正确性断言 —— **跳过而不红**，避免周期性噪声。
         // [SKIP] 前缀用于 grep：CI 日志里能搜到，skip 频繁时人工排查。
-        eprintln!("[SKIP] benchmark_shm_vs_putimage_1080p: 连接失败（Xvfb RST），跳过本次基准");
-        record_skip("benchmark_shm_vs_putimage_1080p", "connect RST");
+        // 不假设错误类型：本轮 demo 用 DISPLAY=:4321 触发的是“服务器不存在”，
+        // 而不是 RST。硬写 RST 会误导排查。
+        eprintln!("[SKIP] benchmark_shm_vs_putimage_1080p: 连接失败，跳过本次基准");
+        record_skip("benchmark_shm_vs_putimage_1080p", "connect failed");
         return;
     };
     let has_shm = probe.query_extension(b"MIT-SHM").ok().flatten();
