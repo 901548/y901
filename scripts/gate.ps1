@@ -209,6 +209,20 @@ if ($SkipTest)  { $notReleasable += "SKIP TEST" }
 if ($SkipAudit) { $notReleasable += "SKIP AUDIT" }
 if ($script:gpuSkipped -gt 0) { $notReleasable += "SKIP GPU: $($script:gpuSkipped) tests" }
 
+# ---------------------------------------------------------------- platform-change warning
+# 为何只 WARN 不硬失败：本 gate 跑在 Windows 上，`#[cfg(unix)]` 代码在这里**根本不编译**
+# （x11 crate 整体为空），因此 gate 无法直接验证 Linux；但"不验证"不能被误读为"可发布"。
+# 已因此返工三次（RenderOutcome 未导入 / create 签名漏改 / CreateArgs 漏 import）。
+$changedFiles = @(& git diff --name-only HEAD 2>$null)
+$platformChanged = @($changedFiles | Where-Object { $_ -match '^crates/y901-backend-(x11|win32)/.*\.rs$' })
+if ($platformChanged.Count -gt 0) {
+    Write-Host ""
+    Write-Host "[gate] WARN: 本次改动含平台代码，Windows 绿灯不代表 Linux 能编："
+    foreach ($f in $platformChanged) { Write-Host "  - $f" }
+    Write-Host "[gate] WARN: 请在 Linux 上跑 cargo check -p y901-backend-x11 --all-targets"
+    Write-Host ""
+}
+
 if ($notReleasable.Count -gt 0) {
     # 主动跳过：不是发布门禁
     Write-Host "GATE NOT RELEASABLE ($($notReleasable -join '; '))"
