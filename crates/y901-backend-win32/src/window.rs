@@ -115,11 +115,28 @@ impl WakeHandle {
 struct WindowShared {
     /// 平台事件队列：wndproc 写，宿主读。
     queue: Vec<RawEvent>,
+    /// 最近一次 `WM_SIZE` 的客户区尺寸。
+    size: (u32, u32),
+    /// 需要整帧重绘（一窗置位，只影响本窗）。
+    need_full_redraw: bool,
+    /// 输入过滤（语义绑当前窗口）。
+    char_filter: Option<CharFilter>,
+    /// 当前是否 fullscreen（状态机，避免重复切换）。
+    fullscreen: bool,
+    /// 全屏下按 Esc：wndproc 置位，`wait_events`（`&mut self`）消费。
+    want_exit_fs: bool,
 }
 
 impl WindowShared {
     fn new() -> Self {
-        Self { queue: Vec::new() }
+        Self {
+            queue: Vec::new(),
+            size: (0, 0),
+            need_full_redraw: false,
+            char_filter: None,
+            fullscreen: false,
+            want_exit_fs: false,
+        }
     }
 }
 
@@ -136,7 +153,6 @@ static TABLE: Mutex<Option<std::collections::HashMap<isize, WindowShared>>> = Mu
 /// 归零才 `PostQuitMessage`。
 static WINDOW_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// 最近一次客户区尺寸。
-static SIZE: Mutex<(u32, u32)> = Mutex::new((0, 0));
 /// IME 状态属于窗口（输入法进程的镜像），与 UI 无关。
 static IME: OnceLock<Mutex<ImeState>> = OnceLock::new();
 static CLASS_READY: OnceLock<bool> = OnceLock::new();
@@ -156,6 +172,33 @@ fn with_table<R>(f: impl FnOnce(&mut std::collections::HashMap<isize, WindowShar
 ///
 /// 表项已在 `WM_NCDESTROY` 移除后，这里会**静默丢弃**（`get_mut` 返 `None`）——
 /// 那是正确行为：窗口已死，再收集事件没意义。
+/// **测试专用**：为一个伪造的 `hwnd` 建表项（不需要真窗右）。
+///
+/// 用途："整窗重绘标志是一次性"这类语义可以在**无 GUI** 下验证，
+/// 而不必为此真建一个 D3D 窗口。
+#[cfg(test)]
+pub fn test_seed_shared(hwnd: isize) {
+    with_table(|map| {
+        map.insert(hwnd, WindowShared::new());
+    });
+}
+
+/// **测试专用**：删除伪造表项。
+#[cfg(test)]
+pub fn test_drop_shared(hwnd: isize) {
+    with_table(|map| {
+        map.remove(&hwnd);
+    });
+}
+
+/// 按 `hwnd` 读一个字段；表项不存在（窗口已死）时用 `default`。
+fn with_shared<R>(hwnd: HWND, default: R, f: impl FnOnce(&mut WindowShared) -> R) -> R {
+    with_table(|map| match map.get_mut(&(hwnd as isize)) {
+        Some(shared) => f(shared),
+        None => default,
+    })
+}
+
 fn push(hwnd: HWND, ev: RawEvent) {
     with_table(|map| {
         if let Some(shared) = map.get_mut(&(hwnd as isize)) {
@@ -247,30 +290,29 @@ unsafe fn client_pos(hwnd: HWND) -> Pos {
 /// 为什么需要：D3D 交换链的内容**不受** Windows 保护——
 /// 遮挡/最小化恢复后，窗口客户区是未定义的（黑或花）。
 /// 而我们的渲染是"有脏区才画"，恢复时通常没有脏区，所以必须显式请求一次全量。
-static NEED_FULL_REDRAW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 /// 请求下一帧整窗重绘（`WM_PAINT` 走这里）。
 ///
 /// 副作用：置位一次性标志；不会被覆盖、不会重复触发（多次调用等价于一次）。
 #[doc(hidden)]
-pub fn request_full_redraw() {
-    NEED_FULL_REDRAW.store(true, std::sync::atomic::Ordering::Relaxed);
+pub fn request_full_redraw(hwnd: HWND) {
+    // 该标志已按窗口分桶：多窗口下"请求重绘 A"不应让 B 也整帧重绘。
+    with_shared(hwnd, (), |shared| shared.need_full_redraw = true);
 }
 
 /// 取走"整窗重绘"请求（runtime 每帧调一次）。
 ///
 /// 返回：`true` = 有人在上一帧之后请求过；取走即清零。
 #[doc(hidden)]
-pub fn take_full_redraw() -> bool {
-    NEED_FULL_REDRAW.swap(false, std::sync::atomic::Ordering::Relaxed)
+pub fn take_full_redraw(hwnd: HWND) -> bool {
+    with_shared(hwnd, false, |shared| {
+        std::mem::replace(&mut shared.need_full_redraw, false)
+    })
 }
 
 /// 全局按键去重状态（`wndproc` 是无状态的 C 回调，只能放静态）。
 ///
 /// 用 `Mutex` 而不是 `AtomicU32`：`CharFilter` 有"取走并清空"的复合语义，
 /// 用原子实现要两次 CAS，容易写错；窗口消息本来就在同一线程串行处理。
-static CHAR_FILTER: std::sync::Mutex<Option<CharFilter>> = std::sync::Mutex::new(None);
-
 /// 控制键的 VK → 它同时会产生的那个控制字符。
 ///
 /// 只覆盖 `TranslateMessage` 会重发 `WM_CHAR` 的四个键：
@@ -406,19 +448,15 @@ impl CharFilter {
 /// 当前窗口是否处于 borderless fullscreen（SPIKE 期间由环境变量控制）。
 ///
 /// 只读一次：`wndproc` 每帧都会调，不能反复读环境变量。
-fn is_fullscreen_window() -> bool {
-    FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed)
+fn is_fullscreen_window(hwnd: HWND) -> bool {
+    with_shared(hwnd, false, |shared| shared.fullscreen)
 }
 
 /// 进程级全局：当前每进程单窗口，`create_inner` 时 store，`wndproc` 里读。
 ///
 /// `wndproc` 是自由函数，拿不到 `Options`；单窗口架构下一个标志就够。
 /// 若将来支持多窗口，改为从 `GWLP_USERDATA` 取实例指针。
-static FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 /// 全屏下按 Esc：`wndproc`（自由函数）置位，`wait_events`（`&mut self`）消费。
-static WANT_EXIT_FS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_NCCREATE => {
@@ -436,7 +474,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_SIZE => {
             let w = (lparam as u32) & 0xFFFF;
             let h = ((lparam as u32) >> 16) & 0xFFFF;
-            *SIZE.lock().unwrap_or_else(|e| e.into_inner()) = (w, h);
+            with_shared(hwnd, (), |shared| shared.size = (w, h));
             push(hwnd, RawEvent::Resize { w, h });
             0
         }
@@ -448,13 +486,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN
         | WM_MBUTTONUP => {
-            if let Ok(mut slot) = CHAR_FILTER.lock() {
-                let filter = slot.get_or_insert_with(CharFilter::default);
-                if let Some(ev) =
-                    handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter)
-                {
-                    push(hwnd, ev);
-                }
+            // **先取事件再 push**：`push` 会再次加 `TABLE` 锁，
+            // 而 std 的 `Mutex` **不可重入** —— 在闭包里 `push` 会直接死锁。
+            let ev = with_shared(hwnd, None, |shared| {
+                let filter = shared.char_filter.get_or_insert_with(CharFilter::default);
+                handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter)
+            });
+            if let Some(ev) = ev {
+                push(hwnd, ev);
             }
             0
         }
@@ -496,7 +535,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     },
                 );
                 // 拖放后要求重绘（高亮状态可能需要更新）
-                request_full_redraw();
+                request_full_redraw(hwnd);
             }
             0
         }
@@ -505,22 +544,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             eprintln!();
             // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
             // 只在全屏下生效：普通窗口的 Esc 仍作为普通按键上报（用户可能用它取消输入）。
-            if is_fullscreen_window() && msg == WM_KEYDOWN && wparam as u32 == VK_ESCAPE as u32 {
+            if is_fullscreen_window(hwnd) && msg == WM_KEYDOWN && wparam as u32 == VK_ESCAPE as u32
+            {
                 // 全屏下 Esc = **退出全屏**（不关进程）。
                 // `wndproc` 是自由函数、拿不到 `&mut self`，
                 // 所以只置全局标志，由 `wait_events`（`&mut self`）消费。
-                WANT_EXIT_FS.store(true, std::sync::atomic::Ordering::Relaxed);
+                with_shared(hwnd, (), |shared| shared.want_exit_fs = true);
                 return 0;
             }
             // 键盘消息统一走纯函数 `handle_wm_msg`（可单测）：它负责去重，
             // wndproc 只做"取状态 + 投递"。
-            if let Ok(mut slot) = CHAR_FILTER.lock() {
-                let filter = slot.get_or_insert_with(CharFilter::default);
-                if let Some(ev) =
-                    handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter)
-                {
-                    push(hwnd, ev);
-                }
+            // **先取事件再 push**：`push` 会再次加 `TABLE` 锁，
+            // 而 std 的 `Mutex` **不可重入** —— 在闭包里 `push` 会直接死锁。
+            let ev = with_shared(hwnd, None, |shared| {
+                let filter = shared.char_filter.get_or_insert_with(CharFilter::default);
+                handle_wm_msg(msg, wparam as u64, lparam as i64, modifiers(), filter)
+            });
+            if let Some(ev) = ev {
+                push(hwnd, ev);
             }
             0
         }
@@ -588,7 +629,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             // D3D 的交换链内容不会被 Windows 恢复，必须让 runtime 下一帧整窗重绘，
             // 否则窗口是黑的/花的。这里只置标记，真正的 invalidate_all 由 runtime 做
             // （wndproc 拿不到 UiTree）。
-            request_full_redraw();
+            request_full_redraw(hwnd);
             0
         }
         WM_DESTROY => {
@@ -971,7 +1012,7 @@ impl Window {
             }
         }
         self.fullscreen = on;
-        FULLSCREEN.store(on, std::sync::atomic::Ordering::Relaxed);
+        with_shared(self.hwnd, (), |shared| shared.fullscreen = on);
         Ok(())
     }
 
@@ -1041,7 +1082,7 @@ impl Window {
             }
         }
         // 尺寸可能在本轮变化
-        self.viewport = *SIZE.lock().unwrap_or_else(|e| e.into_inner());
+        self.viewport = with_shared(self.hwnd, (0, 0), |shared| shared.size);
         true
     }
 
@@ -1195,7 +1236,7 @@ impl Window {
     /// 调用方应 `tree.invalidate_all()` 触发一次整窗重绘。
     /// 这是**一次性**标志，取走即清零。
     pub fn take_repaint_request(&self) -> bool {
-        take_full_redraw()
+        take_full_redraw(self.hwnd)
     }
 
     /// 重新布局（尺寸变化后调用）。
@@ -1326,6 +1367,34 @@ mod key_filter_tests {
         assert_eq!(control_char_for_vk(0x09), Some('\t'));
         assert_eq!(control_char_for_vk(0x20), None, "空格不是控制键");
         assert_eq!(control_char_for_vk(0x41), None);
+    }
+}
+
+#[cfg(test)]
+mod repaint_request_tests {
+    use super::{request_full_redraw, take_full_redraw, test_drop_shared, test_seed_shared};
+
+    /// "整窗重绘请求是一次性"——现在按 `hwnd` 分桶，用伪造句柄验证，
+    /// 不需要真 D3D 窗口。
+    #[test]
+    fn repaint_request_is_one_shot() {
+        let fake = 0xDEAD_usize as isize;
+        test_seed_shared(fake);
+        let hwnd = fake as *mut core::ffi::c_void;
+
+        let _ = take_full_redraw(hwnd);
+        assert!(!take_full_redraw(hwnd), "初始应无请求");
+
+        request_full_redraw(hwnd);
+        assert!(take_full_redraw(hwnd), "置位后第一次取走必须为 true");
+        assert!(!take_full_redraw(hwnd), "取走后再取必须为 false（一次性）");
+
+        request_full_redraw(hwnd);
+        request_full_redraw(hwnd);
+        assert!(take_full_redraw(hwnd));
+        assert!(!take_full_redraw(hwnd));
+
+        test_drop_shared(fake);
     }
 }
 
@@ -1534,7 +1603,7 @@ impl y901_runtime::Presenter for Window {
         if let Some(soft) = self.soft.as_mut() {
             if soft.resize(width, height) {
                 // 尺寸变了 = 帧缓冲被重建 → 整窗重绘（模块级函数）
-                crate::window::request_full_redraw();
+                crate::window::request_full_redraw(self.hwnd);
             }
         }
         Ok(())
@@ -1744,7 +1813,9 @@ impl y901_backend_common::window::WindowBackend for Window {
     fn wait_events(&mut self, wait_ms: u32) -> Option<Vec<RawEvent>> {
         // 全屏下的 Esc：`wndproc` 只能置标志，在这里（`&mut self`）执行切换。
         // 放在 `pump` 之前：切换应在本次事件交付前完成。
-        let want_exit_fs = WANT_EXIT_FS.swap(false, std::sync::atomic::Ordering::Relaxed);
+        let want_exit_fs = with_shared(self.hwnd, false, |shared| {
+            std::mem::replace(&mut shared.want_exit_fs, false)
+        });
         if want_exit_fs && self.fullscreen {
             if let Err(e) = self.set_fullscreen(false) {
                 eprintln!("[y901] 退出全屏失败：{e}");

@@ -10,7 +10,6 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use y901_backend_win32::window::{request_full_redraw, take_full_redraw};
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
     TextStyle, UiTree, Widget,
@@ -136,23 +135,6 @@ fn tree_render_draws_nothing_when_clean() {
 }
 
 #[test]
-fn repaint_request_is_one_shot() {
-    // 先清掉可能残留的标记（其它测试/静态状态）
-    let _ = take_full_redraw();
-    assert!(!take_full_redraw(), "初始应无请求");
-
-    request_full_redraw();
-    assert!(take_full_redraw(), "置位后第一次取走必须为 true");
-    assert!(!take_full_redraw(), "取走后再取必须为 false（一次性）");
-
-    // 多次置位等价于一次
-    request_full_redraw();
-    request_full_redraw();
-    assert!(take_full_redraw());
-    assert!(!take_full_redraw());
-}
-
-#[test]
 fn window_render_has_dirty_guard() {
     // 结构性断言：防止"删掉脏区守卫"这类回归。
     // v0.1.12 起出图体在 `render_inner`（为基准拆出 sync 参数），
@@ -193,7 +175,7 @@ fn wm_paint_requests_full_redraw() {
     let end = body.find("\n        WM_DESTROY").unwrap_or(body.len());
     let body = &body[..end];
     assert!(
-        body.contains("request_full_redraw()"),
+        body.contains("request_full_redraw(hwnd)"),
         "WM_PAINT 必须请求整窗重绘（遮挡/最小化恢复时 D3D 内容是未定义的）：\n{body}"
     );
 }
