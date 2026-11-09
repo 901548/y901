@@ -109,6 +109,13 @@ impl WakeHandle {
 
 /// 平台事件队列：wndproc 写，宿主读。
 static QUEUE: Mutex<Vec<RawEvent>> = Mutex::new(Vec::new());
+
+/// 当前存活的窗口数（多窗口下用来判断"是否最后一个窗口）。
+///
+/// `CreateWindowExW` 成功后 +1；**`WM_NCDESTROY` 里 -1**（不是 `WM_DESTROY`：
+/// 那时窗口还没销毁完，提前归零会误退出消息循环）；
+/// 归零才 `PostQuitMessage`。
+static WINDOW_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// 最近一次客户区尺寸。
 static SIZE: Mutex<(u32, u32)> = Mutex::new((0, 0));
 /// IME 状态属于窗口（输入法进程的镜像），与 UI 无关。
@@ -539,11 +546,25 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_DESTROY => {
             push(RawEvent::Close);
-            PostQuitMessage(0);
+            // 不再无条件 `PostQuitMessage`：多窗口下那会让"关一个窗口"变成
+            // "杀整个进程"。退出由 `WM_NCDESTROY` 的计数归零触发。
             0
         }
         WM_NCDESTROY => {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            // 此时窗口已真正销毁，减计数是安全的。
+            let before = WINDOW_COUNT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            if before == 0 {
+                // 下溢：说明减得比加得多（计数逻辑 bug）。
+                // 修回到 0 并警告；否则 usize 会变成巨大值，永远不会归零。
+                WINDOW_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
+                eprintln!("[y901] 警告：WINDOW_COUNT 下溢（WM_NCDESTROY 时计数已为 0）");
+                return 0;
+            }
+            if before == 1 {
+                // 最后一个窗口也销毁了 → 退出消息循环。
+                PostQuitMessage(0);
+            }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -661,99 +682,113 @@ impl Window {
         if hwnd.is_null() {
             return Err("CreateWindowExW failed".into());
         }
-        // 接受 OS 级文件拖放：没这一步 WM_DROPFILES 永远不会来。
-        DragAcceptFiles(hwnd, 1);
+        // **计数在此 +1**：窗口已真实存在。
+        // 后续任何失败路径都必须 `DestroyWindow`，让 `WM_NCDESTROY` 把计数减回来；
+        // 否则计数永久虚高 → 永远不会归零 → 窗口关了进程也退不出去。
+        WINDOW_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let built = (|| -> Result<Self, String> {
+            // 接受 OS 级文件拖放：没这一步 WM_DROPFILES 永远不会来。
+            DragAcceptFiles(hwnd, 1);
 
-        let mut rect = RECT {
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-        };
-        let _ = GetClientRect(hwnd, &mut rect);
-        let viewport = (
-            (rect.right - rect.left).max(1) as u32,
-            (rect.bottom - rect.top).max(1) as u32,
-        );
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            let _ = GetClientRect(hwnd, &mut rect);
+            let viewport = (
+                (rect.right - rect.left).max(1) as u32,
+                (rect.bottom - rect.top).max(1) as u32,
+            );
 
-        let theme = options.theme.unwrap_or(y901_ui::theme::Theme::DARK);
-        let font = options.font.clone().unwrap_or_default();
+            let theme = options.theme.unwrap_or(y901_ui::theme::Theme::DARK);
+            let font = options.font.clone().unwrap_or_default();
 
-        // 纯 CPU 模式：不创建 D3D11 设备。
-        // 为什么用环境变量而不是 `Options` 字段：`Options` 是公开结构体，
-        // 加字段会破坏所有现有构造点（测试里有十几处）。
-        // `--force-soft` 在 app 层译成这个环境变量。
-        let force_soft = std::env::var_os("Y901_FORCE_SOFT").is_some();
-        let soft = if force_soft {
-            Some({
-                // 字形引擎：自研（Y901_FONT=self）或 DirectWrite（默认）
-                let (cw, ch) = crate::backend::font::cell_metrics_for(font.size);
-                let cell = y901_ui::Size::new(cw, ch);
-                let engine: Box<dyn crate::backend::font::FontEngine> =
-                    if std::env::var("Y901_FONT")
-                        .map(|v| v == "self")
-                        .unwrap_or(false)
-                    {
-                        Box::new(
-                            y901_render::MyFontEngine::new(
-                                y901_render::load_font(&y901_render::resolve_font_path(
-                                    &font.family,
-                                ))
-                                .unwrap_or_default(),
-                                font.size,
-                                cell,
+            // 纯 CPU 模式：不创建 D3D11 设备。
+            // 为什么用环境变量而不是 `Options` 字段：`Options` 是公开结构体，
+            // 加字段会破坏所有现有构造点（测试里有十几处）。
+            // `--force-soft` 在 app 层译成这个环境变量。
+            let force_soft = std::env::var_os("Y901_FORCE_SOFT").is_some();
+            let soft = if force_soft {
+                Some({
+                    // 字形引擎：自研（Y901_FONT=self）或 DirectWrite（默认）
+                    let (cw, ch) = crate::backend::font::cell_metrics_for(font.size);
+                    let cell = y901_ui::Size::new(cw, ch);
+                    let engine: Box<dyn crate::backend::font::FontEngine> =
+                        if std::env::var("Y901_FONT")
+                            .map(|v| v == "self")
+                            .unwrap_or(false)
+                        {
+                            Box::new(
+                                y901_render::MyFontEngine::new(
+                                    y901_render::load_font(&y901_render::resolve_font_path(
+                                        &font.family,
+                                    ))
+                                    .unwrap_or_default(),
+                                    font.size,
+                                    cell,
+                                )
+                                .map_err(|e| format!("MyFontEngine init failed: {e}"))?,
                             )
-                            .map_err(|e| format!("MyFontEngine init failed: {e}"))?,
-                        )
-                    } else {
-                        Box::new(crate::backend::font::TextEngine::new(
-                            &font.family,
-                            font.size,
-                            cw,
-                            ch,
-                        )?)
-                    };
-                y901_render::soft::SoftBackend::new(
-                    viewport.0,
-                    viewport.1,
-                    engine,
-                    cell,
-                    Some(theme),
+                        } else {
+                            Box::new(crate::backend::font::TextEngine::new(
+                                &font.family,
+                                font.size,
+                                cw,
+                                ch,
+                            )?)
+                        };
+                    y901_render::soft::SoftBackend::new(
+                        viewport.0,
+                        viewport.1,
+                        engine,
+                        cell,
+                        Some(theme),
+                    )
+                    .map_err(|e| format!("soft backend init failed: {e}"))?
+                })
+            } else {
+                None
+            };
+            if force_soft {
+                eprintln!("[y901] 纯 CPU 渲染后端已启用（Y901_FORCE_SOFT）：不创建 D3D11 设备");
+            }
+            let backend = if force_soft {
+                None
+            } else {
+                Some(
+                    D3dBackend::new(hwnd, viewport.0, viewport.1, theme, &font)
+                        .map_err(|e| format!("D3D11 init failed: {e}"))?,
                 )
-                .map_err(|e| format!("soft backend init failed: {e}"))?
-            })
-        } else {
-            None
-        };
-        if force_soft {
-            eprintln!("[y901] 纯 CPU 渲染后端已启用（Y901_FORCE_SOFT）：不创建 D3D11 设备");
-        }
-        let backend = if force_soft {
-            None
-        } else {
-            Some(
-                D3dBackend::new(hwnd, viewport.0, viewport.1, theme, &font)
-                    .map_err(|e| format!("D3D11 init failed: {e}"))?,
-            )
-        };
+            };
 
-        ShowWindow(hwnd, SW_SHOW);
+            ShowWindow(hwnd, SW_SHOW);
 
-        let mut win = Self {
-            hwnd,
-            backend,
-            soft,
-            viewport,
-            pending_cursor: None,
-            saved_style: 0,
-            saved_rect: None,
-            fullscreen: false,
-        };
-        // 此时窗口已以普通样式存在，`set_fullscreen` 能保存到真实原状态。
-        if fullscreen {
-            win.set_fullscreen(true)?;
+            let mut win = Self {
+                hwnd,
+                backend,
+                soft,
+                viewport,
+                pending_cursor: None,
+                saved_style: 0,
+                saved_rect: None,
+                fullscreen: false,
+            };
+            // 此时窗口已以普通样式存在，`set_fullscreen` 能保存到真实原状态。
+            if fullscreen {
+                win.set_fullscreen(true)?;
+            }
+            Ok(win)
+        })();
+        if built.is_err() {
+            // 窗口已建但构造失败 → 主动销毁（否则不仅计数泄漏，屏幕上还会残留一个无人管的空窗口）。
+            // SAFETY：`hwnd` 刚创建成功且尚未销毁，在本线程调用 `DestroyWindow` 是合法的。
+            unsafe {
+                DestroyWindow(hwnd);
+            }
         }
-        Ok(win)
+        built
     }
 
     /// 运行时切换 borderless fullscreen。
