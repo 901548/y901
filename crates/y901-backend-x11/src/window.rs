@@ -18,22 +18,6 @@ use crate::encode::{
     encode_create_gc, encode_create_window, encode_map_window, CreateWindowArgs, GcMask, ValueMask,
     WindowClass,
 };
-/// 是否处于 borderless fullscreen（由环境变量控制，与 Win32 一致）。
-///
-/// 只读一次：事件转换每帧都调，不能反复读环境变量。
-fn is_fullscreen_window() -> bool {
-    FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-/// 进程级全局：当前每进程单窗口，`create` 时 store，事件转换时读。
-///
-/// 若将来支持多窗口，应改为 `X11Window` 实例字段
-/// （射窗消息处理拿不到 `&self`，需通过实例句柄取回）。
-static FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Esc 请求退出全屏：事件转换层（`&self`）置位，
-/// 事件循环（`&mut self`）消费，一次性。
-static WANT_EXIT_FS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 use crate::keys::{keysym_to_key, modifiers_from_state, Keymap};
 use crate::X11Event;
@@ -63,6 +47,11 @@ pub struct X11Window {
     frame: Vec<u8>,
     /// 当前是否处于 fullscreen（状态机，避免重复发 EWMH）。
     fullscreen: bool,
+    /// 全屏下按 Esc：`translate`（`&self`）置位，`wait_events`（`&mut self`）消费。
+    ///
+    /// **为何不用进程级 `static`**：`static` 它会让两个窗口共享同一个标志 ——
+    /// A 窗口的 Esc 可能被 B 窗口的 `wait_events` 消费掉，A 反而退不出全屏。
+    want_exit_fs: std::cell::Cell<bool>,
 }
 
 /// 对外可用的光标形状（与 `y901_ui::Cursor` 一一对应）。
@@ -180,7 +169,6 @@ impl X11Window {
         // SPIKE: `Y901_FULLSCREEN=1` 时走 EWMH 全屏。
         // 必须在 Map 之后发：窗口还未映射时部分 WM 会忽略该消息。
         let fullscreen = fullscreen || std::env::var_os("Y901_FULLSCREEN").is_some();
-        FULLSCREEN.store(fullscreen, std::sync::atomic::Ordering::Relaxed);
         if fullscreen {
             // best-effort：全屏请求失败（无 WM、属性不受支持、协议序列异常）
             // 不应阻止窗口启动 —— 用户至少能看到一个普通窗口。
@@ -262,6 +250,7 @@ impl X11Window {
             soft,
             frame: Vec::new(),
             fullscreen,
+            want_exit_fs: std::cell::Cell::new(false),
         })
     }
 
@@ -334,10 +323,10 @@ impl X11Window {
                 if *pressed {
                     // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
                     // 与 Win32 一致：**只在全屏下**生效；普通窗口的 Esc 仍作为普通按键上报。
-                    if is_fullscreen_window() && key == Key::Escape {
+                    if self.fullscreen && key == Key::Escape {
                         // 全屏下 Esc = **退出全屏**（标题栏由 WM 恢复），不再关窗。
                         // `translate` 是 `&self`，所以用全局标志，由 `wait_events` 消费。
-                        WANT_EXIT_FS.store(true, std::sync::atomic::Ordering::Relaxed);
+                        self.want_exit_fs.set(true);
                         return None;
                     }
                     RawEvent::KeyDown {
@@ -541,7 +530,7 @@ impl WindowBackend for X11Window {
     /// 语义：可阻塞至多 `wait_ms`；关闭（`RawEvent::Close`）由 `run_loop` 判定。
     fn wait_events(&mut self, wait_ms: u32) -> Option<Vec<RawEvent>> {
         // 全屏下的 Esc：`translate`（`&self`）只能置标志，在这里（`&mut self`）执行切换。
-        if WANT_EXIT_FS.swap(false, std::sync::atomic::Ordering::Relaxed) && self.fullscreen {
+        if self.want_exit_fs.replace(false) && self.fullscreen {
             if let Err(e) = self.set_fullscreen(false) {
                 eprintln!("[y901] 退出全屏失败：{e}");
             }
@@ -583,7 +572,6 @@ impl WindowBackend for X11Window {
         let root = self.conn.info().root;
         fullscreen_atoms(&mut self.conn, self.wid, root, on)?;
         self.fullscreen = on;
-        FULLSCREEN.store(on, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 
