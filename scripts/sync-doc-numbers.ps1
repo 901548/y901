@@ -67,6 +67,10 @@ Write-Host "[sync] measured: passed=$passed failed=$failed ignored=$ignored incl
 $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 # 时间戳不进 numbers.txt：那会让“纯数据文件”每次 sync 都变脏，
 # 把工具输出和运行日志混在一起。时间戳改写到 target/（已被 gitignore）。
+# **必须在 `if (-not $Check)` 之外**：否则 -Check 模式下 $docFiles 为 $null，
+# 文档校验循环根本不执行 —— -Check 会恒返回 ok（已发生）。
+$docFiles = @('README.md','docs\STATUS.md','docs\FRAMEWORK.md','docs\PERFORMANCE.md','docs\ACCEPTANCE.md')
+
 if (-not $Check) {
 $logPath = Join-Path $root 'target\doc-numbers-last-sync.txt'
 if (-not (Test-Path (Split-Path $logPath -Parent))) {
@@ -84,7 +88,6 @@ $numbers = @(
 )
 [System.IO.File]::WriteAllText($numbersPath, (($numbers -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 
-$docFiles = @('README.md','docs\STATUS.md','docs\FRAMEWORK.md','docs\PERFORMANCE.md','docs\ACCEPTANCE.md')
 $changes = 0
 }
 
@@ -104,7 +107,13 @@ foreach ($f in $docFiles) {
             @{ name = 'baseline';        pattern = '\u57fa\u7ebf\s*\*\*(\d+)\*\*';            want = $baseline },
             @{ name = 'include_ignored'; pattern = 'include-ignored`?\s*[|:]\s*\*\*(\d+)\*\*'; want = $includePassed },
             @{ name = 'include_ignored'; pattern = '\u542b ignore[^\n]{0,8}\*\*(\d+)\*\*';       want = $includePassed },
-            @{ name = 'passed';          pattern = '\*\*(\d+)\*\*\s*passed';                 want = $passed }
+            @{ name = 'passed';          pattern = '\*\*(\d+)\*\*\s*passed';                 want = $passed  },
+            # **行内派生形式**（STATUS 第 5 行：passed=746 等）。
+            # 为何限定反引号：散文里也会出现 "Windows 侧 ignored=58、Linux 侧=59"，
+            # 那是**平台对比**，不该按本仓全局计数校验；加反引号地匹配能把它排除。
+            @{ name = 'inline passed';  pattern = '`passed=(\d+)`'; want = $passed },
+            @{ name = 'inline ignored'; pattern = '`ignored=(\d+)`'; want = $ignored }
+
         )
         foreach ($rule in $rules) {
             foreach ($m in [regex]::Matches($t, $rule.pattern)) {
@@ -117,9 +126,21 @@ foreach ($f in $docFiles) {
         }
         continue
     }
-    $t = [regex]::Replace($t, '(\d+)\s*passed', { param($m) "$passed passed" })
-    $t = [regex]::Replace($t, '(\d+)\s*failed', { param($m) "$failed failed" })
-    $t = [regex]::Replace($t, '(\d+)\s*ignored', { param($m) "$ignored ignored" })
+    # **不做全文 "数字 + passed/failed/ignored" 替换**：
+    # 那会把散文里与本仓全局计数无关的数字一并改掉。
+    # 实例（已发生）："Helm `cargo test` 230 passed / 0 failed / 3 ignored"
+    # 被改成 746 / 0 / 58；"real_window 从 11 passed 变 6 failed" 被改成 746 / 0。
+    # 如今只改**加粗形式**（`**N** passed`）与带明确锚词的行；
+    # 散文里裸写的 "230 passed" 不再被碰。
+    $anchor = '测试全绿|`#\[ignore\]`|基线|include-ignored|项测试|默认|含 ignore'
+    $t = [regex]::Replace($t, "(?m)^.*(?:$anchor).*$", {
+        param($line)
+        $x = $line.Value
+        $x = [regex]::Replace($x, '\*\*(\d+)\*\*(\s*)passed', { param($m) "**$passed**$($m.Groups[2].Value)passed" })
+        $x = [regex]::Replace($x, '\*\*(\d+)\*\*(\s*)failed', { param($m) "**$failed**$($m.Groups[2].Value)failed" })
+        $x = [regex]::Replace($x, '\*\*(\d+)\*\*(\s*)ignored', { param($m) "**$ignored**$($m.Groups[2].Value)ignored" })
+        $x
+    })
     # **派生表述**也要能自动改写，否则每次计数变化都要手工对齐。
     # 前瞻 (?=…) 保留后缀；后顾 (?<=…) 保留前缀。
     $t = [regex]::Replace($t, '(?<!含 ignore\s{0,10})\*{0,2}(\d{1,4})\*{0,2}(?=\s*默认)', { param($m) "**$passed**" })
@@ -127,6 +148,11 @@ foreach ($f in $docFiles) {
     $t = [regex]::Replace($t, '(基线\s*)\*{0,2}(\d{1,4})\*{0,2}', { param($m) $m.Groups[1].Value + "**$baseline**" })
     $t = [regex]::Replace($t, '--include-ignored\s*\*\*(\d+)\*\*', { param($m) "--include-ignored **$includePassed**" })
     $t = [regex]::Replace($t, '包含\s*\*\*(\d+)\*\*', { param($m) "包含 **$includePassed**" })
+    # 行内派生形式（反引号包住的 passed=/ignored=/include_ignored=）同样要维护，
+    # 否则它会长期漂移而 -Check 也查不到（上一轮就是这个漏洞）。
+    $t = [regex]::Replace($t, '`passed=(\d+)`', { param($m) ([char]96 + "passed=$passed" + [char]96) })
+    $t = [regex]::Replace($t, '`ignored=(\d+)`', { param($m) ([char]96 + "ignored=$ignored" + [char]96) })
+
     $t = [regex]::Replace($t, '\*\*(\d{3})\*\*\s*项测试', { param($m) "**$passed** 项测试" })
     $t = [regex]::Replace($t, '(\d{3})\s*项测试', { param($m) "$passed 项测试" })
     # 测试行的加粗数字：只替换数字本身，不动冒号与其他字符

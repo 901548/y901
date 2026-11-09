@@ -403,3 +403,22 @@
   **结构体参数能保证"字段漏写会红"（E0560/E0063），但保证不了"名字没 import 会红"**。
   **固定动作**：改 `#[cfg(unix)]` 文件后，**立即**让 demo 跑 `cargo check --all-targets`，
   不要等下次整体验证。
+
+- **`docs/evidence/test-inventory.txt` 是 **Windows 平台**的测试指纹**：
+  `#![cfg(target_os = "linux")]` 或 `#[cfg(unix)]` 下的测试二进制在 Windows 上为空，
+  **不进入指纹**。例如 `multi_window` 的 2 条测试（1 普通 + 1 ignored）存在于 Linux 侧，
+  但不在 Windows 的 inventory 里，也不进 `numbers.txt`（所以 Windows 侧 ignored=58、Linux 侧=59）。
+  这是**平台固有局限**，不是计数错误；要覆盖 Linux-only 测试需跨平台指纹机制，单独立项。
+
+- **校验通过 ≠ 校验有效**（`sync-doc-numbers.ps1` 的 `-Check` 空转）：
+  `-Check` 分支里 `$docFiles` 定义在 `if (-not $Check)` 内，`-Check` 模式下它是 `$null`，
+  文档校验循环遍历空集合 → **一条都没查** → 恒返回 `ok`。
+  这意味着 gate 的 `doc numbers match` 一步在 `-Check` 路径下**长期空转**，
+  它只比对了 `numbers.txt` 自身的格式，从未校验任何文档。
+  与"写了但没跑过"同构：**`ok` 曾经是"没查任何东西的 ok"**。
+  **教训**：任何"校验 / 检查"代码写完后，必须**故意制造一个违规**确认它真的会报错。
+  如果制造违规后仍 `ok`，那校验本身是坏的，不是被校验对象是对的。
+
+- **VM 没有 PowerShell，`sync-doc-numbers.ps1` 在 Windows 侧验证即可**：
+  该脚本服务于 Windows 侧 gate，不需要 Linux 环境。
+  Linux 侧真正需要的验证是测试计数（`multi_window` / `real_window` / `golden`），已有独立证据。
