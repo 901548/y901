@@ -107,6 +107,38 @@ fn soft_for(w: u16, h: u16, size: f32) -> y901_render::soft::SoftBackend {
         .expect("软光栅器")
 }
 
+/// 记一条 skip，追加到 `target/skip-count.txt`。
+///
+/// 为什么不靠 `eprintln!`：gate 跑 `cargo test` 时**捕获输出**，
+/// **通过的测试的 stderr 不会进 `gate-test.log`** —— 所以 `[SKIP]` 仅是命名约定，
+/// 不可追溯。写文件不依赖捕获，`target/` 又已被 gitignore。
+///
+/// 为何不引入 `chrono`：只为一个时间戳加一个依赖不值得；
+/// 用 `SystemTime` 的 UNIX 秒数就够（排查时只需知道先后）。
+fn record_skip(test_name: &str, reason: &str) {
+    use std::io::Write;
+    // **路径必须从 `CARGO_MANIFEST_DIR` 拼**：
+    // `cargo test` 的 CWD 是**包根**（`crates/y901-backend-x11/`），不是 workspace 根。
+    // 旧实现写相对路径 `target/skip-count.txt`，在该 CWD 下根本不存在 `target/`，
+    // 写不进去 —— 而又用 `let Ok(..) else { return }` 静默吞掉错误，
+    // 于是"写不进去"和"没触发"看起来一模一样。
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/skip-count.txt");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(mut f) => {
+            let _ = writeln!(f, "{secs}\t{test_name}\t{reason}");
+        }
+        // **不静默**：写不进去必须在日志里看得到，否则追溯功能形同虚设。
+        Err(e) => eprintln!("[WARN] 写 skip-count 失败（{path:?}）：{e}"),
+    }
+}
+
 /// 带重试的连接，**失败返回 `None` 而不 panic**。
 ///
 /// 为什么要有它：Xvfb 在高频建连时会做**偶发 RST**（`Connection reset` / `os error 104`）。
@@ -127,6 +159,7 @@ fn connect_opt(d: &str, retries: u32) -> Option<Connection> {
         }
     }
     eprintln!("[SKIP] connect_opt 失败（已重试 {retries} 次）：{last}");
+    record_skip("connect_opt", &last);
     None
 }
 
@@ -584,6 +617,7 @@ fn benchmark_shm_vs_putimage_1080p() {
         // 基准测试不是正确性断言 —— **跳过而不红**，避免周期性噪声。
         // [SKIP] 前缀用于 grep：CI 日志里能搜到，skip 频繁时人工排查。
         eprintln!("[SKIP] benchmark_shm_vs_putimage_1080p: 连接失败（Xvfb RST），跳过本次基准");
+        record_skip("benchmark_shm_vs_putimage_1080p", "connect RST");
         return;
     };
     let has_shm = probe.query_extension(b"MIT-SHM").ok().flatten();
@@ -795,4 +829,23 @@ fn clipboard_roundtrip_through_selection_protocol() {
         eprintln!("[cb] {which:?}：写 {:?} → 读 {:?}", text, got);
         assert_eq!(got, text, "{which:?} 往返应一致");
     }
+}
+
+/// 结构断言：守住剪贴板应答超时 = 500ms。
+///
+/// 为何是结构断言而非运行时测试：真要测"所有者沉默时 ≤600ms 返回"，
+/// 得另起一个持有 CLIPBOARD 但不应答的裸 X11 连接（80～120 行协议代码）。
+/// 这条断言挡不住"逻辑写错"，但能挡住"有人把超时改回 3s"——
+/// 而那正是这个改动最可能被回退的方式（它当初就是 3s）。
+#[test]
+fn clipboard_timeout_is_within_600ms() {
+    let src = include_str!("../src/clipboard.rs");
+    assert!(
+        src.contains("Duration::from_millis(500)"),
+        "get/set 的应答超时必须是 500ms（为什么不能大：它在 UI 线程上同步执行）"
+    );
+    assert!(
+        !src.contains("Duration::from_secs(3)"),
+        "不得退回 3s：那会让 TextInput 的 Ctrl+V 卡住 3 秒"
+    );
 }
