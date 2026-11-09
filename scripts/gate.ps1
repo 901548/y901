@@ -39,6 +39,14 @@ $ver = (& rustc --version) -join ' '
 if ($ver -notmatch 'rustc 1\.(9[2-9]|[1-9][0-9]{2})') { Fail $ver }
 Write-Host "[gate] ok: $ver"
 
+# ---------------------------------------------------------------- 1b. fmt (fast fail)
+# 为何放在测试之前：格式检查约 1s，先跑能尽早失败，
+# 不浪费后面几分钟的测试与审计。
+Step "cargo fmt --all -- --check"
+& cargo fmt --all -- --check 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { Fail "格式检查失败：请运行 cargo fmt --all" }
+Write-Host "[gate] ok: fmt clean"
+
 # ---------------------------------------------------------------- 2. tests (count against baseline)
 if (-not $SkipTest) {
     Step "cargo test --workspace (count must not drop below baseline)"
