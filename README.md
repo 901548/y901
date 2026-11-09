@@ -24,11 +24,9 @@ y901-ui = { path = "crates/y901-ui" }
 y901-widgets = { path = "crates/y901-widgets" }
 y901-runtime = { path = "crates/y901-runtime" }
 y901-shell = { path = "crates/y901-shell" }
-y901-agent = { path = "crates/y901-agent" }
 ```
 
 ```rust
-use y901_agent::Policy;
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
 use y901_ui::{Command, Flex, UiEvent, UiTree};
@@ -44,7 +42,6 @@ impl Host for App {
         }
     }
     fn command(&mut self, _tree: &mut UiTree, _cmd: Command) -> bool { false }
-    fn policy(&self) -> Policy { Policy::default() }
 }
 
 fn build() -> UiTree {
@@ -124,7 +121,7 @@ cargo run --example tree_view    -p y901-app   # TreeView + 虚拟化 + 键盘�
 |---|---|
 | 测试 **746**（`cargo test --workspace`），0 失败 |
 | clippy | **0 warning / 0 error** |
-| 文档完整性 | **12 个 crate 全部 `#![deny(missing_docs)]`**，`RUSTFLAGS="-W missing_docs"` = 0 |
+| 文档完整性 | **10 个 crate 全部 `#![deny(missing_docs)]`**，`RUSTFLAGS="-W missing_docs"` = 0 |
 | 像素哈希门禁 | 通过（`scripts/hash-gate.ps1`，同会话前后对比） |
 | Windows | D3D11 渲染 + GDI 纯 CPU 回退；真机 RTX 4060 @144Hz 空帧 6.885ms（= vsync 间隔） |
 | Linux/X11 | CPU 合成 + MIT-SHM；WSL 上 Xvfb 验证通过（单帧耗时有 `benchmark_shm_vs_putimage_1080p`，待补测） |

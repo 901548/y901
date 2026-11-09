@@ -203,6 +203,17 @@
 - **审查报告**：12 项可追踪并已处理；11 项原始报告未落盘（见上方更正）
 - **SAFETY 100% 调用点覆盖**（d3d11 / font / window）+ vtable 契约 + context 三段式
 - **文本缩放**（CPU + D3D）与**图片 mipmap LOD** 均有像素/解析真值验证
+- **去 AI 完成**（Y901 + Helm-Y901 两仓）：
+  - Y901 主仓：`7062463` 删除 `y901-agent` / `y901-mcp`，`28ffc88` 清 AI 痕迹；
+  - Helm-Y901（独立仓）：删 `y901-agent` 依赖；`host.rs` 的 `Policy` 是死字段（无读者），
+    删字段 + getter；`terminal_bridge.rs` 的 2 条测试改用本地 `dispatch_type` 辅助
+    （`UiTree::set_focus` + `dispatch_to(UiEvent::Text)`，替代已删除的 `dispatch_request`）；
+    `no_c_deps` 守卫恢复为"必须通过"（删跳过分支 + `deleted_local_dependency` + `DELETED_LOCAL_CRATES`）；
+  - 顺带修：Helm 的 `Options` 缺 `fullscreen` 字段（Y901 侧加字段后未同步，
+    被 `y901-agent` 缺失的编译错误掩盖），补了 3 处 `fullscreen: false`；
+  - 验证：Helm `cargo test` 230 passed / 0 failed / 3 ignored；Y901 `no_c_deps` 2 passed ——
+    **Helm 侧改动已应用，等待用户 commit**（Helm 工作区当前有 6 个文件待提交）。
+
 - **`sync_interval` 语义漏洞已修**：`Gfx::present` 之前写死 0，交换链无法遵守 vsync；
   现为参数，默认路径 `render_inner(tree, 1)` 由结构化测试钉死
 
