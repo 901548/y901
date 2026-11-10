@@ -64,6 +64,21 @@ if ($Check) {
 }
 Write-Host "[sync] measured: passed=$passed failed=$failed ignored=$ignored include_ignored=$includeText baseline=$baseline"
 
+# **行内形式的统一表**：新增一个数字字段，**只需在这里加一行** ——
+# `-Check` 的校验规则与完整 sync 的写入都会**自动生成**。
+#
+# 为何要这样：之前 `passed` / `ignored` / `include_ignored` 是人工枚举的，
+# "换个字段名就漏一次"已发生三次（这是第四个盲点的根因）。
+# 与之前"$docFiles 移出 if (-not $Check)"是同一思路：**让机制保证正确性，而不是靠人记得**。
+#
+# 值一律以**字符串**存放：`include_ignored` 可能是 `n/a (full run has failures: …)`，
+# 生成时用 `'^\d+$'` 判定是否为数字，非数字则**跳过**（那种情况下文档不应有数字形式）。
+$inlineFields = [ordered]@{
+    'passed'          = "$passed"
+    'ignored'         = "$ignored"
+    'include_ignored' = "$includeText"
+}
+
 $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 # 时间戳不进 numbers.txt：那会让“纯数据文件”每次 sync 都变脏，
 # 把工具输出和运行日志混在一起。时间戳改写到 target/（已被 gitignore）。
@@ -107,17 +122,19 @@ foreach ($f in $docFiles) {
             @{ name = 'baseline';        pattern = '\u57fa\u7ebf\s*\*\*(\d+)\*\*';            want = $baseline },
             @{ name = 'include_ignored'; pattern = 'include-ignored`?\s*[|:]\s*\*\*(\d+)\*\*'; want = $includePassed },
             @{ name = 'include_ignored'; pattern = '\u542b ignore[^\n]{0,8}\*\*(\d+)\*\*';       want = $includePassed },
-            @{ name = 'passed';          pattern = '\*\*(\d+)\*\*\s*passed';                 want = $passed  },
-            # **行内派生形式**（STATUS 第 5 行：passed=746 等）。
+            @{ name = 'passed';          pattern = '\*\*(\d+)\*\*\s*passed';                 want = $passed  }
+            # **行内形式的规则由 `$inlineFields` 自动生成**（见下方 foreach）。
             # 为何限定反引号：散文里也会出现 "Windows 侧 ignored=58、Linux 侧=59"，
             # 那是**平台对比**，不该按本仓全局计数校验；加反引号地匹配能把它排除。
-            @{ name = 'inline passed';  pattern = '`passed=(\d+)`'; want = $passed },
-            @{ name = 'inline ignored'; pattern = '`ignored=(\d+)`'; want = $ignored },
-            # **include_ignored 的行内形式**（第 4 个盲点）：之前它既不被 -Check 校验、
-            # 也不被完整 sync 写入 —— 于是只能靠手工对齐（已发生一次）。
-            @{ name = 'inline include_ignored'; pattern = '`include_ignored=(\d+)`'; want = $includePassed }
 
         )
+        # 行内规则：从 `$inlineFields` 生成（非数字值跳过）。
+        foreach ($k in $inlineFields.Keys) {
+            $v = $inlineFields[$k]
+            if ("$v" -match '^\d+$') {
+                $rules += @{ name = "inline $k"; pattern = ('`' + $k + '=(\d+)`'); want = $v }
+            }
+        }
         foreach ($rule in $rules) {
             foreach ($m in [regex]::Matches($t, $rule.pattern)) {
                 $n = [int]$m.Groups[1].Value
@@ -151,14 +168,15 @@ foreach ($f in $docFiles) {
     $t = [regex]::Replace($t, '(基线\s*)\*{0,2}(\d{1,4})\*{0,2}', { param($m) $m.Groups[1].Value + "**$baseline**" })
     $t = [regex]::Replace($t, '--include-ignored\s*\*\*(\d+)\*\*', { param($m) "--include-ignored **$includePassed**" })
     $t = [regex]::Replace($t, '包含\s*\*\*(\d+)\*\*', { param($m) "包含 **$includePassed**" })
-    # 行内派生形式（反引号包住的 passed=/ignored=/include_ignored=）同样要维护，
-    # 否则它会长期漂移而 -Check 也查不到（上一轮就是这个漏洞）。
-    $t = [regex]::Replace($t, '`passed=(\d+)`', { param($m) ([char]96 + "passed=$passed" + [char]96) })
-    $t = [regex]::Replace($t, '`ignored=(\d+)`', { param($m) ([char]96 + "ignored=$ignored" + [char]96) })
-    # include_ignored 同样要维护（否则它与 numbers.txt 漂离而 -Check 也查不到）。
-    # 注意类型：`$includePassed` 是字符串（可能为 "n/a (...)"），非数字时不替换。
-    if ($includePassed -match '^\d+$') {
-        $t = [regex]::Replace($t, '`include_ignored=(\d+)`', { param($m) ([char]96 + "include_ignored=$includePassed" + [char]96) })
+    # **行内形式的写入同样由 `$inlineFields` 生成**：新增字段不需要再加这里的代码。
+    # 非数字值（如 "n/a (...)"）跳过。
+    foreach ($k in $inlineFields.Keys) {
+        $v = $inlineFields[$k]
+        if ("$v" -match '^\d+$') {
+            $pat = '`' + $k + '=(\d+)`'
+            $rep = [char]96 + "$k=$v" + [char]96
+            $t = [regex]::Replace($t, $pat, $rep)
+        }
     }
 
     $t = [regex]::Replace($t, '\*\*(\d{3})\*\*\s*项测试', { param($m) "**$passed** 项测试" })
