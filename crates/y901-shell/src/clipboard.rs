@@ -105,8 +105,14 @@ mod win {
                     CloseClipboard();
                     return Err("剪贴板内存锁定失败".to_string());
                 }
+                // **必须有上界**：`CF_UNICODETEXT` 协议要求 NUL 结尾，
+                // 但异常 / 恶意的写入者可能不给 NUL；无界扫描会**越界读（UB）**。
+                // `GlobalSize` 返回该内存块的**字节数**（MSDN），除 2 就是 u16 个数上限。
+                let max_chars = windows_sys::Win32::System::Memory::GlobalSize(h) / 2;
                 let mut len = 0usize;
-                while *p.add(len) != 0 {
+                // SAFETY：`len < max_chars` 保证读取始终在 `GlobalSize` 指定的分配内；
+                // 即使没有 NUL 结尾也不会越界，只会在上界处停下。
+                while len < max_chars && *p.add(len) != 0 {
                     len += 1;
                 }
                 let v = std::slice::from_raw_parts(p, len).to_vec();

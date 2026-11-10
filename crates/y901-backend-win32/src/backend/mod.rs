@@ -576,7 +576,16 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
 
     fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
         // SAFETY: 同 rebuild；尺寸来自当前客户区。
-        let _ = unsafe { D3dBackend::resize(self, width, height) };
+        let rebuilt = unsafe { D3dBackend::resize(self, width, height) };
+        if !rebuilt && self.size != (width, height) {
+            // **区分 false 的两种含义**：
+            // `D3dBackend::resize` 返回 `false` 时，**尺寸没变**与**重建失败**都是 false ——
+            // 它的签名无法区分这两种情况。
+            // 这里用"尺寸是否真的变了"做一次**外部判断**：
+            // 尺寸没变 → false 是正常的"无需重建"；
+            // 尺寸变了却仍 false → 重建失败，必须可见。
+            eprintln!("[y901] D3dBackend::resize 失败：尺寸已变为 {width}x{height} 但交换链未重建");
+        }
         self.size = (width, height);
         Ok(())
     }

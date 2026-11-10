@@ -612,7 +612,11 @@ impl Connection {
         let result = self.poll_events_inner();
         if timeout_ms == 0 {
             // 恢复阻塞模式（忽略错误：即使失败也不应盖掉真正的读取结果）
-            let _ = self.stream.set_nonblocking(false);
+            // 恢复失败不能静默：那意味着**后续阻塞读会异常**
+            // （可能返回 WouldBlock 而被当成空事件，又回到空转）。
+            if let Err(e) = self.stream.set_nonblocking(false) {
+                eprintln!("[y901] 恢复阻塞模式失败：{e}（后续读可能异常）");
+            }
         }
         result
     }

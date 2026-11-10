@@ -150,7 +150,11 @@ fn clipboard_thread(mut conn: Connection, wid: u32, rx: Receiver<Cmd>) {
                     };
                     match conn.send(&crate::encode::encode_set_selection_owner(wid, sel, 0)) {
                         Ok(()) => {
-                            let _ = conn.flush();
+                            // 不静默：若没刷出去，服务器不会建立 owner，
+                            // 后续 get_text 会读到空——而调用方看不出原因。
+                            if let Err(e) = conn.flush() {
+                                eprintln!("[y901] 剪贴板设置 owner 后 flush 失败：{e}");
+                            }
                             match which {
                                 Selection::Clipboard => owned_clip = Some(text),
                                 Selection::Primary => owned_prim = Some(text),
@@ -236,30 +240,45 @@ fn serve_request(
         for a in [atoms.targets, atoms.utf8, atoms.text, 31u32] {
             data.extend_from_slice(&a.to_le_bytes());
         }
-        let _ = conn.send(&crate::encode_change_property(
+        // 不静默：写属性失败时对方拿不到数据，
+        // **不能再发 SelectionNotify**（那会让对方去读一个不存在的属性）。
+        if let Err(e) = conn.send(&crate::encode_change_property(
             requestor,
             property,
             33, // ATOM
             32,
             crate::encode::PropMode::Replace,
             &data,
-        ));
-        let _ = conn.flush();
+        )) {
+            eprintln!("[y901] 剪贴板 TARGETS 响应失败：{e}");
+            return;
+        }
+        if let Err(e) = conn.flush() {
+            eprintln!("[y901] 剪贴板 TARGETS 响应 flush 失败：{e}");
+            return;
+        }
         send_notify(conn, requestor, selection, target, property);
         return;
     }
 
     // 文本类型：UTF8_STRING / TEXT / STRING（都按 UTF-8 发，现代应用都能接）
     if target == atoms.utf8 || target == atoms.text || target == 31 {
-        let _ = conn.send(&crate::encode_change_property(
+        // 同 TARGETS：写属性或 flush 失败就不发 SelectionNotify。
+        if let Err(e) = conn.send(&crate::encode_change_property(
             requestor,
             property,
             atoms.utf8,
             8,
             crate::encode::PropMode::Replace,
             text.as_bytes(),
-        ));
-        let _ = conn.flush();
+        )) {
+            eprintln!("[y901] 剪贴板文本响应失败：{e}");
+            return;
+        }
+        if let Err(e) = conn.flush() {
+            eprintln!("[y901] 剪贴板文本响应 flush 失败：{e}");
+            return;
+        }
         send_notify(conn, requestor, selection, target, property);
         return;
     }
@@ -277,8 +296,14 @@ fn send_notify(conn: &mut Connection, requestor: u32, selection: u32, target: u3
     ev[12..16].copy_from_slice(&selection.to_le_bytes());
     ev[16..20].copy_from_slice(&target.to_le_bytes());
     ev[20..24].copy_from_slice(&property.to_le_bytes());
-    let _ = conn.send(&crate::encode::encode_send_event(requestor, 0, &ev));
-    let _ = conn.flush();
+    // 不静默：SelectionNotify 是"已备好，去读吧"的唯一信号，发不出就是请求失败。
+    if let Err(e) = conn.send(&crate::encode::encode_send_event(requestor, 0, &ev)) {
+        eprintln!("[y901] 剪贴板 SelectionNotify 发送失败：{e}");
+        return;
+    }
+    if let Err(e) = conn.flush() {
+        eprintln!("[y901] 剪贴板 SelectionNotify flush 失败：{e}");
+    }
 }
 
 /// 请求并读取剪贴板文本（阻塞直到 `SelectionNotify` 或超时）。

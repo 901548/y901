@@ -125,6 +125,12 @@ struct WindowShared {
     fullscreen: bool,
     /// 全屏下按 Esc：wndproc 置位，`wait_events`（`&mut self`）消费。
     want_exit_fs: bool,
+    /// IME 组字状态。
+    ///
+    /// **必须每窗口一份**：它是输入法进程的**镜像**（正在组的那串字），
+    /// 两个窗口同时组字时共用一份会**串字**（A 窗口的组字字符串出现在 B）。
+    /// 旧实现是进程级 `static IME: OnceLock<Mutex<ImeState>>`。
+    ime: ImeState,
 }
 
 impl WindowShared {
@@ -136,6 +142,7 @@ impl WindowShared {
             char_filter: None,
             fullscreen: false,
             want_exit_fs: false,
+            ime: ImeState::default(),
         }
     }
 }
@@ -154,8 +161,6 @@ static TABLE: Mutex<Option<std::collections::HashMap<isize, WindowShared>>> = Mu
 /// 以及诊断用（观察有多少窗口存活）。
 static WINDOW_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// 最近一次客户区尺寸。
-/// IME 状态属于窗口（输入法进程的镜像），与 UI 无关。
-static IME: OnceLock<Mutex<ImeState>> = OnceLock::new();
 static CLASS_READY: OnceLock<bool> = OnceLock::new();
 
 /// 取表的锁。
@@ -210,12 +215,6 @@ fn push(hwnd: HWND, ev: RawEvent) {
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-fn ime_state() -> std::sync::MutexGuard<'static, ImeState> {
-    IME.get_or_init(|| Mutex::new(ImeState::default()))
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
 }
 
 fn modifiers() -> Modifiers {
@@ -570,14 +569,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         // 框架不处理系统菜单，直接吞掉（返回 0），避免 Alt+键触发系统提示音。
         WM_SYSCHAR => 0,
         WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION => {
-            let action = {
-                let mut ime = ime_state();
-                handle_ime_message(hwnd, msg, lparam, &mut ime)
-            };
+            // IME 状态已按窗口分桶（`WindowShared.ime`）。
+            let action = with_shared(hwnd, ImeAction::Unhandled, |shared| {
+                handle_ime_message(hwnd, msg, lparam, &mut shared.ime)
+            });
             match action {
                 ImeAction::Unhandled => DefWindowProcW(hwnd, msg, wparam, lparam),
                 ImeAction::Redraw => {
-                    let text = ime_state().composing_text();
+                    // **不能在 `with_shared` 闭包册里再取一次锁**（std Mutex 不可重入），
+                    // 所以单独取一次。
+                    let text =
+                        with_shared(hwnd, String::new(), |shared| shared.ime.composing_text());
                     let composing = !text.is_empty();
                     push(
                         hwnd,
@@ -1184,7 +1186,12 @@ impl Window {
         // `present` 内部会重新校验设备状态，失败时返回 HRESULT 而不是 UB。
         // 违反后果：若在窗口已销毁后 present，交换链仍持有失效的 HWND —— 表现为黑屏或 Present 失败。
         unsafe {
-            let _ = backend.present(self.hwnd, w, h, sync_interval);
+            // **`present` 返回 `bool`（是否被遮挡），不是 `Result`** ——
+            // 因此**失败在这个返回值里不可表达**（D3D11 的错误靠设备状态）。
+            // 这是一个**遥测级欠口**：要真正上报"上屏失败"，需把
+            // `RenderBackend::present` 的返回类型改成 `Result<bool, String>`，
+            // 那会动两个后端 + 全部测试 —— 单独一轮，不在本轮硬改。
+            let _occluded = backend.present(self.hwnd, w, h, sync_interval);
         }
     }
 
@@ -1659,7 +1666,8 @@ fn gdi_present(hwnd: HWND, pixels: &[u8], width: u32, height: u32) {
             biCompression: BI_RGB,
             ..std::mem::zeroed()
         };
-        let _ = StretchDIBits(
+        // 不静默：返回值是“写入了多少扫描行”，GDI_ERROR 时屏幕会停在旧帧。
+        let dib_ok = StretchDIBits(
             hdc,
             0,
             0,
@@ -1674,6 +1682,9 @@ fn gdi_present(hwnd: HWND, pixels: &[u8], width: u32, height: u32) {
             DIB_RGB_COLORS,
             SRCCOPY,
         );
+        if dib_ok == windows_sys::Win32::Graphics::Gdi::GDI_ERROR {
+            eprintln!("[y901] StretchDIBits 失败：GDI_ERROR（帧未上屏）");
+        }
         ReleaseDC(hwnd, hdc);
     }
 }

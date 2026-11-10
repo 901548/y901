@@ -323,8 +323,15 @@ impl TerminalWidget {
     /// 写入 PTY（键盘/注入都走这里）。
     pub fn write(&mut self, bytes: &[u8]) {
         if let Some(pty) = self.pty.as_mut() {
-            let _ = pty.writer.write_all(bytes);
-            let _ = pty.writer.flush();
+            // 不静默：向 PTY 写失败意味着**输入丢了**（用户会发现“键不响应”）。
+            // 不 `?`：调用方是 UI 事件处理，报错无处可传；返回类型也不改。
+            if let Err(e) = pty.writer.write_all(bytes) {
+                eprintln!("[y901] 向 PTY 写入失败（{} 字节）：{e}", bytes.len());
+                return;
+            }
+            if let Err(e) = pty.writer.flush() {
+                eprintln!("[y901] PTY flush 失败：{e}");
+            }
         }
     }
 
