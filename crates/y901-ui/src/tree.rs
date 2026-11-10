@@ -1367,8 +1367,9 @@ impl UiTree {
 
     /// 当前活跃的订阅数（诊断用）。
     ///
-    /// 只读。订阅在 `remove_node` 删除目标节点时**不会**自动清理，
-    /// 而 `poll_subscriptions` 会跳过找不到的节点——因此它可能包含已失效的条目。
+    /// 只读。订阅在 `remove_node` 删除目标节点时**不会立即**清理；
+    /// 它们会在**下一次 `poll_subscriptions`** 被剔除（懒清理）。
+    /// 因此在两次 poll 之间，本计数可能短暂包含已失效的条目。
     pub fn subscription_count(&self) -> usize {
         self.subscriptions.len()
     }
@@ -1379,6 +1380,33 @@ impl UiTree {
     /// - 节流：每个订阅有 `interval`，到期才检查一次，窗口内的多次变化合并成一次。
     pub fn poll_subscriptions(&mut self, now: std::time::Instant) -> Vec<crate::json::Json> {
         use crate::json::Json;
+
+        // **懒清理**：先剔除"目标节点已不存在"的订阅。
+        //
+        // 为何在这里而不是 `remove_node`：`remove_node` 碎树时只知道"被挂掉的子树根"，
+        // 而订阅的 key 是**节点 id**（任意层级）—— 要在那里清就得再遍历一次子树。
+        // 而 `poll_subscriptions` 本来就要逐个查节点，顺带判存在性**零额外遍历**。
+        //
+        // 为何用 `mem::take`：`retain` 的闭包需要 `&self`，而字段又要 `&mut`。
+        // 先把 Vec 整个取出（`Vec` 只是移走指针，零成本），筛完放回。
+        let subs = std::mem::take(&mut self.subscriptions);
+        let mut alive = Vec::with_capacity(subs.len());
+        let mut dropped = 0usize;
+        for sub in subs {
+            // **用 `find_path` 而不是 `find`**：`find` 走的是"上次 layout 建立"的节点索引，
+            // 而 `remove_node` 只把节点从父节点摘掉、并不立即重建索引 ——
+            // 于是"已删节点"仍会被 `find` 找到，订阅永远清不掉（实测）。
+            // `find_path` 直接遍历**活的控件树**，是"节点此刻是否存在"的可靠判据。
+            if self.find_path(&sub.id).is_some() {
+                alive.push(sub);
+            } else {
+                dropped += 1;
+            }
+        }
+        self.subscriptions = alive;
+        if dropped > 0 && std::env::var_os("Y901_SUB_TRACE").is_some() {
+            eprintln!("[y901] 清理了 {dropped} 条已失效订阅");
+        }
 
         let mut out = Vec::new();
         let ids: Vec<String> = self.subscriptions.iter().map(|s| s.id.clone()).collect();

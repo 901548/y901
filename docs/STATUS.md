@@ -2,7 +2,7 @@
 
 - **HEAD**: `56e06a9`
 - **tags**: v0.1.0 ~ **v0.1.17**
-- **测试**: `passed=746` / `ignored=58` / `include_ignored=804`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=748` / `ignored=58` / `include_ignored=804`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1` 六步（MSRV / 测试计数 / clippy / 哈希 / missing_docs / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xDBB308DD1657EF9C` / `400x220`
@@ -114,7 +114,7 @@
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **746**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **748**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 
@@ -452,3 +452,15 @@
   这是"把不可测变成可测"的一次投入：P2-2 的异常路径此前**零运行覆盖**，
   加这个开关后真跑到了 Drop 兜底分支（`[diag] Drop 兜底 DestroyWindow 结果：1`）。
   用 `OnceLock` 缓存，**零热路径成本**。与 `Y901_FULLSCREEN` / `Y901_FORCE_SOFT` 同类。
+
+- **订阅的懒清理语义**：`remove_node` **不立即清理** `subscriptions`，
+  失效条目在**下一次 `poll_subscriptions`** 被剔除。
+  为何不立即清：`remove_node` 只知道被挂掉的子树根，而订阅 key 是**任意层级的节点 id** ——
+  在那里清要多遍历一次子树；而 `poll_subscriptions` 本来就要逐个查节点，
+  顺带判存在性**零额外遍历**。延迟上界 = **一帧**（GUI 每帧 poll）；
+  headless 场景不跑 poll，订阅清理不是其关切。
+  测试 `crates/y901-ui/tests/subscriptions.rs` **经过证伪**（去掉清理即失败）。
+
+- **`Y901_SUB_TRACE` 是订阅清理的诊断开关**：设置后 poll 清理了失效订阅时打印条数。
+  默认静默、**零热路径成本**（只在 `dropped > 0` 时才读环境变量）。
+  与 `Y901_FULLSCREEN` / `Y901_FORCE_SOFT` / `Y901_SIMULATE_RENDER_FAIL` 同类。
