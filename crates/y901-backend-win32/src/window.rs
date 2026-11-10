@@ -1327,7 +1327,28 @@ impl Window {
 
 impl Drop for Window {
     fn drop(&mut self) {
+        // 先释放后端（D3D11 设备 / 交换链 / COM 引用）。
         self.backend = None;
+        // **兜底：异常路径下 HWND 可能还在**。
+        //
+        // 正常路径：用户关窗 → `WM_DESTROY` → `WM_NCDESTROY`（已销毁）→ `run_loop` 返回 → `Window` drop，
+        // 此时 `IsWindow` 返回 0，**不会重复销毁**。
+        // 异常路径：`run_loop` 返回 `Err`（比如渲染器初始化失败后提前返回）→ 窗口还活着，
+        // 不销毁就会**泄漏 HWND + `WindowShared` 表项**（表项靠 `WM_NCDESTROY` 清）。
+        //
+        // SAFETY：`DestroyWindow` 要求在**创建该窗口的线程**调用；
+        // `Window` 在它自己那个线程的 `run`/线程函数中 drop，满足该条件。
+        // `IsWindow` 只是只读查询，任何线程都可调。
+        unsafe {
+            if windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(self.hwnd) != 0
+                && windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(self.hwnd) == 0
+            {
+                eprintln!(
+                    "[y901] Window::drop 兜底 DestroyWindow 失败（hwnd=0x{:X}）",
+                    self.hwnd as isize
+                );
+            }
+        }
     }
 }
 

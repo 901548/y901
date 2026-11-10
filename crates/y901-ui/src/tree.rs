@@ -257,6 +257,17 @@ pub struct UiTree {
     captured_path: Option<Vec<usize>>,
     /// 复用的事件路径缓冲，避免每次鼠标移动都分配。
     path_buf: Vec<usize>,
+    /// `render_pass` 的临时缓存：子节点矩形。
+    ///
+    /// **为何要复用**：`render_pass` 是**每帧每节点**都跑的热路径，
+    /// 每次都 `Vec::new()` 会产生大量短命分配（churn）。
+    render_rects: Vec<Rect>,
+    /// `render_pass` 的临时缓存：子节点裁切（每层用一段，用完 truncate）。
+    ///
+    /// **panic 安全性**：`render_pass` 如果 panic，scratch 不会被放回
+    /// （`self.render_rects = rects` 在 `render_pass` 返回后才执行），
+    /// 下次 `render` 会重新分配。**这是性能退化，不是正确性问题**。
+    render_clips: Vec<Option<Rect>>,
     /// 组件请求的 IME 候选窗位置（应用层取走后清空）。
     pending_ime: Option<Pos>,
     /// 焦点变更重入保护。
@@ -423,6 +434,8 @@ impl UiTree {
             focus_path: None,
             captured_path: None,
             path_buf: Vec::new(),
+            render_rects: Vec::new(),
+            render_clips: Vec::new(),
             pending_ime: None,
             in_focus_change: false,
             focus_order: Vec::new(),
@@ -1701,7 +1714,19 @@ impl UiTree {
         // `UiTree::popups`（树外、最后画），树内只需"父先子后、兄弟按序"。
         {
             let mut path: Vec<usize> = Vec::new();
-            render_pass(self.root.as_mut(), ctx, &dirty, &mut path);
+            // scratch 用 `mem::take` 取出（避免 `&mut self` 字段与 `self.root` 同时借用），用完放回。
+            let mut rects = std::mem::take(&mut self.render_rects);
+            let mut clips = std::mem::take(&mut self.render_clips);
+            render_pass(
+                self.root.as_mut(),
+                ctx,
+                &dirty,
+                &mut path,
+                &mut rects,
+                &mut clips,
+            );
+            self.render_rects = rects;
+            self.render_clips = clips;
         }
 
         if !self.popups.is_empty() {
@@ -2601,6 +2626,9 @@ fn render_pass(
     ctx: &mut dyn RenderCtx,
     dirty: &DirtyRegion,
     path: &mut Vec<usize>,
+    // **复用缓存**（由 `UiTree::render` 持有）：避免每层每帧分配 `Vec`。
+    rects: &mut Vec<Rect>,
+    clips: &mut Vec<Option<Rect>>,
 ) {
     // 关闭的浮层：整棵子树都不绘制（与 rebuild_indices 共享同一不变量）。
     if !node.is_open() {
@@ -2632,28 +2660,36 @@ fn render_pass(
     //
     // 为什么要先算好：`children_mut()` 已经短临借了 `node`，
     // 循环里再调 `node.children_clip(..)` 会碰借用冲突。
-    let child_clips: Vec<Option<Rect>> = {
-        let rects: Vec<Rect> = node.children().iter().map(|c| c.rect()).collect();
-        rects
-            .into_iter()
-            .map(|r| node.children_clip(r).map(|c| c.intersect(node.rect())))
-            .collect()
-    };
+    // **本节点的裁切写在 `clips` 尾部的一段里**，管理方式是"记下 base，用完 truncate"：
+    // 递归每层都会往同一个 Vec 里 push，但**各自只读自己那一段**，所以互不覆盖。
+    let base = clips.len();
+    rects.clear();
+    for c in node.children() {
+        rects.push(c.rect());
+    }
+    let node_rect = node.rect();
+    for r in rects.iter() {
+        clips.push(node.children_clip(*r).map(|c| c.intersect(node_rect)));
+    }
+    let count = clips.len() - base;
+
     if let Some(children) = node.children_mut() {
-        for (i, child) in children.iter_mut().enumerate() {
-            // push/pop 必须配对：下面的两条分支都会走到同一个 pop。
-            let child_clip = child_clips.get(i).copied().flatten();
+        for (i, child) in children.iter_mut().enumerate().take(count) {
+            // 先拷出值，避免递归期间持有 `clips` 的引用。
+            let child_clip = clips[base + i];
             if let Some(c) = child_clip {
                 ctx.push_clip(c);
             }
             path.push(i);
-            render_pass(child.as_mut(), ctx, dirty, path);
+            render_pass(child.as_mut(), ctx, dirty, path, rects, clips);
             path.pop();
             if child_clip.is_some() {
                 ctx.pop_clip();
             }
         }
     }
+    // 收回本节点那一段（递归返回时它们已各自收回，这里保险地再收一次）。
+    clips.truncate(base);
     if clip.is_some() {
         ctx.pop_clip();
     }
