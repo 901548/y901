@@ -2,7 +2,7 @@
 
 - **HEAD**: `56e06a9`
 - **tags**: v0.1.0 ~ **v0.1.17**
-- **测试**: `passed=748` / `ignored=58` / `include_ignored=804`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=751` / `ignored=58` / `include_ignored=809`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1` 六步（MSRV / 测试计数 / clippy / 哈希 / missing_docs / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xDBB308DD1657EF9C` / `400x220`
@@ -114,7 +114,7 @@
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **748**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **751**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 
@@ -464,3 +464,26 @@
 - **`Y901_SUB_TRACE` 是订阅清理的诊断开关**：设置后 poll 清理了失效订阅时打印条数。
   默认静默、**零热路径成本**（只在 `dropped > 0` 时才读环境变量）。
   与 `Y901_FULLSCREEN` / `Y901_FORCE_SOFT` / `Y901_SIMULATE_RENDER_FAIL` 同类。
+
+- **`Copy-Item` 还原源码会回退 mtime，cargo 用旧二进制跑测试**（本轮踩坑）：
+  做证伪验证时用 `Copy-Item` 备份/还原源码，`Copy-Item` 会保留源文件的 `LastWriteTime`，
+  还原后的文件 mtime **比构建产物还旧** → cargo 认为没变化 → **跑旧二进制**。
+  表现：源码明明已还原，测试却持续失败（报的是旧代码的错）。
+  修法：还原后显式 `(Get-Item $f).LastWriteTime = Get-Date` 再跑；
+  或用 `git checkout -- <file>`（但工作区有未提交改动时慎用，会丢改动）。
+  **这条也影响归因判断**：上一轮 subscriptions 的"先绿后红"可能就是这个陷阱，
+  **不一定是 `find` 索引问题**。
+
+- **断言用的子串不能也出现在 mock 数据里**（run_many 契约测试的教训）：
+  mock 返回 `"mock 窗口 0 失败"`，断言 `contains("窗口 0")` ——
+  **即使默认实现完全不加序号前缀，断言也照样通过**（mock 自己的文本里就有"窗口 0"）。
+  做证伪验证时才发现（去掉序号前缀后测试仍然全绿）。
+  修法：mock 错误文本改成不含断言子串的 `mock-boom-{n}`。
+  **原则**：证伪验证不是"跑一遍看红不红"，而是"**去掉被测行为后必须红**"。
+  如果去掉行为后仍然绿，说明断言是**空转**的 —— 测的是 mock 数据，不是被测代码。
+
+- **subscriptions 归因补充**：上一轮记"用 `find` 判断节点存在性导致订阅清不掉，
+  改用 `find_path`"——`find` 走 layout 索引、`remove_node` 不重建索引这个**事实是真的**，
+  但**当时的失败也可能是 stale binary 陷阱**（Copy-Item 还原后 cargo 没重建）。
+  用 `find_path` 仍然是对的（直接遍历活的控件树，不依赖索引时效），
+  但**归因不唯一**。**以后遇到"源码改了测试仍红"，先确认 cargo 真的重建了**。
