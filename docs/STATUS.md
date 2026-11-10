@@ -487,3 +487,16 @@
   但**当时的失败也可能是 stale binary 陷阱**（Copy-Item 还原后 cargo 没重建）。
   用 `find_path` 仍然是对的（直接遍历活的控件树，不依赖索引时效），
   但**归因不唯一**。**以后遇到"源码改了测试仍红"，先确认 cargo 真的重建了**。
+
+- **`cargo check --all-targets` 通过不代表能链接**（四条测试基建债的教训）：
+  `check` 只做类型检查，**不链接**。`y901-backend-win32` 的 lib test 在 Linux 上
+  因为 4 处裸 `#[link(name = "d3d11"/"d3dcompiler"/"dwrite"/"imm32")]` 而链接失败，
+  但 `cargo check --all-targets` 一直是绿的。
+  **`cargo test --workspace` 才是"全量通过"的硬判据** ——
+  它是唯一会**链接所有测试二进制**的命令。
+
+- **`--test <name>` 通过不代表 `cargo test --workspace` 通过**：
+  给 22 个集成测试文件加 `#![cfg(windows)]` 解决了 `--test <name>` 的链接问题，
+  但 **crate 自身的 lib test 目标仍会编译 `src/` 里的 `#[link]` extern 块**。
+  **只有 crate 级的 `#![cfg(windows)]` 才能让 lib 本身在 Linux 上消失。**
+  以后验证 `cargo test --workspace` 时，**不要用 `--exclude` 绕过** —— 那只是掩盖问题。

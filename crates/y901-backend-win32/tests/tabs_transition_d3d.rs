@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! **P1b 硬验收**：Tabs 切换过渡遮罩在真实 D3D11 路径上用**面板色**而不是默认黑。
 //!
 //! 为什么需要它：`tabs.rs::switch_transition_is_visible_in_pixels` 用的是 `SoftBackend`；
@@ -11,8 +13,6 @@
 //! ```text
 //! cargo test -p y901-backend-win32 --release --test tabs_transition_d3d -- --ignored --nocapture
 //! ```
-
-#![cfg(windows)]
 
 use std::cell::Cell;
 use std::rc::Rc;

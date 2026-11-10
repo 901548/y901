@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! D3D11 图片纹理路径的像素验收（真机设备 + 快照回读）。
 //!
 //! 与 `font_3c_pixels` 同一套脚手架：真窗口 + `take_snapshot()`。

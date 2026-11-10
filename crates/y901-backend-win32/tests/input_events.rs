@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! P1-2：输入层扩展（右键/中键/系统键/键松开/滚轮带修饰键）。
 //!
 //! 全部走 `handle_wm_msg` / `wheel_event` 这两个纯函数——与 `wndproc` 里

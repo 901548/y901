@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! Present 节拍基准（sync=0 vs sync=1）。
 //!
 //! **本基准测的是窗口模式下的 Present 节拍**：DWM 合成器会将帧节奏限制在 ~1/刷新率，

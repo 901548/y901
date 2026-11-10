@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! `RenderCtx` 的**实现一致性**检查：D3D 后端必须提供与 CPU 后端同源的
 //! `animation` / `set_animations` / `background_color`。
 //!

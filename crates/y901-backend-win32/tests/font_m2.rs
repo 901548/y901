@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! Milestone 2 验收：度量对齐、图集集成、LRU、恢复。
 
 use y901_backend_win32::backend::font::{cell_metrics_for, DirtyRect, TextEngine};

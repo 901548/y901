@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! **P1a 硬验收**：Popup 开启动画在真实 D3D11 路径上真的在动。
 //!
 //! 为什么需要它：`popup_anim.rs`（y901-render）只验证了 `SoftBackend` 的像素；
@@ -11,8 +13,6 @@
 //! ```text
 //! cargo test -p y901-backend-win32 --release --test popup_anim_d3d -- --ignored --nocapture
 //! ```
-
-#![cfg(windows)]
 
 use std::time::Duration;
 

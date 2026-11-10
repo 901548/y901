@@ -1,7 +1,7 @@
 //! 文件拖放事件的路由：按坐标命中目标控件。
 
 use std::cell::Cell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use y901_ui::{
@@ -101,9 +101,12 @@ fn file_drop_routes_to_control_under_cursor() {
     assert!(r.h > 0.0);
 
     let ev = UiEvent::FileDrop {
+        // **跨平台路径**：用 `join` 构造 —— Windows 上得到 `a\\one.txt`，
+        // Linux 上得到 `a/one.txt`；两边 `file_name()` 都返回 `one.txt` / `two.png`。
+        // 旧写法硬编码 `C:\\a\\one.txt`，在 Linux 上 `file_name()` 返回整串，断言失败。
         paths: vec![
-            PathBuf::from(r"C:\a\one.txt"),
-            PathBuf::from(r"C:\a\two.png"),
+            Path::new("a").join("one.txt"),
+            Path::new("a").join("two.png"),
         ],
         pos: Pos::new(r.x + 10.0, r.y + 10.0),
     };
@@ -117,7 +120,7 @@ fn file_drop_routes_to_control_under_cursor() {
 fn file_drop_outside_control_is_ignored() {
     let (mut tree, hits, _) = tree();
     let ev = UiEvent::FileDrop {
-        paths: vec![PathBuf::from(r"C:\x\y.txt")],
+        paths: vec![Path::new("x").join("y.txt")],
         pos: Pos::new(390.0, 290.0), // 控件之外
     };
     let _ = tree.dispatch(&ev);

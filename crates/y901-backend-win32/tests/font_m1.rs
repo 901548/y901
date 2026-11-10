@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! Milestone 1 验收：面积恒等式、内孔、连通域、性能。
 //!
 //! 测试字体：`C:\Windows\Fonts\segoeui.ttf`（Windows 自带）。

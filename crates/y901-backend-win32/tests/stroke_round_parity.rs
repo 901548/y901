@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! D3D 与 Soft 的 `stroke_round_rect` 像素对拍。
 //!
 //! P1c-2 让 Soft 用与 D3D 着色器**同一个** SDF 公式描边（`y901-render/src/sdf.rs`），

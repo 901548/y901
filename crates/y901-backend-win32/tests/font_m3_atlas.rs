@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! 3b-2：图集容量与驱逐压力测试（CJK × 4 相位）。
 
 use std::time::Instant;

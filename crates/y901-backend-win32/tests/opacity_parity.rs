@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! D3D vs Soft 的 `opacity` 对拍。
 //!
 //! 验证两条实现同语义：

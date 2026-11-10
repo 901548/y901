@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! M3 子步骤 3b-1：CJK 字形加载、复合字形展开、镂空正确性。
 //!
 //! 字体：`C:\Windows\Fonts\simsun.ttc`（SimSun，TTC 集合，取第 0 个 face）。
