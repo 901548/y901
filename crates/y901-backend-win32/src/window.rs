@@ -146,11 +146,12 @@ impl WindowShared {
 /// `*mut c_void`，**不能直接做 `HashMap` 键**（没有 `Hash`/`Eq` 实现）。
 static TABLE: Mutex<Option<std::collections::HashMap<isize, WindowShared>>> = Mutex::new(None);
 
-/// 当前存活的窗口数（多窗口下用来判断"是否最后一个窗口）。
+/// 当前存活的窗口数。
 ///
-/// `CreateWindowExW` 成功后 +1；**`WM_NCDESTROY` 里 -1**（不是 `WM_DESTROY`：
-/// 那时窗口还没销毁完，提前归零会误退出消息循环）；
-/// 归零才 `PostQuitMessage`。
+/// **注意**：每窗口一线程的 `run_many` 下，退出靠**每线程自己的 `WM_QUIT`**
+///（`WM_NCDESTROY` 无条件 `PostQuitMessage(0)`），不依赖本计数。
+/// 本计数仅在"单线程多窗口"模式下作为退出兜底，
+/// 以及诊断用（观察有多少窗口存活）。
 static WINDOW_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// 最近一次客户区尺寸。
 /// IME 状态属于窗口（输入法进程的镜像），与 UI 无关。
@@ -653,10 +654,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 eprintln!("[y901] 警告：WINDOW_COUNT 下溢（WM_NCDESTROY 时计数已为 0）");
                 return 0;
             }
-            if before == 1 {
-                // 最后一个窗口也销毁了 → 退出消息循环。
-                PostQuitMessage(0);
-            }
+            // **无条件 `PostQuitMessage`**：它把 `WM_QUIT` 投进**调用线程**的消息队列，
+            // 只结束**这个窗口自己的** `run_loop`，不会影响其他窗口的线程。
+            //
+            // 旧实现写成 `if before == 1 { PostQuitMessage(0) }`，在"每窗口一线程"下会**卡死**：
+            // 先关的窗口（计数 2→1）不发 `WM_QUIT`，它的线程还停在
+            // `MsgWaitForMultipleObjectsEx` 里无限等待，于是整个进程永远不退出（实测已复现）。
+            PostQuitMessage(0);
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),

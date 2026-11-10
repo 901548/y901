@@ -422,3 +422,26 @@
 - **VM 没有 PowerShell，`sync-doc-numbers.ps1` 在 Windows 侧验证即可**：
   该脚本服务于 Windows 侧 gate，不需要 Linux 环境。
   Linux 侧真正需要的验证是测试计数（`multi_window` / `real_window` / `golden`），已有独立证据。
+
+- **`poll(0)` 在 Linux 下 `set_read_timeout(Some(0ms))` 返回 EINVAL**（既有 bug）：
+  这是 196% CPU 空转的真正来源，不是 EOF。旧的 `Err(_) => return out` 把它当"没事件"吞掉，
+  于是 `run_loop` 在"上一帧有工作"（`was_busy` → `wait_ms = 0`）时每轮都空转。
+  修法：`timeout_ms == 0` 用 `set_nonblocking(true)`，非 0 用 `set_read_timeout(ms)`；
+  函数末尾（**含所有 `?` 返回路径**）恢复阻塞模式 —— 拆成"外层设模式 + 内层干活"才能覆盖完整。
+  `EINTR` 在 `poll_events` 里重试，不冒泡。
+  **教训**：`poll_events(0)` 这条路径**从来就没工作过** ——
+  **"能编译、能跑单窗口"不代表这条路径被验证过**。
+
+- **`WM_PROTOCOLS = WM_DELETE_WINDOW` 必须在 `MapWindow` 之前设置**（ICCCM）：
+  WM 在 reparent 窗口时就读取 `WM_PROTOCOLS`，**映射后再设就晚了**。
+  不设的后果：WM 走 `XKillClient` 直接杀客户端，客户端只能从 EOF 得知窗口没了。
+  修法：intern `WM_PROTOCOLS` / `WM_DELETE_WINDOW`，`ChangeProperty` 到窗口
+  （`format=32`, `type=ATOM(4)`），并且**在 `MapWindow` 之前**。
+  验证方法：外部关窗后，日志应出现"X11 会话结束"（走 ClientMessage 干净路径），
+  **不应**出现"X11 连接已不可用：服务端断开连接"（EOF 兜底）。
+
+- **`WM_NCDESTROY` 里 `PostQuitMessage` 的语义是"投递给调用线程"**：
+  每窗口一线程的 `run_many` 下，`WM_NCDESTROY` 应**无条件** `PostQuitMessage(0)` ——
+  它只结束**当前线程**的 `run_loop`，不影响其他窗口线程。
+  之前的 `if before == 1 { PostQuitMessage(0) }` 会让**先关的窗口线程永久阻塞**（进程不退）。
+  `WINDOW_COUNT` 在"每窗口一线程"下**不参与退出决策**，仅用于诊断。

@@ -97,4 +97,52 @@ impl PlatformRuntime for X11Runtime {
 
         code
     }
+
+    /// 每窗口一线程。
+    ///
+    /// 为何并行可行：**每个 `X11Window` 自带一条 `Connection`**，
+    /// 事件队列与全屏状态已按窗口隔离（多窗口第 1 步已验证）。
+    ///
+    /// `Window` / `Host` / `UiTree` **都在线程内创建** —— 它们都不是 `Send`。
+    /// `DISPLAY` 是进程级环境变量（只读），各线程各自读一次即可。
+    fn run_many(
+        &mut self,
+        options_list: Vec<Options>,
+        make: y901_runtime::WindowFactory,
+    ) -> Result<(), String> {
+        let make = std::sync::Arc::new(std::sync::Mutex::new(make));
+        let handles: Vec<(usize, std::thread::JoinHandle<Result<(), String>>)> = options_list
+            .into_iter()
+            .enumerate()
+            .map(|(i, options)| {
+                let make = std::sync::Arc::clone(&make);
+                // 带上窗口序号，供 join 时拼错误信息
+                let handle = std::thread::spawn(move || -> Result<(), String> {
+                    let (host, tree) = {
+                        let mut guard = make.lock().unwrap_or_else(|e| e.into_inner());
+                        guard(i)
+                    };
+                    // `X11Runtime` 是零字节结构体：每线程自建一个即可。
+                    let mut rt = X11Runtime;
+                    rt.run(host, Box::new(move || tree), options)
+                });
+                (i, handle)
+            })
+            .collect();
+
+        // 错误带窗口序号：多窗口下"哪个窗口失败"是必要信息。
+        let mut errors = Vec::new();
+        for (i, h) in handles {
+            match h.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => errors.push(format!("窗口 {i}: {e}")),
+                Err(_) => errors.push(format!("窗口 {i}: 建窗线程 panic")),
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
+    }
 }

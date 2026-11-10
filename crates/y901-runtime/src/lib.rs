@@ -84,6 +84,14 @@ pub trait Host {
     }
 }
 
+/// 窗口工厂：每个窗口调一次，返回它自己的 `(Host, UiTree)`。
+///
+/// 为何是工厂而非实例：`Host` 与 `UiTree` **都不是 `Send`**，
+/// 必须在各自线程内创建；工厂本身需 `Send`（它会被多个线程调用）。
+///
+/// 抽成别名也是为了让 `run_many` 的签名可读（否则 clippy 报 `type_complexity`）。
+pub type WindowFactory = Box<dyn FnMut(usize) -> (Box<dyn Host>, UiTree) + Send>;
+
 /// 平台侧：每个后端实现一次。
 pub trait PlatformRuntime {
     /// 跑完整主循环（建窗 → 事件 → 重绘 → 直到关闭）。
@@ -99,6 +107,34 @@ pub trait PlatformRuntime {
         build: Box<dyn FnOnce() -> UiTree>,
         options: Options,
     ) -> Result<(), String>;
+
+    /// 跑**多个窗口**。
+    ///
+    /// 默认实现是**串行**（关一个再起下一个），用于不支持并行的后端；
+    /// 支持并行的后端（Win32 / X11）应覆写为"每窗口一线程"。
+    ///
+    /// ## 为何传工厂而非实例
+    ///
+    /// `Host` 与 `UiTree` **都不是 `Send`**（`Host` trait 无 `Send` bound，
+    /// `UiTree.root` 是 `Box<dyn Widget>`）。所以它们**必须在各自线程内创建**，
+    /// 不能先在主线程构造再传进线程。
+    /// `make` 本身需要 `Send`（它会被各线程调用）。
+    fn run_many(
+        &mut self,
+        options_list: Vec<Options>,
+        mut make: WindowFactory,
+    ) -> Result<(), String> {
+        for (i, options) in options_list.into_iter().enumerate() {
+            let (host, tree) = make(i);
+            // `run` 收 `FnOnce`，而工厂已经把树造好了 —— 用闭包包一层。
+            // 不改 `run` 签名：那会动到两个后端与全部测试。
+            // 错误带窗口序号：多窗口下"哪个窗口失败"是必要信息。
+            if let Err(e) = self.run(host, Box::new(move || tree), options) {
+                return Err(format!("窗口 {i}: {e}"));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// 不透明的窗口句柄：**业务与组件永远不接触 `HWND`/`XID`/`NSWindow*`**。

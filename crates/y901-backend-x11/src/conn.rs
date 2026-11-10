@@ -590,9 +590,35 @@ impl Connection {
         &mut self,
         timeout_ms: u32,
     ) -> Result<(Vec<X11Event>, Vec<X11Error>), String> {
-        self.stream
-            .set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
-            .map_err(|e| format!("set_read_timeout: {e}"))?;
+        // **`timeout_ms == 0` 必须用 `set_nonblocking`，不能用 `set_read_timeout(0)`**。
+        //
+        // 为何：Linux 下 `set_read_timeout(Some(0ms))` 会返回 `InvalidInput`（EINVAL）——
+        // 而 `run_loop` 在“上一帧有工作”时正好传 0。于是**"有工作时"的路径从来没跑通过**，
+        // 而且不是“慢”，是**每次都 Err**（旧代码把 Err 当空事件 → **196% CPU 空转**）。
+        //
+        // 恢复：函数结尾把非阻塞关掉（同样覆盖 `?` 提前返回的路径，故用内层函数 + 外层恢复）。
+        if timeout_ms == 0 {
+            self.stream
+                .set_nonblocking(true)
+                .map_err(|e| format!("set_nonblocking(true): {e}"))?;
+        } else {
+            self.stream
+                .set_nonblocking(false)
+                .map_err(|e| format!("set_nonblocking(false): {e}"))?;
+            self.stream
+                .set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+                .map_err(|e| format!("set_read_timeout: {e}"))?;
+        }
+        let result = self.poll_events_inner();
+        if timeout_ms == 0 {
+            // 恢复阻塞模式（忽略错误：即使失败也不应盖掉真正的读取结果）
+            let _ = self.stream.set_nonblocking(false);
+        }
+        result
+    }
+
+    /// `poll_events` 的实体（已按 `timeout_ms` 设好阻塞模式）。
+    fn poll_events_inner(&mut self) -> Result<(Vec<X11Event>, Vec<X11Error>), String> {
         let mut events = std::mem::take(&mut self.pending);
         let mut errors = Vec::new();
         let mut buf = [0u8; 32];
@@ -636,6 +662,8 @@ impl Connection {
                 {
                     return Ok((events, errors))
                 }
+                // 信号中断不是错误：重试即可（否则会被当成“读错”升级成断线）。
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(format!("读事件失败: {e}")),
             }
         }

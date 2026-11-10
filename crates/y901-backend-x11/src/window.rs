@@ -165,7 +165,33 @@ impl X11Window {
             values: VALUES,
         }))?;
         conn.send(&encode_change_title(wid, name_atom, utf8_atom, title))?;
+        // **注册 `WM_PROTOCOLS = [WM_DELETE_WINDOW]`**。
+        //
+        // 为何必需：不注册时，用户点窗口的 × 之后，WM（如 metacity）
+        // 不会发 `WM_DELETE_WINDOW` ClientMessage，而是直接 **`XKillClient`** 把客户端杀掉 ——
+        // 于是我们只能从 socket EOF 得知，走"兜底退出"而不是干净路径。
+        // 注册之后才是 WM 发 ClientMessage → `RawEvent::Close`（见 `map_event` 的 ClientMessage 分支）。
+        //
+        // **必须在 `MapWindow` 之前设置**：WM 在管理（reparent）窗口时就会读取 `WM_PROTOCOLS`，
+        // 映射后才设就晚了 —— 那时 WM 仍会走 `XKillClient`。
+        {
+            let wm_protocols = intern(&mut conn, b"WM_PROTOCOLS")?;
+            let wm_delete_window = intern(&mut conn, b"WM_DELETE_WINDOW")?;
+            // 预定义原子 `ATOM = 4`（X11 协议附录 B）：`WM_PROTOCOLS` 的类型就是 ATOM 数组。
+            const ATOM_ATOM: u32 = 4;
+            conn.send(&crate::encode_change_property(
+                wid,
+                wm_protocols,
+                ATOM_ATOM,
+                32,
+                crate::encode::PropMode::Replace,
+                &wm_delete_window.to_le_bytes(),
+            ))?;
+            conn.flush()?;
+        }
+
         conn.send(&encode_map_window(wid))?;
+
         // SPIKE: `Y901_FULLSCREEN=1` 时走 EWMH 全屏。
         // 必须在 Map 之后发：窗口还未映射时部分 WM 会忽略该消息。
         let fullscreen = fullscreen || std::env::var_os("Y901_FULLSCREEN").is_some();
@@ -459,7 +485,26 @@ impl EventSource for X11Window {
                         return out;
                     }
                 }
-                Err(_) => return out,
+                // **错误不能当“没有事件”，也不能一律当“断线”。**
+                //
+                // `poll_events` 内部已过滤 `WouldBlock`/`TimedOut`（返回空事件）
+                // 并对 `Interrupted` 重试，所以能到这里的 `Err` 分两类：
+                //
+                // 1. **连接已不可用**（EOF / 真实读错 / 不完整包）→ 推 `Close` 让主循环退出；
+                // 2. **配置失败**（`set_nonblocking` / `set_read_timeout` 报错，如 EINVAL）→ **不是断线**，
+                //    它是我们自己写错的信号；把它当断线会让所有窗口在首帧后集体关闭（已发生）。
+                Err(e) => {
+                    let msg = e.to_string();
+                    if msg.starts_with("set_") {
+                        // 配置错误：只报一次，不退出。
+                        // 留在这里是为了让 bug 可见（否则又回到"静默空转"）。
+                        eprintln!("[y901] X11 轮询配置错误（非断线）：{msg}");
+                    } else {
+                        eprintln!("[y901] X11 连接已不可用：{msg}（发 Close 让主循环退出）");
+                        out.push(RawEvent::Close);
+                    }
+                    return out;
+                }
             }
         }
     }
