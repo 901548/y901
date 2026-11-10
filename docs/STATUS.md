@@ -445,3 +445,10 @@
   它只结束**当前线程**的 `run_loop`，不影响其他窗口线程。
   之前的 `if before == 1 { PostQuitMessage(0) }` 会让**先关的窗口线程永久阻塞**（进程不退）。
   `WINDOW_COUNT` 在"每窗口一线程"下**不参与退出决策**，仅用于诊断。
+
+- **`Y901_SIMULATE_RENDER_FAIL` 是异常路径的测试开关**：
+  设置后 `WindowBackend::render` 立即返回 `Err`，用于验证 `Window::Drop` 的异常路径兜底
+  （正常路径下 HWND 已被 `WM_NCDESTROY` 销毁，Drop 时 `IsWindow` 返回 0，不会重复销毁）。
+  这是"把不可测变成可测"的一次投入：P2-2 的异常路径此前**零运行覆盖**，
+  加这个开关后真跑到了 Drop 兜底分支（`[diag] Drop 兜底 DestroyWindow 结果：1`）。
+  用 `OnceLock` 缓存，**零热路径成本**。与 `Y901_FULLSCREEN` / `Y901_FORCE_SOFT` 同类。

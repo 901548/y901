@@ -1340,13 +1340,20 @@ impl Drop for Window {
         // `Window` 在它自己那个线程的 `run`/线程函数中 drop，满足该条件。
         // `IsWindow` 只是只读查询，任何线程都可调。
         unsafe {
-            if windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(self.hwnd) != 0
-                && windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(self.hwnd) == 0
-            {
-                eprintln!(
-                    "[y901] Window::drop 兜底 DestroyWindow 失败（hwnd=0x{:X}）",
-                    self.hwnd as isize
-                );
+            if windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(self.hwnd) != 0 {
+                let destroyed =
+                    windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(self.hwnd);
+                // **仅在模拟失败时打印**：正常路径下不应污染 stderr。
+                // 这行是"兜底真的跑了”的唯一直接证据。
+                if std::env::var_os("Y901_SIMULATE_RENDER_FAIL").is_some() {
+                    eprintln!("[diag] Drop 兜底 DestroyWindow 结果：{destroyed}");
+                }
+                if destroyed == 0 {
+                    eprintln!(
+                        "[y901] Window::drop 兜底 DestroyWindow 失败（hwnd=0x{:X}）",
+                        self.hwnd as isize
+                    );
+                }
             }
         }
     }
@@ -1895,6 +1902,18 @@ impl y901_backend_common::window::WindowBackend for Window {
     /// `had_dirty` 在调用**之前**取一次，仅用于回答“本帧动了没有”；
     /// 它不参与决策（决策仍在 `render_inner` 里）。
     fn render(&mut self, tree: &mut UiTree) -> Result<RenderOutcome, String> {
+        // **测试开关**：强制 render 失败，用于验证 `Window::Drop` 的**异常路径兜底**。
+        //
+        // 为何用 `OnceLock` 而不是每帧 `std::env::var_os`：`render` 是**每帧**调用的热路径，
+        // 环境变量查找虽然很快，但"每帧都去问一次系统"是不必要的。
+        // 只读一次、缓存一辈子。
+        static SIMULATE_FAIL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let simulate =
+            *SIMULATE_FAIL.get_or_init(|| std::env::var_os("Y901_SIMULATE_RENDER_FAIL").is_some());
+        if simulate {
+            return Err("模拟 render 失败（Y901_SIMULATE_RENDER_FAIL）".to_string());
+        }
+
         // 这里只生成 outcome；实际 skip 与 Present 在 `render_inner` 内。
         let had_dirty = !tree.dirty().is_empty();
         self.render_inner(tree, 1);
