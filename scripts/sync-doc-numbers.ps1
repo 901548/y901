@@ -112,7 +112,10 @@ foreach ($f in $docFiles) {
             # 为何限定反引号：散文里也会出现 "Windows 侧 ignored=58、Linux 侧=59"，
             # 那是**平台对比**，不该按本仓全局计数校验；加反引号地匹配能把它排除。
             @{ name = 'inline passed';  pattern = '`passed=(\d+)`'; want = $passed },
-            @{ name = 'inline ignored'; pattern = '`ignored=(\d+)`'; want = $ignored }
+            @{ name = 'inline ignored'; pattern = '`ignored=(\d+)`'; want = $ignored },
+            # **include_ignored 的行内形式**（第 4 个盲点）：之前它既不被 -Check 校验、
+            # 也不被完整 sync 写入 —— 于是只能靠手工对齐（已发生一次）。
+            @{ name = 'inline include_ignored'; pattern = '`include_ignored=(\d+)`'; want = $includePassed }
 
         )
         foreach ($rule in $rules) {
@@ -152,6 +155,11 @@ foreach ($f in $docFiles) {
     # 否则它会长期漂移而 -Check 也查不到（上一轮就是这个漏洞）。
     $t = [regex]::Replace($t, '`passed=(\d+)`', { param($m) ([char]96 + "passed=$passed" + [char]96) })
     $t = [regex]::Replace($t, '`ignored=(\d+)`', { param($m) ([char]96 + "ignored=$ignored" + [char]96) })
+    # include_ignored 同样要维护（否则它与 numbers.txt 漂离而 -Check 也查不到）。
+    # 注意类型：`$includePassed` 是字符串（可能为 "n/a (...)"），非数字时不替换。
+    if ($includePassed -match '^\d+$') {
+        $t = [regex]::Replace($t, '`include_ignored=(\d+)`', { param($m) ([char]96 + "include_ignored=$includePassed" + [char]96) })
+    }
 
     $t = [regex]::Replace($t, '\*\*(\d{3})\*\*\s*项测试', { param($m) "**$passed** 项测试" })
     $t = [regex]::Replace($t, '(\d{3})\s*项测试', { param($m) "$passed 项测试" })
