@@ -651,13 +651,26 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
 }
 
 impl TextMetrics for D3dBackend {
-    fn measure_text(&self, text: &str, _style: &TextStyle) -> Size {
+    fn measure_text(&self, text: &str, style: &TextStyle) -> Size {
+        // **per-text 字号**：与 `SoftBackend` **同源**（都调 `cell_metrics_for`），
+        // `None` 时用引擎默认 cell —— 两后端对同一 `TextStyle` 必须给出同样的度量，
+        // 否则 D3D/软渲染两条路径的布局会分叉。
+        let cell = match style.size {
+            Some(px) if px > 0.0 => {
+                let (w, h) = y901_render::cell_metrics_for(px);
+                y901_ui::Size::new(w, h)
+            }
+            _ => self.cell,
+        };
         let cols: u32 = text.chars().map(|c| self.text.cell_span(c)).sum();
-        Size::new(cols as f32 * self.cell.w, self.cell.h)
+        Size::new(cols as f32 * cell.w, cell.h)
     }
 
-    fn line_height(&self, _style: &TextStyle) -> f32 {
-        self.cell.h
+    fn line_height(&self, style: &TextStyle) -> f32 {
+        match style.size {
+            Some(px) if px > 0.0 => y901_render::cell_metrics_for(px).1,
+            _ => self.cell.h,
+        }
     }
 
     fn scale(&self) -> f32 {

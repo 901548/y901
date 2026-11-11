@@ -92,6 +92,12 @@ pub struct TextStyle {
     pub italic: bool,
     /// 下划线。
     pub underline: bool,
+    /// **字号**（逻辑像素）。
+    ///
+    /// `None` = 用引擎默认字号（`FontConfig.size`）—— **默认路径与加这个字段之前逐像素一致**。
+    /// `Some(px)` = 本段文字用 `px`：后端会按 `cell_metrics_for(px)` 现算度量，
+    /// **不按比例缩放现有 cell**（避免 CJK/等宽混排的亚像素误差）。
+    pub size: Option<f32>,
 }
 
 impl Default for TextStyle {
@@ -102,6 +108,7 @@ impl Default for TextStyle {
             bold: false,
             italic: false,
             underline: false,
+            size: None,
         }
     }
 }
@@ -111,6 +118,7 @@ impl TextStyle {
     pub const fn fg(color: Color) -> Self {
         Self {
             fg: color,
+            size: None,
             bg: Color::TRANSPARENT,
             bold: false,
             italic: false,
@@ -125,6 +133,15 @@ impl TextStyle {
     }
 
     /// 打开粗体。
+    /// 设置本段文字的**字号**（逻辑像素）。
+    ///
+    /// 传入后度量与绘制都按该字号走（两个后端已同源实现）。
+    pub fn size(mut self, px: f32) -> Self {
+        self.size = Some(px);
+        self
+    }
+
+    /// 加粗。
     pub fn bold(mut self) -> Self {
         self.bold = true;
         self

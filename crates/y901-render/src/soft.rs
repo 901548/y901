@@ -313,15 +313,27 @@ impl SoftBackend {
 }
 
 impl TextMetrics for SoftBackend {
-    fn measure_text(&self, text: &str, _style: &TextStyle) -> Size {
+    fn measure_text(&self, text: &str, style: &TextStyle) -> Size {
+        // **per-text 字号**：`Some(px)` 时按该字号**现算 cell**（不按比例缩放，
+        // 避免 CJK/等宽混排的亚像素误差）；`None` 走引擎默认 cell —— 与加字段前逐像素一致。
+        let cell = match style.size {
+            Some(px) if px > 0.0 => {
+                let (w, h) = crate::font::cell_metrics_for(px);
+                Size::new(w, h)
+            }
+            _ => self.cell,
+        };
         let cells: f32 = text
             .chars()
             .map(|c| self.text.cell_span(c).max(1) as f32)
             .sum();
-        Size::new(cells * self.cell.w, self.cell.h)
+        Size::new(cells * cell.w, cell.h)
     }
-    fn line_height(&self, _style: &TextStyle) -> f32 {
-        self.cell.h
+    fn line_height(&self, style: &TextStyle) -> f32 {
+        match style.size {
+            Some(px) if px > 0.0 => crate::font::cell_metrics_for(px).1,
+            _ => self.cell.h,
+        }
     }
     fn scale(&self) -> f32 {
         1.0
