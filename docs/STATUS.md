@@ -265,13 +265,34 @@
 
 ## Linux / WSL 验证口径
 
-- `cargo test --workspace` 在 WSL 上**不可行**：`y901-backend-win32` 在 Linux 下链接失败（预期，
-  `cc` 报 `input_events` / `font_3c_pixels` / `lib test`）
-- Linux 侧验证命令：`DISPLAY=:99 cargo test -p y901-backend-x11`（需 Xvfb :99 运行）
+### Linux 全量测试（**交付前必跑**）
+
+这是唯一能发现"只在 Linux 链接 / 运行时暴露"的债的探针。
+`cargo check --all-targets` **不链接**；Windows 的 `cargo test` **不编译 `#[cfg(unix)]` 代码**。
+
+```bash
+cargo test --workspace --no-fail-fast 2>&1 \
+  | grep -E "test result: FAILED|^error" || echo "LINUX OK"
+```
+
+- 期望：`LINUX OK`。若有输出，**贴完整错误行**。
+- **不要用 `--exclude` 绕过** —— 那只是掩盖问题。
+- 四条测试基建债（22 个测试无门控 / lib 的 4 处 `#[link]` /
+  `file_drop` 硬编码 `C:\` / supersample 阈值绑定字体）就是靠它首次暴露的。
+- 已验证（demo）：**661 passed / 0 failed / 25 ignored**（128 个测试二进制）。
+  与 Windows 的 751/0/58 不同 —— **差异来自平台 cfg 门控，不是测试丢失**。
+
+### X11 专项
+
+- `DISPLAY=:99 cargo test -p y901-backend-x11`（需 Xvfb :99）
 - 平台中立 crate（`y901-core` / `y901-ui` / `y901-render` / `y901-widgets`）可单独 `-p` 跑
 - x11 全量：`DISPLAY=:99 cargo test -p y901-backend-x11 --test real_window -- --test-threads=1`
   （**必须 `--test-threads=1`**：用例共享一个 X 连接与环境变量）
-- 已验证结果见 `docs/evidence/numbers.txt`（该文件是唯一口径）
+- 已验证结果见 `docs/evidence/numbers.txt`（Windows 侧口径）
+
+> 旧描述（已修正）曾写"`cargo test --workspace` 在 WSL 上不可行：
+> `y901-backend-win32` 在 Linux 下链接失败（预期）" ——
+> 那是**crate 级 `#![cfg(windows)]` 之前**的事；现在 Linux 全量测试可行且已过。
 
 ## 数字检查的覆盖范围（已知限制）
 
@@ -281,6 +302,42 @@
 下一步（下一轮）：让脚本比对含 `测试|passed|ignored` 的行里**所有**三位数，
 历史数字用显式标记豁免；Guide 索引由脚本从正文生成。
 本轮已把所有非加粗旧数字改为当前值，`-Check` 通过。
+
+## 框架最终状态（v0.1.17-dev，审计与测试基建债清零）
+
+### 测试
+
+| 平台 | 通过 | 失败 | ignored | 备注 |
+|---|---|---|---|---|
+| **Windows** | **751** | 0 | 58 | `numbers.txt` 与 `test-baseline.txt` 口径 |
+| **Linux** | **661** | 0 | 25 | 差异来自平台 cfg 门控，**非测试丢失** |
+
+### 审计
+
+- **两批全部收口，零未修项**（P1-1/2/3、P2-1/2/3/4a/4b、subscriptions 泄漏、present 签名）
+- 每项都有验证手段：像素哈希 / 双向证伪 / `[diag]` 真跑 / 脚本回归
+
+### 已知未覆盖项（诚实记录，不美化）
+
+| # | 未覆盖 | 原因 | 怎么补 |
+|---|---|---|---|
+| 1 | **IME 两窗口同时组字不串** | 需真实 IME 环境 | 人工：两窗口各打一半中文，看组字条 |
+| 2 | **present 的设备丢失场景** | 真实设备丢失无法构造 | 已有 `Y901_SIMULATE_PRESENT_FAIL` 验证 **Err 传播路径**（非设备丢失本身） |
+| 3 | **Helm 多窗口拆分** | 等产品决策（标签集是否共享） | 先定义标签集语义再动手 |
+
+### 测试开关清单（方便后来者）
+
+| 环境变量 | 作用 | 代码位置 |
+|---|---|---|
+| `Y901_FULLSCREEN` | 启动即全屏（与 `Options.fullscreen` 取 OR） | 两后端的 create |
+| `Y901_FORCE_SOFT` | 强制 CPU 光栅器，不建 D3D11 | win32 `create_inner` |
+| `Y901_SIMULATE_RENDER_FAIL` | `WindowBackend::render` 立即 `Err`（验 `Drop` 兜底） | win32 `window.rs` |
+| `Y901_SIMULATE_PRESENT_FAIL` | `D3dBackend::present` 立即 `Err`（验 present 传播） | win32 `backend/mod.rs` |
+| `Y901_SUB_TRACE` | 打印订阅懒清理条数 | `y901-ui` `tree.rs` |
+| `Y901_PAINT_TRACE` | 按真实绘制顺序打印节点矩形/裁切 | `y901-ui` `tree.rs` |
+| `Y901_PROFILE` | 每次 `run_loop` 退出时打印帧耗时统计 | `backend-common` `runtime.rs` |
+| `Y901_IDLE_WAIT_MS` | 空闲等待上限 | `backend-common` `runtime.rs` |
+| `Y901_FONT=self` / `Y901_NO_CLIPBOARD` | 自研 TTF 字形引擎 / 禁用剪贴板 | `y901-shell` |
 
 ## 架构债
 
