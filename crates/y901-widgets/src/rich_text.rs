@@ -21,6 +21,11 @@ pub struct InlineStyle {
     pub italic: bool,
     /// 覆盖颜色；`None` = 用主题色。
     pub color: Option<Color>,
+    /// **字号**；`None` = 用引擎默认字号。
+    ///
+    /// 给 `Some(px)` 时：绘制按该字号，且 `StyledText` 的**行高按该行 max(size) 算**（见
+    /// `compute_line_heights`）。默认 `None` 时行高与加这个字段之前**逐像素一致**。
+    pub size: Option<f32>,
 }
 
 impl InlineStyle {
@@ -40,6 +45,14 @@ impl InlineStyle {
         }
     }
 
+    /// 指定字号（逻辑像素）。
+    pub fn size(px: f32) -> Self {
+        Self {
+            size: Some(px),
+            ..Self::default()
+        }
+    }
+
     /// 指定颜色。
     pub fn color(color: Color) -> Self {
         Self {
@@ -52,6 +65,8 @@ impl InlineStyle {
         let mut s = TextStyle::fg(self.color.unwrap_or(fallback));
         s.bold = self.bold;
         s.italic = self.italic;
+        // **字号要传下去**：否则行高算了大字号、绘制却用默认字号，字会溢出行高。
+        s.size = self.size;
         s
     }
 }
@@ -251,7 +266,12 @@ impl StyledText {
         let index = self.blocks.len() - 1;
         let (y, _) = self.layout[index];
         let h = match &self.blocks[index] {
-            Block::Paragraph(spans) => self.wrap(spans, per_line).len().max(1) as f32 * line_h,
+            Block::Paragraph(spans) => {
+                let lines = self.wrap(spans, per_line);
+                let hs = Self::compute_line_heights(metrics, spans, &lines, line_h);
+                // 空段落保底一行（与旧行为一致）。
+                if hs.is_empty() { line_h } else { hs.iter().sum() }
+            }
             Block::Code { lines, .. } => lines.len().max(1) as f32 * line_h + self.code_pad * 2.0,
         };
         self.layout[index] = (y, h);
@@ -263,6 +283,30 @@ impl StyledText {
     fn chars_per_line(&self, metrics: &dyn TextMetrics, w: f32) -> usize {
         let cw = metrics.measure_text("M", &TextStyle::default()).w.max(1.0);
         ((w - self.pad * 2.0).max(cw) / cw).floor().max(1.0) as usize
+    }
+
+    /// **逐行行高**（三处共用：`measure` / `measure_last` / `render`）。
+    ///
+    /// 规则：`row_h = max(base, 该行各 span 的 line_height(size))`。
+    /// **全 `None` span 时每行都等于 `base`** —— 与加字号前的 `n * base` **逐像素等价**。
+    fn compute_line_heights(
+        metrics: &dyn TextMetrics,
+        spans: &[Span],
+        lines: &[Vec<(usize, String)>],
+        base: f32,
+    ) -> Vec<f32> {
+        lines
+            .iter()
+            .map(|run| {
+                let mut h = base;
+                for (si, _) in run {
+                    if let Some(px) = spans.get(*si).and_then(|sp| sp.style.size) {
+                        h = h.max(metrics.line_height(&TextStyle::default().size(px)));
+                    }
+                }
+                h
+            })
+            .collect()
     }
 
     /// 段落折行：返回每行的 `(起始 span 索引, 文本)` 列表。
@@ -326,7 +370,8 @@ impl Widget for StyledText {
             let h = match block {
                 Block::Paragraph(spans) => {
                     let lines = self.wrap(spans, per_line);
-                    lines.len().max(1) as f32 * line_h
+                    let hs = Self::compute_line_heights(metrics, spans, &lines, line_h);
+                    if hs.is_empty() { line_h } else { hs.iter().sum() }
                 }
                 Block::Code { lines, .. } => {
                     lines.len().max(1) as f32 * line_h + self.code_pad * 2.0
@@ -385,13 +430,17 @@ impl Widget for StyledText {
             match block {
                 Block::Paragraph(spans) => {
                     let lines = self.wrap(spans, per_line);
+                    // **与 measure 同源**：逐行行高，累加偏移（不是 `li * line_h`）。
+                    let hs = Self::compute_line_heights(ctx, spans, &lines, line_h);
+                    let mut line_y = top;
                     for (li, run) in lines.iter().enumerate() {
                         let mut x = self.rect.x + self.pad;
-                        let y = top + li as f32 * line_h;
                         for (si, text) in run {
                             let style = spans[*si].style.to_text_style(fg);
-                            x += ctx.draw_text(Pos::new(x, y), text, &style);
+                            x += ctx.draw_text(Pos::new(x, line_y), text, &style);
                         }
+                        // 行高不足（数组越界）时回退到基准行高。
+                        line_y += hs.get(li).copied().unwrap_or(line_h);
                     }
                 }
                 Block::Code { lines, .. } => {
