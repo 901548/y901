@@ -23,6 +23,11 @@ pub struct TextLabel {
     /// 加粗只影响刷字字形选择，**不改度量口径**；但字形变粗会使
     /// `measure_text` 的宽度**变大**（见 `measure()`）。
     bold: bool,
+    /// **字号**（逻辑像素）；`None` = 引擎默认字号。
+    ///
+    /// 与 `bold` 一样，它同时影响**度量**与**绘制** —— 两处必须同源
+    /// （见 `to_text_style()`），否则宽度按默认算、绘制按实际字号画，布局错位。
+    size: Option<f32>,
     item: FlexItem,
     rect: Rect,
 }
@@ -43,6 +48,7 @@ impl TextLabel {
             signal: None,
             color: Color::WHITE,
             bold: false,
+            size: None,
             item: FlexItem::default(),
             rect: Rect::ZERO,
         }
@@ -82,12 +88,37 @@ impl TextLabel {
         self
     }
 
+    /// 设置字号（逻辑像素）。
+    ///
+    /// 返回：自身。副作用：无（下次布局/绘制生效）。
+    /// 字号变大会使 `measure()` 返回的宽高都变大。
+    pub fn size(mut self, px: f32) -> Self {
+        self.size = Some(px);
+        self
+    }
+
     /// 设置 flex 伸缩参数。
     ///
     /// 返回：自身。副作用：无（父容器测量时读取）。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
         self
+    }
+
+    /// **本控件的文本样式**。
+    ///
+    /// 为何提取成方法：`measure()` 与 `render()` **必须用同一份样式**。
+    /// 两处各写一份的后果是——漏传 `bold` 就宽度少算，
+    /// 漏传 `size` 就行高不足，都是"布局与绘制分家"。
+    fn to_text_style(&self) -> TextStyle {
+        let mut ts = TextStyle::fg(self.color);
+        if self.bold {
+            ts = ts.bold();
+        }
+        if let Some(px) = self.size {
+            ts = ts.size(px);
+        }
+        ts
     }
 
     /// 当前应显示的文本（**分配一个新 `String`**）。
@@ -128,12 +159,8 @@ impl Widget for TextLabel {
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
-        // 加粗要传给度量：否则 `measure` 与 `render` 对不上（宽度少算）。
-        let style = if self.bold {
-            TextStyle::fg(self.color).bold()
-        } else {
-            TextStyle::fg(self.color)
-        };
+        // 与 `render()` **同源**：同一个 `to_text_style()`。
+        let style = self.to_text_style();
         c.constrain(Size::new(
             metrics.measure_text(&self.current_text(), &style).w,
             metrics.line_height(&style),
@@ -190,11 +217,7 @@ impl Widget for TextLabel {
         ctx.draw_text(
             Pos::new(self.rect.x, self.rect.y),
             &self.current_text(),
-            &if self.bold {
-                TextStyle::fg(self.color).bold()
-            } else {
-                TextStyle::fg(self.color)
-            },
+            &self.to_text_style(),
         );
     }
 
