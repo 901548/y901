@@ -16,6 +16,13 @@ pub struct TextLabel {
     /// 可选的响应式来源：挂载后由 Signal 驱动文本。
     signal: Option<y901_ui::Signal<String>>,
     color: Color,
+    /// 是否加粗（UI 字重层级）。
+    ///
+    /// **为何只加粗不加字号**：`TextStyle` 目前没有 `size` 字段
+    /// （字号来自全局 `FontConfig.size`），加字号需动框架度量链路与像素基准。
+    /// 加粗只影响刷字字形选择，**不改度量口径**；但字形变粗会使
+    /// `measure_text` 的宽度**变大**（见 `measure()`）。
+    bold: bool,
     item: FlexItem,
     rect: Rect,
 }
@@ -35,6 +42,7 @@ impl TextLabel {
             text: text.into(),
             signal: None,
             color: Color::WHITE,
+            bold: false,
             item: FlexItem::default(),
             rect: Rect::ZERO,
         }
@@ -61,6 +69,16 @@ impl TextLabel {
     /// 因此单独改颜色需要调用方自行 `invalidate`）。
     pub fn color(mut self, color: Color) -> Self {
         self.color = color;
+        self
+    }
+
+    /// 加粗文本（字重层级）。
+    ///
+    /// 返回：自身。副作用：无（下次绘制/布局生效）。
+    /// **注意**：加粗后字形变宽，`measure()` 返回的宽度会变大，
+    /// 若容器宽度刚好卡着，可能引入截断（由使用方评估）。
+    pub fn bold(mut self) -> Self {
+        self.bold = true;
         self
     }
 
@@ -110,7 +128,12 @@ impl Widget for TextLabel {
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
-        let style = TextStyle::fg(self.color);
+        // 加粗要传给度量：否则 `measure` 与 `render` 对不上（宽度少算）。
+        let style = if self.bold {
+            TextStyle::fg(self.color).bold()
+        } else {
+            TextStyle::fg(self.color)
+        };
         c.constrain(Size::new(
             metrics.measure_text(&self.current_text(), &style).w,
             metrics.line_height(&style),
@@ -167,7 +190,11 @@ impl Widget for TextLabel {
         ctx.draw_text(
             Pos::new(self.rect.x, self.rect.y),
             &self.current_text(),
-            &TextStyle::fg(self.color),
+            &if self.bold {
+                TextStyle::fg(self.color).bold()
+            } else {
+                TextStyle::fg(self.color)
+            },
         );
     }
 
