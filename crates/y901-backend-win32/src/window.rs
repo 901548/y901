@@ -1122,8 +1122,15 @@ impl Window {
     }
 
     /// 把 UI 树画到交换链。
+    /// 渲染一帧（公开 API，**不向上传播错误**）。
+    ///
+    /// 为什么保留 `()` 而不改成 `Result`：它被大量测试/基准调用，
+    /// 改签名会连带改几十处；而**真实上屏失败已经会在这里打日志**。
+    /// 需要向上传播的调用方走 `WindowBackend::render`（它返 `Result`）。
     pub fn render(&mut self, tree: &mut UiTree) {
-        self.render_inner(tree, 1);
+        if let Err(e) = self.render_inner(tree, 1) {
+            eprintln!("[y901] 渲染失败（上屏失败）：{e}");
+        }
     }
 
     /// 渲染一帧，**显式指定 `sync_interval`**（仅供基准测试）。
@@ -1131,7 +1138,9 @@ impl Window {
     /// 注意：**窗口模式下 DWM 合成器会将帧节奏限制在 ~1/刷新率**，
     /// 因此 `sync = 0` 并不会更快（实测 p50 差仅 18µs）。要测纯提交耗时需独占全屏。
     pub fn render_with_sync(&mut self, tree: &mut UiTree, sync_interval: u32) {
-        self.render_inner(tree, sync_interval);
+        if let Err(e) = self.render_inner(tree, sync_interval) {
+            eprintln!("[y901] 渲染失败（上屏失败，sync={sync_interval}）：{e}");
+        }
     }
 
     /// 仅测试：取出 `present` 记录的 `sync_interval` 序列（转发到 `D3dBackend`）。
@@ -1144,14 +1153,14 @@ impl Window {
     }
 
     /// `render` 与 `render_with_sync` 的共同实现。
-    fn render_inner(&mut self, tree: &mut UiTree, sync_interval: u32) {
+    fn render_inner(&mut self, tree: &mut UiTree, sync_interval: u32) -> Result<(), String> {
         // **没有脏区就不清屏、不 Present**：保留上一帧。
         //
         // 之前每帧都 begin()+present()：`begin` 清空实例，`tree.render` 在脏区为空时
         // 直接返回，于是 Present 出一个"零实例"的空帧 → 屏幕变黑；
         // 下次输入产生脏区才画一帧，然后又被下一帧冲掉（表现为"闪一下又黑"）。
         if tree.dirty().is_empty() {
-            return;
+            return Ok(());
         }
         if let Some(soft) = self.soft.as_mut() {
             // 纯 CPU：先清整张缓冲，再强制整树重绘。
@@ -1163,10 +1172,10 @@ impl Window {
             let (w, h) = self.viewport;
             let _ = (w, h);
             gdi_present(self.hwnd, soft.pixels(), soft.width(), soft.height());
-            return;
+            return Ok(());
         }
         let Some(backend) = self.backend.as_mut() else {
-            return;
+            return Ok(());
         };
         // 必须在 tree.render 之前取脏区（render 会清空它）
         let dirty = tree.dirty();
@@ -1186,13 +1195,11 @@ impl Window {
         // `present` 内部会重新校验设备状态，失败时返回 HRESULT 而不是 UB。
         // 违反后果：若在窗口已销毁后 present，交换链仍持有失效的 HWND —— 表现为黑屏或 Present 失败。
         unsafe {
-            // **`present` 返回 `bool`（是否被遮挡），不是 `Result`** ——
-            // 因此**失败在这个返回值里不可表达**（D3D11 的错误靠设备状态）。
-            // 这是一个**遥测级欠口**：要真正上报"上屏失败"，需把
-            // `RenderBackend::present` 的返回类型改成 `Result<bool, String>`，
-            // 那会动两个后端 + 全部测试 —— 单独一轮，不在本轮硬改。
-            let _occluded = backend.present(self.hwnd, w, h, sync_interval);
+            // **上屏失败要传上去**（设备丢失且重建失败 = 这个窗口已无法正常渲染）。
+            // `Ok(visible)` 的 `false` 只表示"被遮挡"，**不是失败**，不应影响控制流。
+            let _visible = backend.present(self.hwnd, w, h, sync_interval)?;
         }
+        Ok(())
     }
 
     /// 回读当前后备缓冲（BGRA），供像素数学验证使用。
@@ -1916,7 +1923,9 @@ impl y901_backend_common::window::WindowBackend for Window {
 
         // 这里只生成 outcome；实际 skip 与 Present 在 `render_inner` 内。
         let had_dirty = !tree.dirty().is_empty();
-        self.render_inner(tree, 1);
+        // **上屏失败从这里向上传播**：`run_loop` 会收到 `Err` 并退出，
+        // 而不是在一个"永远没画出来"的窗口里无限循环。
+        self.render_inner(tree, 1)?;
         Ok(if had_dirty {
             RenderOutcome::Presented
         } else {

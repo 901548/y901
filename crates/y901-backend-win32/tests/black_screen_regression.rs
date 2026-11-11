@@ -161,9 +161,16 @@ fn window_render_has_dirty_guard() {
         body.find("tree.dirty().is_empty()").unwrap() < body.find("backend.begin()").unwrap(),
         "脏区检查必须在 begin() 之前"
     );
-    assert!(body.contains("return;"), "脏区为空时提前返回（不 Present）");
+    // `render_inner` 现在返 `Result<(), String>`：脏区为空时的提前返回形式是 `return Ok(())`。
+    // 断言意图不变（不 Present 就提前返回），只是跟随签名变化。
     assert!(
-        src.contains("self.render_inner(tree, 1);"),
+        body.contains("return Ok(())"),
+        "脏区为空时提前返回（不 Present）：应为 return Ok(())
+{body}"
+    );
+    // 两处都必须传 1：公开 `render`（打日志）与 `WindowBackend::render`（用 `?` 向上传播）。
+    assert!(
+        src.contains("self.render_inner(tree, 1)"),
         "Window::render 默认必须传 sync_interval = 1"
     );
 }
@@ -235,8 +242,8 @@ fn backend_render_reports_skipped_when_clean() {
         "outcome 必须基于调用前的脏区状态"
     );
     assert!(
-        body.contains("self.render_inner(tree, 1);"),
-        "skip 与 Present 必须在 render_inner 内完成"
+        body.contains("self.render_inner(tree, 1)?"),
+        "skip 与 Present 必须在 render_inner 内完成，且上屏失败要用 `?` 向上传播"
     );
     assert!(
         body.contains("RenderOutcome::Skipped") && body.contains("RenderOutcome::Presented"),

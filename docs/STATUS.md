@@ -500,3 +500,16 @@
   但 **crate 自身的 lib test 目标仍会编译 `src/` 里的 `#[link]` extern 块**。
   **只有 crate 级的 `#![cfg(windows)]` 才能让 lib 本身在 Linux 上消失。**
   以后验证 `cargo test --workspace` 时，**不要用 `--exclude` 绕过** —— 那只是掩盖问题。
+
+- **审计报告的事实前提需要核实**（present 签名改造的教训）：
+  审计第 1 批写"`RenderBackend::present` 返回 `bool`，失败无法表达"——
+  实际读代码后发现：**`RenderBackend::present` 本来就是 `Result<(), String>`**，
+  真正的缺口在**固有方法** `D3dBackend::present`（返回 `bool`，`false` 同时表示失败和被遮挡）。
+  **如果按审计字面意思去改 trait，会改错地方。**
+  **教训**：审计报告也是人写的，事实性描述（"X 返回 Y"）在动手前**必须用代码核实**。
+  特别是"改签名"这类动作，改错 trait 会影响所有实现和调用点。
+
+- **`Y901_SIMULATE_PRESENT_FAIL` 是 present 异常路径的测试开关**：
+  设置后 `D3dBackend::present` 立即返回 `Err`，用于验证 `render_inner` 的 `present?` 传播
+  （设备丢失 / 交换链失效的真实场景无法在测试中构造）。
+  开关在**任何 unsafe 操作之前**检查；与 `Y901_SIMULATE_RENDER_FAIL` 同构，`OnceLock` 缓存，零热路径成本。

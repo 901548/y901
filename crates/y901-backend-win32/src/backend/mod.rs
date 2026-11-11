@@ -272,18 +272,38 @@ impl D3dBackend {
     /// - 同线程调用。
     ///
     /// 违反会导致：重建路径用悬垂 HWND 创建交换链（未定义行为），
-    /// 或尺寸反复不一致造成资源重建风暴。设备丢失属于预期，返回 `false` 而非崩溃。
+    /// 或尺寸反复不一致造成资源重建风暴。
+    ///
+    /// 返回：
+    /// - `Ok(true)`  —— 成功上屏，**未被遮挡**；
+    /// - `Ok(false)` —— 成功上屏，**被遮挡**（`DXGI_STATUS_OCCLUDED`）；
+    /// - `Err(e)`    —— **上屏失败**（首次建设备失败 / 设备丢失后重建失败 / `Present` 返回错误）。
+    ///
+    /// 旧签名返 `bool`，**失败与"被遮挡"同为 `false`** —— 上层无法区分「屏幕没变」与「渲染已坏」。
     pub unsafe fn present(
         &mut self,
         hwnd: HWND,
         width: u32,
         height: u32,
         sync_interval: u32,
-    ) -> bool {
+    ) -> Result<bool, String> {
+        // **测试开关**：强制 present 失败，用于验证 `render_inner` 的 `present?` 传播路径
+        // （设备丢失 / 交换链失效的真实场景无法在测试中构造）。
+        //
+        // 位置：**在任何 unsafe 操作之前** —— 这样开关生效时
+        // 不会触碰任何未定义行为前提（本函数是 `unsafe fn`，但开关本身不需要 unsafe）。
+        // 与 `Y901_SIMULATE_RENDER_FAIL` 同构，`OnceLock` 缓存（零热路径成本）。
+        static SIMULATE_PRESENT_FAIL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *SIMULATE_PRESENT_FAIL
+            .get_or_init(|| std::env::var_os("Y901_SIMULATE_PRESENT_FAIL").is_some())
+        {
+            return Err("模拟 present 失败（Y901_SIMULATE_PRESENT_FAIL）".to_string());
+        }
+
         if self.gfx.is_empty() {
             if let Err(err) = self.gfx.rebuild(hwnd, width, height) {
-                eprintln!("[y901] rebuild failed: {err}");
-                return false;
+                // **首次建设备失败就是真失败**：没有后备路径，上层必须知道。
+                return Err(format!("初始化 D3D11 设备失败：{err}"));
             }
         }
 
@@ -306,8 +326,7 @@ impl D3dBackend {
         if Gfx::device_lost(hr) {
             eprintln!("[y901] device lost: 0x{:08X}, rebuilding", hr as u32);
             if let Err(err) = self.gfx.rebuild(hwnd, width, height) {
-                eprintln!("[y901] rebuild failed: {err}");
-                return false;
+                return Err(format!("设备丢失后重建失败：{err}"));
             }
             // 设备重建后纹理是空的：全量重传
             if let Err(err) =
@@ -322,10 +341,11 @@ impl D3dBackend {
         }
 
         if hr < 0 {
-            eprintln!("[y901] Present failed: 0x{:08X}", hr as u32);
-            return false;
+            // 设备丢失已在上面尝试重建；能到这里说明重建后仍失败。
+            return Err(format!("Present 失败：0x{:08X}", hr as u32));
         }
-        !Gfx::is_occluded(hr)
+        // `Ok(visible)`：`true` = 已上屏且未被遮挡；`false` = 已上屏但被遮挡（DXGI_STATUS_OCCLUDED）。
+        Ok(!Gfx::is_occluded(hr))
     }
     /// 返回至今为止记录的 `sync_interval` 序列（仅测试构建）。
     #[cfg(test)]
@@ -614,15 +634,11 @@ impl y901_runtime::gfx::RenderBackend for D3dBackend {
         }
         let (w, h) = self.size;
         // SAFETY: hwnd 与尺寸均由本结构保存，调用方保证窗口存活。
-        let ok = unsafe { D3dBackend::present(self, self.hwnd, w, h, 1) };
-        self.last_occluded = !ok;
-        if ok {
-            Ok(())
-        } else {
-            // false 可能表示"被遮挡"（非错误）或"设备丢失且重建失败"。
-            // 调用方用 `is_occluded()` 区分。
-            Err("present 未完成（遮挡或设备丢失，见 is_occluded）".to_string())
-        }
+        // 新签名：`Ok(visible)` = 上屏成功（`false` 仅表示被遮挡）；`Err` = 上屏失败。
+        let visible = unsafe { D3dBackend::present(self, self.hwnd, w, h, 1) }?;
+        // `last_occluded` 语义：**被遮挡**。`visible == false` 即被遮挡。
+        self.last_occluded = !visible;
+        Ok(())
     }
 
     fn is_occluded(&self) -> bool {
