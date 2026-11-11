@@ -402,3 +402,17 @@ let list = ListView::new("chat", 24.0)
 行**不再是子节点**：`children()` 为空，命中/标脏用 `row_rect`。
 代价是每行没有独立的语义节点；因此 `semantics()` 只报
 `rows/offset/first_visible/selected` 四个属性。若需逐行语义，用普通容器 + 子控件。
+
+## 已知差异：两后端 `cell_span` 的零宽字符处理（与 TextStyle.size 无关）
+
+- **soft**（`crates/y901-render/src/soft.rs`）：`text.chars().map(|c| self.text.cell_span(c).max(1))`
+  —— **每个字符至少占 1 列**。
+- **win32 D3D**（`crates/y901-backend-win32/src/backend/mod.rs`）：
+  `text.chars().map(|c| self.text.cell_span(c)).sum()` —— **不设下界**。
+
+**后果**：当文本含 **零宽字符 / 某些控制字符**（`cell_span` 返回 0）时，
+**两个后端算出的 `measure_text` 宽度可能不同** → 同一界面在 D3D 与软渲染下布局尺寸可能差几个像素。
+
+**状态**：**改动前既有**，与 `TextStyle.size` / `TextLabel::bold` 都无关；
+属**独立项**（修正方向：让两边都用同一个 `cell_span` 口径，并补一条
+零宽字符的对照测试）。**当前不影响任何测试与哈希基准**。
