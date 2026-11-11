@@ -119,7 +119,7 @@ pub struct Theme {
 
 impl Theme {
     /// 槽位数。新增角色必须落在这几个槽里，否则会被折叠到 panel。
-    pub const SLOTS: usize = 6;
+    pub const SLOTS: usize = 8;
 
     /// 把任意角色映射到槽位；未知角色落到 "panel"。
     pub const fn slot(role: Role) -> usize {
@@ -143,7 +143,9 @@ impl Theme {
             2 => "text_input",
             3 => "text",
             4 => "list",
-            _ => "scrollbar",
+            5 => "scrollbar",
+            6 => "list_item",
+            _ => "window",
         }
     }
 
@@ -166,7 +168,7 @@ impl Theme {
 
     /// 默认暗色主题。组件不得再硬编码颜色。
     pub const DARK: Theme = Theme {
-        slots: ["panel", "button", "text_input", "text", "list", "scrollbar"],
+        slots: ["panel", "button", "text_input", "text", "list", "scrollbar", "list_item", "window"],
         table: [
             // panel
             [
@@ -291,13 +293,59 @@ impl Theme {
                 Style::new(Color::TRANSPARENT, Color::rgba(0.22, 0.24, 0.30, 1.0)),
                 Style::new(Color::TRANSPARENT, Color::rgba(0.15, 0.16, 0.20, 1.0)),
             ],
+            // list_item —— A1：暂与 panel 同色（零视觉变化）
+            [
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.08, 0.08, 0.10, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.10, 0.10, 0.13, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.07, 0.07, 0.09, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.50, 0.52, 0.58, 1.0),
+                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                ),
+            ],
+            // window —— A1：暂与 panel 同色（零视觉变化）
+            [
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.08, 0.08, 0.10, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.10, 0.10, 0.13, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.07, 0.07, 0.09, 1.0),
+                ),
+                Style::new(
+                    Color::rgba(0.50, 0.52, 0.58, 1.0),
+                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                ),
+            ],
         ],
     };
 }
 
 /// 高对比主题：证明"换肤"是真的（组件不持有任何颜色）。
 pub const LIGHT: Theme = Theme {
-    slots: ["panel", "button", "text_input", "text", "list", "scrollbar"],
+    slots: ["panel", "button", "text_input", "text", "list", "scrollbar", "list_item", "window"],
     table: [
         [
             Style::new(
@@ -416,6 +464,52 @@ pub const LIGHT: Theme = Theme {
             Style::new(Color::TRANSPARENT, Color::rgba(0.80, 0.81, 0.85, 1.0)),
             Style::new(Color::TRANSPARENT, Color::rgba(0.88, 0.88, 0.90, 1.0)),
         ],
+        // list_item —— A1：暂与 panel 同色（零视觉变化）
+        [
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.96, 0.96, 0.97, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.94, 0.94, 0.96, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.92, 0.92, 0.94, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.95, 0.95, 0.96, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.45, 0.45, 0.48, 1.0),
+                Color::rgba(0.96, 0.96, 0.97, 1.0),
+            ),
+        ],
+        // window —— A1：暂与 panel 同色（零视觉变化）
+        [
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.96, 0.96, 0.97, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.94, 0.94, 0.96, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.92, 0.92, 0.94, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.95, 0.95, 0.96, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.45, 0.45, 0.48, 1.0),
+                Color::rgba(0.96, 0.96, 0.97, 1.0),
+            ),
+        ],
     ],
 };
 
@@ -455,6 +549,20 @@ mod tests {
         let a = Theme::DARK.style(custom, State::Normal);
         let b = Theme::DARK.style(Role::PANEL, State::Normal);
         assert_eq!(a, b);
+    }
+
+    /// **`LIST_ITEM` / `WINDOW` 必须各自命中独立槽位**（不再回退 panel）。
+    ///
+    /// 这条测试守护 A1 的成果：槽位一旦被误删/改名，这里会立刻红，
+    /// 而不是等到"菜单项 hover 看不见"才被发现。
+    #[test]
+    fn list_item_and_window_have_own_slots() {
+        assert_eq!(Theme::slot(Role::LIST_ITEM), 6, "LIST_ITEM 应命中槽位 6");
+        assert_eq!(Theme::slot(Role::WINDOW), 7, "WINDOW 应命中槽位 7");
+        // 回退行为不变：业务自定义角色仍落 panel。
+        assert_eq!(Theme::slot(Role("timeline")), 0, "未知角色仍回退 panel");
+        // 已有槽位的映射不能被新槽位打乱。
+        assert_eq!(Theme::slot(Role::SCROLLBAR), 5, "scrollbar 应仍在槽位 5");
     }
 
     #[test]
