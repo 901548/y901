@@ -9,6 +9,24 @@ use y901_ui::{
 
 /// 圆框直径。
 const DOT_BOX: f32 = 16.0;
+
+/// 圆框尺寸（逻辑像素 × DPI 缩放）。
+/// **为何是函数**：框与文字并排，字在 125% 下从 16→20px，
+/// 而 16px 的框会变得比字小 —— 对齐关系被破坏。
+/// `Radio` 没有 `&self` 公开几何 API（`row_h` / `row_rect` / `dot_rect` 均私有）→ **不加缓存**。
+fn dot_box(scale: f32) -> f32 {
+    DOT_BOX * scale
+}
+
+/// 框与文字的间距（逻辑像素 × DPI 缩放）。
+fn gap(scale: f32) -> f32 {
+    GAP * scale
+}
+
+/// 行间距（逻辑像素 × DPI 缩放）。
+fn row_gap(scale: f32) -> f32 {
+    ROW_GAP * scale
+}
 /// 圆框与文字的间距。
 const GAP: f32 = 8.0;
 /// 每一项的垂直间距。
@@ -61,25 +79,26 @@ impl RadioGroup {
         true
     }
 
-    /// 单行高度。
-    fn row_h(&self) -> f32 {
-        DOT_BOX + ROW_GAP
+    /// 单行高度（框尺寸 + 行间距，两者必须同源）。
+    fn row_h(&self, scale: f32) -> f32 {
+        dot_box(scale) + row_gap(scale)
     }
 
     /// 第 `i` 行的矩形。
-    fn row_rect(&self, i: usize) -> Rect {
+    fn row_rect(&self, i: usize, scale: f32) -> Rect {
         Rect::new(
             self.rect.x,
-            self.rect.y + i as f32 * self.row_h(),
+            self.rect.y + i as f32 * self.row_h(scale),
             self.rect.w.max(0.0),
-            DOT_BOX,
+            dot_box(scale),
         )
     }
 
     /// 第 `i` 行的圆框矩形。
-    fn dot_rect(&self, i: usize) -> Rect {
-        let r = self.row_rect(i);
-        Rect::new(r.x, r.y + (r.h - DOT_BOX) * 0.5, DOT_BOX, DOT_BOX)
+    fn dot_rect(&self, i: usize, scale: f32) -> Rect {
+        let d = dot_box(scale);
+        let r = self.row_rect(i, scale);
+        Rect::new(r.x, r.y + (r.h - d) * 0.5, d, d)
     }
 
     /// 画一个圆环（外圆填边框色，内圆填底色）。
@@ -125,9 +144,9 @@ impl Widget for RadioGroup {
         let style = TextStyle::default();
         let mut w: f32 = 0.0;
         for o in &self.options {
-            w = w.max(DOT_BOX + GAP + m.measure_text(o, &style).w);
+            w = w.max(dot_box(m.scale()) + gap(m.scale()) + m.measure_text(o, &style).w);
         }
-        let h = self.row_h() * self.options.len() as f32;
+        let h = self.row_h(m.scale()) * self.options.len() as f32;
         c.constrain(Size::new(w, h))
     }
 
@@ -151,7 +170,7 @@ impl Widget for RadioGroup {
                     return EventResult::Ignored;
                 }
                 ctx.request_focus(self.id.clone());
-                let row = ((pos.y - self.rect.y) / self.row_h()).floor();
+                let row = ((pos.y - self.rect.y) / self.row_h(ctx.scale())).floor();
                 if row >= 0.0 {
                     let i = row as usize;
                     if i < self.options.len() && self.select(i) {
@@ -207,7 +226,7 @@ impl Widget for RadioGroup {
         let style = TextStyle::fg(normal.fg);
 
         for i in 0..self.options.len() {
-            let dot = self.dot_rect(i);
+            let dot = self.dot_rect(i, ctx.scale());
             Self::draw_ring(ctx, dot, border, normal.bg, 2.0);
             if self.selected == Some(i) {
                 // 实心圆点：直径 8，居中
@@ -215,8 +234,8 @@ impl Widget for RadioGroup {
                 let c = Rect::new(dot.x + (dot.w - d) * 0.5, dot.y + (dot.h - d) * 0.5, d, d);
                 ctx.fill_round_rect(c, normal.fg, d * 0.5);
             }
-            let row = self.row_rect(i);
-            let tx = dot.right() + GAP;
+            let row = self.row_rect(i, ctx.scale());
+            let tx = dot.right() + gap(ctx.scale());
             let ty = row.y + (row.h - ctx.line_height(&style)) * 0.5;
             ctx.draw_text(Pos::new(tx, ty), &self.options[i], &style);
         }
