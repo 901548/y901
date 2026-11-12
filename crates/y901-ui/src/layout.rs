@@ -593,7 +593,18 @@ pub struct Flex {
     id: String,
     axis: Axis,
     padding: Edges,
+    /// **按 DPI 缩放的内边距基准值**；`None` = 用固定 `padding`。
+    ///
+    /// 与 `scaled_gap` 同理：`measure`/`arrange` 时才能拿到 `scale`，
+    /// **`None` 时行为与加该字段前逐像素一致**。
+    scaled_padding: Option<Edges>,
     gap: f32,
+    /// **按 DPI 缩放的间距基准值**；`None` = 用固定 `gap`。
+    ///
+    /// 由 `.gap_scaled(base)` 设置：实际间距 = `base × metrics.scale()`，
+    /// 在 `measure`/`arrange` 时求值（构造期拿不到 scale）。
+    /// **`None` 时行为与加该字段前逐像素一致**。
+    scaled_gap: Option<f32>,
     /// 交叉轴对齐（`align-items`）。默认 `Stretch` = 加该能力前的行为。
     align_items: Align,
     /// 主轴分布（`justify-content`）。默认 `Start` = 加该能力前的行为。
@@ -621,7 +632,9 @@ impl Flex {
             key,
             axis,
             padding: Edges::ZERO,
+            scaled_padding: None,
             gap: 0.0,
+            scaled_gap: None,
             align_items: Align::Stretch,
             justify_content: Justify::Start,
             background: None,
@@ -652,6 +665,44 @@ impl Flex {
     pub fn gap(mut self, gap: f32) -> Self {
         self.gap = gap;
         self
+    }
+
+    /// 设置**按 DPI 缩放的间距**：实际值 = `base × metrics.scale()`。
+    ///
+    /// 返回：自身。副作用：无。
+    /// 与 [`Flex::gap`] **互斥**：两者都设置时，**后设置者生效**（这里会清掉固定值）。
+    pub fn gap_scaled(mut self, base: f32) -> Self {
+        self.scaled_gap = Some(base);
+        self
+    }
+
+    /// 设置**按 DPI 缩放的内边距**：每一边实际值 = `base.边 × metrics.scale()`。
+    ///
+    /// 与 [`Flex::padding`] **互斥**：后设置者生效。
+    pub fn padding_scaled(mut self, base: Edges) -> Self {
+        self.scaled_padding = Some(base);
+        self
+    }
+
+    /// **实际内边距**：设过 `padding_scaled` 就逐边乘 scale，否则用固定 `padding`。
+    fn padding_for(&self, scale: f32) -> Edges {
+        match self.scaled_padding {
+            Some(base) => Edges {
+                left: base.left * scale,
+                top: base.top * scale,
+                right: base.right * scale,
+                bottom: base.bottom * scale,
+            },
+            None => self.padding,
+        }
+    }
+
+    /// **实际间距**：设过 `gap_scaled` 就按 scale 求值，否则用固定 `gap`。
+    fn gap_for(&self, scale: f32) -> f32 {
+        match self.scaled_gap {
+            Some(base) => base * scale,
+            None => self.gap,
+        }
     }
 
     /// 设置**交叉轴对齐**（`align-items`）。
@@ -727,8 +778,8 @@ impl Widget for Flex {
     ) -> Size {
         flex_measure_into(
             self.axis,
-            self.padding,
-            self.gap,
+            self.padding_for(metrics.scale()),
+            self.gap_for(metrics.scale()),
             &mut self.children,
             metrics,
             constraints,
@@ -741,8 +792,8 @@ impl Widget for Flex {
         self.rect = rect;
         flex_arrange_with(
             self.axis,
-            self.padding,
-            self.gap,
+            self.padding_for(metrics.scale()),
+            self.gap_for(metrics.scale()),
             self.align_items,
             self.justify_content,
             &mut self.children,
@@ -1089,5 +1140,107 @@ mod align_justify_tests {
         assert_eq!(rects[0].w, 30.0);
         assert_eq!(rects[1].w, 40.0);
         assert_eq!(rects[1].x, 30.0);
+    }
+}
+
+#[cfg(test)]
+mod gap_scaled_tests {
+    use super::*;
+    use crate::widget::Constraints;
+    use crate::{Size, TextStyle};
+
+    /// 按固定字号回报 `scale` 的 mock metrics（仅测试用）。
+    struct ScaledMetrics(f32);
+    impl TextMetrics for ScaledMetrics {
+        fn measure_text(&self, text: &str, _s: &TextStyle) -> Size {
+            Size::new(text.chars().count() as f32 * 8.0, 16.0)
+        }
+        fn line_height(&self, _s: &TextStyle) -> f32 {
+            16.0
+        }
+        fn scale(&self) -> f32 {
+            self.0
+        }
+    }
+
+    /// 固定尺寸的子控件（只用于断言 rect）。
+    struct Box1 {
+        id: &'static str,
+        size: Size,
+        rect: Rect,
+        item: FlexItem,
+    }
+    impl Box1 {
+        fn new(id: &'static str, w: f32, h: f32) -> Self {
+            Self { id, size: Size::new(w, h), rect: Rect::ZERO, item: FlexItem::default() }
+        }
+    }
+    impl Widget for Box1 {
+        fn id(&self) -> &str { self.id }
+        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
+            c.constrain(self.size)
+        }
+        fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
+            self.rect = rect;
+        }
+        fn rect(&self) -> Rect { self.rect }
+        fn flex(&self) -> FlexItem { self.item }
+        fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult { EventResult::Ignored }
+        fn children(&self) -> &[Box<dyn Widget>] { &[] }
+        fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
+        fn semantics(&self) -> Semantics { Semantics::default() }
+    }
+
+    fn layout_with(flex: &mut Flex, scale: f32) -> Vec<Rect> {
+        let mut cache = LayoutCache::new();
+        let m = ScaledMetrics(scale);
+        let _ = cache.measure(flex, &m, Constraints::tight(Size::new(200.0, 100.0)));
+        flex.arrange(Rect::from_size(Size::new(200.0, 100.0)), &m, &mut cache);
+        let mut out = Vec::new();
+        for c in flex.children_mut().unwrap_or(&mut Vec::new()).iter_mut() {
+            out.push(c.rect());
+        }
+        out
+    }
+
+    fn three_boxes(gap_fixed: Option<f32>, gap_scaled: Option<f32>) -> Flex {
+        let mut f = Flex::row("row");
+        if let Some(g) = gap_fixed {
+            f = f.gap(g);
+        }
+        if let Some(g) = gap_scaled {
+            f = f.gap_scaled(g);
+        }
+        f.push(Box::new(Box1::new("a", 20.0, 10.0)))
+            .push(Box::new(Box1::new("b", 20.0, 10.0)))
+            .push(Box::new(Box1::new("c", 20.0, 10.0)))
+    }
+
+    #[test]
+    fn gap_scaled_at_scale_one_equals_gap() {
+        let mut fixed = three_boxes(Some(8.0), None);
+        let mut scaled = three_boxes(None, Some(8.0));
+        let rf = layout_with(&mut fixed, 1.0);
+        let rs = layout_with(&mut scaled, 1.0);
+        assert_eq!(rf, rs, "scale=1.0 时 gap_scaled(8) 必须等价于 gap(8)");
+    }
+
+    #[test]
+    fn gap_scaled_follows_scale() {
+        let mut scaled = three_boxes(None, Some(8.0));
+        let rs = layout_with(&mut scaled, 1.25);
+        // 20 + (20*1.25=10) -> 第二个子项 x = 20 + 10 = 30
+        assert_eq!(rs[1].x, 30.0, "125% 下间距应为 8*1.25=10（而非 8）");
+        assert_eq!(rs[2].x, 60.0);
+    }
+
+    #[test]
+    fn padding_scaled_follows_scale() {
+        let mut f = Flex::column("col")
+            .padding_scaled(Edges::all(8.0))
+            .push(Box::new(Box1::new("a", 20.0, 10.0)));
+        let r = layout_with(&mut f, 1.25);
+        assert_eq!(r[0].x, 10.0, "左内边距应 8*1.25=10");
+        assert_eq!(r[0].y, 10.0, "上内边距应 8*1.25=10");
     }
 }
