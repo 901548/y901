@@ -463,6 +463,14 @@ fn is_fullscreen_window(hwnd: HWND) -> bool {
 /// `wndproc` 是自由函数，拿不到 `Options`；单窗口架构下一个标志就够。
 /// 若将来支持多窗口，改为从 `GWLP_USERDATA` 取实例指针。
 /// 全屏下按 Esc：`wndproc`（自由函数）置位，`wait_events`（`&mut self`）消费。
+/// **逻辑字号 × DPI 缩放 = 物理字号**（下限 1px）。
+///
+/// 抽成纯函数是为了可测：“运行期改字号丢 DPI 缩放”这个 bug 就是
+/// 启动路径乘、运行期路径不乘造成的。
+fn physical_font_size(logical: f32, dpi_scale: f32) -> f32 {
+    (logical * dpi_scale).max(1.0)
+}
+
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_NCCREATE => {
@@ -727,6 +735,12 @@ pub struct Window {
     base_font_size: f32,
     /// 字体族名（重建引擎时需要）。
     font_family: String,
+    /// **当前窗口的 DPI 缩放比**（物理 / 逻辑）。
+    ///
+    /// 为何要存：`set_font` 收**逻辑字号**、内部乘它得物理字号；
+    /// 否则“启动时乘、运行期改字号不乘”会让 125% 下的字号突然变小。
+    /// 由 `create_inner` 初始化，**仅 `WM_DPICHANGED` 处理中更新**。
+    dpi_scale: f32,
 }
 
 impl Window {
@@ -961,6 +975,7 @@ impl Window {
                 fullscreen: false,
                 base_font_size,
                 font_family,
+                dpi_scale,
             };
             // 此时窗口已以普通样式存在，`set_fullscreen` 能保存到真实原状态。
             if fullscreen {
@@ -1131,9 +1146,17 @@ impl Window {
     /// 返回：`Ok(())` 已切换；`Err` = 后端未就绪或字体加载失败（此时旧字体保持不变）。
     /// 副作用：图集将在下一帧整张重传；**重排需要调用方做**
     /// （cell 尺寸变了 → `mark_layout_dirty` + 重新 `layout`）。
+    /// **`font.size` 是逻辑字号**；本函数内部乘 `dpi_scale` 得物理字号后再交给后端。
+    ///
+    /// 为何放在这里而不是调用方：这是**唯一的字体切换入口**，
+    /// 放在这里才能保证“所有路径都乘一次、且只乘一次”。
     pub fn set_font(&mut self, font: &y901_runtime::FontConfig) -> Result<(), String> {
+        let physical = y901_runtime::FontConfig {
+            family: font.family.clone(),
+            size: physical_font_size(font.size, self.dpi_scale),
+        };
         match self.backend.as_mut() {
-            Some(b) => b.set_font(font),
+            Some(b) => b.set_font(&physical),
             None => Err("渲染后端尚未就绪".to_string()),
         }
     }
@@ -2059,9 +2082,12 @@ impl y901_backend_common::window::WindowBackend for Window {
         let pending_dpi = with_shared(self.hwnd, None, |s| s.pending_dpi.take());
         if let Some(dpi) = pending_dpi {
             let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+            // **先把新 scale 写进 Window**：`set_font` 内部要用它把逻辑字号换成物理字号。
+            self.dpi_scale = scale;
             let font = y901_runtime::FontConfig {
                 family: self.font_family.clone(),
-                size: (self.base_font_size * scale).max(1.0),
+                // 传**逻辑字号**（未乘 scale）—— `set_font` 会统一乘一次。
+                size: self.base_font_size,
             };
             match Window::set_font(self, &font) {
                 Ok(()) => {
@@ -2097,5 +2123,48 @@ impl y901_backend_common::window::WindowBackend for Window {
         if let Some((pixels, w, h)) = self.take_snapshot() {
             host.on_snapshot(&pixels, w, h);
         }
+    }
+}
+
+#[cfg(test)]
+mod physical_font_size_tests {
+    use super::physical_font_size;
+
+    /// **回归**：DPI=100% 时逻辑字号即物理字号。
+    #[test]
+    fn scale_one_is_identity() {
+        assert_eq!(physical_font_size(16.0, 1.0), 16.0);
+    }
+
+    /// **回归（本 bug 的核心）**：DPI=125%、逻辑 16 → 物理 **20**。
+    ///
+    /// 修复前：`after_frame` 里 `take_font_request` 分支把逻辑值直接交给 `set_font`
+    /// → 用户在设置里改字号后，125% 下字号会从 20px 掉回 16px（**变小 20%**）。
+    #[test]
+    fn scale_125_grows_size() {
+        assert_eq!(physical_font_size(16.0, 1.25), 20.0);
+    }
+
+    /// 极端缩放（200%）与下限 1px。
+    #[test]
+    fn scale_200_and_floor() {
+        assert_eq!(physical_font_size(13.0, 2.0), 26.0);
+        assert_eq!(physical_font_size(0.1, 1.25), 1.0, "物理字号不得小于 1px");
+    }
+
+    /// **双重缩放守卫**：DPI 从 1.0 变到 1.25 后，逻辑 16 必须只乘**一次**得 20。
+    ///
+    /// 若 `WM_DPICHANGED` 路径也自己乘一次（传物理值），而 `set_font` 内部又乘一次，
+    /// 结果会是 `16 × 1.25 × 1.25 = 25` —— 这条断言就是那个 bug 的探测器。
+    #[test]
+    fn dpi_change_does_not_double_scale() {
+        let logical = 16.0_f32;
+        let new_scale = 1.25_f32;
+        let physical = physical_font_size(logical, new_scale);
+        assert_eq!(physical, 20.0, "只乘一次：16 × 1.25 = 20");
+        assert_ne!(
+            physical, 25.0,
+            "16 × 1.25 × 1.25 = 25 说明发生了双重缩放（调用方与 set_font 各乘了一次）"
+        );
     }
 }
