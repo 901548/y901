@@ -294,28 +294,31 @@ impl Theme {
                 Style::new(Color::TRANSPARENT, Color::rgba(0.15, 0.16, 0.20, 1.0)),
             ],
             // list_item —— A1：暂与 panel 同色（零视觉变化）
+            // list_item —— A2a：逐字复制 list 槽位（列表项的 hover/selected 本就是项语义）
             [
                 Style::new(
-                    Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                    Color::rgba(0.86, 0.88, 0.92, 1.0),
+                    Color::rgba(0.06, 0.06, 0.08, 1.0),
                 ),
                 Style::new(
-                    Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.08, 0.08, 0.10, 1.0),
+                    Color::rgba(0.90, 0.93, 0.98, 1.0),
+                    Color::rgba(0.12, 0.14, 0.18, 1.0),
                 ),
                 Style::new(
-                    Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.10, 0.10, 0.13, 1.0),
+                    Color::rgba(1.0, 1.0, 1.0, 1.0),
+                    Color::rgba(0.16, 0.20, 0.28, 1.0),
                 ),
                 Style::new(
-                    Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.07, 0.07, 0.09, 1.0),
+                    Color::rgba(1.0, 1.0, 1.0, 1.0),
+                    Color::rgba(0.10, 0.12, 0.16, 1.0),
                 ),
                 Style::new(
                     Color::rgba(0.50, 0.52, 0.58, 1.0),
-                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                    Color::rgba(0.06, 0.06, 0.08, 1.0),
                 ),
             ],
+            // window —— A1：暂与 panel 同色（零视觉变化）
+            // window —— A2b：窗口底色（比 panel 深一档）
             // window —— A1：暂与 panel 同色（零视觉变化）
             [
                 Style::new(
@@ -465,28 +468,31 @@ pub const LIGHT: Theme = Theme {
             Style::new(Color::TRANSPARENT, Color::rgba(0.88, 0.88, 0.90, 1.0)),
         ],
         // list_item —— A1：暂与 panel 同色（零视觉变化）
+        // list_item —— A2a：逐字复制 list 槽位（列表项的 hover/selected 本就是项语义）
         [
             Style::new(
-                Color::rgba(0.10, 0.10, 0.12, 1.0),
-                Color::rgba(0.96, 0.96, 0.97, 1.0),
-            ),
-            Style::new(
-                Color::rgba(0.10, 0.10, 0.12, 1.0),
-                Color::rgba(0.94, 0.94, 0.96, 1.0),
-            ),
-            Style::new(
-                Color::rgba(0.10, 0.10, 0.12, 1.0),
-                Color::rgba(0.92, 0.92, 0.94, 1.0),
-            ),
-            Style::new(
-                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.16, 0.16, 0.18, 1.0),
                 Color::rgba(0.95, 0.95, 0.96, 1.0),
             ),
             Style::new(
-                Color::rgba(0.45, 0.45, 0.48, 1.0),
-                Color::rgba(0.96, 0.96, 0.97, 1.0),
+                Color::rgba(0.16, 0.16, 0.18, 1.0),
+                Color::rgba(0.88, 0.90, 0.95, 1.0),
+            ),
+            Style::new(
+                Color::rgba(1.0, 1.0, 1.0, 1.0),
+                Color::rgba(0.72, 0.80, 0.95, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.05, 0.05, 0.08, 1.0),
+                Color::rgba(0.97, 0.97, 0.99, 1.0),
+            ),
+            Style::new(
+                Color::rgba(0.60, 0.60, 0.62, 1.0),
+                Color::rgba(0.95, 0.95, 0.96, 1.0),
             ),
         ],
+        // window —— A1：暂与 panel 同色（零视觉变化）
+        // window —— A2b：窗口底色（比 panel 亮一档）
         // window —— A1：暂与 panel 同色（零视觉变化）
         [
             Style::new(
@@ -563,6 +569,19 @@ mod tests {
         assert_eq!(Theme::slot(Role("timeline")), 0, "未知角色仍回退 panel");
         // 已有槽位的映射不能被新槽位打乱。
         assert_eq!(Theme::slot(Role::SCROLLBAR), 5, "scrollbar 应仍在槽位 5");
+    }
+
+    /// **列表项 hover 必须与面板 hover 不同** —— 否则菜单/下拉的 hover 高亮看不见。
+    ///
+    /// 只断言"不等于"，不锁死具体数值（配色可调）。
+    #[test]
+    fn list_item_differs_from_panel_on_hover() {
+        let item = Theme::DARK.style(Role::LIST_ITEM, State::Hovered).bg;
+        let panel = Theme::DARK.style(Role::PANEL, State::Hovered).bg;
+        assert_ne!(
+            item, panel,
+            "列表项 hover 必须与面板 hover 不同，否则菜单 hover 看不见"
+        );
     }
 
     #[test]
