@@ -894,6 +894,14 @@ pub struct EventCtx {
     pub popup_requests: Vec<PopupRequest>,
     /// 请求关闭的浮层 id（分发结束后由树执行）。
     pub close_popup_requests: Vec<String>,
+    /// **DPI 缩放**（96 = 100%）。
+    ///
+    /// 为何要在事件里有它：命中测试必须与绘制用**同一个**尺寸。
+    /// 在 125% DPI 下，菜单项高 26×1.25=32.5px；若命中还按 26px 算，
+    /// 就会出现"点得到但画在别处"。
+    ///
+    /// 由 `UiTree` 在 `layout()` 时从 `metrics.scale()` 写入，分发前拷贝到每个 ctx。
+    pub scale: f32,
 }
 
 impl EventCtx {
@@ -916,6 +924,8 @@ impl EventCtx {
             ime_candidate: None,
             popup_requests: Vec::new(),
             close_popup_requests: Vec::new(),
+            // 默认 1.0：测试与非布局路径行为不变；真实值由 `UiTree` 在 `layout()` 后写入。
+            scale: 1.0,
         }
     }
 
@@ -948,6 +958,14 @@ impl EventCtx {
     /// 释放指针捕获。
     pub fn release_pointer_capture(&mut self) {
         self.pointer_capture = Some(crate::event::PointerCapture::Release);
+    }
+
+    /// **当前 DPI 缩放**（96 = 100%）。
+    ///
+    /// 用途：命中测试里计算"随 scale 变化的尺寸"（如菜单项高、标签栏高），
+    /// 保证与 `render` 用的 `ctx.scale()`（同一 trait 方法）**一致**。
+    pub fn scale(&self) -> f32 {
+        self.scale
     }
 
     /// 当前是否处于目标阶段。
@@ -1550,5 +1568,25 @@ pub trait Widget {
     /// 这是"未布局不绘制"的机制保证。
     fn needs_paint(&self, dirty: &crate::tree::DirtyRegion) -> bool {
         self.always_paints() || dirty.intersects(self.rect())
+    }
+}
+
+#[cfg(test)]
+mod event_ctx_scale_tests {
+    use super::*;
+
+    /// **`EventCtx::new` 默认 `scale = 1.0`**（测试与非布局路径行为不变）。
+    #[test]
+    fn event_ctx_scale_defaults_to_one() {
+        let ctx = EventCtx::new(None, Size::new(100.0, 100.0));
+        assert_eq!(ctx.scale(), 1.0, "默认 scale 必须是 1.0，否则现有测试会变尺寸");
+    }
+
+    /// **`scale` 可被 `UiTree` 写入并读回**（命中测试依赖它与绘制同源）。
+    #[test]
+    fn event_ctx_scale_is_settable() {
+        let mut ctx = EventCtx::new(None, Size::new(100.0, 100.0));
+        ctx.scale = 1.25;
+        assert_eq!(ctx.scale(), 1.25);
     }
 }

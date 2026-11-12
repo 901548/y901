@@ -228,6 +228,11 @@ impl Popup {
 pub struct UiTree {
     /// 待释放的纹理（卸载时收集，下一帧渲染时交给后端）。
     pending_texture_releases: Vec<crate::image::TextureId>,
+    /// **DPI 缩放**（最近一次 `layout()` 从 `metrics.scale()` 取）。
+    ///
+    /// 为何要存：事件分发（`event` / `send_focus`）拿不到 `metrics`，
+    /// 但命中测试需要与绘制同一个尺寸。存在这里后拷贝进 `EventCtx`。
+    scale: f32,
     /// 活动中的动画（key → 动画）。**同 key 重新设置即打断旧动画**。
     animations: Vec<ActiveAnim>,
     root: Box<dyn Widget>,
@@ -418,6 +423,7 @@ impl UiTree {
         let mut this = Self {
             animations: Vec::new(),
             pending_texture_releases: Vec::new(),
+            scale: 1.0,
             root,
             popups: Vec::new(),
             focus: None,
@@ -907,6 +913,7 @@ impl UiTree {
         };
         let viewport = self.viewport;
         let mut ctx = EventCtx::new(self.focus.clone(), viewport);
+        ctx.scale = self.scale;
         ctx.target = id.to_string();
 
         let _ = dispatch_rec(
@@ -1512,6 +1519,8 @@ impl UiTree {
     /// 约束与所有节点的 `layout_version` 都没变时，这次调用是 O(1)：
     /// 直接返回，不进入任何 `measure`。
     pub fn layout(&mut self, viewport: Size, metrics: &dyn TextMetrics) {
+        // **DPI 缩放源头**：事件分发时拿不到 `metrics`，所以在这里存下。
+        self.scale = metrics.scale();
         // 响应式：Signal 变过的节点先标脏，再进布局
         self.drain_invalidation();
         // Signal 与 dispatch 触及的节点在此统一比对语义面（方案 1'，一帧一次）
@@ -2064,6 +2073,7 @@ impl UiTree {
                     Some(id) => {
                         let viewport = self.viewport;
                         let mut ctx = EventCtx::new(self.focus.clone(), viewport);
+        ctx.scale = self.scale;
                         ctx.phase = EventPhase::Target;
                         ctx.target = id.clone();
                         let result = match self.popups.iter_mut().find(|p| p.id == id) {
@@ -2295,6 +2305,7 @@ impl UiTree {
     fn dispatch_path(&mut self, path: &[usize], event: &UiEvent) -> EventResult {
         let viewport = self.viewport;
         let mut ctx = EventCtx::new(self.focus.clone(), viewport);
+        ctx.scale = self.scale;
         if let Some(node) = self.node_at_ref(path) {
             ctx.target = node.id().to_string();
         }
@@ -2308,6 +2319,7 @@ impl UiTree {
         // 注意：空路径是合法的 —— 它表示根节点本身。
         let viewport = self.viewport;
         let mut ctx = EventCtx::new(self.focus.clone(), viewport);
+        ctx.scale = self.scale;
         ctx.phase = EventPhase::Target;
         if let Some(node) = self.node_at_ref(path) {
             ctx.target = node.id().to_string();
@@ -2402,6 +2414,7 @@ impl UiTree {
     fn dispatch_broadcast(&mut self, event: &UiEvent) -> EventResult {
         let viewport = self.viewport;
         let mut ctx = EventCtx::new(self.focus.clone(), viewport);
+        ctx.scale = self.scale;
         ctx.phase = EventPhase::Target;
         let mut acc = EventResult::Ignored;
         let mut rects = std::mem::take(&mut self.broadcast_rects);
