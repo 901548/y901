@@ -466,3 +466,13 @@ let list = ListView::new("chat", 24.0)
 - **重要：Helm 主路径是 D3D** —— 用户当前看到的行为**与改动前一致**（D3D 不支持字号），
   **这不是回归**，而是"能力先落软渲染侧"。
 - **待做**：D3D 中改 `TextEngine`（缓存 key 加字号 + `glyph_run_analysis` 接受 size + 覆写 `glyph_at_size`）+ `backend/mod.rs::draw_text` 同源分支。
+
+#### 技术债：`push_glyph_sized` 的 `#[allow(clippy::too_many_arguments)]`
+
+- `backend/mod.rs` 的 `push_glyph_sized` 有 **9 个参数**（`x, y, span, ch, color, bold, px, ascent, cell_w`），
+  因此加了 `#[allow(clippy::too_many_arguments)]`。
+- **这是风格 lint，不是正确性问题**：不影响编译、不影响行为、不影响 hash 基准。
+- **为何不拆**：拆成 `GlyphRenderContext { px, ascent, cell_w, span, bold }` 会动到
+  调用点与旧路径的对比可读性；且该方法只有一个调用点（`draw_text_sized`）。
+- **后续建议**：若之后还要加参数（如 letter_spacing / 9 号以上），再打包为 struct。
+  **当前不阻塞功能，记录为技术债。**

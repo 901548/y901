@@ -539,6 +539,9 @@ impl FontEngine for TextEngine {
     fn glyph(&mut self, ch: char) -> Option<&GlyphInfo> {
         TextEngine::glyph(self, ch)
     }
+    fn glyph_at_size(&mut self, ch: char, px: f32) -> Option<&GlyphInfo> {
+        TextEngine::glyph_at_size(self, ch, px)
+    }
     fn cell_span(&self, ch: char) -> u32 {
         TextEngine::cell_span(self, ch)
     }
@@ -566,6 +569,16 @@ impl FontEngine for TextEngine {
 }
 
 /// DirectWrite 字形引擎（Windows 原生实现）。与自研 `MyFontEngine` 实现同一个 `FontEngine`，两者可互换而上层一行不改。
+/// 字号归一为整数 key（避开 f32 精度差异）。
+fn px_key(px: f32) -> u32 {
+    if px.is_finite() && px > 0.0 {
+        px.round().max(1.0) as u32
+    } else {
+        1
+    }
+}
+
+/// DirectWrite 字形引擎结构（字体面 + 图集 + 字形缓存）。
 pub struct TextEngine {
     factory: Factory,
     face: FontFace,
@@ -594,7 +607,9 @@ pub struct TextEngine {
     /// 等宽单元格高度。
     pub cell_height: f32,
 
-    cache: HashMap<char, GlyphInfo>,
+    /// `(char, px)` → 字形。**px 是字号**：同一个字在不同字号下是不同位图，
+    /// 必须分开存。默认字号用 `px_key(self.font_size)`，与加该维度前行为一致。
+    cache: HashMap<(char, u32), GlyphInfo>,
     dirty: Vec<DirtyRect>,
     reset_pending: bool,
     /// 当前帧号（LRU 用）。
@@ -700,13 +715,19 @@ impl TextEngine {
 
     /// 取字形；未缓存则光栅化并写入图集。
     pub fn glyph(&mut self, ch: char) -> Option<&GlyphInfo> {
-        if !self.cache.contains_key(&ch) {
+        self.glyph_at(ch, self.font_size)
+    }
+
+    /// **按字号取字形**（内部入口，按 px 分开缓存与光栅化）。
+    fn glyph_at(&mut self, ch: char, px: f32) -> Option<&GlyphInfo> {
+        let k = px_key(px).max(1);
+        if !self.cache.contains_key(&(ch, k)) {
             // SAFETY：`rasterize` 的前提是字形轮廓已展平且图集已初始化，
             // 两者在此均成立（调用点处于字形缓存缺失分支，图集已在 `Factory::new` 里建好）。
             // 违反后果：未展平的曲线点会让扫描线算法读到无效数据 —— 越界或得到错误覆盖率（画面污点）。
-            match unsafe { self.rasterize(ch) } {
+            match unsafe { self.rasterize(ch, k as f32) } {
                 Ok(info) => {
-                    self.cache.insert(ch, info);
+                    self.cache.insert((ch, k), info);
                 }
                 Err(err) => {
                     eprintln!("[y901] rasterize {:?} failed: {err}", ch);
@@ -714,7 +735,17 @@ impl TextEngine {
                 }
             }
         }
-        self.cache.get(&ch)
+        self.cache.get(&(ch, k))
+    }
+
+    /// **按字号取字形**（公开入口）。
+    ///
+    /// **默认字号直接委托 `glyph()`** —— 与加该能力前**逐像素一致**。
+    pub fn glyph_at_size(&mut self, ch: char, px: f32) -> Option<&GlyphInfo> {
+        if px_key(px) == px_key(self.font_size) {
+            return self.glyph(ch);
+        }
+        self.glyph_at(ch, px)
     }
 
     /// 字符占用的格数：**直接来自 `y901_core::width_of_char`（唯一来源）**。
@@ -755,7 +786,7 @@ impl TextEngine {
     /// 内部编排：`ch` 的轮廓必须已由 flatten 展开为**合法的点序列**（曲线已离散化），
     /// 且本引擎的图集/字形缓存已完成初始化。
     /// 违反后果：未展平的曲线点会让扫描线算法读到无效数据 —— 越界或产生错误的覆盖率（画面污点）。
-    unsafe fn rasterize(&mut self, ch: char) -> Result<GlyphInfo, String> {
+    unsafe fn rasterize(&mut self, ch: char, px: f32) -> Result<GlyphInfo, String> {
         // **不要用 `encode_utf16()[0]`**：非 BMP 字符（emoji 等）会得到代理项，
         // 查不到字形；DWrite 的 GetGlyphIndices 本来就要 32 位码点。
         let mut glyph = self.face.glyph_index(ch as u32)?;
@@ -775,11 +806,12 @@ impl TextEngine {
         }
 
         let design = self.face.design_metrics(glyph);
-        let advance = design.advance_width as f32 * self.font_size / self.units_per_em;
+        // **字号由调用方传入**（不再用构造期 `self.font_size`）。
+        let advance = design.advance_width as f32 * px / self.units_per_em;
 
         let run = GlyphRun {
             font_face: self.face.as_ptr(),
-            font_em_size: self.font_size,
+            font_em_size: px,
             glyph_count: 1,
             glyph_indices: &glyph,
             glyph_advances: &advance,
@@ -923,14 +955,15 @@ impl TextEngine {
         while self.atlas_occupancy() > target && !self.cache.is_empty() && guard < 100_000 {
             guard += 1;
             // 最久未使用的那个（frame 最小）
+            // key 现在是 `(char, px)`：**直接按完整 key 删**（不能只按 char）。
             let victim = self
                 .cache
                 .iter()
                 .min_by_key(|(_, g)| g.last_used)
                 .map(|(k, _)| *k);
             match victim {
-                Some(ch) => {
-                    self.cache.remove(&ch);
+                Some(key) => {
+                    self.cache.remove(&key);
                 }
                 None => break,
             }
@@ -948,14 +981,14 @@ impl TextEngine {
 
         // 快照旧像素（搬移期间要读旧位置）
         let snapshot = self.atlas.clone();
-        let mut entries: Vec<(char, GlyphInfo)> =
+        let mut entries: Vec<((char, u32), GlyphInfo)> =
             self.cache.iter().map(|(k, v)| (*k, v.clone())).collect();
         entries.sort_by_key(|(_, g)| (g.atlas_y, g.atlas_x));
 
         self.atlas.fill(0);
         self.packer.reset();
 
-        for (ch, mut info) in entries {
+        for (key, mut info) in entries {
             let Some((x, y)) = self
                 .packer
                 .insert(info.width + PADDING, info.height + PADDING)
@@ -970,7 +1003,7 @@ impl TextEngine {
             }
             info.atlas_x = x;
             info.atlas_y = y;
-            self.cache.insert(ch, info);
+            self.cache.insert(key, info);
         }
 
         self.dirty.clear();

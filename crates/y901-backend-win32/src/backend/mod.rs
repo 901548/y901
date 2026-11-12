@@ -460,6 +460,111 @@ impl D3dBackend {
         self.state.current_scale()
     }
 
+    /// **按字号绘制文本**（per-text 字号，与 soft 的 `draw_text_sized` 同构）。
+    ///
+    /// `px_final = px * current_scale()`；cell 用 `cell_metrics_for(px_final)`（与度量同源）；
+    /// 字形用 `glyph_at_size(ch, px_final)` 并 **1:1 绘制**（不走 mip 选级，避免双重缩放）。
+    fn draw_text_sized(&mut self, origin: Pos, text: &str, style: &TextStyle, px: f32) -> f32 {
+        let px_final = (px * self.current_scale()).max(1.0);
+        let (cell_w, cell_h) = y901_render::cell_metrics_for(px_final);
+        // 基线比例 = ascent / cell_h（字体属性，不随字号变），与 soft 同式
+        let base_ascent = self.text.ascent();
+        let base_cell_h = self.cell.h;
+        let ascent_ratio = if base_cell_h > 0.0 { base_ascent / base_cell_h } else { 0.8 };
+        let ascent = cell_h * ascent_ratio;
+
+        let mut pen_x = origin.x;
+        let start = pen_x;
+        for ch in text.chars() {
+            let span = self.text.cell_span(ch).max(1) as f32;
+            if style.bg.a > 0.0 {
+                self.fill_rect(Rect::new(pen_x, origin.y, span * cell_w, cell_h), style.bg);
+            }
+            if ch != ' ' {
+                self.push_glyph_sized(pen_x, origin.y, span, ch, style.fg, style.bold, px_final, ascent, cell_w);
+            }
+            if style.underline {
+                self.fill_rect(
+                    Rect::new(pen_x, origin.y + cell_h - 2.0, span * cell_w, 1.0),
+                    style.fg,
+                );
+            }
+            pen_x += span * cell_w;
+        }
+        pen_x - start
+    }
+
+    /// 按字号推入一个字形四边形（1:1，不做 mip 缩放）。
+    ///
+    /// 为何不改 `push_glyph` 加参数：那会让旧路径的每个调用点都要传
+    /// `None + ascent + cell_w`，**旧路径变得难以对比 diff**。新增方法让旧路径**一字未动**。
+    #[allow(clippy::too_many_arguments)]
+    fn push_glyph_sized(
+        &mut self,
+        x: f32,
+        y: f32,
+        span: f32,
+        ch: char,
+        color: Color,
+        bold: bool,
+        px: f32,
+        ascent: f32,
+        cell_w: f32,
+    ) {
+        let atlas_size = self.text.atlas_size() as f32;
+        // 先取字形属性（避开 `&mut self.text` 与 `self.map_pos` 的借用冲突）
+        let picked = match self.text.glyph_at_size(ch, px) {
+            Some(g) if g.width > 0 && g.height > 0 => Some((
+                g.width,
+                g.height,
+                g.bearing_x,
+                g.bearing_y,
+                g.atlas_x,
+                g.atlas_y,
+                g.advance,
+            )),
+            _ => None,
+        };
+        let Some((gw, gh, gbx, gby, gax, gay, gadv)) = picked else {
+            return;
+        };
+
+        let offset_x = glyph_offset(span, cell_w, gadv);
+        let pos = self.map_pos(Pos::new(x + offset_x + gbx as f32, y + ascent + gby as f32));
+        // **不调 `map_size`**：字号已按 `px * scale` 光栅化，再乘一次就是双重缩放。
+        let size = [gw as f32, gh as f32];
+        let uv = [
+            gax as f32 / atlas_size,
+            gay as f32 / atlas_size,
+            (gax + gw) as f32 / atlas_size,
+            (gay + gh) as f32 / atlas_size,
+        ];
+        let rgba = [color.r, color.g, color.b, color.a];
+
+        let Some(clip) = self.state.current_clip() else {
+            return;
+        };
+        let Some(quad) = clip_quad(pos, size, uv, clip) else {
+            return;
+        };
+        self.push_instance(Instance {
+            pos: [quad.pos.x, quad.pos.y],
+            size: quad.size,
+            uv_rect: quad.uv,
+            color: rgba,
+            ..Default::default()
+        });
+        if bold {
+            self.push_instance(Instance {
+                pos: [quad.pos.x + 1.0, quad.pos.y],
+                size: quad.size,
+                uv_rect: quad.uv,
+                color: rgba,
+                ..Default::default()
+            });
+        }
+    }
+
     fn push_glyph(&mut self, x: f32, y: f32, span: f32, ch: char, color: Color, bold: bool) {
         let atlas_size = self.text.atlas_size() as f32;
         let ascent = self.text.ascent();
@@ -960,6 +1065,12 @@ impl RenderCtx for D3dBackend {
     }
 
     fn draw_text(&mut self, origin: Pos, text: &str, style: &TextStyle) -> f32 {
+        // **per-text 字号路径**：与 soft 同构。`size: None` 走下面的**原路径**（逐字未动）。
+        if let Some(px) = style.size {
+            if px.is_finite() && px > 0.0 {
+                return self.draw_text_sized(origin, text, style, px);
+            }
+        }
         let mut pen_x = origin.x;
         for ch in text.chars() {
             let span = self.text.cell_span(ch).max(1) as f32;
