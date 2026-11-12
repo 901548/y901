@@ -8,10 +8,17 @@ use y901_ui::{
     Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
-/// 菜单项高度。
-const ITEM_H: f32 = 26.0;
-/// 菜单面板内边距。
-const PAD: f32 = 6.0;
+/// 菜单项高度（逻辑像素 × DPI 缩放）。
+///
+/// **为何是函数而非常量**：125% DPI 下正文字从 16→20px，
+/// 而 `26.0` 的行高只剩 6px 余量 —— **字会顶边**。
+fn item_h(scale: f32) -> f32 {
+    26.0 * scale
+}
+/// 菜单面板内边距（逻辑像素 × DPI 缩放）。
+fn pad(scale: f32) -> f32 {
+    6.0 * scale
+}
 
 /// 选中回调类型。
 type SelectCallback = Box<dyn Fn(usize, &str)>;
@@ -29,6 +36,14 @@ pub struct Menu {
     panel: Rect,
     hover: Option<usize>,
     highlighted: usize,
+    /// **DPI 缩放缓存**，唯一写入点是 `arrange`（`m.scale()`）。
+    ///
+    /// **唯一消费者是 [`Menu::item_rect_at`]** —— 它是 `&self` 公开方法，
+    /// 拿不到 `ctx` / `metrics`，而返回的矩形必须与命中/绘制一致。
+    ///
+    /// **`event` / `render` 不读也不写它** —— 它们直接用 `ctx.scale()`，
+    /// 不经过任何缓存（避免"何时写、何时过期"的隐式状态）。
+    cached_scale: f32,
     item: FlexItem,
     /// 选中回调（与 `action` 并存：前者给应用层，后者给构造者）。
     on_select: Option<SelectCallback>,
@@ -49,6 +64,7 @@ impl Menu {
             panel: Rect::ZERO,
             hover: None,
             highlighted: 0,
+            cached_scale: 1.0,
             item: FlexItem::default(),
             on_select: None,
         }
@@ -89,7 +105,9 @@ impl Menu {
         if i >= self.items.len() {
             return None;
         }
-        Some(self.item_rect(i))
+        // **这里只能读缓存**：`&self` 公开方法拿不到 `ctx`，也拿不到 `metrics`。
+        // 缓存的唯一作用就是让这个 API 与命中/绘制保持同一个 scale。
+        Some(self.item_rect(i, self.cached_scale))
     }
 
     /// 确认选中第 `i` 项：先回调、再发命令、最后关闭自己与它所在的浮层。
@@ -145,12 +163,18 @@ impl Menu {
         self.panel
     }
 
-    fn item_rect(&self, index: usize) -> Rect {
+    /// 第 `index` 项的屏幕矩形。
+    ///
+    /// `scale` 由调用方传入：`arrange` 传 `metrics.scale()`、
+    /// `event` / `render` 传 `ctx.scale()`、公开 API 由调用方自己给。
+    /// **不存缓存字段** —— 它会引入"何时写、何时读、何时过期"的隐式状态。
+    fn item_rect(&self, index: usize, scale: f32) -> Rect {
+        let h = item_h(scale);
         Rect::new(
             self.panel.x,
-            self.panel.y + PAD + index as f32 * ITEM_H,
+            self.panel.y + pad(scale) + index as f32 * h,
             self.panel.w,
-            ITEM_H,
+            h,
         )
     }
 }
@@ -189,12 +213,16 @@ impl Widget for Menu {
     fn arrange(
         &mut self,
         rect: Rect,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
-        let w = 220.0_f32.min((rect.w - 16.0).max(0.0));
-        let h = PAD * 2.0 + self.items.len() as f32 * ITEM_H;
+        // 面板尺寸随 DPI 缩放：arrange 自己有 `metrics`，直接用 `m.scale()`。
+        let scale = m.scale();
+        // **唯一写入点**：供 `item_rect_at`（公开 `&self` API）使用。
+        self.cached_scale = scale;
+        let w = (220.0 * scale).min((rect.w - 16.0 * scale).max(0.0));
+        let h = pad(scale) * 2.0 + self.items.len() as f32 * item_h(scale);
         // 用统一的弹层摆放：下方放不下向上翻转，右侧放不下向左平移，
         // 且不会超出父区域（命中矩形与绘制矩形都派生自 `panel`，天然同步）。
         let anchor = Rect::new(rect.x + 16.0, rect.y + 16.0, 0.0, 0.0);
@@ -226,7 +254,10 @@ impl Widget for Menu {
                 EventResult::Relayout
             }
             UiEvent::MouseMove { pos } => {
-                let hover = (0..self.items.len()).find(|i| self.item_rect(*i).contains(*pos));
+                // 命中与绘制都用 `ctx.scale()`（同一 trait 方法，同一后端实例）。
+                let scale = ctx.scale();
+                let hover =
+                    (0..self.items.len()).find(|i| self.item_rect(*i, scale).contains(*pos));
                 if hover != self.hover {
                     self.hover = hover;
                     EventResult::Redraw
@@ -235,9 +266,10 @@ impl Widget for Menu {
                 }
             }
             UiEvent::MouseDown { pos, .. } => {
+                let scale = ctx.scale();
                 if self.panel.contains(*pos) {
                     if let Some(i) =
-                        (0..self.items.len()).find(|i| self.item_rect(*i).contains(*pos))
+                        (0..self.items.len()).find(|i| self.item_rect(*i, scale).contains(*pos))
                     {
                         self.commit_selection(ctx, i);
                     }
@@ -296,7 +328,7 @@ impl Widget for Menu {
         ctx.stroke_rect(self.panel, y901_ui::Color::rgba(0.35, 0.38, 0.45, 1.0), 1.0);
 
         for (i, label) in self.items.iter().enumerate() {
-            let r = self.item_rect(i);
+            let r = self.item_rect(i, ctx.scale());
             if self.hover == Some(i) || self.highlighted == i {
                 let hover = ctx.theme().style(Role::LIST_ITEM, State::Hovered);
                 ctx.fill_rect(r, hover.bg);
