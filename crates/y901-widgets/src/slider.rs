@@ -35,6 +35,30 @@ const STEP: f32 = 0.05;
 #[allow(dead_code)]
 const HIT_R: f32 = THUMB * 0.5 + 2.0;
 
+// ===================== DPI 缩放（下面三个函数）=====================
+//
+// **为何尺寸要随 scale**：滑块与轨道是**触控/鼠标目标**，
+// 125% DPI 下文字与其他控件都放大 25%，而 16px 的滑块不变 → 它会变得难点。
+//
+// **为何 `2.0` 不乘 scale**：那是**命中容差**（手指/鼠标精度补偿），
+// 属于**输入设备属性**，不是视觉尺寸；放大它会让相邻控件命中区重叠。
+// `Slider` 没有 `&self` 公开几何 API（`track`/`thumb`/`value_at`/`hits_thumb` 均私有）→ **不加缓存**。
+
+/// 轨道厚度（逻辑像素 × DPI 缩放）。
+fn track_h(scale: f32) -> f32 {
+    TRACK_H * scale
+}
+
+/// 滑块边长（逻辑像素 × DPI 缩放）。
+fn thumb_size(scale: f32) -> f32 {
+    THUMB * scale
+}
+
+/// 滑块命中半径：**随滑块变大，但固定容差 2px 不变**。
+fn hit_r(scale: f32) -> f32 {
+    thumb_size(scale) * 0.5 + 2.0
+}
+
 /// 水平滑块。
 pub struct Slider {
     id: String,
@@ -82,8 +106,8 @@ impl Slider {
     }
 
     /// 轨道矩形（水平铺满、垂直居中）。
-    fn track(&self) -> Rect {
-        let h = TRACK_H.min(self.rect.h);
+    fn track(&self, scale: f32) -> Rect {
+        let h = track_h(scale).min(self.rect.h);
         Rect::new(
             self.rect.x,
             self.rect.y + (self.rect.h - h) * 0.5,
@@ -93,23 +117,26 @@ impl Slider {
     }
 
     /// 滑块中心 x。
-    fn thumb_center_x(&self) -> f32 {
+    fn thumb_center_x(&self, _scale: f32) -> f32 {
+        // 滑块中心只取决于 rect 与 value（均为物理像素）——
+        // 保留参数为了让三个方法链同一形状，避免调用方记得何处要传何处不用。
         self.rect.x + self.rect.w * self.value
     }
 
     /// 滑块矩形（正方形，垂直居中）。
-    fn thumb(&self) -> Rect {
-        let cx = self.thumb_center_x();
+    fn thumb(&self, scale: f32) -> Rect {
+        let cx = self.thumb_center_x(scale);
+        let t = thumb_size(scale);
         Rect::new(
-            cx - THUMB * 0.5,
-            self.rect.y + (self.rect.h - THUMB) * 0.5,
-            THUMB,
-            THUMB,
+            cx - t * 0.5,
+            self.rect.y + (self.rect.h - t) * 0.5,
+            t,
+            t,
         )
     }
 
     /// 把屏幕 x 换算成值（clamp 到 0..=1）。
-    fn value_at(&self, x: f32) -> f32 {
+    fn value_at(&self, x: f32, _scale: f32) -> f32 {
         if self.rect.w <= 0.0 {
             return self.value;
         }
@@ -123,9 +150,13 @@ impl Slider {
     // 测试 API：仅 slider 单元测试调用，作为“命中判定语义”的可执行文档。
     // 归类：内部实现 —— `hits_thumb` 已被等价逻辑取代，保留作对照
     #[allow(dead_code)]
-    fn hits_thumb(&self, x: f32, y: f32) -> bool {
-        let t = self.thumb();
-        x >= t.x - 2.0 && x <= t.right() + 2.0 && (y - (t.y + t.h * 0.5)).abs() <= HIT_R
+    fn hits_thumb(&self, x: f32, y: f32, scale: f32) -> bool {
+        let t = self.thumb(scale);
+        // **固定容差 2.0 与 `HIT_R` 里的 `+2.0` 是同一含义**（输入精度补偿），
+        // 统一走 `hit_r(scale)`：它 = 滑块半径（随 scale）+ 2px（不随 scale）。
+        // 水平方向的 `±t.h*0.5`已由 `hit_r` 的 `thumb_size*0.5` 覆盖，所以水平也用它。
+        let r = hit_r(scale);
+        x >= t.x - 2.0 && x <= t.right() + 2.0 && (y - (t.y + t.h * 0.5)).abs() <= r
     }
 }
 
@@ -144,11 +175,11 @@ impl Widget for Slider {
 
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
-        c.constrain(Size::new(c.max.w, THUMB))
+        c.constrain(Size::new(c.max.w, thumb_size(m.scale())))
     }
 
     fn arrange(
@@ -175,14 +206,14 @@ impl Widget for Slider {
                 // （跳转后再拖是滑块的常见手感，用户不必再按一次）
                 self.dragging = true;
                 ctx.set_pointer_capture(self.id.clone());
-                self.set_value(self.value_at(pos.x));
+                self.set_value(self.value_at(pos.x, ctx.scale()));
                 EventResult::Handled
             }
             UiEvent::MouseMove { pos } => {
                 if !self.dragging {
                     return EventResult::Ignored;
                 }
-                self.set_value(self.value_at(pos.x));
+                self.set_value(self.value_at(pos.x, ctx.scale()));
                 EventResult::Redraw
             }
             UiEvent::MouseUp { .. } => {
@@ -219,33 +250,35 @@ impl Widget for Slider {
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
         let normal = ctx.theme().style(Role::BUTTON, State::Normal);
         let accent = ctx.theme().style(Role::BUTTON, State::Selected);
-        let track = self.track();
+        let track = self.track(ctx.scale());
         if track.w <= 0.0 {
             return;
         }
 
         // 轨道
-        ctx.fill_round_rect(track, normal.bg, TRACK_H * 0.5);
+        ctx.fill_round_rect(track, normal.bg, track_h(ctx.scale()) * 0.5);
         // 已填充部分（从左侧到滑块中心）
-        let filled = (self.thumb_center_x() - track.x).clamp(0.0, track.w);
+        let filled = (self.thumb_center_x(ctx.scale()) - track.x).clamp(0.0, track.w);
         if filled > 0.0 {
             ctx.fill_round_rect(
                 Rect::new(track.x, track.y, filled, track.h),
                 accent.bg,
-                TRACK_H * 0.5,
+                track_h(ctx.scale()) * 0.5,
             );
         }
 
         // 滑块：外圈边框 + 内圆，焦点时边框用焦点色
-        let thumb = self.thumb();
+        let thumb = self.thumb(ctx.scale());
         let border = if self.focused || self.dragging {
             ctx.theme().style(Role::BUTTON, State::Focused).fg
         } else {
             accent.bg
         };
-        ctx.fill_round_rect(thumb, border, THUMB * 0.5);
-        let inner = Rect::new(thumb.x + 2.0, thumb.y + 2.0, THUMB - 4.0, THUMB - 4.0);
-        ctx.fill_round_rect(inner, normal.bg, (THUMB - 4.0) * 0.5);
+        ctx.fill_round_rect(thumb, border, thumb_size(ctx.scale()) * 0.5);
+        // 内圈内缩 2px 是**描边宽度**（不随 scale），所以口径是 `t - 4.0`。
+        let t = thumb_size(ctx.scale());
+        let inner = Rect::new(thumb.x + 2.0, thumb.y + 2.0, t - 4.0, t - 4.0);
+        ctx.fill_round_rect(inner, normal.bg, (t - 4.0) * 0.5);
         let _ = Color::WHITE;
     }
 
@@ -318,10 +351,10 @@ mod tests {
             let (bx, _) = brightest_column(&s);
             eprintln!(
                 "[slider] value={value} 最亮列 = {bx}，滑块中心应为 {want_x}（实测中心 {:.1}）",
-                sl.thumb_center_x()
+                sl.thumb_center_x(1.0)
             );
             assert!(
-                (sl.thumb_center_x() - want_x).abs() < 0.5,
+                (sl.thumb_center_x(1.0) - want_x).abs() < 0.5,
                 "value={value} 时滑块中心应为 {want_x}"
             );
             assert!(
@@ -336,10 +369,10 @@ mod tests {
         let mut sl = Slider::new("s", 0.0);
         sl.rect = Rect::new(0.0, 0.0, 100.0, 20.0);
         // 75% 处
-        let v = sl.value_at(75.0);
+        let v = sl.value_at(75.0, 1.0);
         assert!((v - 0.75).abs() < 1e-4, "75% 位置应映射到 0.75，实际 {v}");
-        assert_eq!(sl.value_at(-10.0), 0.0, "左侧越界应 clamp 到 0");
-        assert_eq!(sl.value_at(200.0), 1.0, "右侧越界应 clamp 到 1");
+        assert_eq!(sl.value_at(-10.0, 1.0), 0.0, "左侧越界应 clamp 到 0");
+        assert_eq!(sl.value_at(200.0, 1.0), 1.0, "右侧越界应 clamp 到 1");
     }
 
     #[test]
@@ -370,9 +403,9 @@ mod tests {
     fn thumb_hit_test_covers_the_knob() {
         let mut sl = Slider::new("s", 0.5);
         sl.rect = Rect::new(0.0, 0.0, 100.0, 20.0);
-        let cx = sl.thumb_center_x();
-        assert!(sl.hits_thumb(cx, 10.0), "滑块中心应命中");
-        assert!(sl.hits_thumb(cx + 6.0, 10.0), "滑块右缘附近应命中");
-        assert!(!sl.hits_thumb(cx + 40.0, 10.0), "远离滑块不应命中");
+        let cx = sl.thumb_center_x(1.0);
+        assert!(sl.hits_thumb(cx, 10.0, 1.0), "滑块中心应命中");
+        assert!(sl.hits_thumb(cx + 6.0, 10.0, 1.0), "滑块右缘附近应命中");
+        assert!(!sl.hits_thumb(cx + 40.0, 10.0, 1.0), "远离滑块不应命中");
     }
 }
