@@ -520,3 +520,22 @@ let list = ListView::new("chat", 24.0)
 - **失败处理**：`set_font` 返 `Err` 时打印错误并**保持旧引擎**（画面仍可用，只是字号未变），不 panic。
 - **需用户手动验证**：将窗口从 100% 显示器拖到 125% 显示器再拖回去，
   观察：① 字号是否跟随变化；② 布局是否重排（无重叠/越界）；③ 是否有黑帧/闪烁。
+
+### wrap（`Flex::wrap(true)`）—— 2026-11-12 实现
+
+- **用法**：`Flex::row("id").wrap(true).gap(8.0).push(..)`
+  默认 `wrap == false` → **走原单行路径，逐像素不变**（hash-gate 守门）。
+- **实现形态**：`Flex` 内部两条独立分支（`wrap_measure` / `wrap_arrange`），
+  **原 `flex_measure_into` / `flex_arrange_with` 调用逐字未动**。
+- **两趟布局**：
+  - `measure` 按 `constraints.max.w`（父容器给的**上界**）分行，报总主轴 × 总交叉轴；
+  - `arrange` 按 `rect.w`（**实际分配**）**重算分行** —— **以 arrange 为准**（与 CSS 一致）。
+  - 两者宽度不同时，`debug_assert!` 会在调试构建报出行数不一致。
+- **行内摆放复用**：每一行调用现有 [`flex_arrange_with`]（传 `Edges::ZERO` + 行子切片）——
+  因此 **`align` / `justify` 在行内自然生效**，无需重写。
+- **行高**：每行 = 该行子项**交叉轴尺寸的最大值**；容器交叉轴 = `Σ行高 + gap × (行数-1)`。
+- **已知限制**：
+  1. **`arrange` 宽度窄于 `measure` 宽度时，实际行数可能多于预留高度所容纳的行数 → 内容可能溢出预留高度**（与 CSS 同）。
+  2. **`Dimension::Flex` 与 `wrap` 同时使用时，flex 因子被忽略**（按内容尺寸分行）——
+     因为 flex 宽度取决于同行其他子项，与“先分行再分配”**互相依赖**。
+  3. **absolute / aspect-ratio 仍不做**（与“父容器分配 rect”模型冲突）。

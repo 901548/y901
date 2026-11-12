@@ -12,7 +12,10 @@
 //!    只放宽上限，返回的内容尺寸始终有限；滚动容器的子节点排在**内容坐标系**里，
 //!    平移由渲染/命中阶段处理。
 //!
-//! 刻意不做：wrap / align-items / absolute / aspect-ratio。
+//! **已做**：wrap（`Flex::wrap(true)`）、align-items（`Flex::align`）、justify-content、per-child min/max。
+//!
+//! **仍不做**：absolute（定位逃逸）、aspect-ratio。理由：它们与“所有子控件由父容器分配 rect”
+//! 的模型直接冲突；当前层叠需求已由 `Stack` + 各控件自算 rect 满足。
 
 use std::collections::{HashMap, HashSet};
 
@@ -605,6 +608,19 @@ pub struct Flex {
     /// 在 `measure`/`arrange` 时求值（构造期拿不到 scale）。
     /// **`None` 时行为与加该字段前逐像素一致**。
     scaled_gap: Option<f32>,
+    /// **是否开启 wrap（换行）**。默认 `false` = 加该能力前的行为（单行、可溢出）。
+    ///
+    /// `true` 时走**独立分支**（`wrap_measure` / `wrap_arrange`），原路径逐字不动。
+    wrap: bool,
+    /// wrap 的**分行结果**（每行 = 子项下标列表）。
+    ///
+    /// **只在 `wrap == true` 时使用**；默认 `false` 时始终为空
+    /// （空 `Vec` 不分配堆内存 —— 零开销）。
+    /// `measure` 写入；`arrange` 在宽度不变时与它一致（宽度变了则重算，见注释）。
+    wrap_lines: Vec<Vec<usize>>,
+    /// wrap 的**每行高度**（= 该行子项交叉轴尺寸的最大值）。
+    /// 与 `wrap_lines` 同生同死，同样默认为空。
+    wrap_line_heights: Vec<f32>,
     /// 交叉轴对齐（`align-items`）。默认 `Stretch` = 加该能力前的行为。
     align_items: Align,
     /// 主轴分布（`justify-content`）。默认 `Start` = 加该能力前的行为。
@@ -635,6 +651,9 @@ impl Flex {
             scaled_padding: None,
             gap: 0.0,
             scaled_gap: None,
+            wrap: false,
+            wrap_lines: Vec::new(),
+            wrap_line_heights: Vec::new(),
             align_items: Align::Stretch,
             justify_content: Justify::Start,
             background: None,
@@ -697,11 +716,199 @@ impl Flex {
         }
     }
 
+    /// **开启换行**（`flex-wrap: wrap`）。默认不开启。
+    ///
+    /// 返回：自身。副作用：无。
+    /// **开启后走独立分支**，原（单行）路径逐字不动。
+    pub fn wrap(mut self, enabled: bool) -> Self {
+        self.wrap = enabled;
+        self
+    }
+
     /// **实际间距**：设过 `gap_scaled` 就按 scale 求值，否则用固定 `gap`。
     fn gap_for(&self, scale: f32) -> f32 {
         match self.scaled_gap {
             Some(base) => base * scale,
             None => self.gap,
+        }
+    }
+
+    /// **按容器主轴可用宽度分行**（纯函数，不碰 `self`）。
+    ///
+    /// 返回：`(lines, heights, main_total, cross_total)`。
+    /// * `lines`：每行的子项下标；
+    /// * `heights`：每行高度 = 该行子项**交叉轴尺寸的最大值**；
+    /// * `main_total`：全部行中**最宽那行**的主轴长度；
+    /// * `cross_total`：`Σ行高 + gap × (行数 - 1)`。
+    ///
+    /// **`Dimension::Flex` 子项不吃剩余空间**：分行需要“先知道每个子项宽”，
+    /// 而 flex 因子的宽度取决于同行其他子项 —— **互相依赖**。
+    /// 因此 wrap 模式下 flex 因子被**忽略**，按内容尺寸分行（已写入文档）。
+    fn wrap_lines_of(
+        axis: Axis,
+        measured: &[(Size, FlexItem)],
+        main_max: f32,
+        gap: f32,
+    ) -> (Vec<Vec<usize>>, Vec<f32>, f32, f32) {
+        let mut lines: Vec<Vec<usize>> = Vec::new();
+        let mut heights: Vec<f32> = Vec::new();
+        let mut cur: Vec<usize> = Vec::new();
+        let mut cur_main = 0.0f32;
+        let mut cur_cross = 0.0f32;
+        let mut max_main = 0.0f32;
+
+        for (i, (size, _item)) in measured.iter().enumerate() {
+            let (m, c) = match axis {
+                Axis::Horizontal => (size.w, size.h),
+                Axis::Vertical => (size.h, size.w),
+            };
+            // 行内已有子项时才需要 gap；换行后重新从 0 累加。
+            let extra = if cur.is_empty() { 0.0 } else { gap };
+            if !cur.is_empty() && cur_main + extra + m > main_max {
+                max_main = max_main.max(cur_main);
+                lines.push(std::mem::take(&mut cur));
+                heights.push(cur_cross);
+                cur_main = 0.0;
+                cur_cross = 0.0;
+            }
+            cur_main += if cur.is_empty() { m } else { gap + m };
+            cur_cross = cur_cross.max(c);
+            cur.push(i);
+        }
+        if !cur.is_empty() {
+            max_main = max_main.max(cur_main);
+            lines.push(cur);
+            heights.push(cur_cross);
+        }
+        let cross_total =
+            heights.iter().sum::<f32>() + gap * (heights.len().saturating_sub(1)) as f32;
+        (lines, heights, max_main, cross_total)
+    }
+
+    /// **wrap 的 measure**：按 `constraints.max` 得到的可用宽分行，报**总主轴×总交叉轴**。
+    ///
+    /// 注意：这里的分行基于 **measure 宽度**；`wrap_arrange` 会用**实际宽度**
+    /// 重算 —— 两者不同时，**以 arrange 为准**（与 CSS 一致）。
+    fn wrap_measure(
+        &mut self,
+        metrics: &dyn TextMetrics,
+        constraints: Constraints,
+        cache: &mut LayoutCache,
+    ) -> Size {
+        let scale = metrics.scale();
+        let padding = self.padding_for(scale);
+        let gap = self.gap_for(scale);
+        let inner_max = Size::new(
+            if constraints.is_unbounded(Axis::Horizontal) {
+                f32::INFINITY
+            } else {
+                (constraints.max.w - padding.horizontal()).max(0.0)
+            },
+            if constraints.is_unbounded(Axis::Vertical) {
+                f32::INFINITY
+            } else {
+                (constraints.max.h - padding.vertical()).max(0.0)
+            },
+        );
+        let main_max = match self.axis {
+            Axis::Horizontal => inner_max.w,
+            Axis::Vertical => inner_max.h,
+        };
+
+        self.measured.clear();
+        for child in self.children.iter_mut() {
+            let item = child.flex();
+            let size = cache.measure(child.as_mut(), metrics, Constraints::loose(inner_max));
+            self.measured.push((size, item));
+        }
+
+        let (lines, heights, main_total, cross_total) =
+            Self::wrap_lines_of(self.axis, &self.measured, main_max, gap);
+        self.wrap_lines = lines;
+        self.wrap_line_heights = heights;
+
+        match self.axis {
+            Axis::Horizontal => constraints.constrain(Size::new(
+                main_total + padding.horizontal(),
+                cross_total + padding.vertical(),
+            )),
+            Axis::Vertical => constraints.constrain(Size::new(
+                cross_total + padding.horizontal(),
+                main_total + padding.vertical(),
+            )),
+        }
+    }
+
+    /// **wrap 的 arrange**：用**实际可用宽重算分行**，每行用现有
+    /// [`flex_arrange_with`] 摆放——因此 `align` / `justify` 在行内**自然生效**，无需重写。
+    fn wrap_arrange(&mut self, rect: Rect, metrics: &dyn TextMetrics, cache: &mut LayoutCache) {
+        let scale = metrics.scale();
+        let padding = self.padding_for(scale);
+        let gap = self.gap_for(scale);
+        let inner = rect.inset(padding);
+        let main_max = match self.axis {
+            Axis::Horizontal => inner.w,
+            Axis::Vertical => inner.h,
+        };
+
+        let (lines, heights, _main_total, _cross_total) =
+            Self::wrap_lines_of(self.axis, &self.measured, main_max, gap);
+
+        // **读回 measure 阶段的分行数做一致性断言**：
+        // 不等说明 arrange 宽度与 measure 不同 —— 这时**以 arrange 为准**（行高可能与预留高度不符，见文档）。
+        let measured_lines = self.wrap_lines.len();
+        debug_assert!(
+            measured_lines == 0 || measured_lines == lines.len(),
+            "wrap: measure 分行数 {} 与 arrange 分行数 {} 不同（宽度变了）",
+            measured_lines,
+            lines.len()
+        );
+
+        // 把最新分行写回字段：下次同宽 measure 若命中缓存，这里保持与 arrange 一致。
+        let line_ranges: Vec<(usize, usize, f32)> = lines
+            .iter()
+            .zip(heights.iter())
+            .map(|(l, h)| {
+                let start = *l.first().unwrap_or(&0);
+                let end = *l.last().unwrap_or(&0) + 1;
+                (start, end, *h)
+            })
+            .collect();
+        self.wrap_lines = lines;
+        self.wrap_line_heights = heights;
+
+        // 逐行摆放：拆分借用（children 需 &​mut，measured 需 &）。
+        let Self {
+            children,
+            measured,
+            align_items,
+            justify_content,
+            ..
+        } = self;
+        let mut cursor = match self.axis {
+            Axis::Horizontal => inner.y,
+            Axis::Vertical => inner.x,
+        };
+        for (start, end, h) in line_ranges {
+            let sub = match self.axis {
+                // 横向 wrap：每一行是一条水平带。
+                Axis::Horizontal => Rect::new(inner.x, cursor, inner.w, h),
+                // 纵向 wrap：每一列是一条竖带。
+                Axis::Vertical => Rect::new(cursor, inner.y, h, inner.h),
+            };
+            flex_arrange_with(
+                self.axis,
+                Edges::ZERO,
+                gap,
+                *align_items,
+                *justify_content,
+                &mut children[start..end],
+                sub,
+                metrics,
+                cache,
+                &measured[start..end],
+            );
+            cursor += h + gap;
         }
     }
 
@@ -776,6 +983,10 @@ impl Widget for Flex {
         constraints: Constraints,
         cache: &mut LayoutCache,
     ) -> Size {
+        // **wrap 走独立分支**；下面的原路径逐字未动（默认 `wrap == false`）。
+        if self.wrap {
+            return self.wrap_measure(metrics, constraints, cache);
+        }
         flex_measure_into(
             self.axis,
             self.padding_for(metrics.scale()),
@@ -790,6 +1001,11 @@ impl Widget for Flex {
 
     fn arrange(&mut self, rect: Rect, metrics: &dyn TextMetrics, cache: &mut LayoutCache) {
         self.rect = rect;
+        // **wrap 走独立分支**；原路径逐字未动。
+        if self.wrap {
+            self.wrap_arrange(rect, metrics, cache);
+            return;
+        }
         flex_arrange_with(
             self.axis,
             self.padding_for(metrics.scale()),
@@ -1242,5 +1458,119 @@ mod gap_scaled_tests {
         let r = layout_with(&mut f, 1.25);
         assert_eq!(r[0].x, 10.0, "左内边距应 8*1.25=10");
         assert_eq!(r[0].y, 10.0, "上内边距应 8*1.25=10");
+    }
+}
+
+#[cfg(test)]
+mod wrap_tests {
+    use super::*;
+    use crate::widget::{Constraints, Widget};
+    use crate::{Size, TextStyle};
+
+    /// 测试用 metrics：固定字宽/行高，`scale = 1.0`。无字段（免未读字段告警）。
+    struct Fixed;
+    impl TextMetrics for Fixed {
+        fn measure_text(&self, t: &str, _s: &TextStyle) -> Size {
+            Size::new(t.chars().count() as f32 * 8.0, 16.0)
+        }
+        fn line_height(&self, _s: &TextStyle) -> f32 {
+            16.0
+        }
+        fn scale(&self) -> f32 {
+            1.0
+        }
+    }
+
+    struct Box1 {
+        id: &'static str,
+        size: Size,
+        rect: Rect,
+        item: FlexItem,
+    }
+    impl Box1 {
+        fn new(id: &'static str, w: f32, h: f32) -> Self {
+            Self { id, size: Size::new(w, h), rect: Rect::ZERO, item: FlexItem::default() }
+        }
+    }
+    impl Widget for Box1 {
+        fn id(&self) -> &str { self.id }
+        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
+            c.constrain(self.size)
+        }
+        fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
+            self.rect = rect;
+        }
+        fn rect(&self) -> Rect { self.rect }
+        fn flex(&self) -> FlexItem { self.item }
+        fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult { EventResult::Ignored }
+        fn children(&self) -> &[Box<dyn Widget>] { &[] }
+        fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
+        fn semantics(&self) -> Semantics { Semantics::default() }
+    }
+
+    /// 布一次局，返回 (measure 得到的尺寸, 子项 rects)。
+    fn layout(flex: &mut Flex, w: f32, h: f32) -> (Size, Vec<Rect>) {
+        let mut cache = LayoutCache::new();
+        let m = Fixed;
+        let size = cache.measure(flex, &m, Constraints::tight(Size::new(w, h)));
+        flex.arrange(Rect::from_size(Size::new(w, h)), &m, &mut cache);
+        let mut out = Vec::new();
+        for c in flex.children_mut().unwrap_or(&mut Vec::new()).iter_mut() {
+            out.push(c.rect());
+        }
+        (size, out)
+    }
+
+    #[test]
+    fn default_no_wrap_still_overflows() {
+        // 3 × 20px 子项在 50px 宽内：**默认不换行 → 单行、总宽 60 溢出**。
+        let mut f = Flex::row("r")
+            .push(Box::new(Box1::new("a", 20.0, 10.0)))
+            .push(Box::new(Box1::new("b", 20.0, 10.0)))
+            .push(Box::new(Box1::new("c", 20.0, 10.0)));
+        let (_size, rects) = layout(&mut f, 50.0, 100.0);
+        // 三个子项 y 相同 = 单行
+        assert_eq!(rects[0].y, rects[1].y, "默认应单行");
+        assert_eq!(rects[1].y, rects[2].y, "默认应单行");
+        // 第三个子项越过 50px 宽度 → 溢出（与改前一致）
+        assert!(rects[2].right() > 50.0, "默认应允许溢出：{rects:?}");
+    }
+
+    #[test]
+    fn wrap_breaks_into_multiple_lines() {
+        // 3 × 20px 在 50px 内 + wrap → 2+1 两行
+        let mut f = Flex::row("r")
+            .wrap(true)
+            .push(Box::new(Box1::new("a", 20.0, 10.0)))
+            .push(Box::new(Box1::new("b", 20.0, 10.0)))
+            .push(Box::new(Box1::new("c", 20.0, 10.0)));
+        let (_size, rects) = layout(&mut f, 50.0, 100.0);
+        assert_eq!(rects[0].y, rects[1].y, "第一行放 a,b");
+        assert!(rects[2].y > rects[1].y, "第二行放 c：{rects:?}");
+        assert_eq!(rects[2].x, 0.0, "新行从左侧重新开始");
+    }
+
+    #[test]
+    fn wrap_line_height_is_max_of_row() {
+        // 一行内 10px 与 20px 子项 → 行高 = 20（第二行的 y 应 = 20）
+        // 宽 15 × 2 = 30 刚好放进 30 宽的第一行（a、b），c 落第二行。
+        let mut f = Flex::row("r")
+            .wrap(true)
+            .push(Box::new(Box1::new("a", 15.0, 10.0)))
+            .push(Box::new(Box1::new("b", 15.0, 20.0)))
+            .push(Box::new(Box1::new("c", 15.0, 10.0)));
+        let (_size, rects) = layout(&mut f, 30.0, 100.0);
+        assert_eq!(rects[0].y, rects[1].y, "a、b 应在同一行：{rects:?}");
+        assert_eq!(rects[2].y, 20.0, "行高应取该行最大子项高 20：{rects:?}");
+    }
+
+    #[test]
+    fn wrap_empty_children_no_panic() {
+        let mut f = Flex::row("r").wrap(true);
+        let (size, rects) = layout(&mut f, 50.0, 100.0);
+        assert!(rects.is_empty(), "空子项集不应有 rect");
+        assert!(size.w.is_finite() && size.h.is_finite(), "尺寸必须有限：{size:?}");
+        // 分行结果应为空（无行可排）。
+        assert!(f.wrap_lines.is_empty(), "空子项集不五有分行结果");
     }
 }
