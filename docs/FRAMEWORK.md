@@ -416,3 +416,23 @@ let list = ListView::new("chat", 24.0)
 **状态**：**改动前既有**，与 `TextStyle.size` / `TextLabel::bold` 都无关；
 属**独立项**（修正方向：让两边都用同一个 `cell_span` 口径，并补一条
 零宽字符的对照测试）。**当前不影响任何测试与哈希基准**。
+
+## 已知限制：`TextStyle.size` 当前**只有布局效果，没有绘制效果**
+
+- **并非未实现**：
+  - `TextMetrics::measure_text`（`soft.rs:316` / `backend/mod.rs:654`）**读 `style.size`**；
+  - `TextMetrics::line_height`（`soft.rs:323` / `backend/mod.rs:659`）**读 `style.size`**；
+  - **但 `RenderCtx::draw_text`（`soft.rs:646` / `backend/mod.rs:962`）不读** ——
+    两处直接用 `self.cell`（引擎的唯一字号 cell）。
+- **后果**：`TextStyle::size(px)`、`TextLabel::size(px)`、`InlineStyle::size(px)`
+  **只会改变布局占位**；字仍然按引擎默认字号绘制。
+- **原因**：引擎只光栅化一套字号的字形（`MyFontEngine::new(data, size_px, cell)`）。
+  按任意 `size` 绘制需要"多字号光栅化"（每个字号都有真实字形，而非把默认字号拉伸）。
+- **影响（Helm）**：第七轮的"分组标题 18px / 表头 13px"在**视觉上未生效** ——
+  分组标题仍按 16px 画（只是布局预留了 18px 高）；
+  更麻烦的是**表头预留了 13px 高却按 16px 画 → 文字可能被上下裁掉**。
+  （`bold` 是**真的**：`draw_text` 读 `style.bold`，所以加粗那部分视觉生效。）
+- **修复方向**：多字号光栅化（`draw_text` 按 `style.size` 取/生成字形）。
+  已有前提：自研光栅化器 `rasterize_glyph_phased(data, ch, size, phase)`
+  **本就接受字号参数**，图集缓存 key 已是 `(char, phase)` 元组 ——
+  **加一个尺寸维度即可**，不需要新的字体轮廓访问路径。
