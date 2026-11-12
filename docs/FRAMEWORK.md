@@ -491,6 +491,14 @@ let list = ListView::new("chat", 24.0)
   - **高度常量尚未乘 scale**（`TAB_BAR_H` / `TOOLBAR_H` / `ITEM_H` / `ROW_H` 等约 12 组、约 18 个常量）。
   - 125% 下**字从 16→20，但标签栏仍 32px** → **文字会顶边/裁切**。
   - 不随 scale 的约 10 个（`split::DIVIDER` 1px、`CARET_W`、`BAR_WIDTH`、`CHECK_W`、`RADIUS`等）**应保持不变**。
-- **hash-gate 基线已更新**：`0xDBB308DD1657EF9C` → **`0x87DECF871BB90AFF`**
-  （原因：基准字号 16→20 @125%，客户区尺寸不变）。
-  记录写在 `scripts/hash-gate.ps1` 头部注释（baseline 文件本身必须保持单行，它被机器读）。
+- **hash-gate 基线**：当前为 **`0xDBB308DD1657EF9C`**（门禁已固定 `Y901_TEST_DPI_SCALE=1.0`）。
+- **曾经的错误归因（已更正）**：
+  当时记录过 `0x87DECF871BB90AFF`，并写成"原因：基准字号 16→20 @125%"。
+  **这个归因是错的**：
+  - DPI=1.0 时算出的是 `0xDBB308DD1657EF9C`；
+  - DPI=1.25 时算出的是 `0xFC83652FBBC7188B`；
+  - `0x87DECF871BB90AFF` **两者都不是** —— 它是一个**不可复现的环境值**（当时运行会话的 DPI 与现在不同）。
+  若真是 1.25，当年就应算出 `0xFC83…`，而不是 `0x87DE…`。
+- **正确结论与完整实证见 [`docs/hash-gate-scope.md`](hash-gate-scope.md)**：
+  门禁场景只渲染一个自绘 `Scene`（不含任何框架控件）；
+  自 `75af5b1` 起字号乘 DPI 缩放 → 门禁曾失去可复现性，现已固定 DPI=1.0。
