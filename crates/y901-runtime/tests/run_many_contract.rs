@@ -188,3 +188,86 @@ fn default_run_many_short_circuits_after_first_error() {
         "`make` 也不应对未启动的窗口调用"
     );
 }
+
+// ---------------------------------------------------------------- 契约 1：序号严格递增
+
+/// 工厂记录它收到的**序号序列**（不只是次数）。
+fn index_recording_factory(seen: Arc<std::sync::Mutex<Vec<usize>>>) -> WindowFactory {
+    Box::new(move |i| {
+        if let Ok(mut v) = seen.lock() {
+            v.push(i);
+        }
+        (
+            Box::new(NoopHost) as Box<dyn Host>,
+            UiTree::new(Box::new(NoopWidget::new())),
+        )
+    })
+}
+
+/// **`make` 拿到的下标必须是 `0, 1, 2, …` 且严格递增**——
+/// 契约只写"下标 `0..options_list.len()`"，若实现传错序号，
+/// 多窗口错误信息就会指向错窗口。
+#[test]
+fn default_run_many_passes_sequential_indices() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let make = index_recording_factory(Arc::clone(&seen));
+
+    let options = vec![Options::default(), Options::default(), Options::default()];
+    let mut rt = MockRuntime {
+        runs: Arc::new(AtomicUsize::new(0)),
+        fail_at: None,
+    };
+
+    rt.run_many(options, make).expect("全成功应返 Ok");
+    let got = seen.lock().unwrap().clone();
+    assert_eq!(got, vec![0usize, 1, 2], "make 应依次收到 0,1,2");
+}
+
+// ---------------------------------------------------------------- 空列表
+
+/// **空列表 = 不启动任何窗口，直接 `Ok(())`**。
+///
+/// 为何要测：这是"不做事"的边界；若实现在空列表上 panic 或返 `Err`，
+/// 调用方就无法用"空配置"表达"不开窗口"。
+#[test]
+fn default_run_many_empty_list_is_ok_and_never_calls_factory() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let make = counting_factory(Arc::clone(&calls));
+    let mut rt = MockRuntime {
+        runs: Arc::new(AtomicUsize::new(0)),
+        fail_at: None,
+    };
+
+    let result = rt.run_many(Vec::new(), make);
+    assert!(result.is_ok(), "空列表应返 Ok：{result:?}");
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "空列表不应调用 make");
+    assert_eq!(rt.runs.load(Ordering::SeqCst), 0, "空列表不应调用 run");
+}
+
+// ---------------------------------------------------------------- 契约 2：非 0 序号的错误
+
+/// **第 1 个窗口失败时**，错误应指向窗口 1（不是 0），
+/// 且第 0 个已跑完（`runs == 2`）、第 2 个未启动（`calls == 2`）。
+///
+/// 已有的 `error_carries_window_index` 只测 `fail_at = 0`——
+/// 那种情况下"序号 0"恰好与"没有序号"难分，所以必须补一条非 0 序号。
+#[test]
+fn default_run_many_error_index_is_accurate_for_later_window() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let make = counting_factory(Arc::clone(&calls));
+    let mut rt = MockRuntime {
+        runs: Arc::new(AtomicUsize::new(0)),
+        fail_at: Some(1),
+    };
+
+    let options = vec![
+        Options::default(),
+        Options::default(),
+        Options::default(),
+    ];
+    let err = rt.run_many(options, make).expect_err("第 1 个窗口失败时应返 Err");
+    assert!(err.contains("窗口 1"), "错误必须指向窗口 1：{err}");
+    assert!(err.contains("mock-boom-1"), "应保留原始错误：{err}");
+    assert_eq!(rt.runs.load(Ordering::SeqCst), 2, "第 0、1 个跑完后才失败");
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "第 2 个窗口不应被启动");
+}
