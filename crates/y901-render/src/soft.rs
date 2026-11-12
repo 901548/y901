@@ -340,6 +340,101 @@ impl TextMetrics for SoftBackend {
     }
 }
 
+impl SoftBackend {
+    /// **按字号绘制文本**（per-text 字号）。
+    ///
+    /// 组合方式（**字号与变换缩放的关系**）：
+    /// `px_final = px * map_scale()`，然后**按 `px_final` 光栅化**字形。
+    ///
+    /// 为何不用"固定字号 + mip 降采样"（旧路径的做法）：
+    /// mip 链只能**缩小**（L1=1/2、L2=1/4），而字号可大可小；
+    /// 按目标字号重新光栅化能得到**真实轮廓**，这正是引擎已具备的能力。
+    ///
+    /// 基线：`ascent` 按**基准字号的 ascent/cell_h 比例**换算到新字号
+    /// （该比例是字体属性，不随字号变化）——**不是拍脑袋的 0.8**。
+    fn draw_text_sized(&mut self, origin: Pos, text: &str, style: &TextStyle, px: f32) -> f32 {
+        let mapped = self.map_point(origin);
+        let origin = Pos::new(mapped.x, mapped.y);
+        let scale = self.map_scale();
+        let px_final = (px * scale).max(1.0);
+        let (cell_w, cell_h) = crate::font::cell_metrics_for(px_final);
+        // 与旧路径同式：基线 = 顶部 + ascent
+        let ascent_ratio = if self.cell.h > 0.0 {
+            self.text.ascent() / self.cell.h
+        } else {
+            0.8
+        };
+        let ascent = cell_h * ascent_ratio;
+        let atlas_size = self.text.atlas_size() as usize;
+        let mut pen_x = origin.x;
+        let start = pen_x;
+        for ch in text.chars() {
+            let span = self.text.cell_span(ch).max(1) as f32;
+            if style.bg.a > 0.0 {
+                self.fill_rect(Rect::new(pen_x, origin.y, span * cell_w, cell_h), style.bg);
+            }
+            if ch != ' ' {
+                // 先 clone 再画：避开 `&mut self.text` 与 `self.text.atlas()` 的借用冲突
+                let glyph = self.text.glyph_at_size(ch, px_final).cloned();
+                if let Some(g) = glyph {
+                    if g.width > 0 && g.height > 0 {
+                        let bx = (pen_x + g.bearing_x as f32).floor() as i32;
+                        let by = (origin.y + ascent + g.bearing_y as f32).floor() as i32;
+                        for gy in 0..g.height as i32 {
+                            let dy = by + gy;
+                            if dy < 0 || dy >= self.height as i32 {
+                                continue;
+                            }
+                            for gx in 0..g.width as i32 {
+                                let dx = bx + gx;
+                                if dx < 0 || dx >= self.width as i32 {
+                                    continue;
+                                }
+                                if let Some(clip) = self.state.current_clip() {
+                                    if !clip.contains(Pos::new(dx as f32 + 0.5, dy as f32 + 0.5)) {
+                                        continue;
+                                    }
+                                }
+                                let ax = g.atlas_x as usize + gx as usize;
+                                let ay = g.atlas_y as usize + gy as usize;
+                                let si = (ay * atlas_size + ax) * 4;
+                                let mut cov =
+                                    self.text.atlas().get(si).copied().unwrap_or(0) as f32 / 255.0;
+                                if style.bold {
+                                    // 与旧路径同：取右侧邻居覆盖度取 max → 向右拓宽 1px
+                                    let right = if (gx as u32) + 1 < g.width {
+                                        self.text.atlas().get(si + 4).copied().unwrap_or(0) as f32
+                                            / 255.0
+                                    } else {
+                                        0.0
+                                    };
+                                    cov = cov.max(right);
+                                }
+                                if cov <= 0.0 {
+                                    continue;
+                                }
+                                let px_src = pack(style.fg, cov, self.state.current_opacity());
+                                let di = dy as u32 * self.width + dx as u32;
+                                if let Some(dst) = self.buf.get_mut(di as usize) {
+                                    *dst = blend(*dst, px_src);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if style.underline {
+                self.fill_rect(
+                    Rect::new(pen_x, origin.y + cell_h - 2.0, span * cell_w, 1.0),
+                    style.fg,
+                );
+            }
+            pen_x += span * cell_w;
+        }
+        pen_x - start
+    }
+}
+
 impl RenderCtx for SoftBackend {
     fn size(&self) -> Size {
         Size::new(self.width as f32, self.height as f32)
@@ -644,6 +739,13 @@ impl RenderCtx for SoftBackend {
     }
 
     fn draw_text(&mut self, origin: Pos, text: &str, style: &TextStyle) -> f32 {
+        // **per-text 字号路径**：字号 × 变换缩放 = 最终像素字号，按该字号**光栅化**（不拉伸位图）。
+        // 这是新分支；**下面的旧路径逐字未动**，`size` 为 `None` 时行为与改前逐像素相同。
+        if let Some(px) = style.size {
+            if px.is_finite() && px > 0.0 {
+                return self.draw_text_sized(origin, text, style, px);
+            }
+        }
         // 文本第一版**只跟随平移，不缩放**（缩放需要重新光栅化或重采样）。
         // 这是已知限制，已写在报告与文档里。
         let mapped = self.map_point(origin);

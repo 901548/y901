@@ -453,3 +453,16 @@ let list = ListView::new("chat", 24.0)
   所以默认字号路径**逐像素不变**）。
   `glyph_at_size` 对非基准字号**不生成 mip**（mip 的级尺寸按基准字号算，不适用于其他字号）。
 - **待做**：两后端 `draw_text` 改用 `glyph_at_size` + `cell_metrics_for(px)`（尚未生效）。
+
+#### 当前状态（中间态，待 D3D 补齐）
+
+- **soft 后端：已支持 per-text 字号。**
+  `draw_text` 在 `style.size` 为 `Some(px)` 时走 `draw_text_sized`：
+  `px_final = px * map_scale()`，按该字号**重新光栅化**（`glyph_at_size`）并 1:1 绘制。
+  `size: None` 仍走**原路径**（106 行逐字未动）。
+- **D3D 后端：尚未支持。** `TextEngine::glyph` 用构造期固定的 `font_size`，
+  `glyph_run_analysis`（DirectWrite）也按该值算 em —— **需要中改**（含 unsafe 的 DWrite 调用），已单独立项。
+- **临时分裂**：**软渲染下** Helm 的 18/13 字号生效；**D3D 下**仍按默认字号画。D3D 完成后分裂消失。
+- **重要：Helm 主路径是 D3D** —— 用户当前看到的行为**与改动前一致**（D3D 不支持字号），
+  **这不是回归**，而是"能力先落软渲染侧"。
+- **待做**：D3D 中改 `TextEngine`（缓存 key 加字号 + `glyph_run_analysis` 接受 size + 覆写 `glyph_at_size`）+ `backend/mod.rs::draw_text` 同源分支。
