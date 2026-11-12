@@ -319,27 +319,26 @@ impl Theme {
             ],
             // window —— A1：暂与 panel 同色（零视觉变化）
             // window —— A2b：窗口底色（比 panel 深一档）
-            // window —— A1：暂与 panel 同色（零视觉变化）
             [
                 Style::new(
                     Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                    Color::rgba(0.03, 0.03, 0.04, 1.0),
                 ),
                 Style::new(
                     Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.08, 0.08, 0.10, 1.0),
+                    Color::rgba(0.03, 0.03, 0.04, 1.0),
                 ),
                 Style::new(
                     Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.10, 0.10, 0.13, 1.0),
+                    Color::rgba(0.03, 0.03, 0.04, 1.0),
                 ),
                 Style::new(
                     Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.07, 0.07, 0.09, 1.0),
+                    Color::rgba(0.03, 0.03, 0.04, 1.0),
                 ),
                 Style::new(
-                    Color::rgba(0.50, 0.52, 0.58, 1.0),
-                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                    Color::rgba(0.90, 0.92, 0.96, 1.0),
+                    Color::rgba(0.03, 0.03, 0.04, 1.0),
                 ),
             ],
         ],
@@ -493,27 +492,26 @@ pub const LIGHT: Theme = Theme {
         ],
         // window —— A1：暂与 panel 同色（零视觉变化）
         // window —— A2b：窗口底色（比 panel 亮一档）
-        // window —— A1：暂与 panel 同色（零视觉变化）
         [
             Style::new(
                 Color::rgba(0.10, 0.10, 0.12, 1.0),
-                Color::rgba(0.96, 0.96, 0.97, 1.0),
+                Color::rgba(0.99, 0.99, 0.995, 1.0),
             ),
             Style::new(
                 Color::rgba(0.10, 0.10, 0.12, 1.0),
-                Color::rgba(0.94, 0.94, 0.96, 1.0),
+                Color::rgba(0.99, 0.99, 0.995, 1.0),
             ),
             Style::new(
                 Color::rgba(0.10, 0.10, 0.12, 1.0),
-                Color::rgba(0.92, 0.92, 0.94, 1.0),
+                Color::rgba(0.99, 0.99, 0.995, 1.0),
             ),
             Style::new(
                 Color::rgba(0.10, 0.10, 0.12, 1.0),
-                Color::rgba(0.95, 0.95, 0.96, 1.0),
+                Color::rgba(0.99, 0.99, 0.995, 1.0),
             ),
             Style::new(
-                Color::rgba(0.45, 0.45, 0.48, 1.0),
-                Color::rgba(0.96, 0.96, 0.97, 1.0),
+                Color::rgba(0.10, 0.10, 0.12, 1.0),
+                Color::rgba(0.99, 0.99, 0.995, 1.0),
             ),
         ],
     ],
@@ -582,6 +580,16 @@ mod tests {
             item, panel,
             "列表项 hover 必须与面板 hover 不同，否则菜单 hover 看不见"
         );
+    }
+
+    /// **窗口底色必须与面板不同** —— 否则"面板浮在窗口上"的层次感丢失。
+    ///
+    /// 只断言"不等于"，不锁死具体数值（深一档/亮一档都可）。
+    #[test]
+    fn window_bg_differs_from_panel_in_dark() {
+        let w = Theme::DARK.style(Role::WINDOW, State::Normal).bg;
+        let p = Theme::DARK.style(Role::PANEL, State::Normal).bg;
+        assert_ne!(w, p, "窗口底色应与面板不同，否则层次感丢失");
     }
 
     #[test]
