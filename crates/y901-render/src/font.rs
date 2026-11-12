@@ -159,6 +159,18 @@ pub trait FontEngine {
     ///
     /// 默认实现的语义是"这个引擎不支持缩放"——它不是错误，
     /// 只是能力差异：DirectWrite 路径没有 mip 链，也就没有更粗的级可选。
+    /// **按字号取字形**（per-text 字号）。
+    ///
+    /// 默认实现：**忽略 `px`，委托 `glyph(ch)`** ——
+    /// 这样其他 `FontEngine` 实现者（如 D3D 的 `TextEngine`）**不需要改动**就能编译，
+    /// 行为与现状一致（字号参数被忽略）。
+    ///
+    /// 真正实现在 [`crate::font_engine::MyFontEngine`]（按 px 分开缓存并现场光栅化）。
+    fn glyph_at_size(&mut self, ch: char, _px: f32) -> Option<&GlyphInfo> {
+        self.glyph(ch)
+    }
+
+    /// 按**变换栈缩放比**取字形（mip 降采样链）。
     fn glyph_at_scale(&mut self, ch: char, _scale: f32) -> Option<ScaledGlyph> {
         let g = self.glyph(ch)?.clone();
         Some(ScaledGlyph {

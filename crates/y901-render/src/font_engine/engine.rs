@@ -54,7 +54,12 @@ pub struct MyFontEngine {
     atlas_size: u32,
     packer: SkylinePacker,
     /// `(char, phase)` → 字形信息。
-    cache: HashMap<(char, u8), GlyphInfo>,
+    /// `(char, phase, px)` → 字形信息。
+    ///
+    /// **第三个维度是字号**（px，取整）：同一个字在不同字号下是**不同的位图**，
+    /// 必须分开存（否则 18px 的字会拿到 16px 的字形）。
+    /// 默认字号用 `px_key()`（= 引擎 `size` 取整），**与加该维度前的行为一致**。
+    cache: HashMap<(char, u8, u32), GlyphInfo>,
     /// 当前帧号（LRU 用）。
     frame: u64,
     /// 待上传的脏区。
@@ -127,7 +132,7 @@ impl MyFontEngine {
     pub fn prefetch(&mut self, chars: &[char]) -> usize {
         let mut added = 0usize;
         for ch in chars {
-            if self.cache.contains_key(&(*ch, 0)) {
+            if self.cache.contains_key(&(*ch, 0, self.px_key())) {
                 continue;
             }
             if self.glyph_phased(*ch, 0).is_some() {
@@ -137,16 +142,52 @@ impl MyFontEngine {
         added
     }
 
+    /// **引擎基准字号**的整数 key（默认路径用）。
+    fn px_key(&self) -> u32 {
+        self.size.round().max(1.0) as u32
+    }
+
     /// 取字形（不命中则现场光栅化并入图集）。
     pub fn glyph(&mut self, ch: char) -> Option<&GlyphInfo> {
         self.glyph_phased(ch, 0)
+    }
+
+    /// **按字号取字形**（per-text 字号）。
+    ///
+    /// 输入：`ch`、`px`（逻辑像素，取整）。
+    /// 返回：该字号下的字形；不命中则**按该字号现场光栅化**。
+    ///
+    /// **默认路径（`px` 等于引擎基准字号）直接委托 `glyph()`** ——
+    /// 保证与加该能力前**逐像素一致**（同一份缓存、同一条光栅化路径）。
+    ///
+    /// **字号来源必须与 `cell_metrics_for(px)` 同源**（因为宽度度量用的是同一个 px）。
+    pub fn glyph_at_size(&mut self, ch: char, px: f32) -> Option<&GlyphInfo> {
+        let k = if px.is_finite() && px > 0.0 {
+            px.round().max(1.0) as u32
+        } else {
+            self.px_key()
+        };
+        if k == self.px_key() {
+            return self.glyph(ch);
+        }
+        let key = (ch, 0u8, k);
+        if !self.cache.contains_key(&key) {
+            // 按目标字号光栅化；**不生成 mip**（mip 按基准字号算的级尺寸不适用）。
+            let bitmap = rasterize_glyph_phased(&self.data, ch, k as f32, 0)?;
+            let info = self.insert_into_atlas(ch, &bitmap)?;
+            self.cache.insert(key, info);
+        }
+        if let Some(g) = self.cache.get_mut(&key) {
+            g.last_used = self.frame;
+        }
+        self.cache.get(&key)
     }
 
     /// 带亚像素相位取字形（`phase` ∈ 0..=3）。
     ///
     /// 缓存 key 是 `(char, phase)`——同一字的 4 个相位是 4 张不同位图。
     pub fn glyph_phased(&mut self, ch: char, phase: u8) -> Option<&GlyphInfo> {
-        let key = (ch, phase & 3);
+        let key = (ch, phase & 3, self.px_key());
         if !self.cache.contains_key(&key) {
             let bitmap = rasterize_glyph_phased(&self.data, ch, self.size, phase)?;
             let info = self.insert_into_atlas(ch, &bitmap)?;
@@ -293,7 +334,7 @@ impl MyFontEngine {
         // 不缩放 / 非法值 / 放大：直接 L0，不生成 mip
         if !(scale.is_finite() && scale > 0.0 && scale < 1.0) {
             self.glyph(ch)?;
-            let g = self.cache.get(&(ch, 0u8))?;
+            let g = self.cache.get(&(ch, 0u8, self.px_key()))?;
             return Some(MipSelection {
                 level: 0,
                 glyph: g,
@@ -311,13 +352,13 @@ impl MyFontEngine {
         // 先取 L0（它是 mip 的源，也提供缓存的 ink）
         self.glyph(ch)?;
         let wanted = {
-            let g = self.cache.get(&(ch, 0u8))?;
+            let g = self.cache.get(&(ch, 0u8, self.px_key()))?;
             crate::mip::level_for(scale, g.ink, 2)
         };
         // level 0 就是 L0：**不要生成 mip**。否则 0.75 这类"基础级为 0"的调用
         // 会白白付 14µs 并产生脏区，而画面与不生成时完全一致。
         if wanted == 0 {
-            let g = self.cache.get(&(ch, 0u8))?;
+            let g = self.cache.get(&(ch, 0u8, self.px_key()))?;
             return Some(MipSelection {
                 level: 0,
                 glyph: g,
@@ -333,7 +374,7 @@ impl MyFontEngine {
         }
         let _ = self.ensure_mips(ch);
 
-        let g = self.cache.get(&(ch, 0u8))?;
+        let g = self.cache.get(&(ch, 0u8, self.px_key()))?;
         // 回退：从 wanted 往下找第一个真正存在的级
         for level in (1..=wanted).rev() {
             if let Some(slot) = g.mip_at(level) {
@@ -383,7 +424,7 @@ impl MyFontEngine {
     /// 需要 L1，把 L2 也一并生成是白付 20% 的时间。
     /// 将来若冷启动超预算，可以改成"首次需要 L2 时才生成 L2"。
     pub fn ensure_mips_upto(&mut self, ch: char, max_level: usize) -> bool {
-        let key = (ch, 0u8);
+        let key = (ch, 0u8, self.px_key());
         let Some(info) = self.cache.get(&key) else {
             return false;
         };

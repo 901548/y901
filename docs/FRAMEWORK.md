@@ -436,3 +436,20 @@ let list = ListView::new("chat", 24.0)
   已有前提：自研光栅化器 `rasterize_glyph_phased(data, ch, size, phase)`
   **本就接受字号参数**，图集缓存 key 已是 `(char, phase)` 元组 ——
   **加一个尺寸维度即可**，不需要新的字体轮廓访问路径。
+
+### 为何选方案①（引擎内多字号）而不是方案②（后端多引擎）
+
+- **方案②被否决的硬事实**：
+  两个后端只持有 `text: Box<dyn FontEngine>`（`soft.rs:75`）——
+  **拿不到具体的 `MyFontEngine`，也拿不到字体字节 `data: Vec<u8>`**。
+  要支持“每字号一个引擎”就得：改后端构造契约（传字体字节）+ 后端加字节字段 +
+  把 trait 对象改成同时持有具体类型 + 两个后端各复制一套管理 + 改 supersample/x11 调用点。
+- **方案①的前提全部已就位**：`data: Vec<u8>` 就在引擎里、
+  `rasterize_glyph_phased(data, ch, size, phase)` 本就接受字号、图集缓存 key 是元组（加一个维度即可）、
+  驱逐/占用率/清空都在引擎内。
+  **后端只需多调一个 `glyph_at_size(ch, px)`。**
+- **已实现**：`cache` key `(char, phase)` → `(char, phase, px)`；`px_key()` = 引擎基准字号取整；
+  新增 `MyFontEngine::glyph_at_size(ch, px)`；`FontEngine` trait 加默认实现（委托 `glyph`，
+  所以默认字号路径**逐像素不变**）。
+  `glyph_at_size` 对非基准字号**不生成 mip**（mip 的级尺寸按基准字号算，不适用于其他字号）。
+- **待做**：两后端 `draw_text` 改用 `glyph_at_size` + `cell_metrics_for(px)`（尚未生效）。
