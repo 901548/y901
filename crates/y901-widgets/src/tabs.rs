@@ -24,8 +24,13 @@ use y901_ui::{
     Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
-/// 标签栏高度（逻辑像素）。
-const BAR_H: f32 = 32.0;
+/// 标签栏高度（逻辑像素 × DPI 缩放）。
+///
+/// **为何是函数**：125% DPI 下正文字从 16→20px，
+/// 32px 的标签栏只剩 12px 余量，而标签文字是垂直居中的 —— 字会顶边。
+fn bar_h(scale: f32) -> f32 {
+    32.0 * scale
+}
 /// 切换过渡时长。
 const SWITCH_MS: u64 = 200;
 /// 过渡时内容区的水平位移（像素）。
@@ -117,18 +122,23 @@ impl Tabs {
     }
 
     /// 标签栏矩形。
-    fn bar_rect(&self) -> Rect {
+    ///
+    /// `scale` 由调用方传入：`measure` / `arrange` 传 `m.scale()`，
+    /// `event` / `render` 传 `ctx.scale()`。**不存缓存** ——
+    /// `Tabs` 没有 `&self` 公开几何 API（`bar_rect` / `content_rect` 都是私有），
+    /// 所以不存在"拿不到 ctx 的调用方"。
+    fn bar_rect(&self, scale: f32) -> Rect {
         Rect::new(
             self.rect.x,
             self.rect.y,
             self.rect.w,
-            BAR_H.min(self.rect.h),
+            bar_h(scale).min(self.rect.h),
         )
     }
 
-    /// 内容区矩形。
-    fn content_rect(&self) -> Rect {
-        let bar = self.bar_rect();
+    /// 内容区矩形（`scale` 与 `bar_rect` 必须同源，否则栏与内容会错位）。
+    fn content_rect(&self, scale: f32) -> Rect {
+        let bar = self.bar_rect(scale);
         Rect::new(
             self.rect.x,
             bar.bottom(),
@@ -141,8 +151,8 @@ impl Tabs {
     ///
     /// 为什么等分而不是自适应：自适应要量文字宽度，会在每次布局时改变标签位置，
     /// 用户肌肉记忆会失效。等分在 2~6 个标签时更稳。
-    fn tab_rect(&self, i: usize) -> Rect {
-        let bar = self.bar_rect();
+    fn tab_rect(&self, i: usize, scale: f32) -> Rect {
+        let bar = self.bar_rect(scale);
         let n = self.items.len().max(1) as f32;
         let w = bar.w / n;
         Rect::new(bar.x + w * i as f32, bar.y, w, bar.h)
@@ -209,14 +219,15 @@ impl Widget for Tabs {
 
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
-        // 有显式 `content_height` 就用它；否则保留**最小高度** `BAR_H + 1.0`（保证内容区≥ 1px）。
+        // 有显式 `content_height` 就用它；否则保留**最小高度** `bar_h + 1.0`（保证内容区≥ 1px）。
+        let bar = bar_h(m.scale());
         let h = match self.content_height {
-            Some(ch) => BAR_H + ch.max(0.0),
-            None => BAR_H + 1.0,
+            Some(ch) => bar + ch.max(0.0),
+            None => bar + 1.0,
         };
         c.constrain(Size::new(c.max.w, h))
     }
@@ -252,13 +263,13 @@ impl Widget for Tabs {
     fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
         match event {
             UiEvent::MouseDown { pos, .. } => {
-                let bar = self.bar_rect();
+                let bar = self.bar_rect(ctx.scale());
                 if !bar.contains(*pos) {
                     return EventResult::Ignored;
                 }
                 ctx.request_focus(self.id.clone());
                 for i in 0..self.items.len() {
-                    if self.tab_rect(i).contains(*pos) {
+                    if self.tab_rect(i, ctx.scale()).contains(*pos) {
                         return if self.select(i) {
                             EventResult::Handled
                         } else {
@@ -313,7 +324,7 @@ impl Widget for Tabs {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
-        let bar = self.bar_rect();
+        let bar = self.bar_rect(ctx.scale());
         let selected_style = ctx.theme().style(y901_ui::Role::BUTTON, State::Selected);
         let normal_style = ctx.theme().style(y901_ui::Role::BUTTON, State::Normal);
 
@@ -323,7 +334,7 @@ impl Widget for Tabs {
         let n = self.items.len().max(1);
         let mut labels: Vec<(String, Rect, TextStyle)> = Vec::with_capacity(n);
         for i in 0..n {
-            let r = self.tab_rect(i);
+            let r = self.tab_rect(i, ctx.scale());
             let active = i == self.selected.get();
             let s = if active { selected_style } else { normal_style };
             if active {
@@ -339,7 +350,7 @@ impl Widget for Tabs {
 
         // 选中标签的下划线（过渡时随进度从 0 长到满宽）
         let p = self.progress();
-        let sel_rect = self.tab_rect(self.selected.get().min(n - 1));
+        let sel_rect = self.tab_rect(self.selected.get().min(n - 1), ctx.scale());
         ctx.fill_rect(
             Rect::new(
                 sel_rect.x,
@@ -359,7 +370,7 @@ impl Widget for Tabs {
         }
 
         // 内容区：只在激活页上调用 painter，并施加过渡（淡入 + 右移）。
-        let content = self.content_rect();
+        let content = self.content_rect(ctx.scale());
         if content.w > 0.0 && content.h > 0.0 {
             ctx.push_clip(content);
             let eased = 1.0 - p; // p=0 → 完全透明
