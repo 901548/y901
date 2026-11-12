@@ -18,6 +18,15 @@ pub const DEFAULT_DELAY_MS: u64 = 500;
 /// 内边距。
 const PAD: f32 = 6.0;
 
+/// 浮层内边距（逻辑像素 × DPI 缩放）。
+///
+/// **为何是函数**：125% DPI 下文字变大 25%，固定 6px 的内边距会让文字贴边。
+/// `Tooltip` 没有 `&self` 公开几何 API（`new` / `delay_ms` / `tooltip_id` / `is_open`），
+/// 所以**不需要缓存**，全部传参。
+fn pad(scale: f32) -> f32 {
+    PAD * scale
+}
+
 /// 提示气泡本体（作为浮层内容绘制）。
 pub struct Tooltip {
     id: String,
@@ -53,7 +62,8 @@ impl Widget for Tooltip {
     ) -> Size {
         let style = TextStyle::default();
         let t = m.measure_text(&self.text, &style);
-        c.constrain(Size::new(t.w + PAD * 2.0, t.h + PAD * 2.0))
+        let p = pad(m.scale());
+        c.constrain(Size::new(t.w + p * 2.0, t.h + p * 2.0))
     }
 
     fn arrange(
@@ -78,8 +88,9 @@ impl Widget for Tooltip {
         ctx.fill_round_rect(self.rect, s.bg, 4.0);
         ctx.stroke_rect(self.rect, s.border, 1.0);
         let style = TextStyle::fg(s.fg);
+        let p = pad(ctx.scale());
         ctx.draw_text(
-            Pos::new(self.rect.x + PAD, self.rect.y + PAD),
+            Pos::new(self.rect.x + p, self.rect.y + p),
             &self.text,
             &style,
         );

@@ -10,6 +10,20 @@ use y901_ui::{
 
 /// 方框边长（逻辑像素）。
 const BOX: f32 = 16.0;
+
+/// 复选框尺寸（逻辑像素 × DPI 缩放）。
+///
+/// **为何是函数**：框与文字并排，字在 125% 下从 16→20px，
+/// 而 16px 的框会变得比字小 —— 对齐关系被破坏。
+/// `Checkbox` 没有 `&self` 公开几何 API（`box_rect` 是私有）→ **不加缓存**。
+fn box_size(scale: f32) -> f32 {
+    BOX * scale
+}
+
+/// 框与文字的间距（逻辑像素 × DPI 缩放）。
+fn gap(scale: f32) -> f32 {
+    GAP * scale
+}
 /// 方框与文字的间距。
 const GAP: f32 = 8.0;
 /// 对勾两条线段的粗细。
@@ -50,9 +64,10 @@ impl Checkbox {
     }
 
     /// 方框矩形（左侧，垂直居中）。
-    fn box_rect(&self) -> Rect {
-        let y = self.rect.y + (self.rect.h - BOX) * 0.5;
-        Rect::new(self.rect.x, y, BOX.min(self.rect.w), BOX)
+    fn box_rect(&self, scale: f32) -> Rect {
+        let b = box_size(scale);
+        let y = self.rect.y + (self.rect.h - b) * 0.5;
+        Rect::new(self.rect.x, y, b.min(self.rect.w), b)
     }
 
     /// 切换选中状态并触发回调。
@@ -108,8 +123,9 @@ impl Widget for Checkbox {
     ) -> Size {
         let style = TextStyle::default();
         let tw = m.measure_text(&self.label, &style).w;
-        let h = BOX.max(m.line_height(&style));
-        c.constrain(Size::new(BOX + GAP + tw, h))
+        let b = box_size(m.scale());
+        let h = b.max(m.line_height(&style));
+        c.constrain(Size::new(b + gap(m.scale()) + tw, h))
     }
 
     fn arrange(
@@ -160,7 +176,7 @@ impl Widget for Checkbox {
         } else {
             normal.border
         };
-        let boxr = self.box_rect();
+        let boxr = self.box_rect(ctx.scale());
 
         // 方框：先填底，再描边（描边用四条 fill_rect，避免依赖 stroke_round_rect 的实现细节）
         ctx.fill_round_rect(boxr, normal.bg, 2.0);
@@ -176,7 +192,7 @@ impl Widget for Checkbox {
 
         // 标签
         let style = TextStyle::fg(normal.fg);
-        let text_x = boxr.right() + GAP;
+        let text_x = boxr.right() + gap(ctx.scale());
         let text_y = self.rect.y + (self.rect.h - ctx.line_height(&style)) * 0.5;
         ctx.draw_text(Pos::new(text_x, text_y), &self.label, &style);
     }
