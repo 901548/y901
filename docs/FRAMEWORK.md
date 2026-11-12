@@ -476,3 +476,21 @@ let list = ListView::new("chat", 24.0)
   调用点与旧路径的对比可读性；且该方法只有一个调用点（`draw_text_sized`）。
 - **后续建议**：若之后还要加参数（如 letter_spacing / 9 号以上），再打包为 struct。
   **当前不阻塞功能，记录为技术债。**
+
+### DPI × scale：字号已接入（高度常量待做）
+
+- **当前状态（已完成）**：
+  - **基准字号**：`FontConfig.size × dpi_scale`（`window.rs` 用 `GetDpiForWindow(hwnd)/96.0`）。
+  - **per-text 字号**：`Some(px)` 路径在两个后端同源乘 `self.dpi_scale`
+    （`measure_text` / `line_height` / `draw_text_sized` 各 3 处）。
+  - **`None` 路径不乘**：`self.cell` 已是 `FontConfig.size × dpi_scale` 的物理像素，再乘就是双重缩放。
+  - `px_final = px × dpi_scale × map_scale()`：**两个 scale 来源不同**（设备 DPI vs 变换栈），不重复。
+  - `TextMetrics::scale()` 已修正为返回**窗口级** DPI（字段注入）。
+    **实测：`GetDpiForSystem()`=96 而窗口 DPI=120** —— PMv2 进程下不能用系统 DPI。
+- **已知中间态缺陷（下一轮必须修）**：
+  - **高度常量尚未乘 scale**（`TAB_BAR_H` / `TOOLBAR_H` / `ITEM_H` / `ROW_H` 等约 12 组、约 18 个常量）。
+  - 125% 下**字从 16→20，但标签栏仍 32px** → **文字会顶边/裁切**。
+  - 不随 scale 的约 10 个（`split::DIVIDER` 1px、`CARET_W`、`BAR_WIDTH`、`CHECK_W`、`RADIUS`等）**应保持不变**。
+- **hash-gate 基线已更新**：`0xDBB308DD1657EF9C` → **`0x87DECF871BB90AFF`**
+  （原因：基准字号 16→20 @125%，客户区尺寸不变）。
+  记录写在 `scripts/hash-gate.ps1` 头部注释（baseline 文件本身必须保持单行，它被机器读）。

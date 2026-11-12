@@ -74,11 +74,25 @@ pub struct SoftBackend {
     next_texture: u64,
     text: Box<dyn super::font::FontEngine>,
     cell: Size,
+    /// **DPI 缩放（物理 / 逻辑）**。默认 1.0（X11 / 测试），
+    /// 由平台层在窗口创建后注入（Windows 软渲染 fallback 也注入）。
+    dpi_scale: f32,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
     clear_color: Color,
 }
 
 impl SoftBackend {
+    /// 设置 **DPI 缩放比**（物理 / 逻辑）。
+    ///
+    /// 由平台层在窗口创建后调用；`y901-render` 本身不知道 DPI。
+    pub fn set_dpi_scale(&mut self, scale: f32) {
+        self.dpi_scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+    }
+
     /// 当前纹理表大小（测试与诊断用）。
     pub fn texture_count(&self) -> usize {
         self.textures.len()
@@ -113,6 +127,7 @@ impl SoftBackend {
             cell,
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
+            dpi_scale: 1.0,
         })
     }
 
@@ -136,6 +151,7 @@ impl SoftBackend {
             text: font,
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
+            dpi_scale: 1.0,
         })
     }
 
@@ -318,7 +334,8 @@ impl TextMetrics for SoftBackend {
         // 避免 CJK/等宽混排的亚像素误差）；`None` 走引擎默认 cell —— 与加字段前逐像素一致。
         let cell = match style.size {
             Some(px) if px > 0.0 => {
-                let (w, h) = crate::font::cell_metrics_for(px);
+                // **per-text 字号乘 DPI**：`px` 是逻辑像素，引擎需物理像素。
+                let (w, h) = crate::font::cell_metrics_for(px * self.dpi_scale);
                 Size::new(w, h)
             }
             _ => self.cell,
@@ -331,12 +348,12 @@ impl TextMetrics for SoftBackend {
     }
     fn line_height(&self, style: &TextStyle) -> f32 {
         match style.size {
-            Some(px) if px > 0.0 => crate::font::cell_metrics_for(px).1,
+            Some(px) if px > 0.0 => crate::font::cell_metrics_for(px * self.dpi_scale).1,
             _ => self.cell.h,
         }
     }
     fn scale(&self) -> f32 {
-        1.0
+        self.dpi_scale
     }
 }
 
@@ -356,7 +373,8 @@ impl SoftBackend {
         let mapped = self.map_point(origin);
         let origin = Pos::new(mapped.x, mapped.y);
         let scale = self.map_scale();
-        let px_final = (px * scale).max(1.0);
+        // **DPI × 变换缩放**（两个不同来源，不重复）。
+        let px_final = (px * self.dpi_scale * scale).max(1.0);
         let (cell_w, cell_h) = crate::font::cell_metrics_for(px_final);
         // 与旧路径同式：基线 = 顶部 + ascent
         let ascent_ratio = if self.cell.h > 0.0 {

@@ -207,3 +207,26 @@ pub fn cell_metrics_for(font_size: f32) -> (f32, f32) {
     };
     ((size * 0.5).round().max(1.0), size.round().max(1.0))
 }
+
+#[cfg(test)]
+mod dpi_scale_tests {
+    use super::cell_metrics_for;
+
+    /// **DPI 缩放后，字号层级顺序必须保持**，且 cell 必须变大。
+    ///
+    /// 只断言"顺序 + 变大"，**不锁死具体数值**（字体/字号可调）。
+    #[test]
+    fn dpi_scale_grows_cell_and_preserves_order() {
+        let base = cell_metrics_for(16.0 * 1.25);
+        let title = cell_metrics_for(18.0 * 1.25);
+        let secondary = cell_metrics_for(13.0 * 1.25);
+        assert!(
+            title.0 > base.0 && base.0 > secondary.0,
+            "缩放后层级顺序必须保持：标题 > 正文 > 表头"
+        );
+        assert!(
+            base.0 > cell_metrics_for(16.0).0,
+            "1.25 缩放后 cell 必须更大"
+        );
+    }
+}

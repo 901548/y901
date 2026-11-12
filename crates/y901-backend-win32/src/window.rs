@@ -48,7 +48,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{
-    AdjustWindowRectExForDpi, GetDpiForSystem, SetProcessDpiAwarenessContext,
+    AdjustWindowRectExForDpi, GetDpiForSystem, GetDpiForWindow, SetProcessDpiAwarenessContext,
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_ESCAPE};
@@ -801,7 +801,31 @@ impl Window {
             );
 
             let theme = options.theme.unwrap_or(y901_ui::theme::Theme::DARK);
-            let font = options.font.clone().unwrap_or_default();
+            // **DPI 缩放（唯一注入点）**：`FontConfig.size` 是**逻辑像素**（用户在配置里填 16），
+            // 而布局/绘制/字形引擎**全程物理像素**。因此在这里把它乘上设备缩放比。
+            //
+            // 为何在这里而不是在 `y901-runtime`：`FontConfig` 是平台无关的（X11 也用它），
+            // 而 DPI 是 **平台事实**；只有后端知道该用哪个 scale。
+            // 而且此时 `hwnd` 已存在（L766 创建），可用**窗口级** DPI。
+            //
+            // SAFETY：`GetDpiForWindow` 只读查询，参数是刚创建成功的有效 HWND。
+            let dpi_scale = {
+                let hwnd = hwnd;
+                let dpi = unsafe { GetDpiForWindow(hwnd) };
+                if dpi == 0 {
+                    1.0
+                } else {
+                    dpi as f32 / 96.0
+                }
+            };
+            let font = {
+                let cfg = options.font.clone().unwrap_or_default();
+                // 字体族不变，只把逻辑字号换成物理字号。
+                y901_runtime::FontConfig {
+                    family: cfg.family,
+                    size: (cfg.size * dpi_scale).max(1.0),
+                }
+            };
 
             // 纯 CPU 模式：不创建 D3D11 设备。
             // 为什么用环境变量而不是 `Options` 字段：`Options` 是公开结构体，
@@ -837,14 +861,17 @@ impl Window {
                                 ch,
                             )?)
                         };
-                    y901_render::soft::SoftBackend::new(
+                    let mut soft = y901_render::soft::SoftBackend::new(
                         viewport.0,
                         viewport.1,
                         engine,
                         cell,
                         Some(theme),
                     )
-                    .map_err(|e| format!("soft backend init failed: {e}"))?
+                    .map_err(|e| format!("soft backend init failed: {e}"))?;
+                    // 软渲染同样需要真实 DPI（Windows fallback 也会走这里）。
+                    soft.set_dpi_scale(dpi_scale);
+                    soft
                 })
             } else {
                 None
@@ -855,10 +882,13 @@ impl Window {
             let backend = if force_soft {
                 None
             } else {
-                Some(
-                    D3dBackend::new(hwnd, viewport.0, viewport.1, theme, &font)
-                        .map_err(|e| format!("D3D11 init failed: {e}"))?,
-                )
+                Some({
+                    let mut d3d = D3dBackend::new(hwnd, viewport.0, viewport.1, theme, &font)
+                        .map_err(|e| format!("D3D11 init failed: {e}"))?;
+                    // **DPI 注入：**此处有 hwnd，用窗口级 DPI（不是系统 DPI）。
+                    d3d.set_dpi_scale(dpi_scale);
+                    d3d
+                })
             };
 
             ShowWindow(hwnd, SW_SHOW);

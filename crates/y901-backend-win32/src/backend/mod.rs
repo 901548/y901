@@ -57,6 +57,11 @@ pub struct D3dBackend {
     size: (u32, u32),
     /// 上一次 `present` 是否被遮挡（D3D11 只能从 `Present` 返回值得知）。
     last_occluded: bool,
+    /// **窗口级 DPI 缩放**（96 = 100%），由 `window.rs` 在创建后注入。
+    ///
+    /// 为何不在此调 `GetDpiForSystem`：实测本机系统 DPI=96 而窗口 DPI=120，
+    /// PMv2 进程下两者**可以不同**，用系统 DPI 会静默错位。
+    dpi_scale: f32,
     /// 渲染主题（启动时由 Options.theme 注入，None 时用 DARK）。
     /// 动画快照（每帧由 `UiTree::render` 通过 `set_animations` 推入）。
     ///
@@ -153,6 +158,7 @@ impl D3dBackend {
             last_occluded: false,
             state: y901_render::render_state::RenderState::new(theme),
             cell: Size::new(cell_w, cell_h),
+            dpi_scale: 1.0,
         };
         backend.sync_atlas()?;
         Ok(backend)
@@ -177,6 +183,16 @@ impl D3dBackend {
     /// 后端不认识 `UiTree`，由 runtime 调 `tree.invalidate_all()`。
     ///
     /// 说明：主题只含颜色，不含字形信息，因此**不需要重建图集**。
+    /// 设置 **窗口级 DPI 缩放比**（物理 / 逻辑），由 `window.rs` 在窗口创建后调用。
+    pub fn set_dpi_scale(&mut self, scale: f32) {
+        self.dpi_scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+    }
+
+    /// 切换主题（重建后需重传字形图集与清屏色）。
     pub fn set_theme(&mut self, theme: y901_ui::theme::Theme) -> Result<(), String> {
         self.state.set_theme(theme);
         Ok(())
@@ -465,7 +481,8 @@ impl D3dBackend {
     /// `px_final = px * current_scale()`；cell 用 `cell_metrics_for(px_final)`（与度量同源）；
     /// 字形用 `glyph_at_size(ch, px_final)` 并 **1:1 绘制**（不走 mip 选级，避免双重缩放）。
     fn draw_text_sized(&mut self, origin: Pos, text: &str, style: &TextStyle, px: f32) -> f32 {
-        let px_final = (px * self.current_scale()).max(1.0);
+        // **DPI × 变换缩放**（两个不同来源，不重复）。
+        let px_final = (px * self.dpi_scale * self.current_scale()).max(1.0);
         let (cell_w, cell_h) = y901_render::cell_metrics_for(px_final);
         // 基线比例 = ascent / cell_h（字体属性，不随字号变），与 soft 同式
         let base_ascent = self.text.ascent();
@@ -762,7 +779,8 @@ impl TextMetrics for D3dBackend {
         // 否则 D3D/软渲染两条路径的布局会分叉。
         let cell = match style.size {
             Some(px) if px > 0.0 => {
-                let (w, h) = y901_render::cell_metrics_for(px);
+                // **per-text 字号乘 DPI**（与 soft 同源）
+                let (w, h) = y901_render::cell_metrics_for(px * self.dpi_scale);
                 y901_ui::Size::new(w, h)
             }
             _ => self.cell,
@@ -773,22 +791,17 @@ impl TextMetrics for D3dBackend {
 
     fn line_height(&self, style: &TextStyle) -> f32 {
         match style.size {
-            Some(px) if px > 0.0 => y901_render::cell_metrics_for(px).1,
+            Some(px) if px > 0.0 => y901_render::cell_metrics_for(px * self.dpi_scale).1,
             _ => self.cell.h,
         }
     }
 
     fn scale(&self) -> f32 {
-        // **真实 DPI**（96 = 100%）。用 `GetDpiForSystem` 而不是 `GetDpiForWindow`：
-        // `TextMetrics` 这一层拿不到 HWND（`D3dBackend` 不持有窗口句柄，present 时才传入）。
-        // **当前全仓无消费者**（`grep "\.scale()"` 只命中定义行），所以这个值变化**不影响输出**。
-        // SAFETY：`GetDpiForSystem` 无参数、无指针、只读系统状态，任何线程可调。
-        let dpi = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForSystem() };
-        if dpi == 0 {
-            1.0
-        } else {
-            dpi as f32 / 96.0
-        }
+        // **窗口级 DPI**（96 = 100%），字段由 `window.rs` 注入。
+        //
+        // 何以不再用 `GetDpiForSystem`：**实测本机系统 DPI=96 而窗口 DPI=120** ——
+        // PMv2 进程下两者可以不同，用系统 DPI 会在这类机器上静默错位。
+        self.dpi_scale
     }
 }
 
