@@ -20,6 +20,33 @@ fn pad(scale: f32) -> f32 {
     6.0 * scale
 }
 
+// ===================== Dialog 布局尺寸（随 DPI 缩放）=====================
+//
+// 下面四个对应 `Dialog::arrange` 里原本的两个 `GAP` 与按钮尺寸。
+// **两个 `GAP` 是不同名意义**（一个纵向一个横向），故分开命名。
+// `Dialog` 的几何 API（`panel_rect` 等）都是 `pub`，但**它们返回的是已安排好的 `Rect`**，
+// 不需要 scale 参数 —— 所以**不加缓存**，布局里直接用 `m.scale()`。
+
+/// Dialog 正文区子节点的**纵向**间距。
+fn body_gap(scale: f32) -> f32 {
+    8.0 * scale
+}
+
+/// Dialog 按钮条的**横向**间距。
+fn btn_gap(scale: f32) -> f32 {
+    8.0 * scale
+}
+
+/// Dialog 按钮宽度。
+fn btn_w(scale: f32) -> f32 {
+    88.0 * scale
+}
+
+/// Dialog 按钮高度（与 `btn_w` 同比例，避免"变宽不变高"）。
+fn btn_h(scale: f32) -> f32 {
+    28.0 * scale
+}
+
 /// 选中回调类型。
 type SelectCallback = Box<dyn Fn(usize, &str)>;
 
@@ -638,7 +665,7 @@ impl Widget for Dialog {
         // 现在按顺序排：每个子节点先测高，再给剩余高度，累加间距；
         // 剩余高度不足时给 0（不 panic、不越过 body 底部）。
         {
-            const GAP: f32 = 8.0;
+            let gap = body_gap(m.scale());
             let mut y = body.y;
             for child in self.children.iter_mut() {
                 let remaining = (body.bottom() - y).max(0.0);
@@ -646,22 +673,24 @@ impl Widget for Dialog {
                     child.measure(m, Constraints::loose(Size::new(body.w, remaining)), cache);
                 let h = size.h.min(remaining);
                 child.arrange(Rect::new(body.x, y, body.w, h), m, cache);
-                y += h + GAP;
+                y += h + gap;
             }
         }
 
         // 按钮条：右对齐排布，等宽 88px，间距 8px
         self.button_rects.clear();
         if !self.buttons.is_empty() {
-            const BTN_W: f32 = 88.0;
-            const GAP: f32 = 8.0;
+            let scale = m.scale();
+            let bw = btn_w(scale);
+            let bh = btn_h(scale);
+            let gap = btn_gap(scale);
             let n = self.buttons.len() as f32;
-            let total = n * BTN_W + (n - 1.0) * GAP;
+            let total = n * bw + (n - 1.0) * gap;
             let mut x = inner.x + (inner.w - total).max(0.0);
             let y = self.panel.bottom() - 16.0 - 28.0;
             for _ in 0..self.buttons.len() {
-                self.button_rects.push(Rect::new(x, y, BTN_W, 28.0));
-                x += BTN_W + GAP;
+                self.button_rects.push(Rect::new(x, y, bw, bh));
+                x += bw + gap;
             }
         }
     }
