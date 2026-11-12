@@ -502,3 +502,21 @@ let list = ListView::new("chat", 24.0)
 - **正确结论与完整实证见 [`docs/hash-gate-scope.md`](hash-gate-scope.md)**：
   门禁场景只渲染一个自绘 `Scene`（不含任何框架控件）；
   自 `75af5b1` 起字号乘 DPI 缩放 → 门禁曾失去可复现性，现已固定 DPI=1.0。
+
+### `WM_DPICHANGED`：DPI 变化已实现（2026-11-12）
+
+- **wndproc**（`window.rs`）新增 `WM_DPICHANGED` 分支：
+  - 从 `wParam` 取新 DPI（`LOWORD`）写入 `WindowShared::pending_dpi`；
+  - 按 `lParam` 的**系统建议矩形**调 `SetWindowPos`（`SWP_NOZORDER | SWP_NOACTIVATE`）——
+    如果不调，窗口尺寸与新 DPI 不匹配，看起来像被裁切。
+- **`Window::after_frame`**（每帧尾巴）消费该标记：
+  - `take()` 后置 `None` → **只在真正变化的那一帧重建**，不会每帧重建；
+  - 用 `base_font_size`（**未乘 scale 的用户配置字号**）× 新 scale 重建引擎；
+  - `backend.set_dpi_scale(scale)` + `soft.set_dpi_scale(scale)`（`Some(px)` 路径依赖它）；
+  - `resize(tree)` + `tree.invalidate_all()` → 全量重排与重绘。
+- **为何不在 `wndproc` 里直接重建**：它是**自由函数**，拿不到 `Window`/`backend`/`tree`。
+- **已知行为**：重建引擎会让字形图集**全空**，雀一帧需重新光栅化可见区文字 —— **一次性 1 帧代价**。
+- **已知限制**：`wParam` 高低位不等时（各向异性 DPI）**取 `LOWORD` 统一处理**；Windows 当前不产生此情况。
+- **失败处理**：`set_font` 返 `Err` 时打印错误并**保持旧引擎**（画面仍可用，只是字号未变），不 panic。
+- **需用户手动验证**：将窗口从 100% 显示器拖到 125% 显示器再拖回去，
+  观察：① 字号是否跟随变化；② 布局是否重排（无重叠/越界）；③ 是否有黑帧/闪烁。

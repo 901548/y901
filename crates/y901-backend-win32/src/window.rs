@@ -60,14 +60,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetCursor, SetWindowLongPtrW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW,
     CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW, IDC_HAND, IDC_IBEAM,
     IDC_SIZEALL, IDC_SIZENS, IDC_SIZEWE, MSG, PM_REMOVE, QS_ALLINPUT, SW_SHOW, WM_CHAR, WM_DESTROY,
-    WM_DROPFILES, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
+    WM_DPICHANGED, WM_DROPFILES, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
     WM_NCCREATE, WM_NCDESTROY, WM_NULL, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP,
     WM_SETCURSOR, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetWindowRect, MoveWindow, SetWindowPos, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, WS_POPUP, WS_VISIBLE,
+    SWP_NOACTIVATE, SWP_NOZORDER, WS_POPUP, WS_VISIBLE,
 };
 
 use y901_runtime::{Options, RawEvent};
@@ -125,6 +125,11 @@ struct WindowShared {
     fullscreen: bool,
     /// 全屏下按 Esc：wndproc 置位，`wait_events`（`&mut self`）消费。
     want_exit_fs: bool,
+    /// **DPI 变化待处理标记**：`wndproc` 在 `WM_DPICHANGED` 时写入新 DPI，
+    /// `after_frame`（拿得到 `&mut self` + `tree`）用 `take()` 消费 —— **只触发一次**。
+    ///
+    /// 为何不在 `wndproc` 里直接重建引擎：它是**自由函数**，拿不到 `Window`/`backend`/`tree`。
+    pending_dpi: Option<u32>,
     /// IME 组字状态。
     ///
     /// **必须每窗口一份**：它是输入法进程的**镜像**（正在组的那串字），
@@ -136,6 +141,7 @@ struct WindowShared {
 impl WindowShared {
     fn new() -> Self {
         Self {
+            pending_dpi: None,
             queue: Vec::new(),
             size: (0, 0),
             need_full_redraw: false,
@@ -478,6 +484,34 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             push(hwnd, RawEvent::Resize { w, h });
             0
         }
+        // **DPI 变化**（拖窗口到另一个显示器）。
+        //
+        // `wParam`：LOWORD = 新的水平 DPI，HIWORD = 新的垂直 DPI（Windows 实践中两者相等）。
+        // `lParam`：系统建议的新窗口矩形（`RECT*`）—— 必须采用，否则窗口尺寸与新 DPI
+        // 不匹配（看起来像被裁切）。
+        //
+        // **重建引擎不在这里**：本函数是自由函数，拿不到 `Window`/`tree`。
+        // 这里只记标记 + 调窗口尺寸，真正的重建由 `after_frame` 消费。
+        WM_DPICHANGED => {
+            let new_dpi = (wparam as u32) & 0xFFFF;
+            with_shared(hwnd, (), |s| {
+                s.pending_dpi = Some(new_dpi);
+            });
+            let rc = lparam as *const RECT;
+            if !rc.is_null() {
+                let r = *rc;
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    r.left,
+                    r.top,
+                    r.right - r.left,
+                    r.bottom - r.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+            0
+        }
         WM_MOUSEMOVE => {
             let x = (lparam as u32 & 0xFFFF) as i16 as f32;
             let y = ((lparam as u32 >> 16) & 0xFFFF) as i16 as f32;
@@ -686,6 +720,13 @@ pub struct Window {
     saved_rect: Option<(i32, i32, i32, i32)>,
     /// 当前是否全屏（状态机，避免重复切换）。
     fullscreen: bool,
+    /// **用户配置的逻辑字号**（未乘 `dpi_scale`）。
+    ///
+    /// 为何要存：`WM_DPICHANGED` 时需重建引擎，若从当前 `font.size` 反推，
+    /// 会因陷入"已乘过 scale 再乘一次"的双重缩放。
+    base_font_size: f32,
+    /// 字体族名（重建引擎时需要）。
+    font_family: String,
 }
 
 impl Window {
@@ -831,12 +872,15 @@ impl Window {
                     }
                 }
             };
+            // **保留逻辑字号与族名**：`WM_DPICHANGED` 重建引擎时要用它们。
+            let font_cfg = options.font.clone().unwrap_or_default();
+            let base_font_size = font_cfg.size;
+            let font_family = font_cfg.family.clone();
             let font = {
-                let cfg = options.font.clone().unwrap_or_default();
                 // 字体族不变，只把逻辑字号换成物理字号。
                 y901_runtime::FontConfig {
-                    family: cfg.family,
-                    size: (cfg.size * dpi_scale).max(1.0),
+                    family: font_cfg.family,
+                    size: (font_cfg.size * dpi_scale).max(1.0),
                 }
             };
 
@@ -915,6 +959,8 @@ impl Window {
                 saved_style: 0,
                 saved_rect: None,
                 fullscreen: false,
+                base_font_size,
+                font_family,
             };
             // 此时窗口已以普通样式存在，`set_fullscreen` 能保存到真实原状态。
             if fullscreen {
@@ -2005,6 +2051,33 @@ impl y901_backend_common::window::WindowBackend for Window {
                     tree.invalidate_all();
                 }
                 Err(err) => eprintln!("[y901] 切换字体失败: {err}"),
+            }
+        }
+        // ---- **DPI 变化消费**（WM_DPICHANGED 写入的标记）----
+        //
+        // `take()` 后置 None → **只在真正变化的那一帧重建**，不会每帧重建。
+        let pending_dpi = with_shared(self.hwnd, None, |s| s.pending_dpi.take());
+        if let Some(dpi) = pending_dpi {
+            let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
+            let font = y901_runtime::FontConfig {
+                family: self.font_family.clone(),
+                size: (self.base_font_size * scale).max(1.0),
+            };
+            match Window::set_font(self, &font) {
+                Ok(()) => {
+                    // 两个后端都需更新缩放比（`Some(px)` 路径依赖它）。
+                    if let Some(b) = self.backend.as_mut() {
+                        b.set_dpi_scale(scale);
+                    }
+                    if let Some(soft) = self.soft.as_mut() {
+                        soft.set_dpi_scale(scale);
+                    }
+                    // 重建后字形图集为空 → 必须整窗重排 + 重绘。
+                    self.resize(tree);
+                    tree.invalidate_all();
+                }
+                // **Err 不 panic、不静默**：报错后保持旧引擎（画面仍可用，只是字号未变）。
+                Err(err) => eprintln!("[y901] DPI 变化后重建字体失败: {err}"),
             }
         }
         if self.take_repaint_request() {
