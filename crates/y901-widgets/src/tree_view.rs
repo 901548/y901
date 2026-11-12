@@ -17,8 +17,16 @@ use y901_ui::{
 };
 
 /// 每层缩进。
+/// 每层缩进的**基准值**（scale = 1.0）。
+///
+/// **运行时值在 `TreeView::indent` 字段里**（`measure()` 按 DPI 写入）。
+/// 保留这个 `pub const` 是为了**不破坏公开 API**（应用层与测试已引用它）。
 pub const INDENT: f32 = 16.0;
 /// 行高。
+/// 行高的**基准值**（scale = 1.0）。
+///
+/// **运行时值在 `TreeView::row_h` 字段里**（`measure()` 按 DPI 写入）。
+/// 保留 `pub const` 为不破坏公开 API。
 pub const ROW_H: f32 = 24.0;
 /// 展开图标所占宽度。
 const CHEVRON: f32 = 16.0;
@@ -62,8 +70,12 @@ pub struct TreeView {
     selected: Option<Vec<usize>>,
     /// 垂直滚动偏移（像素）
     scroll_offset: f32,
-    /// 行高
+    /// **行高**（运行时值 = `ROW_H × scale`）。
     row_h: f32,
+    /// **每层缩进**（运行时值 = `INDENT × scale`）。
+    indent: f32,
+    /// **展开箭头尺寸**（运行时值 = `CHEVRON × scale`）。
+    chevron: f32,
     rect: Rect,
     /// 扁平化结果：`(路径, 深度)`
     visible: Vec<(Vec<usize>, usize)>,
@@ -84,7 +96,10 @@ impl TreeView {
             roots,
             selected: None,
             scroll_offset: 0.0,
+            // 初始值 = `scale = 1.0` 下的几何；真实值在 `measure()` 里按 DPI 写入。
             row_h: ROW_H,
+            indent: INDENT,
+            chevron: CHEVRON,
             rect: Rect::ZERO,
             visible: Vec::new(),
             item: y901_ui::FlexItem::default(),
@@ -147,7 +162,9 @@ impl TreeView {
     /// 抽成公开函数的理由：缩进是外观契约，测试与使用方都需要能验证它，
     /// 而不应去重算 `depth * INDENT + CHEVRON` 这个公式。
     pub fn text_x(&self, depth: usize) -> f32 {
-        self.rect.x + depth as f32 * INDENT + CHEVRON + 2.0
+        // 读**实例字段**（已按 DPI 写入），不读常量。
+        // `2.0` 是**箭头与文字之间的固定间隙**（视觉细节，不随 scale）。
+        self.rect.x + depth as f32 * self.indent + self.chevron + 2.0
     }
 
     /// 第 `i` 行（扁平索引）的矩形。
@@ -252,10 +269,21 @@ impl Widget for TreeView {
 
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
+        // **DPI 缩放写入**（这里是唯一写入点）。
+        //
+        // 为何用实例字段而不是给方法加 `scale` 参数：
+        // `text_x` / `row_rect` / `row_at` / `visible_range` 是 **`pub` 且 `&self`**，
+        // 调用方（应用层、测试）拿不到 `ctx`/`metrics`，
+        // 加参数就是**破坏公开 API**。`row_h` 本来就是字段，把同类信息放在一起最一致。
+        let scale = m.scale();
+        self.row_h = ROW_H * scale;
+        self.indent = INDENT * scale;
+        self.chevron = CHEVRON * scale;
+
         let h = (self.visible.len() as f32 * self.row_h).min(c.max.h);
         c.constrain(Size::new(c.max.w, h))
     }
@@ -286,8 +314,8 @@ impl Widget for TreeView {
                 let (path, depth) = self.visible[i].clone();
                 ctx.request_focus(self.id.clone());
                 // 点展开图标区域（缩进之后、文字之前的 16px）→ 切换展开
-                let x0 = self.rect.x + depth as f32 * INDENT;
-                if pos.x >= x0 && pos.x < x0 + CHEVRON && self.toggle_expanded(&path) {
+                let x0 = self.rect.x + depth as f32 * self.indent;
+                if pos.x >= x0 && pos.x < x0 + self.chevron && self.toggle_expanded(&path) {
                     return EventResult::Relayout;
                 }
                 self.selected = Some(path);
@@ -394,7 +422,7 @@ impl Widget for TreeView {
                 ctx.fill_rect(r, selected.bg);
             }
 
-            let x0 = r.x + depth as f32 * INDENT;
+            let x0 = r.x + depth as f32 * self.indent;
             // 展开图标：用逐行短条拼一个三角形（没有旋转图元）。
             let expanded = self
                 .item_at(&path)
@@ -406,7 +434,7 @@ impl Widget for TreeView {
                 .unwrap_or(false);
             if has_children {
                 let cy = r.y + r.h * 0.5;
-                let cx = x0 + CHEVRON * 0.5;
+                let cx = x0 + self.chevron * 0.5;
                 let color = normal.fg;
                 for k in 0..5 {
                     let w = 6.0 - k as f32 * 1.0;
