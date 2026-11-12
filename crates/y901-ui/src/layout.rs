@@ -896,6 +896,30 @@ impl Flex {
                 // 纵向 wrap：每一列是一条竖带。
                 Axis::Vertical => Rect::new(cursor, inner.y, h, inner.h),
             };
+            // **行内必须忽略 flex 因子**：分行时按内容宽算的行数，
+            // 若排列时又让 flex 子项吃剩余空间，它会溢出本行（与文档不符）。
+            // 做法：把 flex 维度换成 `Px(实测尺寸)` 的临时副本，**不改 `flex_arrange_with`**。
+            let line_measured: Vec<(Size, FlexItem)> = measured[start..end]
+                .iter()
+                .map(|(size, item)| {
+                    let main_flex = match self.axis {
+                        Axis::Horizontal => item.width.flex_factor(),
+                        Axis::Vertical => item.height.flex_factor(),
+                    };
+                    let mut item = *item;
+                    if main_flex.is_some() {
+                        let px = match self.axis {
+                            Axis::Horizontal => size.w,
+                            Axis::Vertical => size.h,
+                        };
+                        match self.axis {
+                            Axis::Horizontal => item.width = crate::Dimension::Px(px),
+                            Axis::Vertical => item.height = crate::Dimension::Px(px),
+                        }
+                    }
+                    (*size, item)
+                })
+                .collect();
             flex_arrange_with(
                 self.axis,
                 Edges::ZERO,
@@ -906,7 +930,7 @@ impl Flex {
                 sub,
                 metrics,
                 cache,
-                &measured[start..end],
+                &line_measured,
             );
             cursor += h + gap;
         }
@@ -1572,5 +1596,43 @@ mod wrap_tests {
         assert!(size.w.is_finite() && size.h.is_finite(), "尺寸必须有限：{size:?}");
         // 分行结果应为空（无行可排）。
         assert!(f.wrap_lines.is_empty(), "空子项集不五有分行结果");
+    }
+
+    /// **回归**：wrap + `Dimension::Flex` 子项时，行内不得溢出。
+    ///
+    /// 修复前：`measure` 忽略 flex 因子（按内容宽分行），但 `arrange` 的
+    /// `flex_arrange_with` 仍让 flex 子项吃"本行剩余空间" → 子项右边界超出容器宽。
+    #[test]
+    fn wrap_with_flex_child_does_not_overflow() {
+        let mut flex_child = Box1::new("f", 20.0, 10.0);
+        flex_child.item.width = crate::Dimension::Flex(1.0);
+        let mut f = Flex::row("r")
+            .wrap(true)
+            .push(Box::new(Box1::new("a", 20.0, 10.0)))
+            .push(Box::new(flex_child))
+            .push(Box::new(Box1::new("c", 20.0, 10.0)));
+        let (_size, rects) = layout(&mut f, 50.0, 100.0);
+        for (i, r) in rects.iter().enumerate() {
+            assert!(
+                r.right() <= 50.0 + 0.01,
+                "子项 {i} 溢出容器：right={} rect={r:?}",
+                r.right()
+            );
+        }
+    }
+
+    /// **回归**：wrap + `Align::Center` 时行内子项在行高内居中对齐。
+    #[test]
+    fn wrap_line_aligns_children_with_center() {
+        let mut f = Flex::row("r")
+            .wrap(true)
+            .align(Align::Center)
+            .push(Box::new(Box1::new("a", 15.0, 10.0)))
+            .push(Box::new(Box1::new("b", 15.0, 20.0)))
+            .push(Box::new(Box1::new("c", 15.0, 10.0)));
+        let (_size, rects) = layout(&mut f, 30.0, 100.0);
+        // 第一行高 = 20（a:10, b:20）→ a 居中后 y = (20-10)/2 = 5
+        assert_eq!(rects[0].y, 5.0, "a 应在行内垂直居中：{rects:?}");
+        assert_eq!(rects[1].y, 0.0, "b 撑满行高：{rects:?}");
     }
 }
