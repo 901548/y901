@@ -2,21 +2,47 @@
 
 //! 3c 最终交付证据：`--font=self` 下的像素统计 + PNG 基准。
 //!
-//! 山不能拈我们就拍屏幕（无法抓真实窗口\n），所以用**回读像素 + 统计 + PNG**：
+//! 山不能拈我们就拍屏幕（无法抓真实窗口），所以用**回读像素 + 统计 + PNG**：
 //! 数字可以做回归基准，比截图更硬。
+//!
+//! **2026-11-12 扩展**：场景末尾新增一段**框架控件布局**（`Flex` + 三个
+//! `TextLabel`，字号 16/18/13，`align::Center`），让"布局 + per-text 字号"
+//! 也进入像素基线 —— 此前门禁只守字形光栅化。
 
 use std::time::Instant;
 
 use y901_backend_win32::window::Window;
 use y901_runtime::Options;
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
-    TextStyle, UiEvent, UiTree, Widget,
+    Align, Color, Constraints, EventCtx, EventResult, Flex, Pos, Rect, RenderCtx, Semantics, Size,
+    TextMetrics, TextStyle, UiEvent, UiTree, Widget,
 };
+use y901_widgets::TextLabel;
+
+/// 门禁场景的**布局段**：一个横向 `Flex`，三个不同字号的标签。
+///
+/// 为什么是这三个字号：16 = 引擎默认（`TextStyle.size = None` 路径），
+/// 18 与 13 = 显式 `Some(px)` 路径 —— 三者同时出现，能同时守住
+/// "默认字号不变" 与 "per-text 字号差异可见"。
+///
+/// 为什么用 `align::Center`：交叉轴对齐会改变子项的 **y 偏移**，
+/// 让"布局是否真的生效"变成**像素可见**的差异（而非仅尺寸差异）。
+fn gate_bar() -> Flex {
+    Flex::row("gate-bar")
+        .align(Align::Center)
+        .gap(6.0)
+        .push(Box::new(TextLabel::new("gate-t16", "M3 字号 16")))
+        .push(Box::new(TextLabel::new("gate-t18", "T18").size(18.0)))
+        .push(Box::new(TextLabel::new("gate-t13", "s13").size(13.0)))
+}
 
 /// 一个固定场景：中英文混排文本 + 3 个 SDF 圆角按钮 + 一条渐变。
+///
+/// 末尾另有一段**框架控件布局**（`bar`），见 [`gate_bar`]。
 struct Scene {
     rect: Rect,
+    /// 布局段（`Flex` 子树）。`render` 里逐个绘制其子节点。
+    bar: Flex,
 }
 
 impl Widget for Scene {
@@ -25,19 +51,24 @@ impl Widget for Scene {
     }
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
-        _cache: &mut y901_ui::layout::LayoutCache,
+        cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
+        // 让布局段参与度量（返回值不变 —— 场景始终占满）。
+        let _ = self.bar.measure(m, c, cache);
         c.constrain(Size::new(c.max.w, c.max.h))
     }
     fn arrange(
         &mut self,
         r: Rect,
-        _m: &dyn TextMetrics,
-        _cache: &mut y901_ui::layout::LayoutCache,
+        m: &dyn TextMetrics,
+        cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = r;
+        // 布局段放在下方空白带（原绘制占 y+0..140，背景条到 y+140）。
+        let bar_rect = Rect::new(r.x + 12.0, r.y + 146.0, (r.w - 24.0).max(0.0), 40.0);
+        self.bar.arrange(bar_rect, m, cache);
     }
     fn rect(&self) -> Rect {
         self.rect
@@ -87,6 +118,12 @@ impl Widget for Scene {
             Rect::new(r.x, r.y + 120.0, r.w, 20.0),
             Color::rgba(0.10, 0.10, 0.12, 1.0),
         );
+        // **布局段**：`Flex::render` 只画自身背景（默认 None），子节点需逐个绘制。
+        if let Some(kids) = self.bar.children_mut() {
+            for kid in kids.iter_mut() {
+                kid.render(ctx);
+            }
+        }
     }
     fn semantics(&self) -> Semantics {
         Semantics::default()
@@ -242,7 +279,10 @@ fn pixel_statistics_and_png_baseline() {
     // 项目早期观测到 382x173 / 0xF38B9C1AB8A877E2，本轮观测到 378x164 / 0xF4C92C36969FEC48。
     // 门禁脚本 `scripts/hash-gate.ps1` 改为"同会话前后对比 + 记录客户区尺寸"，不再硬编码常量。
     let mut window = Window::create(&options).expect("需要 D3D11");
-    let mut tree = UiTree::new(Box::new(Scene { rect: Rect::ZERO }));
+    let mut tree = UiTree::new(Box::new(Scene {
+        rect: Rect::ZERO,
+        bar: gate_bar(),
+    }));
     window.resize(&mut tree);
     tree.invalidate_all();
     window.request_snapshot();
@@ -325,7 +365,10 @@ fn probe_orientation_and_channels() {
         fullscreen: false,
     };
     let mut window = Window::create(&options).expect("d3d");
-    let mut tree = UiTree::new(Box::new(Scene { rect: Rect::ZERO }));
+    let mut tree = UiTree::new(Box::new(Scene {
+        rect: Rect::ZERO,
+        bar: gate_bar(),
+    }));
     window.resize(&mut tree);
     tree.invalidate_all();
     window.request_snapshot();

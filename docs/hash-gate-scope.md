@@ -72,3 +72,37 @@ cargo test -p y901-backend-win32 --offline --test font_3c_pixels -- --ignored
 3. 要证明"hash 变化的原因"，**必须做 checkout 重跑实验**（本轮就是靠 stash/bisect 才排除了 radio）。
 4. **引入依赖环境（DPI/字体）的改动时，必须同时固定门禁的环境变量** ——
    否则门禁会变成"谁跑谁改基线"。
+
+## 门禁场景扩展（2026-11-12）
+
+### 新增内容
+
+- `Flex::row("gate-bar")` + `align::Center` + `gap(6.0)`
+- 3 个 `TextLabel`：`t16`（默认 16px）、`t18`（`size(18.0)`）、`t13`（`size(13.0)`）
+- 放在原 `Scene` 绘制区域的空白带（`r.y + 146`，高 40），**避开原绘制**
+
+### 新旧 hash
+
+| | 值 | 说明 |
+|---|---|---|
+| 旧 | `0xDBB308DD1657EF9C` | 只有 `Scene` 自绘，无框架控件 |
+| **新** | **`0x39AE41C1697CBFD0`** | + `Flex` 布局 + 三档 per-text 字号 |
+
+**客户区尺寸不变**（`400x220`）→ 变化完全来自新增布局段。
+
+### 现在门禁覆盖
+
+- **字形光栅化**（中英混排、SDF 圆角、渐变）
+- **Flex 布局**（`align::Center` + `gap`）
+- **per-text 字号**（16 / 18 / 13 三档）
+
+### 仍不覆盖
+
+- **DPI 常量**（场景 DPI 固定 1.0）
+- **`WM_DPICHANGED`**（运行期 DPI 变化）
+- **`wrap`**（场景未使用）
+- **`cell_span` 零宽字符**（场景无零宽/组合/控制字符）
+
+### 可复现性
+
+`Y901_TEST_DPI_SCALE=1.0` 固定；扩展后连跑 **4 次**，hash 均为 `0x39AE41C1697CBFD0`。
