@@ -1060,11 +1060,16 @@ impl Window {
 
     /// 窗口句柄的**平台无关包装**（业务与组件只能拿到这个）。
     pub fn handle(&self) -> y901_runtime::WindowHandle {
+        // **真实 DPI**：优先按窗口所在显示器取（`GetDpiForWindow`），拿不到再退回 1.0。
+        // 与 `TextMetrics::scale()` 不同，这里**有 HWND**，所以用窗口级 DPI（多显示器混合 DPI 时更准）。
+        // SAFETY：`GetDpiForWindow` 只读查询，参数是有效的 HWND（本结构持有，窗口存活时有效）。
+        let dpi = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(self.hwnd) };
+        let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
         y901_runtime::WindowHandle::new(
             y901_runtime::gfx::PlatformWindowHandle::Win32(self.hwnd),
             self.viewport.0,
             self.viewport.1,
-            1.0,
+            scale,
         )
     }
 

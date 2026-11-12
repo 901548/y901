@@ -674,7 +674,16 @@ impl TextMetrics for D3dBackend {
     }
 
     fn scale(&self) -> f32 {
-        1.0
+        // **真实 DPI**（96 = 100%）。用 `GetDpiForSystem` 而不是 `GetDpiForWindow`：
+        // `TextMetrics` 这一层拿不到 HWND（`D3dBackend` 不持有窗口句柄，present 时才传入）。
+        // **当前全仓无消费者**（`grep "\.scale()"` 只命中定义行），所以这个值变化**不影响输出**。
+        // SAFETY：`GetDpiForSystem` 无参数、无指针、只读系统状态，任何线程可调。
+        let dpi = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForSystem() };
+        if dpi == 0 {
+            1.0
+        } else {
+            dpi as f32 / 96.0
+        }
     }
 }
 
