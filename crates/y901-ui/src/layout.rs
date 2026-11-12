@@ -237,6 +237,46 @@ pub fn flex_measure(
 ///
 /// 让 `arrange` 能直接复用（省掉每个子节点一次 id 哈希 + 一次 `flex()` 虚调用）。
 #[allow(clippy::too_many_arguments)] // 与 flex_measure 保持同一组参数 + 一个 out 参数
+/// 把某轴的尺寸 clamp 到 `[min, max]`；若 `avail` 有限则上限也不超过 `avail`
+/// （**`min > avail` 时退化为 `avail`**，不溢出父容器）。
+fn clamp_axis(v: f32, min: Dimension, max: Dimension, avail: f32) -> f32 {
+    let floor = min.resolve(avail, 0.0).max(0.0);
+    let ceil = match max {
+        Dimension::Auto => f32::INFINITY,
+        d => d.resolve(avail, v),
+    };
+    let mut out = v.max(floor).min(ceil);
+    if !out.is_finite() {
+        out = v;
+    }
+    if avail.is_finite() {
+        out = out.min(avail.max(0.0));
+    }
+    out
+}
+
+/// 把 `(main, cross)` 按主/交叉轴各自的 min/max clamp（两处共用）。
+fn clamp_pair(
+    axis: Axis,
+    item: FlexItem,
+    main_avail: f32,
+    cross_avail: f32,
+    main: f32,
+    cross: f32,
+) -> (f32, f32) {
+    let (mw, mh, cw, ch) = match axis {
+        Axis::Horizontal => (item.min_width, item.max_width, item.min_height, item.max_height),
+        Axis::Vertical => (item.min_height, item.max_height, item.min_width, item.max_width),
+    };
+    (
+        clamp_axis(main, mw, mh, main_avail),
+        clamp_axis(cross, cw, ch, cross_avail),
+    )
+}
+
+/// 测量本容器与子节点（子尺寸写入 `measured` 供 arrange 复用）。
+///
+/// 详细约束与无界处理见函数体内注释。
 pub fn flex_measure_into(
     axis: Axis,
     padding: Edges,
@@ -311,6 +351,22 @@ pub fn flex_measure_into(
             _ => cross_content,
         };
 
+        // **min/max clamp**（在尺寸解析之后、累加之前）。
+        // 默认 min=Px(0)/max=Auto 时不改变任何值 —— 与加该能力前逐像素一致。
+        let (main, cross) = clamp_pair(
+            axis,
+            item,
+            match axis {
+                Axis::Horizontal => inner_max.w,
+                Axis::Vertical => inner_max.h,
+            },
+            match axis {
+                Axis::Horizontal => inner_max.h,
+                Axis::Vertical => inner_max.w,
+            },
+            main,
+            cross,
+        );
         main_total += main;
         cross_max = cross_max.max(cross);
         visible += 1;
@@ -488,6 +544,8 @@ pub fn flex_arrange_with(
         };
 
         let cross = if cross.is_finite() { cross } else { 0.0 };
+        // **min/max clamp**（默认不改变任何值）。
+        let (main, cross) = clamp_pair(axis, item, main_avail, cross_avail, main, cross);
         let cross = cross.min(cross_avail);
         // 交叉轴偏移（`Stretch` / `Start` 为 0）。
         let cross_off = match align {
@@ -853,6 +911,10 @@ mod align_justify_tests {
                 item: FlexItem::default(),
             }
         }
+        fn with_item(mut self, item: FlexItem) -> Self {
+            self.item = item;
+            self
+        }
     }
 
     impl Widget for Box1 {
@@ -983,5 +1045,49 @@ mod align_justify_tests {
         let rects = layout(&mut flex, 100.0, 100.0);
         assert_eq!(rects[0].x, 40.0);
         assert_eq!(rects[0].y, 40.0);
+    }
+    #[test]
+    fn min_width_applies() {
+        // 内容宽 20 但 min_width = 100 → 实际 100
+        let mut flex = Flex::row("row").push(Box::new(
+            Box1::new("a", 20.0, 10.0).with_item(FlexItem::width(20.0).min_width(100.0)),
+        ));
+        let rects = layout(&mut flex, 300.0, 100.0);
+        assert_eq!(rects[0].w, 100.0, "min_width 应把 20 抬到 100");
+    }
+
+    #[test]
+    fn max_width_applies() {
+        // 内容宽 200 但 max_width = 80 → 实际 80
+        let mut flex = Flex::row("row").push(Box::new(
+            Box1::new("a", 200.0, 10.0).with_item(FlexItem::width(200.0).max_width(80.0)),
+        ));
+        let rects = layout(&mut flex, 300.0, 100.0);
+        assert_eq!(rects[0].w, 80.0, "max_width 应把 200 压到 80");
+    }
+
+    #[test]
+    fn min_larger_than_available_degrades_to_available() {
+        // 容器只有 50，下界 100 → **退化为可用空间 50**（不溢出）
+        let mut flex = Flex::row("row").push(Box::new(
+            Box1::new("a", 20.0, 10.0).with_item(FlexItem::width(20.0).min_width(100.0)),
+        ));
+        let rects = layout(&mut flex, 50.0, 100.0);
+        assert_eq!(
+            rects[0].w, 50.0,
+            "min > 可用空间时应 clamp 到可用空间（不溢出父容器）"
+        );
+    }
+
+    #[test]
+    fn default_min_max_does_not_change_layout() {
+        // 默认 NO_LIMITS：布局与不设 min/max 时一致
+        let mut flex = Flex::row("row")
+            .push(Box::new(Box1::new("a", 30.0, 10.0)))
+            .push(Box::new(Box1::new("b", 40.0, 10.0)));
+        let rects = layout(&mut flex, 200.0, 100.0);
+        assert_eq!(rects[0].w, 30.0);
+        assert_eq!(rects[1].w, 40.0);
+        assert_eq!(rects[1].x, 30.0);
     }
 }

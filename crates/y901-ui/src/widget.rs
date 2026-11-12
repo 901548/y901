@@ -199,14 +199,33 @@ pub struct FlexItem {
     pub width: Dimension,
     /// 高度约束。
     pub height: Dimension,
+    /// 宽度下界；`Px(0.0)`（默认）= 无下界。
+    pub min_width: Dimension,
+    /// 宽度上界；`Auto`（默认）= 无上界。
+    pub max_width: Dimension,
+    /// 高度下界；`Px(0.0)`（默认）= 无下界。
+    pub min_height: Dimension,
+    /// 高度上界；`Auto`（默认）= 无上界。
+    pub max_height: Dimension,
 }
 
 impl FlexItem {
+    /// 无 min/max 限制的默认值（供各构造器 `..` 展开）。
+    pub const NO_LIMITS: Self = Self {
+        width: Dimension::Auto,
+        height: Dimension::Auto,
+        min_width: Dimension::Px(0.0),
+        max_width: Dimension::Auto,
+        min_height: Dimension::Px(0.0),
+        max_height: Dimension::Auto,
+    };
+
     /// 两个方向都填满可用空间（最常用）。
     pub const fn fill() -> Self {
         Self {
             width: Dimension::Flex(1.0),
             height: Dimension::Flex(1.0),
+            ..Self::NO_LIMITS
         }
     }
 
@@ -223,22 +242,25 @@ impl FlexItem {
             } else {
                 Dimension::Auto
             },
+            ..Self::NO_LIMITS
         }
     }
 
-    /// 固定宽度，高度填满。
+    /// 固定宽度，高度按内容。
     pub const fn width(w: f32) -> Self {
         Self {
             width: Dimension::Px(w),
             height: Dimension::Auto,
+            ..Self::NO_LIMITS
         }
     }
 
-    /// 固定高度，宽度填满。
+    /// 固定高度，宽度按内容。
     pub const fn height(h: f32) -> Self {
         Self {
             width: Dimension::Auto,
             height: Dimension::Px(h),
+            ..Self::NO_LIMITS
         }
     }
 
@@ -247,7 +269,46 @@ impl FlexItem {
         Self {
             width: Dimension::Flex(factor),
             height: Dimension::Flex(factor),
+            ..Self::NO_LIMITS
         }
+    }
+
+    /// 宽度下界（逻辑像素）。
+    pub const fn min_width(mut self, w: f32) -> Self {
+        self.min_width = Dimension::Px(w);
+        self
+    }
+
+    /// 宽度上界（逻辑像素）。
+    pub const fn max_width(mut self, w: f32) -> Self {
+        self.max_width = Dimension::Px(w);
+        self
+    }
+
+    /// 高度下界（逻辑像素）。
+    pub const fn min_height(mut self, h: f32) -> Self {
+        self.min_height = Dimension::Px(h);
+        self
+    }
+
+    /// 高度上界（逻辑像素）。
+    pub const fn max_height(mut self, h: f32) -> Self {
+        self.max_height = Dimension::Px(h);
+        self
+    }
+
+    /// 两个方向同一下界。
+    pub const fn min(mut self, v: f32) -> Self {
+        self.min_width = Dimension::Px(v);
+        self.min_height = Dimension::Px(v);
+        self
+    }
+
+    /// 两个方向同一上界。
+    pub const fn max(mut self, v: f32) -> Self {
+        self.max_width = Dimension::Px(v);
+        self.max_height = Dimension::Px(v);
+        self
     }
 }
 

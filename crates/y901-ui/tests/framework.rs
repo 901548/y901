@@ -355,10 +355,13 @@ fn hover_only_dirties_two_nodes() {
         .push(Box::new(Leaf::new("a").flex_item(FlexItem {
             width: y901_ui::Dimension::Px(100.0),
             height: y901_ui::Dimension::Flex(1.0),
+            // 新增的 min/max 字段用默认值（无限制）。
+            ..FlexItem::NO_LIMITS
         })))
         .push(Box::new(Leaf::new("b").flex_item(FlexItem {
             width: y901_ui::Dimension::Px(100.0),
             height: y901_ui::Dimension::Flex(1.0),
+            ..FlexItem::NO_LIMITS
         })));
 
     let mut tree = UiTree::new(Box::new(root));
