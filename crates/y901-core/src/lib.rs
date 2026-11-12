@@ -1161,3 +1161,41 @@ mod tests {
         assert!(g.rows >= 1, "set_rows(0) 应 clamp，实测 {}", g.rows);
     }
 }
+
+#[cfg(test)]
+mod width_of_char_tests {
+    use super::Grid;
+
+    /// **格数契约**（来源：`unicode-width`）：
+    /// 0（组合符）→ 0，窄 → 1，宽/全角 → 2；`width()` 返回 `None`（控制字符）→ `unwrap_or(1)` = 1。
+    /// 这是**格数的唯一来源**，后端不得再做二次加工。
+    #[test]
+    fn ascii_is_one_cell() {
+        assert_eq!(Grid::width_of_char('a'), 1);
+    }
+
+    #[test]
+    fn wide_char_is_two_cells() {
+        assert_eq!(Grid::width_of_char('\u{4e2d}'), 2, "中（CJK）应占 2 格");
+    }
+
+    #[test]
+    fn combining_mark_is_zero_cells() {
+        // U+0301 COMBINING ACUTE ACCENT：unicode-width 返回 0（组合字符不占格）。
+        // 这正是为何后端不能 `.max(1)`：那会让重音多占一格、与前字错位。
+        assert_eq!(Grid::width_of_char('\u{301}'), 0);
+    }
+
+    #[test]
+    fn zero_width_space_is_zero_cells() {
+        // U+200B ZERO WIDTH SPACE：宽度 0，不推进。
+        assert_eq!(Grid::width_of_char('\u{200b}'), 0);
+    }
+
+    #[test]
+    fn control_char_falls_back_to_one_cell() {
+        // U+0001：`unicode-width` 对控制字符返回 `None` → `unwrap_or(1)` 兜底为 **1**
+        // （不能是 0，否则连续控制字符会堆在同一列）。
+        assert_eq!(Grid::width_of_char('\u{1}'), 1);
+    }
+}

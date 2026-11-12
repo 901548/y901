@@ -340,10 +340,9 @@ impl TextMetrics for SoftBackend {
             }
             _ => self.cell,
         };
-        let cells: f32 = text
-            .chars()
-            .map(|c| self.text.cell_span(c).max(1) as f32)
-            .sum();
+        // 格数的**唯一来源**是 `y901_core::Grid::width_of_char`（经 `cell_span`），
+        // 此处**不做二次加工**：零宽/组合字符就是 0 格（控制字符由 core 的 `unwrap_or(1)` 兵底为 1）。
+        let cells: f32 = text.chars().map(|c| self.text.cell_span(c) as f32).sum();
         Size::new(cells * cell.w, cell.h)
     }
     fn line_height(&self, style: &TextStyle) -> f32 {
@@ -387,7 +386,8 @@ impl SoftBackend {
         let mut pen_x = origin.x;
         let start = pen_x;
         for ch in text.chars() {
-            let span = self.text.cell_span(ch).max(1) as f32;
+            // 同上：格数只有一个来源，不做二次加工。
+            let span = self.text.cell_span(ch) as f32;
             if style.bg.a > 0.0 {
                 self.fill_rect(Rect::new(pen_x, origin.y, span * cell_w, cell_h), style.bg);
             }
@@ -775,7 +775,9 @@ impl RenderCtx for SoftBackend {
         let cell_w = self.cell.w;
         let ascent = self.text.ascent();
         for ch in text.chars() {
-            let span = self.text.cell_span(ch).max(1) as f32;
+            // 格数只有一个来源（`width_of_char`）。**span = 0 时仍绘制字形、pen 不推进** ——
+            // 组合字符（如 U+0301）必须画在前一个字上面才能显示重音。
+            let span = self.text.cell_span(ch) as f32;
             if style.bg.a > 0.0 {
                 self.fill_rect(
                     Rect::new(pen_x, origin.y, span * cell_w, self.cell.h),

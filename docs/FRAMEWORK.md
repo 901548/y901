@@ -403,19 +403,30 @@ let list = ListView::new("chat", 24.0)
 代价是每行没有独立的语义节点；因此 `semantics()` 只报
 `rows/offset/first_visible/selected` 四个属性。若需逐行语义，用普通容器 + 子控件。
 
-## 已知差异：两后端 `cell_span` 的零宽字符处理（与 TextStyle.size 无关）
+## 已修复：`cell_span` 的格数已统一（曾有 5 处 `.max(1)` 违反契约）
 
-- **soft**（`crates/y901-render/src/soft.rs`）：`text.chars().map(|c| self.text.cell_span(c).max(1))`
-  —— **每个字符至少占 1 列**。
-- **win32 D3D**（`crates/y901-backend-win32/src/backend/mod.rs`）：
-  `text.chars().map(|c| self.text.cell_span(c)).sum()` —— **不设下界**。
-
-**后果**：当文本含 **零宽字符 / 某些控制字符**（`cell_span` 返回 0）时，
-**两个后端算出的 `measure_text` 宽度可能不同** → 同一界面在 D3D 与软渲染下布局尺寸可能差几个像素。
-
-**状态**：**改动前既有**，与 `TextStyle.size` / `TextLabel::bold` 都无关；
-属**独立项**（修正方向：让两边都用同一个 `cell_span` 口径，并补一条
-零宽字符的对照测试）。**当前不影响任何测试与哈希基准**。
+- **格数的唯一来源**：`y901_core::Grid::width_of_char`
+  （日志：0 → 组合符 0 格，窄 → 1，宽/全角 → 2；控制字符由 `unwrap_or(1)` 兵底为 1）。
+- **两后端的 `cell_span` 本就同源**（均直接调 `width_of_char`）：
+  - soft：`crates/y901-render/src/font_engine/engine.rs:121`
+  - D3D：`crates/y901-backend-win32/src/backend/font.rs:1026`
+- **曾存在的问题（已修）**：6 个**消费点**里有 **5 个**对结果做了 `.max(1)`二次加工 ——
+  这使组合字符 / 零宽字符被当成 1 格，与 `width_of_char` 的 "0 格"直接冲突：
+  | 位置 | 函数 | 处理 |
+  |---|---|---|
+  | `soft.rs` measure_text | 度量 | 已删 `.max(1)` |
+  | `soft.rs` draw_text | 绘制推进 | 已删 |
+  | `soft.rs` draw_text_sized | 绘制推进 | 已删 |
+  | `backend/mod.rs` draw_text | 绘制推进 | 已删 |
+  | `backend/mod.rs` push_glyph | 绘制推进 | 已删 |
+  | **`backend/mod.rs` measure_text** | 度量 | **本来就没有**（反而是对的） |
+- **现在**：6 个消费点**全部直接用 `cell_span(ch)`**，无二次加工 → **两后端对同一文本的度量完全一致**。
+- **`span = 0` 的行为**：**仍绘制字形，但推进 0** —— 组合字符（U+0301）必须叠在前一个字上。
+- **测试守护**：
+  - `y901-core`：`width_of_char_tests`（5 条：ASCII/wide/combining/zero-width/control）；
+  - `y901-render`：`tests/cell_span_semantics.rs`（4 条，含 **组合字符不增宽** 与 **零宽字符宽度 = 0**）。
+- **影响**：`hash-gate` **未变**（`0xDBB308DD1657EF9C`）—— 场景文本不含组合/零宽/控制字符，
+  而常规字符的 `.max(1)` 本就是无效操作。
 
 ## 已知限制：`TextStyle.size` 当前**只有布局效果，没有绘制效果**
 

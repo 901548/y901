@@ -493,7 +493,9 @@ impl D3dBackend {
         let mut pen_x = origin.x;
         let start = pen_x;
         for ch in text.chars() {
-            let span = self.text.cell_span(ch).max(1) as f32;
+            // 格数的**唯一来源**是 `y901_core::Grid::width_of_char`（经 `cell_span`），
+            // **不做二次加工**；`span = 0` 时仍绘制字形、推进 0。
+            let span = self.text.cell_span(ch) as f32;
             if style.bg.a > 0.0 {
                 self.fill_rect(Rect::new(pen_x, origin.y, span * cell_w, cell_h), style.bg);
             }
@@ -1086,7 +1088,9 @@ impl RenderCtx for D3dBackend {
         }
         let mut pen_x = origin.x;
         for ch in text.chars() {
-            let span = self.text.cell_span(ch).max(1) as f32;
+            // 格数只有一个来源（`y901_core::Grid::width_of_char` 经 `cell_span`），不做二次加工；
+            // `span = 0` 时仍绘制字形、推进 0（组合字符需叠在前字上）。
+            let span = self.text.cell_span(ch) as f32;
             // 背景（如果有）
             if style.bg.a > 0.0 {
                 self.fill_rect(

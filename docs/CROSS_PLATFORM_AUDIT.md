@@ -1,5 +1,7 @@
 # Y901 跨平台 v3 · 阶段 0 盘点
 
+> **最后核对：2026-11-12**。
+>
 > 结论全部来自 grep / 源码阅读，证据格式 `文件:行号`。
 > 标注 **未验证** 的条目表示"需要读更多代码或做实验才能确认"，不做猜测。
 
@@ -61,7 +63,7 @@
 
 | 位置 | 问题 |
 |---|---|
-| `Host::policy()` | 让平台层（backend）反向依赖 `y901-agent::Policy`，破坏 `backend → runtime → ui` 的单向依赖。**这是已知架构债**（前几轮记录过，无调用点） |
+| `Host::policy()` | 让平台层（backend）反向依赖 `y901-agent::Policy`（**该 crate 已不存在，依赖已移除**），破坏 `backend → runtime → ui` 的单向依赖。**这是已知架构债**（前几轮记录过，无调用点） |
 | `PlatformRuntime::run(...)` | 一次性接收 `impl FnOnce() -> UiTree`，没有给"窗口重建"留接口；macOS 的 view 重建可能需要对钩子 |
 | `RawEvent` | 变体命名/语义偏 Win32（如 `ImeCommit`/`ImeCompose` 直接对应 `WM_IME_*`），需要确认 macOS/WASM 能映射（**未验证**） |
 
@@ -184,7 +186,7 @@
 
 1. **修 §3.2**：把 `font.rs:503-508` 的硬 `Err` 改成 `debug_assert!` + 记录实际 advance（否则平台一换，后端起不来）。
 2. **确认 §3.3**：读 `atlas.rs` 的实例生成代码，确认终端网格是否 `col*CELL_W`（本轮未验证）。
-3. **清除 `Host::policy()` 对 `y901-agent` 的依赖**（`runtime/lib.rs:23`），否则 `runtime` 无法脱离 agent 单独移植。
+3. ~~**清除 `Host::policy()` 对 `y901-agent` 的依赖**~~ **✅ 已完成（2026-11-12 核对：`y901-agent` crate 已不存在）**（`runtime/lib.rs:23`），否则 `runtime` 无法脱离 agent 单独移植。
 
 ---
 
