@@ -20,8 +20,8 @@ use crate::color::Color;
 use crate::event::{EventResult, UiEvent};
 use crate::geometry::{Edges, Rect, Size};
 use crate::widget::{
-    Axis, Constraints, Dimension, EventCtx, FlexItem, RenderCtx, Role, Semantics, TextMetrics,
-    Widget,
+    Align, Axis, Constraints, Dimension, EventCtx, FlexItem, Justify, RenderCtx, Role, Semantics,
+    TextMetrics, Widget,
 };
 
 // ============================ 布局缓存 ============================
@@ -347,7 +347,18 @@ pub fn flex_arrange(
     metrics: &dyn TextMetrics,
     cache: &mut LayoutCache,
 ) {
-    flex_arrange_with(axis, padding, gap, children, rect, metrics, cache, &[]);
+    flex_arrange_with(
+        axis,
+        padding,
+        gap,
+        Align::Stretch,
+        Justify::Start,
+        children,
+        rect,
+        metrics,
+        cache,
+        &[],
+    );
 }
 
 /// 同 [`flex_arrange`]，但**优先复用** `measured`（来自 [`flex_measure_into`]）。
@@ -358,6 +369,8 @@ pub fn flex_arrange_with(
     axis: Axis,
     padding: Edges,
     gap: f32,
+    align: Align,
+    justify: Justify,
     children: &mut [Box<dyn Widget>],
     rect: Rect,
     metrics: &dyn TextMetrics,
@@ -420,8 +433,21 @@ pub fn flex_arrange_with(
     };
     let leftover = (main_avail - fixed_total - gaps).max(0.0);
 
-    // 第二遍：分配并排布
-    let mut cursor = 0.0f32;
+    // **主轴分布**（justify-content）：用"已分配的主轴总长" 算剩余，
+    // 再转成"起始偏移 + 额外间距"。
+    // **`Justify::Start` 时 offset 与 gap_extra 均为 0** —— 与加该能力前逐像素一致。
+    let n = children.len() as f32;
+    let main_used = fixed_total + if flex_total > 0.0 { leftover } else { 0.0 } + gaps;
+    let free = (main_avail - main_used).max(0.0);
+    let free = if free.is_finite() { free } else { 0.0 };
+    let (mut cursor, gap_extra) = match justify {
+        Justify::Start => (0.0, 0.0),
+        Justify::Center => (free * 0.5, 0.0),
+        Justify::End => (free, 0.0),
+        // `n == 1` 时退化为 Start（避免 0 除法）
+        Justify::SpaceBetween => (0.0, if n > 1.0 { free / (n - 1.0) } else { 0.0 }),
+        Justify::SpaceAround => (free / n * 0.5, free / n),
+    };
     for (idx, child) in children.iter_mut().enumerate() {
         let item = child.flex();
         let size = sizes[idx];
@@ -445,21 +471,43 @@ pub fn flex_arrange_with(
             },
         };
 
+        // **交叉轴尺寸**：
+        // * `Stretch`（默认）—— `Auto` 子项拿满交叉轴（**与加该能力前一致**）；
+        // * 其余对齐 —— `Auto` 子项用自己的内容尺寸，否则 Center / End 无意义。
+        let content_cross = match axis {
+            Axis::Horizontal => size.h,
+            Axis::Vertical => size.w,
+        };
         let cross = match cross_dim {
             Dimension::Px(v) => v,
             Dimension::Percent(p) if cross_avail.is_finite() => cross_avail * (p / 100.0),
-            _ => cross_avail,
+            _ => match align {
+                Align::Stretch => cross_avail,
+                _ => content_cross,
+            },
         };
 
         let cross = if cross.is_finite() { cross } else { 0.0 };
+        let cross = cross.min(cross_avail);
+        // 交叉轴偏移（`Stretch` / `Start` 为 0）。
+        let cross_off = match align {
+            Align::Start | Align::Stretch => 0.0,
+            Align::Center => ((cross_avail - cross) * 0.5).max(0.0),
+            Align::End => (cross_avail - cross).max(0.0),
+        };
         let child_rect = match axis {
-            Axis::Horizontal => Rect::new(inner.x + cursor, inner.y, main, cross.min(cross_avail)),
-            Axis::Vertical => Rect::new(inner.x, inner.y + cursor, cross.min(cross_avail), main),
+            Axis::Horizontal => {
+                Rect::new(inner.x + cursor, inner.y + cross_off, main, cross)
+            }
+            Axis::Vertical => {
+                Rect::new(inner.x + cross_off, inner.y + cursor, cross, main)
+            }
         };
 
         cache.stats.arranged += 1;
         child.arrange(child_rect, metrics, cache);
-        cursor += main + gap;
+        // `gap_extra` 仅在 SpaceBetween / SpaceAround 下非零。
+        cursor += main + gap + gap_extra;
     }
 }
 
@@ -488,6 +536,10 @@ pub struct Flex {
     axis: Axis,
     padding: Edges,
     gap: f32,
+    /// 交叉轴对齐（`align-items`）。默认 `Stretch` = 加该能力前的行为。
+    align_items: Align,
+    /// 主轴分布（`justify-content`）。默认 `Start` = 加该能力前的行为。
+    justify_content: Justify,
     background: Option<Color>,
     children: Vec<Box<dyn Widget>>,
     rect: Rect,
@@ -512,6 +564,8 @@ impl Flex {
             axis,
             padding: Edges::ZERO,
             gap: 0.0,
+            align_items: Align::Stretch,
+            justify_content: Justify::Start,
             background: None,
             children: Vec::new(),
             rect: Rect::ZERO,
@@ -539,6 +593,22 @@ impl Flex {
     /// 设置子控件之间的间距。
     pub fn gap(mut self, gap: f32) -> Self {
         self.gap = gap;
+        self
+    }
+
+    /// 设置**交叉轴对齐**（`align-items`）。
+    ///
+    /// 默认 `Align::Stretch`（Auto 子项拿满交叉轴）。
+    pub fn align(mut self, align: Align) -> Self {
+        self.align_items = align;
+        self
+    }
+
+    /// 设置**主轴分布**（`justify-content`）。
+    ///
+    /// 默认 `Justify::Start`（从起点紧排）。
+    pub fn justify(mut self, justify: Justify) -> Self {
+        self.justify_content = justify;
         self
     }
 
@@ -615,6 +685,8 @@ impl Widget for Flex {
             self.axis,
             self.padding,
             self.gap,
+            self.align_items,
+            self.justify_content,
             &mut self.children,
             rect,
             metrics,
@@ -753,5 +825,163 @@ impl Widget for Stack {
     fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
     fn semantics(&self) -> Semantics {
         Semantics::default().exposed(true)
+    }
+}
+
+// ============================ align / justify 单测 ============================
+
+#[cfg(test)]
+mod align_justify_tests {
+    use super::*;
+    use crate::widget::{Constraints, Widget};
+    use crate::{Size, TextStyle};
+
+    /// 固定尺寸的标记子控件（只用于断言 rect）。
+    struct Box1 {
+        id: &'static str,
+        size: Size,
+        rect: Rect,
+        item: FlexItem,
+    }
+
+    impl Box1 {
+        fn new(id: &'static str, w: f32, h: f32) -> Self {
+            Self {
+                id,
+                size: Size::new(w, h),
+                rect: Rect::ZERO,
+                item: FlexItem::default(),
+            }
+        }
+    }
+
+    impl Widget for Box1 {
+        fn id(&self) -> &str {
+            self.id
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _cache: &mut LayoutCache,
+        ) -> Size {
+            c.constrain(self.size)
+        }
+        fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
+            self.rect = rect;
+        }
+        fn rect(&self) -> Rect {
+            self.rect
+        }
+        fn flex(&self) -> FlexItem {
+            self.item
+        }
+        fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult {
+            EventResult::Ignored
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &[]
+        }
+        fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
+        fn semantics(&self) -> Semantics {
+            Semantics::default()
+        }
+    }
+
+    struct Dummy;
+    impl TextMetrics for Dummy {
+        fn measure_text(&self, text: &str, _s: &TextStyle) -> Size {
+            Size::new(text.chars().count() as f32 * 8.0, 16.0)
+        }
+        fn line_height(&self, _s: &TextStyle) -> f32 {
+            16.0
+        }
+        fn scale(&self) -> f32 {
+            1.0
+        }
+    }
+
+    /// 布一次局，返回每个子件的 rect。
+    fn layout(flex: &mut Flex, w: f32, h: f32) -> Vec<Rect> {
+        let mut cache = LayoutCache::new();
+        let m = Dummy;
+        let _ = cache.measure(flex, &m, Constraints::tight(Size::new(w, h)));
+        flex.arrange(Rect::from_size(Size::new(w, h)), &m, &mut cache);
+        let mut out = Vec::new();
+        walk(flex, &mut out);
+        out
+    }
+
+    fn walk(node: &mut dyn Widget, out: &mut Vec<Rect>) {
+        for c in node.children_mut().unwrap_or(&mut Vec::new()).iter_mut() {
+            out.push(c.rect());
+            walk(c.as_mut(), out);
+        }
+    }
+
+    #[test]
+    fn align_center_offsets_each_child() {
+        // 容器 100 高，子件高 10 / 20 / 30（Auto 高度 = 内容）
+        let mut flex = Flex::row("row")
+            .align(Align::Center)
+            .push(Box::new(Box1::new("a", 10.0, 10.0)))
+            .push(Box::new(Box1::new("b", 10.0, 20.0)))
+            .push(Box::new(Box1::new("c", 10.0, 30.0)));
+        let rects = layout(&mut flex, 100.0, 100.0);
+        assert_eq!(rects[0].y, 45.0, "高 10 居中 → y=45");
+        assert_eq!(rects[1].y, 40.0, "高 20 居中 → y=40");
+        assert_eq!(rects[2].y, 35.0, "高 30 居中 → y=35");
+        // 居中时子件不被拉伸：高度保持内容值
+        assert_eq!(rects[0].h, 10.0);
+        assert_eq!(rects[2].h, 30.0);
+    }
+
+    #[test]
+    fn align_stretch_keeps_old_behaviour() {
+        // 默认 Stretch：Auto 高度子件拿满交叉轴（= 加能力前行为）
+        let mut flex = Flex::row("row")
+            .push(Box::new(Box1::new("a", 10.0, 10.0)))
+            .push(Box::new(Box1::new("b", 10.0, 20.0)));
+        let rects = layout(&mut flex, 100.0, 100.0);
+        assert_eq!(rects[0].y, 0.0);
+        assert_eq!(rects[0].h, 100.0, "Stretch: 交叉轴拉满");
+        assert_eq!(rects[1].x, 10.0, "主轴从起点紧排");
+    }
+
+    #[test]
+    fn justify_space_between_spreads_free_space() {
+        // 3 个 20 宽子件在 100 宽内：剩余 40 → 间隔各 +20
+        let mut flex = Flex::row("row")
+            .justify(Justify::SpaceBetween)
+            .push(Box::new(Box1::new("a", 20.0, 10.0)))
+            .push(Box::new(Box1::new("b", 20.0, 10.0)))
+            .push(Box::new(Box1::new("c", 20.0, 10.0)));
+        let rects = layout(&mut flex, 100.0, 100.0);
+        assert_eq!(rects[0].x, 0.0);
+        assert_eq!(rects[1].x, 40.0, "20 + gap(0) + extra(20)");
+        assert_eq!(rects[2].x, 80.0);
+    }
+
+    #[test]
+    fn justify_space_around_puts_half_gap_at_ends() {
+        // 2 个 20 宽子件在 100 宽内：剩余 60 → 每份 30，两侧各 15
+        let mut flex = Flex::row("row")
+            .justify(Justify::SpaceAround)
+            .push(Box::new(Box1::new("a", 20.0, 10.0)))
+            .push(Box::new(Box1::new("b", 20.0, 10.0)));
+        let rects = layout(&mut flex, 100.0, 100.0);
+        assert_eq!(rects[0].x, 15.0, "首端留半份间距");
+        assert_eq!(rects[1].x, 65.0, "15 + 20 + 30");
+    }
+
+    #[test]
+    fn align_center_with_justify_center_centers_child() {
+        let mut flex = Flex::row("row")
+            .align(Align::Center)
+            .justify(Justify::Center)
+            .push(Box::new(Box1::new("only", 20.0, 20.0)));
+        let rects = layout(&mut flex, 100.0, 100.0);
+        assert_eq!(rects[0].x, 40.0);
+        assert_eq!(rects[0].y, 40.0);
     }
 }

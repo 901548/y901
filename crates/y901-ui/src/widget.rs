@@ -157,6 +157,41 @@ impl Dimension {
     }
 }
 
+/// **交叉轴对齐**（Flex 的 `align-items`）。
+///
+/// 默认 `Stretch` = **加这个能力之前的行为**（Auto 子项拿满交叉轴），
+/// 所以不显式设置的布局**逐像素不变**。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Align {
+    /// 交叉轴起点（`Stretch` 之外的子项按内容尺寸）。
+    Start,
+    /// 交叉轴居中。
+    Center,
+    /// 交叉轴终点。
+    End,
+    /// 占满交叉轴（默认；`Dimension::Auto` 子项拿满）。
+    #[default]
+    Stretch,
+}
+
+/// **主轴分布**（Flex 的 `justify-content`）。
+///
+/// 默认 `Start` = **加这个能力之前的行为**（从起点依次紧排，剩余空间留在尾部）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Justify {
+    /// 起点紧排（默认）。
+    #[default]
+    Start,
+    /// 居中。
+    Center,
+    /// 靠终点。
+    End,
+    /// 首尾贴边，间距均分（`n == 1` 时退化为 `Start`）。
+    SpaceBetween,
+    /// 每项两侧等间距（首尾也有半份间距）。
+    SpaceAround,
+}
+
 /// 组件在父容器里的伸缩参数。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FlexItem {
