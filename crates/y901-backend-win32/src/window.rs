@@ -810,12 +810,25 @@ impl Window {
             //
             // SAFETY：`GetDpiForWindow` 只读查询，参数是刚创建成功的有效 HWND。
             let dpi_scale = {
-                let hwnd = hwnd;
-                let dpi = unsafe { GetDpiForWindow(hwnd) };
-                if dpi == 0 {
-                    1.0
-                } else {
-                    dpi as f32 / 96.0
+                // **测试/诊断覆盖**：`Y901_TEST_DPI_SCALE=1.0` 可强制固定缩放。
+                //
+                // 为何需要：像素哈希门禁（`font_3c_pixels`）画的是**文字**，
+                // 而字号自 `75af5b1` 起乘了 DPI 缩放 → **同一代码在 96/120 DPI 会算出不同哈希**。
+                // 门禁应只报"渲染回归"，不应因换显示器而报警。
+                let forced = std::env::var("Y901_TEST_DPI_SCALE")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .filter(|s| s.is_finite() && *s > 0.0);
+                match forced {
+                    Some(s) => s,
+                    None => {
+                        let dpi = unsafe { GetDpiForWindow(hwnd) };
+                        if dpi == 0 {
+                            1.0
+                        } else {
+                            dpi as f32 / 96.0
+                        }
+                    }
                 }
             };
             let font = {

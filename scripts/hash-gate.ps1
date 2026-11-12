@@ -29,6 +29,9 @@ $root = Split-Path -Parent $PSScriptRoot
 $baseline = Join-Path $root 'docs\evidence\hash-baseline.txt'
 
 Write-Host '[hash-gate] 运行 font_3c_pixels ...'
+# **固定 DPI 缩放 = 1.0**：门禁只应报渲染回归，不应因显示器 DPI 不同而变。
+# 字号自 75af5b1 起乘 DPI 缩放，而该场景画的就是文字 —— 不固定就不可复现。
+$env:Y901_TEST_DPI_SCALE = '1.0'
 $out = & cargo test -p y901-backend-win32 --offline --test font_3c_pixels -- --ignored --nocapture 2>&1 | Out-String
 
 $hashLine = ($out -split "`n" | Where-Object { $_ -match 'FNV 哈希 = (0x[0-9A-Fa-f]+)' } | Select-Object -First 1)
