@@ -60,6 +60,29 @@ fn footer_gap(scale: f32) -> f32 {
     16.0 * scale
 }
 
+/// Dialog 面板**相对父区域的最小留白**（屏幕边不贴边）。
+///
+/// 原式是 `panel_size.w.min(rect.w - 40.0)` —— **是尺寸上限的扣除量**，
+/// 不是 `inset`（不会把面板往内挤，只是不让它超过 `rect.w - 40`）。
+/// 125% DPI 下若不随 scale，面板会相对变大、贴近屏幕边。
+fn dialog_margin(scale: f32) -> f32 {
+    40.0 * scale
+}
+
+/// Dialog 面板**内边距**（`panel.inset(Edges::all(..))`）。
+fn dialog_padding(scale: f32) -> f32 {
+    16.0 * scale
+}
+
+/// Dialog **底部为按钮条预留的高度**（>0 表示有按钮）。
+///
+/// **与 `btn_h` 的关系（不合并）**：`btn_h` = 按钮自身高度（28）；
+/// 本值 = 预留区（36）= 按钮高 + 上下留白，是**“给正文区让多少空间”的布局量**。
+/// 两者相差 8px 且**语义不同**，若合并会失去“预留区可比按钮高”这一选项，所以**保持独立**。
+fn bar_reserve(scale: f32) -> f32 {
+    36.0 * scale
+}
+
 /// 选中回调类型。
 type SelectCallback = Box<dyn Fn(usize, &str)>;
 
@@ -653,8 +676,9 @@ impl Widget for Dialog {
         cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
-        let w = self.panel_size.w.min(rect.w - 40.0);
-        let h = self.panel_size.h.min(rect.h - 40.0);
+        let margin = dialog_margin(m.scale());
+        let w = self.panel_size.w.min(rect.w - margin);
+        let h = self.panel_size.h.min(rect.h - margin);
         self.panel = Rect::new(
             rect.x + (rect.w - w) * 0.5,
             rect.y + (rect.h - h) * 0.5,
@@ -662,9 +686,13 @@ impl Widget for Dialog {
             h,
         );
 
-        let inner = self.panel.inset(Edges::all(16.0));
+        let inner = self.panel.inset(Edges::all(dialog_padding(m.scale())));
         // 底部预留按钮条（36px），body 相应缩短
-        let bar_h = if self.buttons.is_empty() { 0.0 } else { 36.0 };
+        let bar_h = if self.buttons.is_empty() {
+            0.0
+        } else {
+            bar_reserve(m.scale())
+        };
         let header = header_h(m.scale());
         let body = Rect::new(
             inner.x,
