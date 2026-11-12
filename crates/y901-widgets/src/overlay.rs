@@ -47,6 +47,19 @@ fn btn_h(scale: f32) -> f32 {
     28.0 * scale
 }
 
+/// Dialog **正文区顶部偏移**（= 标题区占的高度）。
+///
+/// 命名依据：`arrange` 里它被用于 `inner.y + 28.0` 与 `inner.h - 28.0 - bar_h`，
+/// 即"从内边距顶部让出标题区"——**不是按钮高度**（按钮高是 `btn_h`）。
+fn header_h(scale: f32) -> f32 {
+    28.0 * scale
+}
+
+/// Dialog 按钮条**距面板底部**的边距。
+fn footer_gap(scale: f32) -> f32 {
+    16.0 * scale
+}
+
 /// 选中回调类型。
 type SelectCallback = Box<dyn Fn(usize, &str)>;
 
@@ -652,11 +665,12 @@ impl Widget for Dialog {
         let inner = self.panel.inset(Edges::all(16.0));
         // 底部预留按钮条（36px），body 相应缩短
         let bar_h = if self.buttons.is_empty() { 0.0 } else { 36.0 };
+        let header = header_h(m.scale());
         let body = Rect::new(
             inner.x,
-            inner.y + 28.0,
+            inner.y + header,
             inner.w,
-            (inner.h - 28.0 - bar_h).max(0.0),
+            (inner.h - header - bar_h).max(0.0),
         );
         // 子节点纵向排列（**全部**，不是只有第一个）。
         //
@@ -687,7 +701,7 @@ impl Widget for Dialog {
             let n = self.buttons.len() as f32;
             let total = n * bw + (n - 1.0) * gap;
             let mut x = inner.x + (inner.w - total).max(0.0);
-            let y = self.panel.bottom() - 16.0 - 28.0;
+            let y = self.panel.bottom() - footer_gap(scale) - bh;
             for _ in 0..self.buttons.len() {
                 self.button_rects.push(Rect::new(x, y, bw, bh));
                 x += bw + gap;
