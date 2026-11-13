@@ -2,7 +2,7 @@
 //!
 //! **全平台的唯一分叉点**。
 //!
-//! 为什么单独一个 crate：业务层（Helm）只需 `y901_shell::create_runtime()`，
+//! 为什么单独一个 crate：业务层应用只需调用 `y901_shell::create_runtime()` 即可启动，
 //! 不得出现任何 `#[cfg(target_os)]`。把分叉集中在**这一个文件**里：
 //!
 //! - 新增一个平台 → 只改这里的一个 `#[cfg]` 分支 + 新建一个 backend crate；
