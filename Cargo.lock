@@ -448,17 +448,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "y901-app"
-version = "0.1.0"
-dependencies = [
- "y901-backend-win32",
- "y901-runtime",
- "y901-shell",
- "y901-ui",
- "y901-widgets",
-]
-
-[[package]]
 name = "y901-backend-win32"
 version = "0.1.0"
 dependencies = [

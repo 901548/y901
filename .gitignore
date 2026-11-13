@@ -26,3 +26,6 @@ commitmsg.txt
 
 # 证据文件例外（论文可引用的原始 log / 基线图像，必须入库）
 !docs/evidence/**
+
+# \u793a\u4f8b\u7528\u7684\u56fe\u7247\u8d44\u6e90\u9700\u5165\u5e93\uff08include_bytes! \u9700\u8981\u771f\u5b9e\u6587\u4ef6\uff09
+!**/examples/assets/*.png

@@ -45,7 +45,9 @@ fn default_font_config() -> y901_runtime::FontConfig {
 /// D3D11 渲染后端：持有设备、交换链与实例缓冲；它不认识 UI 树，只认实例。
 pub struct D3dBackend {
     /// D3D11 设备与交换链。设备丢失后由 `Gfx::rebuild` 重建，因此这里是可重建的唯一入口。
-    pub gfx: Gfx,
+    // **收紧为 crate 内可见**：`Gfx` 是设备/交换链的实现细节，框架使用者不应直接持有它
+    // （全仓唯一访问者都在本 crate 内，含下面的单元测试）。
+    pub(crate) gfx: Gfx,
     text: Box<dyn crate::backend::font::FontEngine>,
     instances: Vec<Instance>,
     viewport: Size,
