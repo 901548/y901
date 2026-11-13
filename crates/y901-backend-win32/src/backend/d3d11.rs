@@ -90,6 +90,10 @@ pub const INSTANCE_SIZE: usize = 96;
 /// 单帧实例上限。超出时按此截断而不是扩缓冲——每帧重分配缓冲比少画几个元素更糟。
 pub const INSTANCE_CAPACITY: usize = 10_000;
 
+/// 实例超限告警的"只打一次"开关（跨进程级；避免每帧刷屏）。
+static INSTANCE_OVERFLOW_WARNED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// 一个绘制实例（轴对齐四边形）。
 ///
 /// 布局（与 GPU InputLayout 逐字节对应，改字段必须同步改 `create_pipeline`）：
@@ -2371,6 +2375,20 @@ impl Gfx {
             .update_constant_buffer(&pipeline.constant_buffer, globals.as_ptr() as *const c_void);
 
         let count = instances.len().min(INSTANCE_CAPACITY);
+        // **绝不静默丢实例**：以前超出 `INSTANCE_CAPACITY` 的部分直接被 `min()` 截掉，
+        // 画面上表现为"后半帧的控件整体消失"，且没有任何日志可查（排查代价极高）。
+        // 这里改为：超限时明确告警（每个进程只打一次，避免刷屏），并如实报告丢弃数量。
+        if instances.len() > INSTANCE_CAPACITY {
+            if !INSTANCE_OVERFLOW_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[y901] 实例数 {} 超过单批上限 {}，本帧丢弃 {} 个实例（画面可能缺内容）。\
+                     如复现，请调大 INSTANCE_CAPACITY 或改为分批提交。",
+                    instances.len(),
+                    INSTANCE_CAPACITY,
+                    instances.len() - INSTANCE_CAPACITY
+                );
+            }
+        }
         if count > 0 {
             match context.map_discard(&pipeline.instance_buffer) {
                 Some(mapped) => {
