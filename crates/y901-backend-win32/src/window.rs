@@ -467,6 +467,15 @@ fn is_fullscreen_window(hwnd: HWND) -> bool {
 ///
 /// 抽成纯函数是为了可测：“运行期改字号丢 DPI 缩放”这个 bug 就是
 /// 启动路径乘、运行期路径不乘造成的。
+/// **DPI → 缩放比**（96 = 100%）。
+fn scale_from_dpi(dpi: u32) -> f32 {
+    if dpi == 0 {
+        1.0
+    } else {
+        dpi as f32 / 96.0
+    }
+}
+
 fn physical_font_size(logical: f32, dpi_scale: f32) -> f32 {
     (logical * dpi_scale).max(1.0)
 }
@@ -981,6 +990,22 @@ impl Window {
             if fullscreen {
                 win.set_fullscreen(true)?;
             }
+            // **ShowWindow 后的 DPI 校准**（本轮修复）：
+            //
+            // 创建时（`CreateWindowExW` 之后立即）取的 DPI 可能还是**系统 DPI**（常为 96），
+            // 因为窗口尚未落到目标显示器。`ShowWindow` 后才能拿到真实值。
+            // 实证：同一 exe 两次运行引擎 ascent 分别为 13.75（1.0）与 17.19（1.25）。
+            //
+            // `Y901_TEST_DPI_SCALE` 优先级最高（门禁可复现）→ 设了就跳过校准。
+            if std::env::var_os("Y901_TEST_DPI_SCALE").is_none() {
+                let dpi_after = GetDpiForWindow(hwnd);
+                let scale_after = scale_from_dpi(dpi_after);
+                if (scale_after - win.dpi_scale).abs() > 0.01 {
+                    // 此时尚未调用过 `tree.layout()`（由调用方在 `create` 之后做），
+                    // 所以**不需要重排**：起始布局就会用正确的 scale。
+                    win.apply_dpi(scale_after)?;
+                }
+            }
             Ok(win)
         })();
         if built.is_err() {
@@ -1159,6 +1184,28 @@ impl Window {
             Some(b) => b.set_font(&physical),
             None => Err("渲染后端尚未就绪".to_string()),
         }
+    }
+
+    /// **应用一个新的 DPI 缩放比**：重建字体引擎 + 同步两个后端的 scale。
+    ///
+    /// 返回：`Ok(())` = 已应用；`Err` = 字体重建失败（此时 `dpi_scale` 已写入，
+    /// 但引擎仍是旧的 —— 调用方应报错且不要声称已生效）。
+    /// 副作用：图集将在下一帧整张重传；**重排由调用方做**（需 `tree`）。
+    fn apply_dpi(&mut self, scale: f32) -> Result<(), String> {
+        self.dpi_scale = scale;
+        // `set_font` 收**逻辑字号**并内部乘 `dpi_scale`。
+        let font = y901_runtime::FontConfig {
+            family: self.font_family.clone(),
+            size: self.base_font_size,
+        };
+        Window::set_font(self, &font)?;
+        if let Some(b) = self.backend.as_mut() {
+            b.set_dpi_scale(scale);
+        }
+        if let Some(soft) = self.soft.as_mut() {
+            soft.set_dpi_scale(scale);
+        }
+        Ok(())
     }
 
     /// 原始 `HWND`。
@@ -2082,22 +2129,9 @@ impl y901_backend_common::window::WindowBackend for Window {
         let pending_dpi = with_shared(self.hwnd, None, |s| s.pending_dpi.take());
         if let Some(dpi) = pending_dpi {
             let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
-            // **先把新 scale 写进 Window**：`set_font` 内部要用它把逻辑字号换成物理字号。
-            self.dpi_scale = scale;
-            let font = y901_runtime::FontConfig {
-                family: self.font_family.clone(),
-                // 传**逻辑字号**（未乘 scale）—— `set_font` 会统一乘一次。
-                size: self.base_font_size,
-            };
-            match Window::set_font(self, &font) {
+            // 复用 `apply_dpi`（与 ShowWindow 后的首次校准同一条路径）。
+            match self.apply_dpi(scale) {
                 Ok(()) => {
-                    // 两个后端都需更新缩放比（`Some(px)` 路径依赖它）。
-                    if let Some(b) = self.backend.as_mut() {
-                        b.set_dpi_scale(scale);
-                    }
-                    if let Some(soft) = self.soft.as_mut() {
-                        soft.set_dpi_scale(scale);
-                    }
                     // 重建后字形图集为空 → 必须整窗重排 + 重绘。
                     self.resize(tree);
                     tree.invalidate_all();
@@ -2166,5 +2200,34 @@ mod physical_font_size_tests {
             physical, 25.0,
             "16 × 1.25 × 1.25 = 25 说明发生了双重缩放（调用方与 set_font 各乘了一次）"
         );
+    }
+}
+/// **DPI \u2192 \u7f29\u653e\u6bd4**\u7684\u5951\u7ea6\u6d4b\u8bd5\uff08\u7eaf\u51fd\u6570\uff0c\u65e0\u9700\u771f\u5b9e\u7a97\u53e3\uff09\u3002
+#[cfg(test)]
+mod scale_from_dpi_tests {
+    use super::scale_from_dpi;
+
+    /// 100% \u663e\u793a\u5668\uff1a96 DPI \u2192 1.0\u3002
+    #[test]
+    fn dpi_96_is_scale_one() {
+        assert_eq!(scale_from_dpi(96), 1.0);
+    }
+
+    /// 125% \u663e\u793a\u5668\uff08120 DPI\uff09\u2192 1.25 \u2014\u2014 \u672c\u673a\u5b9e\u6d4b\u503c\u3002
+    #[test]
+    fn dpi_120_is_scale_125() {
+        assert_eq!(scale_from_dpi(120), 1.25);
+    }
+
+    /// 150% \u663e\u793a\u5668\uff08144 DPI\uff09\u2192 1.5\u3002
+    #[test]
+    fn dpi_144_is_scale_150() {
+        assert_eq!(scale_from_dpi(144), 1.5);
+    }
+
+    /// \u9632\u5fa1\uff1a`GetDpiForWindow` \u8fd4\u56de 0\uff08\u5931\u8d25\uff09\u65f6\u5f52\u4e00\uff0c\u4e0d\u4f1a\u5f97\u5230 0 \u500d\u7f29\u653e\u3002
+    #[test]
+    fn dpi_zero_falls_back_to_one() {
+        assert_eq!(scale_from_dpi(0), 1.0);
     }
 }
