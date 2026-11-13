@@ -1,7 +1,7 @@
 //! X11 运行时：把「平台事件 → 框架 → 业务」串起来的地方（Linux）。
 //!
 //! 与 `Win32Runtime` 同构：建窗 → 拉事件 → 派发 → 重排 → 重绘 → 上屏。
-//! 主循环已抽到 `y901-backend-common::runtime::run_loop`；本文件只负责
+//! 主循环已抽到 `y901-runtime::runtime::run_loop`；本文件只负责
 //! **窗口创建 + 字形引擎/光栅器初始化 + 窗口句柄接进循环**。
 //!
 //! ## 为什么没有 GPU 路径
@@ -13,7 +13,7 @@
 //! 光栅器现在住在 [`X11Window`] 里（`soft` 字段），`WindowBackend::relayout/render`
 //! 直接驱动它；本文件不再持有第二份软后端。
 
-use y901_backend_common::runtime::run_loop;
+use y901_runtime::runtime::run_loop;
 use y901_render::soft::SoftBackend;
 use y901_render::MyFontEngine;
 use y901_runtime::{EventSource, Host, Options, PlatformRuntime};

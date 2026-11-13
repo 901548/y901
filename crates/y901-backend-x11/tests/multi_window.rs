@@ -15,7 +15,7 @@
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use y901_backend_common::window::WindowBackend;
+use y901_runtime::window::WindowBackend;
 use y901_backend_x11::window::{CreateArgs, X11Window};
 use y901_render::soft::SoftBackend;
 use y901_ui::Size;

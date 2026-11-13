@@ -11,7 +11,6 @@ members = [
     "crates/y901-app",
     "crates/y901-shell",
     "crates/y901-backend-x11",
-    "crates/y901-backend-common",
     "crates/y901-render",
 ]
 

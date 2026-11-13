@@ -18,7 +18,7 @@
 
 use std::time::Instant;
 
-use y901_runtime::{translate, Host, RawEvent};
+use crate::{translate, Host, RawEvent};
 use y901_ui::{Size, UiEvent, UiTree};
 
 use crate::window::{RenderOutcome, WindowBackend};

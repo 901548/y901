@@ -3,7 +3,7 @@
 //! 设计原则：只收两个后端**同名且语义相同**的能力。语义不同的一律不进 trait，
 //! 留给后端自己实现（见各方法说明里的"语义"一条）。
 
-use y901_runtime::{FontConfig, RawEvent};
+use crate::{FontConfig, RawEvent};
 use y901_ui::theme::Theme;
 use y901_ui::UiTree;
 
@@ -88,12 +88,12 @@ pub trait WindowBackend {
     ///
     /// 这里**可以修改 `tree`**（例如 `invalidate_all()`），因为它跑在渲染之前——
     /// 修改会在本帧生效。默认空实现；平台特有的东西放这里，**不进 run_loop**。
-    fn after_frame(&mut self, _tree: &mut UiTree, _host: &mut dyn y901_runtime::Host) {}
+    fn after_frame(&mut self, _tree: &mut UiTree, _host: &mut dyn crate::Host) {}
 
     /// **Present 之后**的钩子（快照**回读**、显示后的统计等）。
     ///
     /// 为何不合并到 `after_frame`：快照必须在**本帧已经提交**之后才能回读像素，
     /// 放到渲染前去读只会得到**上一帧**的内容。两个钩子不是冗余：
     /// `after_frame` 可以改 `tree`，`after_present` 不会改——它只读取已提交的结果。
-    fn after_present(&mut self, _tree: &mut UiTree, _host: &mut dyn y901_runtime::Host) {}
+    fn after_present(&mut self, _tree: &mut UiTree, _host: &mut dyn crate::Host) {}
 }

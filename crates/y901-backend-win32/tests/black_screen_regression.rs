@@ -211,7 +211,7 @@ fn runtime_consumes_repaint_request_before_render() {
         "消费重绘请求后必须全量失效"
     );
 
-    let common = include_str!("../../y901-backend-common/src/runtime.rs");
+    let common = include_str!("../../y901-runtime/src/runtime.rs");
     let hook = common
         .find("window.after_frame(tree, host)")
         .expect("run_loop 必须调 after_frame");

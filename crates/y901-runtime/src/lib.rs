@@ -16,6 +16,12 @@ use y901_ui::{Command, EventResult, Key, Modifiers, MouseButton, Size, UiEvent, 
 /// 渲染后端抽象（跨平台 v3 阶段 1）。
 pub mod gfx;
 
+/// 平台后端之间**逐段同构**的事件循环骨架（原 y901-backend-common::runtime）。
+pub mod runtime;
+
+/// 事件循环需要的最小窗口抽象（原 y901-backend-common::window）。
+pub mod window;
+
 /// 业务侧回调：App 与 Demo 实现它。
 ///
 /// 运行时不认识任何业务，只在合适的时机回调这些方法。

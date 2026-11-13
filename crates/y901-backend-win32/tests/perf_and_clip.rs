@@ -9,7 +9,7 @@
 fn runtime_idles_when_nothing_to_do() {
     // 主循环必须休眠，否则空闲时 100% CPU 空转。
     // 重构后休眠分层了：这里跨两个文件验证（比旧版只看一个文件更强）。
-    let common = include_str!("../../y901-backend-common/src/runtime.rs");
+    let common = include_str!("../../y901-runtime/src/runtime.rs");
     let win32 = include_str!("../src/window.rs");
 
     assert!(

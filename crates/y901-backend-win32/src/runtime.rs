@@ -1,7 +1,7 @@
 //! Win32 平台运行时。
 //!
 //! 平台特有的部分（窗口创建、D3D/GDI 提交、IME、光标、快照）都在 [`Window`] 里；
-//! 事件循环本身与 X11 共用 `y901-backend-common::runtime::run_loop`。
+//! 事件循环本身与 X11 共用 `y901-runtime::runtime::run_loop`。
 
 use y901_runtime::{Host, Options, PlatformRuntime};
 use y901_ui::UiTree;
@@ -29,7 +29,7 @@ impl PlatformRuntime for Win32Runtime {
         window.resize(&mut tree);
 
         // 主循环：事件 → 命令 → idle → 重排 → 主题 → 平台收尾 → 渲染 → 快照 → 统计。
-        y901_backend_common::runtime::run_loop(&mut window, &mut tree, host.as_mut())?;
+        y901_runtime::runtime::run_loop(&mut window, &mut tree, host.as_mut())?;
 
         // 退出前补一次 Tick，让在跑的 PTY 会话有机会收尾。
         let _ = tree.dispatch(&y901_ui::UiEvent::Tick);
@@ -64,7 +64,7 @@ impl PlatformRuntime for Win32Runtime {
                     };
                     host.attach_waker(std::sync::Arc::new(WindowWaker(window.wake_handle())));
                     window.resize(&mut tree);
-                    y901_backend_common::runtime::run_loop(&mut window, &mut tree, host.as_mut())?;
+                    y901_runtime::runtime::run_loop(&mut window, &mut tree, host.as_mut())?;
                     let _ = tree.dispatch(&y901_ui::UiEvent::Tick);
                     Ok(())
                 });

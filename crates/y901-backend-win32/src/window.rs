@@ -2057,9 +2057,9 @@ mod present_sync_tests {
 // WindowBackend：把平台差异藏在这里
 // ---------------------------------------------------------------------------
 
-use y901_backend_common::window::RenderOutcome;
+use y901_runtime::window::RenderOutcome;
 
-impl y901_backend_common::window::WindowBackend for Window {
+impl y901_runtime::window::WindowBackend for Window {
     /// 先泵一次消息；没有事件且允许等待时，才真的睡一次。
     ///
     /// 这与旧循环的“事件 → 处理 → 空闲时 `wait_message`”等价：

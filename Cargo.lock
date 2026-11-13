@@ -459,20 +459,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "y901-backend-common"
-version = "0.1.0"
-dependencies = [
- "y901-render",
- "y901-runtime",
- "y901-ui",
-]
-
-[[package]]
 name = "y901-backend-win32"
 version = "0.1.0"
 dependencies = [
  "windows-sys",
- "y901-backend-common",
  "y901-core",
  "y901-render",
  "y901-runtime",
@@ -484,7 +474,6 @@ dependencies = [
 name = "y901-backend-x11"
 version = "0.1.0"
 dependencies = [
- "y901-backend-common",
  "y901-render",
  "y901-runtime",
  "y901-ui",
