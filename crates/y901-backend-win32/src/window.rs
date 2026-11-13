@@ -476,6 +476,36 @@ fn scale_from_dpi(dpi: u32) -> f32 {
     }
 }
 
+/// **构造软渲染用的字形引擎**（`Y901_FORCE_SOFT=1` 时走这个后端）。
+///
+/// 与 `create_inner` 里的内联分支保持一致：`Y901_FONT=self` 用自研引擎，否则用 DirectWrite。
+/// 抽成函数是为了让 **运行期 `set_font`（DPI 变化）** 也能重建软后端的引擎 ——
+/// 旧实现只重建 D3D 的，软后端在 DPI 变化后仍用旧字号（且 `set_font` 会直接返回 Err）。
+fn build_soft_font_engine(
+    family: &str,
+    size: f32,
+) -> Result<(Box<dyn crate::backend::font::FontEngine>, y901_ui::Size), String> {
+    let (cw, ch) = crate::backend::font::cell_metrics_for(size);
+    let cell = y901_ui::Size::new(cw, ch);
+    let engine: Box<dyn crate::backend::font::FontEngine> =
+        if std::env::var("Y901_FONT")
+            .map(|v| v == "self")
+            .unwrap_or(false)
+        {
+            Box::new(
+                y901_render::MyFontEngine::new(
+                    y901_render::load_font(&y901_render::resolve_font_path(family)).unwrap_or_default(),
+                    size,
+                    cell,
+                )
+                .map_err(|e| format!("MyFontEngine init failed: {e}"))?,
+            )
+        } else {
+            Box::new(crate::backend::font::TextEngine::new(family, size, cw, ch)?)
+        };
+    Ok((engine, cell))
+}
+
 fn physical_font_size(logical: f32, dpi_scale: f32) -> f32 {
     (logical * dpi_scale).max(1.0)
 }
@@ -1182,7 +1212,17 @@ impl Window {
         };
         match self.backend.as_mut() {
             Some(b) => b.set_font(&physical),
-            None => Err("渲染后端尚未就绪".to_string()),
+            // **软后端（`Y901_FORCE_SOFT=1`）也必须走这条路径**：两个后端互斥，
+            // 旧实现只处理 `backend`，导致纯 CPU 模式下任何 `set_font`（含 DPI 校准）
+            // 都直接返回 `Err("渲染后端尚未就绪")`，DPI 变化后字号不再更新。
+            None => match self.soft.as_mut() {
+                Some(soft) => {
+                    let (engine, cell) = build_soft_font_engine(&physical.family, physical.size)?;
+                    soft.set_font(engine, cell);
+                    Ok(())
+                }
+                None => Err("渲染后端尚未就绪".to_string()),
+            },
         }
     }
 

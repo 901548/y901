@@ -675,14 +675,21 @@ impl Flex {
     }
 
     /// 设置内边距；子控件可用空间相应减少。
+    ///
+    /// 与 [`Flex::padding_scaled`] **互斥**：后设置者生效 —— 这里会清掉 `scaled_padding`，
+    /// 否则文档承诺的"后设置者生效"就不成立（旧实现只写 `padding`，`scaled_padding` 残留会继续优先）。
     pub fn padding(mut self, padding: Edges) -> Self {
         self.padding = padding;
+        self.scaled_padding = None;
         self
     }
 
     /// 设置子控件之间的间距。
+    ///
+    /// 与 [`Flex::gap_scaled`] **互斥**：后设置者生效 —— 这里会清掉 `scaled_gap`。
     pub fn gap(mut self, gap: f32) -> Self {
         self.gap = gap;
+        self.scaled_gap = None;
         self
     }
 
