@@ -51,6 +51,8 @@ pub fn run_loop<W: WindowBackend>(
     let mut stat_since = Instant::now();
     // 上一帧是否有工作：有工作时不得等待，否则 Win32 会在每帧都“睡”一次。
     let mut was_busy = false;
+    // 上一帧的时间点（供动画 dt）。
+    let mut last_tick = Instant::now();
 
     loop {
         let frame_start = Instant::now();
@@ -89,6 +91,21 @@ pub fn run_loop<W: WindowBackend>(
             let _ = host.command(tree, cmd);
         }
         host.idle(tree);
+
+        // ---- 2.5 动画推进（**每帧必须调**）----
+        //
+        // `UiTree::tick_animations` 之前**全仓没有调用点**（本轮修复）：
+        // 于是任何淡入/缩放动画的 `progress` 永远停在 0。
+        // 后果：弹层的"淡入膜"（`tree.rs` 用 `1-progress` 透明度的背景色盖一层）
+        // **永远不会消失** —— 菜单/面板"有框无字"就是这个原因。
+        // 用**真实 dt**（上一帧到本帧），不用固定步长，否则动画速度随帧率变。
+        let tick_now = Instant::now();
+        let dt = tick_now.saturating_duration_since(last_tick);
+        last_tick = tick_now;
+        if tree.tick_animations(dt) {
+            // 有活跃动画 → 本帧算"有工作"，下一帧不睡眠，直到动画结束。
+            had_work = true;
+        }
 
         // ---- 3. 重排判定 ----
         let external = tree.drain_external_invalidations();
