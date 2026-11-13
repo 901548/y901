@@ -74,7 +74,7 @@ fn resolve_crate_names(manifest_dir: &Path) -> BTreeSet<String> {
     }
 }
 
-/// 同 [`resolve_crate_names`]，但把失败原因交回调用方（兄弟仓守卫要按错误类型分流）。
+/// 同 `resolve_crate_names`，但把失败原因交回调用方（需要区分失败类型时用）。
 fn try_resolve_crate_names(manifest_dir: &Path) -> Result<BTreeSet<String>, String> {
     let out = Command::new(env!("CARGO"))
         .args(["tree", "--prefix", "none", "--offline"])
@@ -266,39 +266,5 @@ fn no_c_or_cpp_toolchain_dependencies() {
     );
 }
 
-/// 对兄弟仓库 `Helm-Y901` 做同样的审计（不存在时跳过，便于单独检出 Y901）。
-#[test]
-fn sibling_repo_helm_has_no_c_dependencies() {
-    let helm = workspace_root()
-        .parent()
-        .map(|p| p.join("Helm-Y901"))
-        .unwrap_or_default();
-    if !helm.join("Cargo.toml").exists() {
-        eprintln!("[守卫] Helm-Y901 不在相邻目录，跳过");
-        return;
-    }
-    // 依赖树解析失败要分两类：
-    //   * 兄弟仓依赖了本仓已删除的本地 crate → 跨仓迁移未完成（Helm 已完成迁移，不再跳过）；
-    //   * 其他任何失败（锁文件坏了 / 网络 / 真正的解析错误）→ 仍然红。
-    let names = match try_resolve_crate_names(&helm) {
-        Ok(names) => names,
-        // 迁移完成后：解析失败就是真失败（不再有"依赖了已删 crate"的合法情形）。
-        Err(stderr) => panic!("cargo tree 失败：{stderr}"),
-    };
-    let (crates, scanned, violations) = audit_with_names(&helm, &names);
-    eprintln!(
-        "[守卫] Helm-Y901：{crates} 个 crate，扫描 build.rs {scanned} 个，违规 {}条",
-        violations.len()
-    );
-    assert!(
-        violations.is_empty(),
-        "
-Helm-Y901 守卫失败（{}条）：
-{}",
-        violations.len(),
-        violations.join(
-            "
-"
-        )
-    );
-}
+// 跨仓审计已移出框架：框架只审计自身依赖，不感知任何兄弟仓库目录。
+
