@@ -764,6 +764,24 @@ impl UiTree {
         self.cache.mark_dirty(id);
     }
 
+    /// **请求下一次 `layout()` 重新布局整棵树**。
+    ///
+    /// 输入：无。返回：无。
+    /// 副作用：置 `layout_requested = true` → 下一帧 `take_layout_request()` 返回 `true`，
+    /// 主循环据此调用 `relayout`（`y901-backend-common::run_loop` 的步骤 3）。
+    ///
+    /// **何时必须调用**：**结构性变更**（增删节点、切换布局模式、改变子节点数量）之后。
+    /// 这类变更**不会**自动触发布局：
+    /// - [`UiTree::mark_layout_dirty`] 只清**布局缓存**，让"下一次 layout"重算该节点，
+    ///   但**不**请求 layout —— 没人请求，就永远不重算；
+    /// - [`UiTree::invalidate`] / [`invalidate_all`] 只标**脏区**（重绘），同样不触发布局。
+    ///
+    /// 典型误用：给容器新增子节点后只调 `invalidate`，于是新子节点**从未被 arrange**，
+    /// 表现为"控件画在了旧位置/别的位置"。
+    pub fn request_layout(&mut self) {
+        self.layout_requested = true;
+    }
+
     /// 上一次 `layout()` 的统计（测量次数 / arrange 次数 / 是否被整体跳过）。
     ///
     /// 只读、无副作用，用于诊断"缓存是否生效"。
