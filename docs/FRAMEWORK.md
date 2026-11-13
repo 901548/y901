@@ -3,7 +3,7 @@
 Y901 是一个**零 C/C++ 编译依赖**的桌面 UI 框架。UI 框架本身不认识任何平台 API，
 平台能力（Win32 / D3D11 / DirectWrite / PTY）全部收敛在应用层。
 
-## 1. 十个 crate
+## 1. 十一个 crate
 
 | crate | 职责 | 生产依赖 |
 |---|---|---|
@@ -21,10 +21,9 @@ Y901 是一个**零 C/C++ 编译依赖**的桌面 UI 框架。UI 框架本身不
 依赖方向严格单向（箭头指向被依赖方）：
 
 ```
-y901-app ──> y901-backend-win32 ──> y901-runtime ──> y901-agent ──> y901-ui
+y901-app ──> y901-backend-win32 ──> y901-runtime ──> y901-ui
     │                │                    │                │
     │                └──> y901-core <─────┴──> y901-widgets ┘
-    ├──> y901-mcp ──> y901-agent / y901-widgets / y901-ui
     └──> y901-widgets / y901-ui
 ```
 
@@ -428,7 +427,7 @@ let list = ListView::new("chat", 24.0)
 - **影响**：`hash-gate` **未变**（`0xDBB308DD1657EF9C`）—— 场景文本不含组合/零宽/控制字符，
   而常规字符的 `.max(1)` 本就是无效操作。
 
-## 已知限制：`TextStyle.size` 当前**只有布局效果，没有绘制效果**
+## 已支持：`TextStyle.size` 的 per-text 字号（soft 与 D3D 两后端均已实现）
 
 - **并非未实现**：
   - `TextMetrics::measure_text`（`soft.rs:316` / `backend/mod.rs:654`）**读 `style.size`**；
@@ -471,8 +470,8 @@ let list = ListView::new("chat", 24.0)
   `draw_text` 在 `style.size` 为 `Some(px)` 时走 `draw_text_sized`：
   `px_final = px * map_scale()`，按该字号**重新光栅化**（`glyph_at_size`）并 1:1 绘制。
   `size: None` 仍走**原路径**（106 行逐字未动）。
-- **D3D 后端：尚未支持。** `TextEngine::glyph` 用构造期固定的 `font_size`，
-  `glyph_run_analysis`（DirectWrite）也按该值算 em —— **需要中改**（含 unsafe 的 DWrite 调用），已单独立项。
+- **D3D 后端：已支持。** `draw_text` 在 `style.size = Some(px)` 时转 `draw_text_sized`
+ （`px_final = px * map_scale()`，按该字号重新光栅化 `glyph_at_size` 后 1:1 绘制）。
 - **临时分裂**：**软渲染下** Helm 的 18/13 字号生效；**D3D 下**仍按默认字号画。D3D 完成后分裂消失。
 - **重要：Helm 主路径是 D3D** —— 用户当前看到的行为**与改动前一致**（D3D 不支持字号），
   **这不是回归**，而是"能力先落软渲染侧"。
@@ -502,7 +501,7 @@ let list = ListView::new("chat", 24.0)
   - **高度常量尚未乘 scale**（`TAB_BAR_H` / `TOOLBAR_H` / `ITEM_H` / `ROW_H` 等约 12 组、约 18 个常量）。
   - 125% 下**字从 16→20，但标签栏仍 32px** → **文字会顶边/裁切**。
   - 不随 scale 的约 10 个（`split::DIVIDER` 1px、`CARET_W`、`BAR_WIDTH`、`CHECK_W`、`RADIUS`等）**应保持不变**。
-- **hash-gate 基线**：当前为 **`0xDBB308DD1657EF9C`**（门禁已固定 `Y901_TEST_DPI_SCALE=1.0`）。
+- **hash-gate 基线**：当前为 **`0x39AE41C1697CBFD0`**（门禁已固定 `Y901_TEST_DPI_SCALE=1.0`）。
 - **曾经的错误归因（已更正）**：
   当时记录过 `0x87DECF871BB90AFF`，并写成"原因：基准字号 16→20 @125%"。
   **这个归因是错的**：

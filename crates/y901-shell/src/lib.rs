@@ -13,7 +13,7 @@
 //! | 平台 | 后端 | 状态 |
 //! |---|---|---|
 //! | Windows | `y901-backend-win32`（D3D11 + 纯 CPU 软渲染 + Win32 窗口/事件/IME） | ✅ 完整 |
-//! | Linux / macOS | 尚未实现（见 `docs/CROSS_PLATFORM_PLAN.md`） | ⏳ S2/S3 排期中 |
+//! | Linux / macOS | 尚未实现（X11 后端 `y901-backend-x11` 已实现并在 Xvfb 下验证，仅真机待验；macOS 无后端，见 `docs/CROSS_PLATFORM_PLAN.md`） | ⏳ S3 排期中 |
 //!
 //! 未实现的平台不会 panic，而是返回 `Err("请看文档")——这样 CI 能在 Linux 上
 //! `cargo build` 通过（做类型检查），只是真正跑的时候会得到一个清楚的错误。
