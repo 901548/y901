@@ -1,0 +1,244 @@
+//! ErrorState：`EmptyState` 的错误版（红色图标 + 红色标题 + 重试按钮）。
+//!
+//! 为什么和 EmptyState 分开而不是加一个 `kind` 参数：
+//! 两者的**语义**不同（"没有数据" vs "出错了，可以重试"），颜色规则也不同
+//! （错误态必须让用户一眼看出"出事了"）。合成一个组件会让调用方每次都要传 kind。
+
+use y901_ui::widget::FlexItem;
+use y901_ui::{
+    Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Role, Semantics, Size, State,
+    TextStyle, TextMetrics, UiEvent, Widget,
+};
+
+/// 错误红（主题暂无 ERROR 槽位，先按约定值取）。
+const ERROR_RED: Color = Color::rgba(0.95, 0.38, 0.38, 1.0);
+/// 图标直径。
+const ICON_D: f32 = 48.0;
+/// 操作按钮高度。
+const ACTION_H: f32 = 32.0;
+
+/// 错误状态占位。
+pub struct ErrorState {
+    id: String,
+    title: String,
+    description: Option<String>,
+    action: Option<(String, Box<dyn Fn()>)>,
+    rect: Rect,
+    item: FlexItem,
+    action_rect: Rect,
+}
+
+impl ErrorState {
+    /// 用标题创建（例如"加载失败"）。
+    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            title: title.into(),
+            description: None,
+            action: None,
+            rect: Rect::ZERO,
+            item: FlexItem::default(),
+            action_rect: Rect::ZERO,
+        }
+    }
+
+    /// 追加错误详情。
+    pub fn description(mut self, text: impl Into<String>) -> Self {
+        self.description = Some(text.into());
+        self
+    }
+
+    /// 追加"重试"之类的操作按钮。
+    pub fn action(mut self, label: impl Into<String>, f: impl Fn() + 'static) -> Self {
+        self.action = Some((label.into(), Box::new(f)));
+        self
+    }
+
+    /// 设置 flex 约束。
+    pub fn flex_item(mut self, item: FlexItem) -> Self {
+        self.item = item;
+        self
+    }
+
+    /// 期望高度：图标 + 标题 +（说明）+（按钮）。
+    fn content_height(&self) -> f32 {
+        let mut h = ICON_D + 16.0 + 24.0;
+        if self.description.is_some() {
+            h += 8.0 + 18.0;
+        }
+        if self.action.is_some() {
+            h += 16.0 + ACTION_H;
+        }
+        h
+    }
+}
+
+impl Widget for ErrorState {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn role(&self) -> Role {
+        Role::PANEL
+    }
+
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
+        c.constrain(Size::new(c.max.w, self.content_height()))
+    }
+
+    fn arrange(
+        &mut self,
+        rect: Rect,
+        _m: &dyn TextMetrics,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) {
+        self.rect = rect;
+        let w = 120.0f32;
+        self.action_rect = Rect::new(
+            rect.x + (rect.w - w) * 0.5,
+            rect.bottom() - ACTION_H - 8.0,
+            w,
+            ACTION_H,
+        );
+    }
+
+    fn flex(&self) -> FlexItem {
+        self.item
+    }
+
+    fn rect(&self) -> Rect {
+        self.rect
+    }
+
+    fn event(&mut self, _ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+        if let UiEvent::MouseUp { pos, .. } = event {
+            if self.action.is_some() && self.action_rect.contains(*pos) {
+                if let Some((_, f)) = self.action.as_ref() {
+                    f();
+                }
+                return EventResult::Redraw;
+            }
+        }
+        EventResult::Ignored
+    }
+
+    fn render(&mut self, ctx: &mut dyn RenderCtx) {
+        if self.rect.w <= 0.0 || self.rect.h <= 0.0 {
+            return;
+        }
+        // \u5148\u62f7\u989c\u8272\uff1a`ctx.theme()` \u6301\u6709 `&ctx`\uff0c\u540e\u7eed\u7ed8\u5236\u8981 `&mut ctx`\u3002
+        let (muted, accent) = {
+            let theme = ctx.theme();
+            (
+                theme.muted_text_color(),
+                theme.style(Role::BUTTON, State::Pressed).bg,
+            )
+        };
+
+        let mut y = self.rect.y + 8.0;
+        let cx = self.rect.x + self.rect.w * 0.5;
+        // \u9519\u8bef\u7ea2\u5706\u5f62\u5360\u4f4d\uff08\u534a\u900f\u660e\u5e95 + \u5b9e\u5fc3\u5185\u5708\uff09
+        ctx.fill_round_rect(
+            Rect::new(cx - ICON_D * 0.5, y, ICON_D, ICON_D),
+            Color::rgba(ERROR_RED.r, ERROR_RED.g, ERROR_RED.b, 0.18),
+            ICON_D * 0.5,
+        );
+        ctx.fill_round_rect(
+            Rect::new(cx - 10.0, y + ICON_D * 0.5 - 10.0, 20.0, 20.0),
+            ERROR_RED,
+            10.0,
+        );
+        y += ICON_D + 16.0;
+
+        // \u6807\u9898\uff1a\u9519\u8bef\u7ea2
+        let title_style = TextStyle::fg(ERROR_RED);
+        let tw = ctx.measure_text(&self.title, &title_style).w;
+        ctx.draw_text(Pos::new(cx - tw * 0.5, y), &self.title, &title_style);
+        y += 24.0;
+
+        // \u8bf4\u660e\uff1a\u5f31\u5316\u8272
+        if let Some(desc) = self.description.as_ref() {
+            y += 8.0;
+            let style = TextStyle::fg(muted);
+            let dw = ctx.measure_text(desc, &style).w;
+            ctx.draw_text(Pos::new(cx - dw * 0.5, y), desc, &style);
+        }
+
+        // \u91cd\u8bd5\u6309\u94ae
+        if let Some((label, _)) = self.action.as_ref() {
+            ctx.fill_round_rect(self.action_rect, accent, 6.0);
+            let style = TextStyle::fg(Color::WHITE);
+            let lw = ctx.measure_text(label, &style).w;
+            let ly = self.action_rect.y + (ACTION_H - ctx.line_height(&style)) * 0.5;
+            ctx.draw_text(
+                Pos::new(self.action_rect.x + (self.action_rect.w - lw) * 0.5, ly),
+                label,
+                &style,
+            );
+        }
+    }
+
+    fn semantics(&self) -> Semantics {
+        let mut s = Semantics::default()
+            .exposed(true)
+            .label(format!("error {}", self.id))
+            .value(self.title.clone())
+            .prop("kind", "error");
+        if let Some(d) = self.description.as_ref() {
+            s = s.prop("description", d.clone());
+        }
+        s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use y901_ui::layout::LayoutCache;
+
+    struct Metrics;
+    impl TextMetrics for Metrics {
+        fn measure_text(&self, t: &str, _s: &TextStyle) -> Size {
+            Size::new(t.chars().count() as f32 * 7.0, 14.0)
+        }
+        fn line_height(&self, _s: &TextStyle) -> f32 {
+            14.0
+        }
+        fn scale(&self) -> f32 {
+            1.0
+        }
+    }
+
+    #[test]
+    fn height_grows_with_optional_parts() {
+        let mut a = ErrorState::new("e", "加载失败");
+        let mut b = ErrorState::new("e", "加载失败")
+            .description("连接超时")
+            .action("重试", || {});
+        let mut cache = LayoutCache::new();
+        let c = Constraints::loose(Size::new(400.0, 400.0));
+        assert!(b.measure(&Metrics, c, &mut cache).h > a.measure(&Metrics, c, &mut cache).h);
+    }
+
+    #[test]
+    fn retry_only_fires_inside_its_rect() {
+        let hit = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let h2 = hit.clone();
+        let mut e = ErrorState::new("e", "t").action("重试", move || {
+            h2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let mut cache = LayoutCache::new();
+        e.arrange(Rect::new(0.0, 0.0, 400.0, 200.0), &Metrics, &mut cache);
+        let mut ctx = EventCtx::new(None, Size::new(400.0, 200.0));
+        e.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(4.0, 4.0), button: y901_ui::MouseButton::Left });
+        assert_eq!(hit.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let r = e.action_rect;
+        e.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(r.x + 4.0, r.y + 4.0), button: y901_ui::MouseButton::Left });
+        assert_eq!(hit.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+}
