@@ -3,7 +3,7 @@
 Y901 是一个**零 C/C++ 编译依赖**的桌面 UI 框架。UI 框架本身不认识任何平台 API，
 平台能力（Win32 / D3D11 / DirectWrite / PTY）全部收敛在应用层。
 
-## 1. 十一个 crate
+## 1. 九个 crate
 
 | crate | 职责 | 生产依赖 |
 |---|---|---|
@@ -13,7 +13,6 @@ Y901 是一个**零 C/C++ 编译依赖**的桌面 UI 框架。UI 框架本身不
 | `y901-extras` | **扩展**组件：TerminalWidget（Grid + VT + PTY） | `core`, `ui`, `crossbeam-channel`, `portable-pty` |
 | `y901-runtime` | 平台无关契约：`Host` / `PlatformRuntime` / `RawEvent` / `translate` / `RenderBackend` | `ui` |
 | `y901-backend-win32` | 唯一接触 Win32 的 crate：窗口 / D3D11 / DirectWrite / IME / DPI | `core`, `ui`, `runtime`, `windows-sys` |
-| `y901-app` | 启动器：解析参数、建树、装配 Host、跑事件循环（不实现组件、不定义布局） | `backend-win32`, `runtime`, `ui`, `widgets` |
 | `y901-render` | 软件光栅化器（SoftBackend）与自研 TTF 字形引擎（图集 / mipmap LOD） | `ui`, `ttf-parser` |
 | `y901-shell` | 应用壳：菜单栏 / 托盘 / 快捷键绑定 | `ui`, `runtime`, `windows-sys`（命令行 / 磁盘操作）|
 | `y901-backend-x11` | Linux X11 后端（Xvfb 下验证，真机待验） | `core`, `ui`, `render`, `runtime`, `x11rb` |
@@ -21,10 +20,10 @@ Y901 是一个**零 C/C++ 编译依赖**的桌面 UI 框架。UI 框架本身不
 依赖方向严格单向（箭头指向被依赖方）：
 
 ```
-y901-app ──> y901-backend-win32 ──> y901-runtime ──> y901-ui
+y901-shell ──> y901-backend-win32 ──> y901-runtime ──> y901-ui
     │                │                    │                │
     │                └──> y901-core <─────┴──> y901-widgets ┘
-    └──> y901-widgets / y901-ui
+    └──> y901-widgets / y901-ui / y901-render
 ```
 
 关键约束：
