@@ -280,6 +280,7 @@ fn clamp_pair(
 /// 测量本容器与子节点（子尺寸写入 `measured` 供 arrange 复用）。
 ///
 /// 详细约束与无界处理见函数体内注释。
+#[allow(clippy::too_many_arguments)] // 与 d3d11::draw_scene 一致：参数就是布局所需的最小集合
 pub fn flex_measure_into(
     axis: Axis,
     padding: Edges,

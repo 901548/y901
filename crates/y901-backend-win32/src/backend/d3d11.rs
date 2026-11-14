@@ -2468,16 +2468,16 @@ impl Gfx {
         // **绝不静默丢实例**：以前超出 `INSTANCE_CAPACITY` 的部分直接被 `min()` 截掉，
         // 画面上表现为"后半帧的控件整体消失"，且没有任何日志可查（排查代价极高）。
         // 这里改为：超限时明确告警（每个进程只打一次，避免刷屏），并如实报告丢弃数量。
-        if instances.len() > INSTANCE_CAPACITY {
-            if !INSTANCE_OVERFLOW_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                eprintln!(
+        if instances.len() > INSTANCE_CAPACITY
+            && !INSTANCE_OVERFLOW_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            eprintln!(
                     "[y901] 实例数 {} 超过单批上限 {}，本帧丢弃 {} 个实例（画面可能缺内容）。\
                      如复现，请调大 INSTANCE_CAPACITY 或改为分批提交。",
                     instances.len(),
                     INSTANCE_CAPACITY,
                     instances.len() - INSTANCE_CAPACITY
-                );
-            }
+            );
         }
         if count > 0 {
             match context.map_discard(&pipeline.instance_buffer) {

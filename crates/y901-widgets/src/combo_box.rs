@@ -186,6 +186,8 @@ impl Widget for ComboBox {
                     items,
                     selected,
                     shared,
+                    // 初始高亮 = 当前选中项（没有则 0）
+                    highlight: selected.unwrap_or(0),
                     width: self.box_rect().w.max(LIST_MIN_W),
                     rect: Rect::ZERO,
                 };
@@ -242,6 +244,8 @@ struct ComboList {
     items: Vec<String>,
     selected: Option<usize>,
     shared: Rc<Cell<Option<usize>>>,
+    /// 高亮项（键盘 ↑↓ 移动，**到边界停住**）。
+    highlight: usize,
     width: f32,
     rect: Rect,
 }
@@ -290,6 +294,40 @@ impl Widget for ComboList {
     }
 
     fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+        // **键盘：** Esc 关闭（不改选中）、↑↓ 移动高亮（到边界**停住**）、Enter 确认。
+        if let UiEvent::Key { key, .. } = event {
+            match key {
+                y901_ui::Key::Escape => {
+                    ctx.request_close_popup(self.id.clone());
+                    return EventResult::Redraw;
+                }
+                y901_ui::Key::Up => {
+                    let next = self.highlight.saturating_sub(1);
+                    if next != self.highlight {
+                        self.highlight = next;
+                        return EventResult::Redraw;
+                    }
+                    return EventResult::Handled;
+                }
+                y901_ui::Key::Down => {
+                    let last = self.items.len().saturating_sub(1);
+                    let next = (self.highlight + 1).min(last);
+                    if next != self.highlight {
+                        self.highlight = next;
+                        return EventResult::Redraw;
+                    }
+                    return EventResult::Handled;
+                }
+                y901_ui::Key::Enter => {
+                    if self.highlight < self.items.len() {
+                        self.shared.set(Some(self.highlight));
+                    }
+                    ctx.request_close_popup(self.id.clone());
+                    return EventResult::Redraw;
+                }
+                _ => return EventResult::Ignored,
+            }
+        }
         let UiEvent::MouseUp { pos, .. } = event else {
             return EventResult::Ignored;
         };
@@ -389,5 +427,72 @@ mod tests {
         // 第二次 Tick：已吸收，无变化
         assert_eq!(cb.event(&mut ctx, &UiEvent::Tick), EventResult::Ignored);
         assert_eq!(ctx.commands.len(), 1, "选中后应发出命令");
+    }
+
+    /// 构造一个已布局的 ComboBox，并把它的列表弹出物取出来。
+    fn popup_list(selected: Option<usize>, n: usize) -> ComboList {
+        let items: Vec<String> = (0..n).map(|i| format!("item{i}")).collect();
+        let mut list = ComboList {
+            id: "c-list".to_string(),
+            items,
+            selected,
+            shared: Rc::new(Cell::new(None)),
+            highlight: selected.unwrap_or(0),
+            width: 200.0,
+            rect: Rect::ZERO,
+        };
+        let mut cache = y901_ui::layout::LayoutCache::new();
+        list.arrange(Rect::new(0.0, 0.0, 200.0, 3.0 * ITEM_H), &Metrics, &mut cache);
+        list
+    }
+
+    fn key(k: y901_ui::Key) -> UiEvent {
+        UiEvent::Key {
+            key: k,
+            modifiers: y901_ui::Modifiers::default(),
+        }
+    }
+
+    #[test]
+    fn escape_closes_without_changing_selection() {
+        let mut list = popup_list(Some(1), 3);
+        let mut ctx = EventCtx::new(None, Size::new(400.0, 400.0));
+        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Escape)), EventResult::Redraw);
+        assert_eq!(ctx.close_popup_requests.len(), 1, "Esc 应请求关闭浮层");
+        assert_eq!(list.shared.get(), None, "Esc 不应改变选中");
+    }
+
+    #[test]
+    fn down_moves_highlight_and_stops_at_bottom() {
+        let mut list = popup_list(Some(0), 3);
+        let mut ctx = EventCtx::new(None, Size::new(400.0, 400.0));
+        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Down)), EventResult::Redraw);
+        assert_eq!(list.highlight, 1);
+        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Down)), EventResult::Redraw);
+        assert_eq!(list.highlight, 2);
+        // 已到最后一项：再按不动（停住，不循环）
+        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Down)), EventResult::Handled);
+        assert_eq!(list.highlight, 2);
+    }
+
+    #[test]
+    fn up_moves_highlight_and_stops_at_top() {
+        let mut list = popup_list(Some(1), 3);
+        let mut ctx = EventCtx::new(None, Size::new(400.0, 400.0));
+        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Up)), EventResult::Redraw);
+        assert_eq!(list.highlight, 0);
+        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Up)), EventResult::Handled);
+        assert_eq!(list.highlight, 0);
+    }
+
+    #[test]
+    fn enter_commits_highlighted_item_and_closes() {
+        let mut list = popup_list(Some(0), 3);
+        let mut ctx = EventCtx::new(None, Size::new(400.0, 400.0));
+        let _ = list.event(&mut ctx, &key(y901_ui::Key::Down));
+        let _ = list.event(&mut ctx, &key(y901_ui::Key::Down));
+        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Enter)), EventResult::Redraw);
+        assert_eq!(list.shared.get(), Some(2), "应提交高亮项");
+        assert_eq!(ctx.close_popup_requests.len(), 1);
     }
 }
