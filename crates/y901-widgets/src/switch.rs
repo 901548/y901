@@ -206,6 +206,7 @@ impl Widget for Switch {
             .label(format!("switch {}", self.id))
             .value(if self.checked { "on" } else { "off" })
             .prop("checked", self.checked.to_string())
+            .action("toggle")
     }
 }
 
@@ -249,5 +250,12 @@ mod tests {
         sw.event(&mut ctx, &UiEvent::MouseUp { pos: y901_ui::Pos::new(20.0, 12.0), button: y901_ui::MouseButton::Left });
         assert!(sw.checked());
         assert_eq!(ctx.commands.len(), 1, "应发出一条命令");
+    }
+
+    #[test]
+    fn exposes_toggle_action() {
+        let sw = Switch::new("s", false);
+        let acts = sw.semantics().actions;
+        assert!(acts.iter().any(|a| a.name == "toggle"), "switch 应暴露 toggle，实测 {:?}", acts.iter().map(|a| a.name.clone()).collect::<Vec<_>>());
     }
 }

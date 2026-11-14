@@ -235,6 +235,7 @@ impl Widget for ComboBox {
             .label(format!("combobox {}", self.id))
             .value(self.display_text().to_string())
             .prop("items", self.items.len().to_string())
+            .action("select")
     }
 }
 
@@ -494,5 +495,12 @@ mod tests {
         assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Enter)), EventResult::Redraw);
         assert_eq!(list.shared.get(), Some(2), "应提交高亮项");
         assert_eq!(ctx.close_popup_requests.len(), 1);
+    }
+
+    #[test]
+    fn exposes_select_action() {
+        let cb = ComboBox::new("c", vec!["a", "b"]);
+        let acts = cb.semantics().actions;
+        assert!(acts.iter().any(|a| a.name == "select"), "combo_box 应暴露 select");
     }
 }

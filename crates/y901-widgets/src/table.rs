@@ -147,19 +147,26 @@ impl Table {
         }
         let mut fixed = 0.0f32;
         let mut flex_weight = 0.0f32;
+        // **Percent 基准** = 表格内容总宽（`self.rect.w`）：百分比列按"整表宽度"计算，
+        // 与 CSS 的 percentage 宽度语义一致。
+        let avail = self.rect.w.max(0.0);
+        let mut percent_total = 0.0f32;
         for c in &self.columns {
             match c.width {
                 Dimension::Px(v) => fixed += v.max(0.0) * self.scale,
                 Dimension::Flex(f) => flex_weight += f.max(0.0),
-                _ => fixed += FLEX_MIN_W,
+                Dimension::Percent(p) => percent_total += avail * p.max(0.0) / 100.0,
+                Dimension::Auto => fixed += FLEX_MIN_W,
             }
         }
-        let rest = (self.rect.w - fixed).max(0.0);
+        let rest = (self.rect.w - fixed - percent_total).max(0.0);
         let mut out = Vec::with_capacity(n);
         let mut x = self.rect.x;
         for c in &self.columns {
             let w = match c.width {
                 Dimension::Px(v) => v.max(0.0) * self.scale,
+                // **百分比列**：直接取总宽的 p%（不参与余量分配）
+                Dimension::Percent(p) => avail * p.max(0.0) / 100.0,
                 Dimension::Flex(f) if flex_weight > 0.0 => {
                     (rest * f.max(0.0) / flex_weight).max(FLEX_MIN_W.min(rest))
                 }
@@ -314,7 +321,8 @@ impl Widget for Table {
             .exposed(true)
             .label(format!("table {} ({} rows)", self.id, self.rows.len()))
             .prop("rows", self.rows.len().to_string())
-            .prop("columns", self.columns.len().to_string());
+            .prop("columns", self.columns.len().to_string())
+            .action("select_row");
         if let Some(i) = self.selected {
             s = s.value(format!("row {i}"));
         }
@@ -390,5 +398,31 @@ mod tests {
         t.rect = Rect::new(0.0, 0.0, 200.0, 100.0);
         assert_eq!(t.row_at(Pos::new(10.0, 10.0)), None, "表头不应命中行");
         assert_eq!(t.row_at(Pos::new(10.0, HEADER_H + 5.0)), Some(0));
+    }
+
+    #[test]
+    fn percent_column_takes_share_of_total_width() {
+        let mut t = Table::new("t")
+            .column(TableColumn::flex("a"))
+            .column(TableColumn {
+                title: "b".to_string(),
+                width: Dimension::Percent(50.0),
+                align: Align::Start,
+            })
+            .row(vec!["a".into(), "b".into()]);
+        let mut cache = LayoutCache::new();
+        t.arrange(Rect::new(0.0, 0.0, 400.0, 200.0), &Metrics, &mut cache);
+        let cols = t.column_layout();
+        // Percent(50) 占 400 的一半
+        assert!((cols[1].1 - 200.0).abs() < 0.5, "Percent(50) 应为 200，实测 {}", cols[1].1);
+        // flex 列吃剩下的 200
+        assert!((cols[0].1 - 200.0).abs() < 0.5, "flex 应剩 200，实测 {}", cols[0].1);
+    }
+
+    #[test]
+    fn exposes_select_row_action() {
+        let t = Table::new("t").column(TableColumn::flex("a")).row(vec!["x".into()]);
+        let acts = t.semantics().actions;
+        assert!(acts.iter().any(|a| a.name == "select_row"), "table 应暴露 select_row");
     }
 }

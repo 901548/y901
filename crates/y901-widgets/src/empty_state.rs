@@ -192,7 +192,8 @@ impl Widget for EmptyState {
         let mut s = Semantics::default()
             .exposed(true)
             .label(format!("empty {}", self.id))
-            .value(self.title.clone());
+            .value(self.title.clone())
+            .action("action");
         if let Some(d) = self.description.as_ref() {
             s = s.prop("description", d.clone());
         }

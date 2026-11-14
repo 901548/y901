@@ -229,7 +229,8 @@ impl Widget for Alert {
             .exposed(true)
             .label(format!("alert {}", self.id))
             .value(self.title.clone())
-            .prop("kind", self.kind.as_str());
+            .prop("kind", self.kind.as_str())
+            .action("dismiss");
         if let Some(d) = self.description.as_ref() {
             s = s.prop("description", d.clone());
         }

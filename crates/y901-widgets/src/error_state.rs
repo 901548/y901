@@ -198,7 +198,8 @@ impl Widget for ErrorState {
             .exposed(true)
             .label(format!("error {}", self.id))
             .value(self.title.clone())
-            .prop("kind", "error");
+            .prop("kind", "error")
+            .action("retry");
         if let Some(d) = self.description.as_ref() {
             s = s.prop("description", d.clone());
         }
