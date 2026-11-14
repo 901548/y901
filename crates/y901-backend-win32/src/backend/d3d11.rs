@@ -1867,7 +1867,7 @@ unsafe fn draw_scene(
     pipeline: &Pipeline,
     atlas: &Atlas,
     cached: &CachedTarget,
-    instances: &[Instance],
+    _instances: &[Instance],
     count: usize,
     batches: &[Batch],
     images: &std::collections::HashMap<u64, (Texture, ShaderResourceView, u32, u32, u32)>,
@@ -1952,7 +1952,6 @@ unsafe fn draw_scene(
             }
         }
     }
-    let _ = instances;
 }
 
 /// 把自持 RT 整张 blit 到交换链后备缓冲。
