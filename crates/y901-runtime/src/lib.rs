@@ -271,6 +271,23 @@ impl Default for FontConfig {
     }
 }
 
+impl FontConfig {
+    /// **现代比例字体**（Windows 10/11 自带）：`Microsoft YaHei UI`。
+    ///
+    /// ⚠️ **先读这段再用**：Y901 的文本模型是**等宽 cell**
+    /// （`cell_metrics_for` 固定按 `0.5em × 1em` 出 cell，绘制时按 `cell_span × cell.w` 步进），
+    /// 所以比例字体只会被"按固定步进"放置 —— 字母间距会不均匀、窄字母偏松、
+    /// 中文与西文混排时位置会偏。**它适合做视觉试验，不适合当默认**。
+    ///
+    /// 默认仍是 `NSimSun`（等宽、中英文齐全），原因就在上面这条。
+    pub fn modern() -> Self {
+        Self {
+            family: "Microsoft YaHei UI".to_string(),
+            size: 16.0,
+        }
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {

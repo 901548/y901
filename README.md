@@ -1,142 +1,69 @@
 # Y901
 
-**纯 Rust 的跨平台桌面 GUI 框架**——双后端（Windows D3D11 / Linux X11 CPU 合成）、自研 TTF 字体引擎、
-**零 C/C++ 编译依赖**（只有 `windows-sys` 一个原生绑定 crate），面向"人能读、程序也能读"的界面。
+Rust 跨平台 GUI 框架，自带 Win32/D3D11 与 X11 后端。文本模型是**等宽 cell**
+（`0.5em × 1em`），适合终端、日志、文件管理等桌面工具类应用。
 
-```
-crates/
-  y901-core     数据结构（Grid / Cell / Color / ColorSpec）
-  y901-ui       机制层：Widget / UiTree / RenderCtx / 布局 / 主题 / 动画 / 图片
-  y901-widgets  通用组件：Button / TextInput / Tabs / TreeView / Tooltip / Slider …
-  y901-extras   子系统组件：终端（VT 解析 + PTY）
-  y901-render   平台无关渲染器：软光栅 + 自研 TTF 字形引擎
-  y901-runtime  平台契约：Host / EventSource / Presenter / PlatformRuntime
-  y901-backend-win32 / y901-backend-x11   两个平台后端
-  y901-shell    平台选择 + 密钥 + 剪贴板
-```
+## 状态
 
-## 5 分钟快速开始
+**实验性（experimental）**。Windows D3D11 路径经过完整验证（130 个测试目标、像素门禁）；
+X11 后端可在 Xvfb 下跑通，**未做真机验收**；macOS 无后端。
 
-```toml
-# Cargo.toml（当前为工作区内部使用；尚未发布到 crates.io）
-[dependencies]
-y901-ui = { path = "crates/y901-ui" }
-y901-widgets = { path = "crates/y901-widgets" }
-y901-runtime = { path = "crates/y901-runtime" }
-y901-shell = { path = "crates/y901-shell" }
-```
+## 组件
 
-```rust
-use y901_runtime::{Host, Options};
-use y901_shell::create_runtime;
-use y901_ui::{Command, Flex, UiEvent, UiTree};
-use y901_widgets::Button;
+| 类别 | 组件 |
+|---|---|
+| 基础输入 | `Button` `TextInput` `Checkbox` `RadioGroup` `Switch` `Slider` |
+| 容器/布局 | `Flex`（含 `radius`/`border`）`Grid` `Stack` `ScrollView` `SplitView` `Tabs` |
+| 数据展示 | `Table` `ListView` `TreeView` `Image` `RichText` `TextLabel` |
+| 反馈/状态 | `Spinner` `ProgressBar` `EmptyState` `ErrorState` `Alert` |
+| 导航/浮层 | `Menu` `Dialog` `ContextMenu` `Tooltip` |
 
-struct App;
-
-impl Host for App {
-    fn idle(&mut self, tree: &mut UiTree) {
-        // 组件心跳：没有组件需要时立即返回，不占 CPU
-        for _ in 0..4 {
-            if !tree.dispatch(&UiEvent::Tick).is_handled() { break; }
-        }
-    }
-    fn command(&mut self, _tree: &mut UiTree, _cmd: Command) -> bool { false }
-}
-
-fn build() -> UiTree {
-    UiTree::new(Box::new(
-        Flex::column("root").push(Box::new(Button::new("btn", "点我"))),
-    ))
-}
-
-fn main() -> Result<(), String> {
-    create_runtime().run(
-        Box::new(App),
-        Box::new(build),
-        Options { title: "Hello".into(), width: 480, height: 240, ..Default::default() },
-    )
-}
-```
-
-> 上例已在**干净目录**（仅 5 个路径依赖、无工作区继承）实际编译并运行验证：
-> 首帧 9.1ms，窗口常驻正常。
-
-## 界面
-
-![TreeView 示例截图](docs/screenshot.png)
-
-> 上图为 `tree_view` 示例的实际渲染结果（622×473，D3D11 后端）。
-> 重新生成：`Y901_SNAPSHOT=docs/screenshot.png cargo run --example tree_view -p y901-app`
-> （设置该环境变量后，示例在首帧渲染完成后自动截图并退出。）
-
-## 可运行的示例
+## 快速开始
 
 ```bash
-cargo run --example hello        -p y901-app   # 按钮 + 文字（最小用法）
-cargo run --example counter      -p y901-app   # Flex + 状态 + 进度条
-cargo run --example image_gallery -p y901-app  # Grid + PNG 图片 + 四种适配
-cargo run --example tree_view    -p y901-app   # TreeView + 虚拟化 + 键盘导航
+cargo run --example static_page     # 一屏静态页面：排版/颜色/圆角
+cargo run --example table           # 多列表格 + 选中行
+cargo run --example alert           # 四种 Alert
 ```
 
-> 示例都在 `crates/y901-app/examples/`。写它们的过程暴露了 3 个 API 缺口（组件没导出到 crate 根、
-> 部分组件缺 `flex_item` 构造器），已在本轮补齐——示例是**按用户会写的方式**写的，没有绕开 API。
+## 仓库结构（9 个 crate）
 
-## 能力清单
+```
+y901-core            纯逻辑：终端 Grid / 格宽 / 区间
+y901-ui              框架：Widget / UiTree / 布局 / 事件 / 主题 / 动画 / 语义树
+y901-widgets         组件：Button / Table / Alert / Switch / ...
+y901-extras          扩展：TerminalWidget（Grid + VT + PTY）
+y901-render          软光栅器（SoftBackend）+ 自研 TTF 字形引擎 + 图集
+y901-runtime         平台无关契约：Host / PlatformRuntime / 帧 / 字体配置
+y901-backend-win32   Win32 + D3D11 + DirectWrite + IME + DPI
+y901-backend-x11     X11 后端（Xvfb 下验证）
+y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
+```
 
-| 领域 | 已有能力 |
-|---|---|
-| **渲染** | 软光栅（CPU）与 D3D11 双后端；矩形/圆角/渐变/SDF 抗锯齿；字形图集 + LRU；纹理上传与双线性采样；变换栈（缩放）；像素回读 |
-| **文本缩放** | mipmap LOD（加载性生成、图集占用保护）| Windows D3D11 + Linux X11 CPU | ✅ 两个后端都有像素断言 |
-| **字体** | 自研 TTF 引擎（26.6 定点、自适应曲线扁平化、非零环绕填充、4 个亚像素相位）；CJK 支持 |
-| **布局** | Flex（百分比/padding/gap）、Stack、Grid（`Fixed`/`Fraction`/`Auto` 轨道）、滚动容器、容器裁剪子控件 |
-| **组件** | Button / TextLabel / TextInput / ListView / ScrollView / SplitView / Menu / Dialog / Tabs / ProgressBar / Checkbox / RadioGroup / Slider / Tooltip / ContextMenu / TreeView / Image / 终端 |
-| **动画** | 7 条缓动曲线、时间轴、中途改目标（`retarget` 从当前值续）、完成回调、空闲零 CPU |
-| **交互** | hover（含冒泡）、指针捕获、焦点与 Tab 遍历、IME、剪贴板、右键菜单、拖拽选区 |
-| **语义查询** | 语义树（`Semantics`）、按选择器筛选（`query`）、revision 差异、状态订阅 |
+## 构建与测试
+
+```bash
+cargo check --workspace --all-targets      # 0 warning
+cargo test --workspace                     # 130 个测试目标
+powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0x39AE41C1697CBFD0）
+```
+
+## 已知限制
+
+- **Linux 输入法（IME）未实现**：中文只能显示、不能输入。
+- **macOS 后端未实现**。
+- **无障碍只有语义树**（`Widget::semantics`），**没有 OS 桥接**（UIA / AT-SPI）。
+- **Grid + Image 组合在 D3D cached-RT 路径下整帧空白**：已排除 clip/blit/scissor/脏区/实例超限，
+  根因未定位，需要 PIX/RenderDoc（详见 `docs/FRAMEWORK.md` §16）。
+- **组件内无法启动动画**：`UiTree::animate(..)` 在树侧，`EventCtx` 没有入口；
+  因此 `Switch` 的滑块是即时移动（滚动/弹层动画不受影响）。
+- **文本模型要求等宽字体**：`cell_metrics_for` 固定按 `0.5em × 1em` 出 cell。
+  默认字体 `NSimSun`（等宽、中英文齐全）。`FontConfig::modern()` 可切到
+  `Microsoft YaHei UI`，但**只建议做视觉试验**——比例字体按固定步进排布会字距不均。
+- 组件库**未发布到 crates.io**（当前只支持 `path` 依赖）。
 
 ## 文档
 
-- **[docs/FRAMEWORK_GUIDE.md](docs/FRAMEWORK_GUIDE.md)** —— 组件写法、能力清单（§40）、门禁与纪律（§41-42）
-- **[docs/PERFORMANCE.md](docs/PERFORMANCE.md)** —— 布局 / 渲染 / 字体基准数据
-- **[docs/CROSS_PLATFORM_PLAN.md](docs/CROSS_PLATFORM_PLAN.md)** —— 平台后端与已知限制
-- **[docs/FONT_ENGINE_PLAN.md](docs/FONT_ENGINE_PLAN.md)** —— 自研字体引擎的设计与验收证明
-- **`cargo doc --no-deps --open`** —— API 参考（`cargo doc` 无 `missing_docs` 警告）
-
-## 工程纪律（摘要）
-
-1. **四条件门禁**：`0 failed` + clippy 0 警告 / 0 错误 + 像素哈希（同尺寸下）一致 + `missing_docs` 为 0。
-   全部由 `scripts/gate.ps1` 一次验证（不再手打）。
-   只要漏一条，"验证后提交"就会变成看起来在执行的空动作（真实事故：`bbdbd89` 带 5 个 warning 提交）。
-2. **像素断言先怀疑基准**：本项目出现过 6 次"度量方法本身是 bug"（背景取在被测物内部、扫全画布、
-   用遮罩前的基准…）。断言红了先问"基准对不对"，再问实现。
-3. **"画了但看不见" ≡ "没画"**：`TextStyle::default()` 曾是透明前景，导致文字完全不可见，
-   看起来像"后端不支持文字"。默认值也是 API。
-
-完整纪律见 [docs/FRAMEWORK_GUIDE.md §0.1 / §42](docs/FRAMEWORK_GUIDE.md)。
-
-## 当前状态
-
-| 项 | 状态 |
-|---|---|
-| 测试 **751**（`cargo test --workspace`），0 失败 |
-| clippy | **0 warning / 0 error** |
-| 文档完整性 | **10 个 crate 全部 `#![deny(missing_docs)]`**，`RUSTFLAGS="-W missing_docs"` = 0 |
-| 像素哈希门禁 | 通过（`scripts/hash-gate.ps1`，同会话前后对比） |
-| Windows | D3D11 渲染 + GDI 纯 CPU 回退；真机 RTX 4060 @144Hz 空帧 6.885ms（= vsync 间隔） |
-| Linux/X11 | CPU 合成 + MIT-SHM；WSL 上 Xvfb 验证通过（单帧耗时有 `benchmark_shm_vs_putimage_1080p`，待补测） |
-| macOS | **未实现** |
-| 示例 | 4 个可运行（`hello` / `counter` / `tree_view` / `image_gallery`） |
-
-### 已知限制
-
-- 无合成粗体的轮廓加粗：CPU 后端用"向右 1px 涂抹"近似，非真粗体（见 `CROSS_PLATFORM_PLAN.md §8.5.1`）
-- Xvfb 下 `CreateGlyphCursor` 返回 `BadFont`，光标恒为默认箭头（真 Xorg 未验）
-- 图片每张纹理一次 draw call（图集化未做）
-- 图片纹理在窗口销毁路径不回收（进程退出无影响）
-- Grid 自动流只支持**行优先**；`span` 放不下时退化为 1×1（不动态加行）
-
-
-## 许可证
-
-内部项目，暂未选定开源许可证。
+- `docs/FRAMEWORK.md`：架构、组件模型、坐标系与裁剪、已知限制
+- `docs/CROSS_PLATFORM_PLAN.md`：X11 / macOS 路线
+- `docs/evidence/hash-baseline.txt`：像素门禁基线

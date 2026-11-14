@@ -626,6 +626,11 @@ pub struct Flex {
     /// 主轴分布（`justify-content`）。默认 `Start` = 加该能力前的行为。
     justify_content: Justify,
     background: Option<Color>,
+    /// **背景圆角半径**。`0.0`（默认）= 直角，
+    /// 与加该字段前的行为**逐像素相同**。
+    radius: f32,
+    /// **描边**：`(color, width)`。`None`（默认）= 不描边。
+    border: Option<(Color, f32)>,
     children: Vec<Box<dyn Widget>>,
     rect: Rect,
     item: FlexItem,
@@ -657,6 +662,8 @@ impl Flex {
             align_items: Align::Stretch,
             justify_content: Justify::Start,
             background: None,
+            radius: 0.0,
+            border: None,
             children: Vec::new(),
             rect: Rect::ZERO,
             item: FlexItem::default(),
@@ -965,6 +972,18 @@ impl Flex {
         self
     }
 
+    /// 设置**背景圆角半径**（逻辑像素）。`0.0` = 直角（默认）。
+    pub fn radius(mut self, radius: f32) -> Self {
+        self.radius = radius.max(0.0);
+        self
+    }
+
+    /// 设置**描边**（颜色 + 宽度）；默认不描边。
+    pub fn border(mut self, color: Color, width: f32) -> Self {
+        self.border = Some((color, width.max(0.0)));
+        self
+    }
+
     /// 设置自己在父容器里的尺寸约束。
     pub fn flex_item(mut self, item: FlexItem) -> Self {
         self.item = item;
@@ -1064,8 +1083,20 @@ impl Widget for Flex {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
+        // 回退路径保持与加 radius/border 之前**逐像素相同**：
+        // radius == 0 且 border == None 时走 `fill_rect`（不走 SDF）。
+        let plain = self.radius <= 0.0 && self.border.is_none();
         if let Some(bg) = self.background {
-            ctx.fill_rect(self.rect, bg);
+            if plain {
+                ctx.fill_rect(self.rect, bg);
+            } else {
+                ctx.fill_round_rect(self.rect, bg, self.radius);
+            }
+        }
+        if let Some((color, width)) = self.border {
+            if width > 0.0 {
+                ctx.stroke_round_rect(self.rect, color, width, self.radius);
+            }
         }
     }
 

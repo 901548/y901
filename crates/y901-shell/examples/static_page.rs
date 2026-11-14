@@ -74,6 +74,8 @@ fn build() -> UiTree {
 
     let card = Flex::column("card")
         .background(card_bg)
+        .radius(8.0)
+        .border(theme.divider_color(), 1.0)
         .padding(Edges::all(20.0))
         .gap(12.0)
         .push(Box::new(form_row(
