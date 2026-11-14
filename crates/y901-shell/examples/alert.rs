@@ -36,6 +36,12 @@ fn build() -> UiTree {
         .push(Box::new(Alert::new("i", AlertKind::Info, "有新版本可用").on_dismiss(y901_ui::Command::app("alert:dismiss", y901_ui::json::Json::Null)).flex_item(FlexItem::height(48.0))))
         .push(Box::new(Alert::new("s", AlertKind::Success, "保存成功").flex_item(FlexItem::height(48.0))))
         .push(Box::new(Alert::new("w", AlertKind::Warning, "磁盘空间不足").description("剩余 120 MB，建议清理缓存").on_dismiss(y901_ui::Command::app("alert:dismiss", y901_ui::json::Json::Null)).flex_item(FlexItem::height(64.0))))
+        // STYLE-OVERRIDE：验证 WidgetStyle::bg 确实覆盖默认面板底色
+        .push(Box::new(
+            Alert::new("styled", AlertKind::Info, "style 覆盖底色")
+                .style(y901_widgets::WidgetStyle::default().bg(y901_ui::Color::rgba(0.10, 0.45, 0.85, 1.0)))
+                .flex_item(FlexItem::height(48.0)),
+        ))
         .push(Box::new(Alert::new("e", AlertKind::Error, "连接已断开").description("请检查网络后重试").on_dismiss(y901_ui::Command::app("alert:dismiss", y901_ui::json::Json::Null)).flex_item(FlexItem::height(64.0))));
     UiTree::new(Box::new(root))
 }

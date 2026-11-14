@@ -34,6 +34,11 @@ fn build() -> UiTree {
         .push(Box::new(Badge::new("s", "成功").kind(BadgeKind::Success)))
         .push(Box::new(Badge::new("w", "警告").kind(BadgeKind::Warning)))
         .push(Box::new(Badge::new("e", "失败").kind(BadgeKind::Error)))
+        // STYLE-OVERRIDE：验证 WidgetStyle::bg 确实覆盖胶囊底色
+        .push(Box::new(
+            Badge::new("styled", "style")
+                .style(y901_widgets::WidgetStyle::default().bg(y901_ui::Color::rgba(0.95, 0.55, 0.10, 1.0))),
+        ))
         .push(Box::new(Badge::dot("dot-e").kind(BadgeKind::Error).flex_item(FlexItem::fixed(8.0, 8.0))))
         .push(Box::new(y901_widgets::TextLabel::new("t", "← 未读圆点").size(12.0)));
     UiTree::new(Box::new(root))
