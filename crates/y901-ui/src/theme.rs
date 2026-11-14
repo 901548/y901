@@ -126,20 +126,66 @@ impl Theme {
     /// 为什么做成方法而不是新槽位：`SLOTS = 8` 是对外契约（`slot()` 线性查表），
     /// 加槽会破坏所有既有 `Theme` 常量；而"弱化文字"是**派生色**，不是独立角色。
     pub fn muted_text_color(&self) -> Color {
-        // **用亮度求中性灰**：三通道取同一个值，B-R = 0。
-        //
-        // 旧值 (0.55,0.58,0.65) 的 B-R = 0.10，在深底上看起来是"淡蓝"而不是"灰"
-        // —— 说明文字不应带色彩倾向（`static_page` 里实测得到的）。
+        // 弱化文字 = text fg 向 panel bg 插值 35%（自动适配 DARK/LIGHT）
         let fg = self.style(Role::TEXT, State::Normal).fg;
-        let l = (0.299 * fg.r + 0.587 * fg.g + 0.114 * fg.b) * 0.64;
-        let l = l.max(0.35); // 可读性下限：不能暗到看不清
-        Color::rgba(l, l, l, 1.0)
+        let bg = self.style(Role::PANEL, State::Normal).bg;
+        let t = 0.35;
+        let l = |a: f32, b: f32| a + (b - a) * t;
+        let floor = if self.is_dark() { 0.35 } else { 0.30 };
+        let c = |a: f32, b: f32| l(a, b).max(floor).min(1.0);
+        Color::rgba(c(fg.r, bg.r), c(fg.g, bg.g), c(fg.b, bg.b), 1.0)
     }
 
     /// **分割线颜色**：比 `border` 亮一点、比输入框边框暗，保证 1px 线在深底上可见。
     pub fn divider_color(&self) -> Color {
-        // 分割线是**中性元素**：不应偏蓝（旧值 B-R = 0.06）。
-        Color::rgba(0.18, 0.18, 0.18, 1.0)
+        // 分割线 = panel bg 向 text fg 插值 12%（DARK → 稍亮灰；LIGHT → 稍暗灰）
+        let fg = self.style(Role::TEXT, State::Normal).fg;
+        let bg = self.style(Role::PANEL, State::Normal).bg;
+        let t = 0.12;
+        let l = |a: f32, b: f32| a + (b - a) * t;
+        Color::rgba(l(bg.r, fg.r), l(bg.g, fg.g), l(bg.b, fg.b), 1.0)
+    }
+
+    /// 主题是否为深色（用 panel bg 亮度判定）。
+    pub fn is_dark(&self) -> bool {
+        let bg = self.style(Role::PANEL, State::Normal).bg;
+        0.299 * bg.r + 0.587 * bg.g + 0.114 * bg.b < 0.5
+    }
+
+    /// **信息色**（蓝）。
+    pub fn info_color(&self) -> Color {
+        if self.is_dark() {
+            Color::rgba(0.36, 0.62, 0.96, 1.0)
+        } else {
+            Color::rgba(0.16, 0.42, 0.76, 1.0)
+        }
+    }
+
+    /// **成功色**（绿）。
+    pub fn success_color(&self) -> Color {
+        if self.is_dark() {
+            Color::rgba(0.36, 0.80, 0.52, 1.0)
+        } else {
+            Color::rgba(0.18, 0.58, 0.32, 1.0)
+        }
+    }
+
+    /// **警告色**（黄）。
+    pub fn warning_color(&self) -> Color {
+        if self.is_dark() {
+            Color::rgba(0.95, 0.78, 0.32, 1.0)
+        } else {
+            Color::rgba(0.72, 0.56, 0.12, 1.0)
+        }
+    }
+
+    /// **错误色**（红）；Alert / ErrorState 共用同一个红。
+    pub fn error_color(&self) -> Color {
+        if self.is_dark() {
+            Color::rgba(0.95, 0.38, 0.38, 1.0)
+        } else {
+            Color::rgba(0.76, 0.18, 0.18, 1.0)
+        }
     }
 
     /// 把任意角色映射到槽位；未知角色落到 "panel"。

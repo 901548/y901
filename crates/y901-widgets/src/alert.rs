@@ -24,13 +24,13 @@ pub enum AlertKind {
 }
 
 impl AlertKind {
-    /// 该类型的强调色。
-    pub fn accent(self) -> Color {
+    /// 该类型的强调色（从主题的语义色取，自动适配 DARK/LIGHT）。
+    pub fn accent(self, theme: &y901_ui::Theme) -> Color {
         match self {
-            AlertKind::Info => Color::rgba(0.36, 0.62, 0.96, 1.0),
-            AlertKind::Success => Color::rgba(0.36, 0.80, 0.52, 1.0),
-            AlertKind::Warning => Color::rgba(0.95, 0.78, 0.32, 1.0),
-            AlertKind::Error => Color::rgba(0.95, 0.38, 0.38, 1.0),
+            AlertKind::Info => theme.info_color(),
+            AlertKind::Success => theme.success_color(),
+            AlertKind::Warning => theme.warning_color(),
+            AlertKind::Error => theme.error_color(),
         }
     }
 
@@ -168,7 +168,10 @@ impl Widget for Alert {
         if self.rect.w <= 0.0 || self.rect.h <= 0.0 {
             return;
         }
-        let accent = self.kind.accent();
+        let accent = {
+            let theme = ctx.theme();
+            self.kind.accent(theme)
+        };
         // \u80cc\u666f\uff1a\u4e3b\u9898\u5e95\u8272 + \u4e00\u5c42\u975e\u5e38\u6de1\u7684 kind \u8272\u504f
         let (bg, text_fg, muted) = {
             let theme = ctx.theme();

@@ -611,3 +611,23 @@ let sw = Switch::new("wifi", false)
 
 组件侧发命令用 `EventCtx::emit_command`；`Command` 没有 `with_args`，
 需要替换参数时用 `y901_widgets::command_with_args(&cmd, args)`（重建，不改框架定义）。
+
+## 19. 语义色常量
+
+`Theme` 额外提供 4 个**语义色方法**（不是槽位，`SLOTS` 仍为 8）：
+
+| 方法 | 语义 | DARK | LIGHT |
+|---|---|---|---|
+| `info_color()` | 信息（蓝） | (0.36, 0.62, 0.96) | (0.16, 0.42, 0.76) |
+| `success_color()` | 成功（绿） | (0.36, 0.80, 0.52) | (0.18, 0.58, 0.32) |
+| `warning_color()` | 警告（黄） | (0.95, 0.78, 0.32) | (0.72, 0.56, 0.12) |
+| `error_color()` | 错误（红） | (0.95, 0.38, 0.38) | (0.76, 0.18, 0.18) |
+
+用于 `Alert`（左侧色条 + 蒙层）、`Badge`（压暗 0.62 作实底）、`ErrorState`（图标与标题）。
+`Alert(Error)` 与 `ErrorState` **共用 `error_color()`**，避免同屏出现两种"错误红"。
+
+另外两个派生色也改为**按主题插值**（自动适配，不再写死）：
+
+- `muted_text_color()`：`text` 前景向 `panel` 背景插值 35%
+- `divider_color()`：`panel` 背景向 `text` 前景插值 12%
+- `is_dark()`：按 `panel` 背景亮度判定，供上述方法分支

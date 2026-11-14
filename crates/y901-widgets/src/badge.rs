@@ -25,21 +25,22 @@ pub enum BadgeKind {
 }
 
 impl BadgeKind {
-    /// 底色。
-    fn bg(self) -> Option<Color> {
+    /// 底色：Accent 取主题按钮按下态，其余从语义色压暗 0.62。
+    fn bg(self, theme: &y901_ui::Theme) -> Option<Color> {
+        let dim = |c: y901_ui::Color| y901_ui::Color::rgba(c.r * 0.62, c.g * 0.62, c.b * 0.62, 1.0);
         match self {
-            BadgeKind::Default => None, // 用主题底色
-            BadgeKind::Accent => Some(Color::rgba(0.26, 0.44, 0.72, 1.0)),
-            BadgeKind::Success => Some(Color::rgba(0.20, 0.52, 0.32, 1.0)),
-            BadgeKind::Warning => Some(Color::rgba(0.62, 0.48, 0.14, 1.0)),
-            BadgeKind::Error => Some(Color::rgba(0.62, 0.22, 0.22, 1.0)),
+            BadgeKind::Default => None,
+            BadgeKind::Accent => Some(theme.style(y901_ui::Role::BUTTON, y901_ui::State::Pressed).bg),
+            BadgeKind::Success => Some(dim(theme.success_color())),
+            BadgeKind::Warning => Some(dim(theme.warning_color())),
+            BadgeKind::Error => Some(dim(theme.error_color())),
         }
     }
 
-    /// 文字色（浅色底上用白字）。
+    /// 文字色（彩色底用白字，Default 用主题文字色）。
     fn fg(self) -> Color {
         match self {
-            BadgeKind::Default => Color::rgba(0.80, 0.82, 0.86, 1.0),
+            BadgeKind::Default => Color::WHITE,
             _ => Color::WHITE,
         }
     }
@@ -163,7 +164,7 @@ impl Widget for Badge {
             let theme = ctx.theme();
             theme.style(Role::PANEL, State::Hovered).bg
         };
-        let bg = self.kind.bg().unwrap_or(fallback);
+        let bg = self.kind.bg(ctx.theme()).unwrap_or(fallback);
         let radius = if self.dot_only {
             self.rect.w.min(self.rect.h) * 0.5
         } else {

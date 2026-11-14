@@ -10,8 +10,6 @@ use y901_ui::{
     TextStyle, TextMetrics, UiEvent, Widget,
 };
 
-/// 错误红（主题暂无 ERROR 槽位，先按约定值取）。
-const ERROR_RED: Color = Color::rgba(0.95, 0.38, 0.38, 1.0);
 /// 图标直径。
 const ICON_D: f32 = 48.0;
 /// 操作按钮高度。
@@ -132,6 +130,7 @@ impl Widget for ErrorState {
             return;
         }
         // \u5148\u62f7\u989c\u8272\uff1a`ctx.theme()` \u6301\u6709 `&ctx`\uff0c\u540e\u7eed\u7ed8\u5236\u8981 `&mut ctx`\u3002
+        let error_red = ctx.theme().error_color();
         let (muted, accent) = {
             let theme = ctx.theme();
             (
@@ -145,18 +144,18 @@ impl Widget for ErrorState {
         // \u9519\u8bef\u7ea2\u5706\u5f62\u5360\u4f4d\uff08\u534a\u900f\u660e\u5e95 + \u5b9e\u5fc3\u5185\u5708\uff09
         ctx.fill_round_rect(
             Rect::new(cx - ICON_D * 0.5, y, ICON_D, ICON_D),
-            Color::rgba(ERROR_RED.r, ERROR_RED.g, ERROR_RED.b, 0.18),
+            Color::rgba(error_red.r, error_red.g, error_red.b, 0.18),
             ICON_D * 0.5,
         );
         ctx.fill_round_rect(
             Rect::new(cx - 10.0, y + ICON_D * 0.5 - 10.0, 20.0, 20.0),
-            ERROR_RED,
+            error_red,
             10.0,
         );
         y += ICON_D + 16.0;
 
         // \u6807\u9898\uff1a\u9519\u8bef\u7ea2
-        let title_style = TextStyle::fg(ERROR_RED);
+        let title_style = TextStyle::fg(error_red);
         let tw = ctx.measure_text(&self.title, &title_style).w;
         ctx.draw_text(Pos::new(cx - tw * 0.5, y), &self.title, &title_style);
         y += 24.0;

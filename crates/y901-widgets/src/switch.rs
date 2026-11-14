@@ -157,10 +157,13 @@ impl Widget for Switch {
         // \u5148\u53d6\u8272\u518d\u7ed8\u5236\uff08\u907f\u5f00 `&ctx` / `&mut ctx` \u51b2\u7a81\uff09
         let (on_bg, off_bg, knob) = {
             let theme = ctx.theme();
+            let panel = theme.style(Role::PANEL, State::Normal).bg;
+            // 滑块 = panel 底色的**反色**：DARK → 近白，LIGHT → 近黑，两种主题都有对比。
+            let knob = Color::rgba(1.0 - panel.r, 1.0 - panel.g, 1.0 - panel.b, 1.0);
             (
                 theme.style(Role::BUTTON, State::Pressed).bg,
                 theme.style(Role::PANEL, State::Hovered).bg,
-                Color::WHITE,
+                knob,
             )
         };
         let track = Rect::new(self.rect.x, self.rect.y, self.rect.w, self.rect.h);
