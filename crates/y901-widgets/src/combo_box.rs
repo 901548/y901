@@ -284,7 +284,11 @@ impl Widget for ComboBox {
         ctx.fill_round_rect(b, box_bg, radius);
         ctx.stroke_round_rect(b, box_border, 1.0, radius);
 
-        let style = TextStyle::fg(text_fg);
+        // **占位符不能和选中值同色**：未选中时 `display_text()` 返回
+        // 占位提示，那是"还没选"的语义，应用 muted；选中后才用 text fg。
+        // 之前两者共用 `text_fg`，于是"请选择"和真正的值看上去一样。
+        let is_placeholder = self.selected.is_none();
+        let style = TextStyle::fg(if is_placeholder { muted } else { text_fg });
         let ty = b.y + (b.h - ctx.line_height(&style)) * 0.5;
         ctx.draw_text(Pos::new(b.x + 10.0 * self.scale, ty), self.display_text(), &style);
 

@@ -651,3 +651,20 @@ let sw = Switch::new("wifi", false)
 
 已提供 `.style()` 的两个示例：`Alert`（底色调 + 圆角）、`Table`（表头底色）。
 `Badge` / `ComboBox` 同样支持；`Popover` **不支持** —— 它自身不渲染任何像素（内容由 popup 层绘制）。
+
+## 20. 验证纪律：必须在 clean 工作区上跑
+
+`cargo check` / `cargo test` / `cargo clippy` 的 exit code **只有在 `git status --short` 为空时才可信**。
+
+为什么：编译器看的是**工作区**，不是 HEAD。工作区里未提交的文件可以提供 HEAD 上**不存在的符号**，
+于是"编译通过"是假象；等那个文件被移除，HEAD 就编译不了了，而问题会潜伏很多个 commit。
+
+**实例**：`5d71b48` 提交时，工作区残留着并发进程的 `snapshot.rs`（含 `SnapshotOneshot`），
+`examples/badge.rs` 里也带着调用 → 当时的 `cargo check` 报 exit 0；
+并发进程撤走自己的文件后，**HEAD 连续 5 个 commit 都编译失败**，直到 `2764e08` 回滚才恢复。
+
+**做法**：
+1. 提交前先 `git status --short`，非空就先 stash / commit，再验证；
+2. 三项验证（check / clippy / test）都**显式打印 exit code**，不要用"数 `test result: ok` 行"代替——
+   编译失败打印的是 `error[E…]`，永远匹配不到 `FAILED`，求和会给出一个**看似合理**的数字；
+3. 怀疑时用 `git stash` 后再跑一次，对比两次结果。
