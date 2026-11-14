@@ -58,6 +58,8 @@ pub struct Skeleton {
     gap: f32,
     rect: Rect,
     item: FlexItem,
+    /// DPI 缩放（`measure` 唯一写入）。
+    scale: f32,
     pulse: bool,
     /// 呼吸相位（0..=1 的三角波），每次 Tick 推进一步。
     phase: f32,
@@ -72,6 +74,7 @@ impl Skeleton {
             gap: 8.0,
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            scale: 1.0,
             pulse: true,
             phase: 0.0,
         }
@@ -136,10 +139,11 @@ impl Widget for Skeleton {
 
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
+        self.scale = m.scale();
         c.constrain(Size::new(c.max.w, self.content_height()))
     }
 
@@ -202,7 +206,7 @@ impl Widget for Skeleton {
             match *shape {
                 SkeletonShape::Text { width, height } => {
                     let w = match width {
-                        Dimension::Px(v) => v,
+                        Dimension::Px(v) => v * self.scale,
                         Dimension::Flex(_) => self.rect.w,
                         _ => self.rect.w * 0.7,
                     };
@@ -227,7 +231,7 @@ impl Widget for Skeleton {
                     radius,
                 } => {
                     let w = match width {
-                        Dimension::Px(v) => v,
+                        Dimension::Px(v) => v * self.scale,
                         Dimension::Flex(_) => self.rect.w,
                         _ => self.rect.w,
                     };
