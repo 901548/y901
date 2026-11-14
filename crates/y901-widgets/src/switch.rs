@@ -3,10 +3,9 @@
 //! 视觉：圆角轨道 + 圆形滑块。未选中 = panel Hovered 轨道、滑块靠左；
 //! 选中 = accent 轨道（`BUTTON Pressed` 底）、滑块靠右。
 //!
-//! **动画**：本版滑块**即时**移动。原因：`RenderCtx::animation(key)` 只能**读**本帧快照，
-//! 动画走框架：`EventCtx::start_animation` 发起 → `UiTree::animate` 推进 →
-//! 每帧快照 → `render` 里 `RenderCtx::animation(key)` 读进度。
-//! 等框架补一个"组件内请求动画"的 API 后，这里把 `knob_x` 改成按 progress 插值即可（已在代码里留位）。
+//! **动画**：滑块位置与轨道颜色都由框架动画驱动 —— `EventCtx::start_animation` 发起，
+//! `UiTree::animate` 推进，每帧快照经 `render` 里的 `RenderCtx::animation(key)` 读回进度，
+//! 再插值成 `t`（0 = 左 / 1 = 右）。切换时记录 `anim_from`，因此从当前位置平滑过渡而不是跳变。
 
 use y901_ui::widget::FlexItem;
 use y901_ui::{
