@@ -112,7 +112,18 @@ impl Widget for Popover {
         EventResult::Redraw
     }
 
-    fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
+    fn render(&mut self, ctx: &mut dyn RenderCtx) {
+        if self.rect.w <= 0.0 || self.rect.h <= 0.0 {
+            return;
+        }
+        // **关闭态要有可见锚点**：之前这里是空函数，
+        // 于是没点开时整个触发区完全不可见，用户不知道点哪里。
+        // 给一个**低强度描边**（分隔线色），不影响内容布局，
+        // 也不会在弹出时遮挡浮层。
+        let border = ctx.theme().divider_color();
+        let radius = 6.0 * ctx.scale();
+        ctx.stroke_round_rect(self.rect, border, 1.0, radius);
+    }
 
     fn semantics(&self) -> Semantics {
         Semantics::default()
