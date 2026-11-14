@@ -26,7 +26,8 @@ const SLIDE_MS: u64 = 120;
 pub struct Switch {
     id: String,
     checked: bool,
-    on_change: Option<Box<dyn Fn(bool)>>,
+    /// 状态变化时发出的命令（args = bool）。见 crate::command_with_args。
+    command: Option<y901_ui::Command>,
     rect: Rect,
     item: FlexItem,
 }
@@ -37,15 +38,17 @@ impl Switch {
         Self {
             id: id.into(),
             checked,
-            on_change: None,
+            command: None,
             rect: Rect::ZERO,
             item: FlexItem::default(),
         }
     }
 
-    /// 状态变化回调。
-    pub fn on_change(mut self, f: impl Fn(bool) + 'static) -> Self {
-        self.on_change = Some(Box::new(f));
+    /// 状态变化时发出的**命令**（参数 = 新的 bool 状态）。
+    ///
+    /// 与 `Button` 一致：组件只表达意图，不持有应用逻辑。
+    pub fn command(mut self, cmd: y901_ui::Command) -> Self {
+        self.command = Some(cmd);
         self
     }
 
@@ -63,11 +66,18 @@ impl Switch {
     /// 切换状态并触发回调。
     fn toggle(&mut self) {
         self.checked = !self.checked;
-        if let Some(cb) = self.on_change.as_ref() {
-            cb(self.checked);
-        }
     }
 
+}
+
+impl Switch {
+    /// 发出状态变化命令（参数就是当前状态）。
+    fn emit(&self, ctx: &mut EventCtx) {
+        if let Some(cmd) = self.command.as_ref() {
+            let c = crate::command_with_args(cmd, y901_ui::json::Json::from(self.checked));
+            ctx.emit_command(c);
+        }
+    }
 }
 
 impl Widget for Switch {
@@ -128,10 +138,12 @@ impl Widget for Switch {
                     y901_ui::animation::Easing::EaseOutCubic,
                 );
                 ctx.start_animation(y901_ui::animation::key_of(&format!("{}-slide", self.id)), anim);
+                self.emit(ctx);
                 EventResult::Redraw
             }
             UiEvent::Key { key, .. } if matches!(key, y901_ui::Key::Enter) => {
                 self.toggle();
+                self.emit(ctx);
                 EventResult::Redraw
             }
             _ => EventResult::Ignored,
@@ -205,14 +217,9 @@ mod tests {
     }
 
     #[test]
-    fn click_inside_toggles_and_reports() {
-        let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let s2 = seen.clone();
-        let mut sw = Switch::new("s", false).on_change(move |on| {
-            if on {
-                s2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
-        });
+    fn click_inside_toggles_and_emits_command() {
+        let mut sw = Switch::new("s", false)
+            .command(y901_ui::Command::app("switch:toggle", y901_ui::json::Json::Null));
         let mut cache = LayoutCache::new();
         sw.arrange(Rect::new(0.0, 0.0, 44.0, 24.0), &Metrics, &mut cache);
         let mut ctx = EventCtx::new(None, Size::new(200.0, 100.0));
@@ -222,6 +229,6 @@ mod tests {
         // \u5185\u90e8\u70b9\u51fb\uff1a\u5207\u6362 + \u56de\u8c03
         sw.event(&mut ctx, &UiEvent::MouseUp { pos: y901_ui::Pos::new(20.0, 12.0), button: y901_ui::MouseButton::Left });
         assert!(sw.checked());
-        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(ctx.commands.len(), 1, "应发出一条命令");
     }
 }

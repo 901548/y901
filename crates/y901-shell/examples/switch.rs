@@ -12,7 +12,12 @@ impl Host for H {
         for _ in 0..4 { if !tree.dispatch(&UiEvent::Tick).is_handled() { break; } }
         for _ in tree.poll_subscriptions(Instant::now()) {}
     }
-    fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool { false }
+    fn command(&mut self, _t: &mut UiTree, cmd: Command) -> bool {
+        if let Command::App { name, args } = cmd {
+            eprintln!("[example] command {} args={:?}", name, args);
+        }
+        true
+    }
 }
 
 fn row(id: &'static str, label: &'static str, on: bool) -> Flex {
@@ -24,7 +29,11 @@ fn row(id: &'static str, label: &'static str, on: bool) -> Flex {
             width: y901_ui::widget::Dimension::Flex(1.0),
             ..FlexItem::NO_LIMITS
         })))
-        .push(Box::new(Switch::new(id, on).flex_item(FlexItem::fixed(44.0, 24.0))))
+        .push(Box::new(
+            Switch::new(id, on)
+                .command(y901_ui::Command::app("switch:toggle", y901_ui::json::Json::Null))
+                .flex_item(FlexItem::fixed(44.0, 24.0)),
+        ))
 }
 
 fn build() -> UiTree {

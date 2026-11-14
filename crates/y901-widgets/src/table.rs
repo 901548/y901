@@ -64,7 +64,8 @@ pub struct Table {
     columns: Vec<TableColumn>,
     rows: Vec<Vec<String>>,
     selected: Option<usize>,
-    on_select: Option<Box<dyn Fn(usize)>>,
+    /// 选中行时发出的命令（args = {"row": index}）。
+    command: Option<y901_ui::Command>,
     rect: Rect,
     item: FlexItem,
     hovered_row: Option<usize>,
@@ -78,7 +79,7 @@ impl Table {
             columns: Vec::new(),
             rows: Vec::new(),
             selected: None,
-            on_select: None,
+            command: None,
             rect: Rect::ZERO,
             item: FlexItem::default(),
             hovered_row: None,
@@ -104,8 +105,8 @@ impl Table {
     }
 
     /// 点击行回调。
-    pub fn on_select(mut self, f: impl Fn(usize) + 'static) -> Self {
-        self.on_select = Some(Box::new(f));
+    pub fn command(mut self, cmd: y901_ui::Command) -> Self {
+        self.command = Some(cmd);
         self
     }
 
@@ -217,7 +218,7 @@ impl Widget for Table {
         self.rect
     }
 
-    fn event(&mut self, _ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+    fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
         match event {
             UiEvent::MouseMove { pos } => {
                 let was = self.hovered_row;
@@ -231,9 +232,10 @@ impl Widget for Table {
             UiEvent::MouseUp { pos, .. } => {
                 if let Some(idx) = self.row_at(*pos) {
                     self.selected = Some(idx);
-                    if let Some(f) = self.on_select.as_ref() {
-                        f(idx);
-                    }
+                    if let Some(cmd) = self.command.as_ref() {
+                    let args = y901_ui::json::Json::obj().set("row", idx as i32);
+                    ctx.emit_command(crate::command_with_args(cmd, args));
+                }
                     EventResult::Redraw
                 } else {
                     EventResult::Ignored

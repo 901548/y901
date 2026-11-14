@@ -20,7 +20,7 @@ pub struct EmptyState {
     id: String,
     title: String,
     description: Option<String>,
-    action: Option<(String, Box<dyn Fn()>)>,
+    action: Option<(String, y901_ui::Command)>,
     rect: Rect,
     item: FlexItem,
     action_rect: Rect,
@@ -47,8 +47,8 @@ impl EmptyState {
     }
 
     /// 追加操作按钮。
-    pub fn action(mut self, label: impl Into<String>, f: impl Fn() + 'static) -> Self {
-        self.action = Some((label.into(), Box::new(f)));
+    pub fn action(mut self, label: impl Into<String>, cmd: y901_ui::Command) -> Self {
+        self.action = Some((label.into(), cmd));
         self
     }
 
@@ -113,11 +113,11 @@ impl Widget for EmptyState {
         self.rect
     }
 
-    fn event(&mut self, _ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+    fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
         if let UiEvent::MouseUp { pos, .. } = event {
             if self.action.is_some() && self.action_rect.contains(*pos) {
-                if let Some((_, f)) = self.action.as_ref() {
-                    f();
+                if let Some((_, cmd)) = self.action.as_ref() {
+                    ctx.emit_command(crate::command_with_args(cmd, y901_ui::json::Json::Null));
                 }
                 return EventResult::Redraw;
             }
@@ -219,7 +219,7 @@ mod tests {
         let mut a = EmptyState::new("e", "暂无数据");
         let mut b = EmptyState::new("e", "暂无数据")
             .description("点击上方按钮创建")
-            .action("新建", || {});
+            .action("确定", y901_ui::Command::app("empty_state:activate", y901_ui::json::Json::Null));
         let mut cache = LayoutCache::new();
         let c = Constraints::loose(Size::new(400.0, 400.0));
         let ha = a.measure(&Metrics, c, &mut cache).h;
@@ -229,20 +229,17 @@ mod tests {
 
     #[test]
     fn action_only_fires_inside_its_rect() {
-        let hit = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let h2 = hit.clone();
-        let mut e = EmptyState::new("e", "t").action("ok", move || {
-            h2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        });
+        
+        let mut e = EmptyState::new("e", "t").action("确定", y901_ui::Command::app("empty_state:activate", y901_ui::json::Json::Null));
         let mut cache = LayoutCache::new();
         e.arrange(Rect::new(0.0, 0.0, 400.0, 200.0), &Metrics, &mut cache);
         let mut ctx = EventCtx::new(None, Size::new(400.0, 200.0));
         // 在按钮外点一下：不触发
         e.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(4.0, 4.0), button: y901_ui::MouseButton::Left });
-        assert_eq!(hit.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(ctx.commands.is_empty());
         // 在按钮内点一下：触发
         let c = e.action_rect;
         e.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(c.x + 4.0, c.y + 4.0), button: y901_ui::MouseButton::Left });
-        assert_eq!(hit.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(ctx.commands.len(), 1);
     }
 }

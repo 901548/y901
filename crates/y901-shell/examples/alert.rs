@@ -11,7 +11,12 @@ impl Host for H {
         for _ in 0..4 { if !tree.dispatch(&UiEvent::Tick).is_handled() { break; } }
         for _ in tree.poll_subscriptions(Instant::now()) {}
     }
-    fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool { false }
+    fn command(&mut self, _t: &mut UiTree, cmd: Command) -> bool {
+        if let Command::App { name, args } = cmd {
+            eprintln!("[example] command {} args={:?}", name, args);
+        }
+        true
+    }
 }
 
 fn build() -> UiTree {
@@ -21,10 +26,10 @@ fn build() -> UiTree {
         .background(bg)
         .padding(Edges::all(24.0))
         .gap(12.0)
-        .push(Box::new(Alert::new("i", AlertKind::Info, "有新版本可用").dismissible(|| {}).flex_item(FlexItem::height(48.0))))
+        .push(Box::new(Alert::new("i", AlertKind::Info, "有新版本可用").on_dismiss(y901_ui::Command::app("alert:dismiss", y901_ui::json::Json::Null)).flex_item(FlexItem::height(48.0))))
         .push(Box::new(Alert::new("s", AlertKind::Success, "保存成功").flex_item(FlexItem::height(48.0))))
-        .push(Box::new(Alert::new("w", AlertKind::Warning, "磁盘空间不足").description("剩余 120 MB，建议清理缓存").dismissible(|| {}).flex_item(FlexItem::height(64.0))))
-        .push(Box::new(Alert::new("e", AlertKind::Error, "连接已断开").description("请检查网络后重试").dismissible(|| {}).flex_item(FlexItem::height(64.0))));
+        .push(Box::new(Alert::new("w", AlertKind::Warning, "磁盘空间不足").description("剩余 120 MB，建议清理缓存").on_dismiss(y901_ui::Command::app("alert:dismiss", y901_ui::json::Json::Null)).flex_item(FlexItem::height(64.0))))
+        .push(Box::new(Alert::new("e", AlertKind::Error, "连接已断开").description("请检查网络后重试").on_dismiss(y901_ui::Command::app("alert:dismiss", y901_ui::json::Json::Null)).flex_item(FlexItem::height(64.0))));
     UiTree::new(Box::new(root))
 }
 

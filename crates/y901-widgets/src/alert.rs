@@ -59,7 +59,8 @@ pub struct Alert {
     kind: AlertKind,
     title: String,
     description: Option<String>,
-    on_dismiss: Option<Box<dyn Fn()>>,
+    /// 点×时发出的命令。
+    command: Option<y901_ui::Command>,
     rect: Rect,
     item: FlexItem,
     dismiss_rect: Rect,
@@ -73,7 +74,7 @@ impl Alert {
             kind,
             title: title.into(),
             description: None,
-            on_dismiss: None,
+            command: None,
             rect: Rect::ZERO,
             item: FlexItem::default(),
             dismiss_rect: Rect::ZERO,
@@ -87,8 +88,8 @@ impl Alert {
     }
 
     /// 追加"关闭"按钮与回调。
-    pub fn dismissible(mut self, f: impl Fn() + 'static) -> Self {
-        self.on_dismiss = Some(Box::new(f));
+    pub fn on_dismiss(mut self, cmd: y901_ui::Command) -> Self {
+        self.command = Some(cmd);
         self
     }
 
@@ -150,11 +151,12 @@ impl Widget for Alert {
         self.rect
     }
 
-    fn event(&mut self, _ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+    fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
         if let UiEvent::MouseUp { pos, .. } = event {
-            if self.on_dismiss.is_some() && self.dismiss_rect.contains(*pos) {
-                if let Some(f) = self.on_dismiss.as_ref() {
-                    f();
+            if self.dismiss_rect.contains(*pos) {
+                if let Some(cmd) = self.command.as_ref() {
+                    let c = crate::command_with_args(cmd, y901_ui::json::Json::Null);
+                    ctx.emit_command(c);
                 }
                 return EventResult::Redraw;
             }
@@ -200,7 +202,7 @@ impl Widget for Alert {
             ctx.draw_text(Pos::new(text_x, ty + 22.0), desc, &style);
         }
 
-        if self.on_dismiss.is_some() {
+        if self.command.is_some() {
             // \u5173\u95ed\uff1a\u4e00\u4e2a\u00d7\uff08\u7528\u6587\u5b57\u753b\uff0c\u4e0d\u65b0\u589e\u56fe\u5143\uff09
             let style = TextStyle::fg(muted);
             let w = ctx.measure_text("×", &style).w;
@@ -258,18 +260,15 @@ mod tests {
 
     #[test]
     fn dismiss_fires_only_inside_its_rect() {
-        let hit = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let h2 = hit.clone();
-        let mut a = Alert::new("a", AlertKind::Error, "boom").dismissible(move || {
-            h2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        });
+        
+        let mut a = Alert::new("a", AlertKind::Error, "boom").on_dismiss(y901_ui::Command::app("alert:dismiss", y901_ui::json::Json::Null));
         let mut cache = LayoutCache::new();
         a.arrange(Rect::new(0.0, 0.0, 400.0, 48.0), &Metrics, &mut cache);
         let mut ctx = EventCtx::new(None, Size::new(400.0, 48.0));
         a.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(10.0, 10.0), button: y901_ui::MouseButton::Left });
-        assert_eq!(hit.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(ctx.commands.is_empty(), "点外部不应发命令");
         let r = a.dismiss_rect;
         a.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(r.x + 4.0, r.y + 4.0), button: y901_ui::MouseButton::Left });
-        assert_eq!(hit.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(ctx.commands.len(), 1, "点×应发出命令");
     }
 }

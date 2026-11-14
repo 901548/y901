@@ -22,7 +22,7 @@ pub struct ErrorState {
     id: String,
     title: String,
     description: Option<String>,
-    action: Option<(String, Box<dyn Fn()>)>,
+    action: Option<(String, y901_ui::Command)>,
     rect: Rect,
     item: FlexItem,
     action_rect: Rect,
@@ -49,8 +49,8 @@ impl ErrorState {
     }
 
     /// 追加"重试"之类的操作按钮。
-    pub fn action(mut self, label: impl Into<String>, f: impl Fn() + 'static) -> Self {
-        self.action = Some((label.into(), Box::new(f)));
+    pub fn action(mut self, label: impl Into<String>, cmd: y901_ui::Command) -> Self {
+        self.action = Some((label.into(), cmd));
         self
     }
 
@@ -115,11 +115,11 @@ impl Widget for ErrorState {
         self.rect
     }
 
-    fn event(&mut self, _ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+    fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
         if let UiEvent::MouseUp { pos, .. } = event {
             if self.action.is_some() && self.action_rect.contains(*pos) {
-                if let Some((_, f)) = self.action.as_ref() {
-                    f();
+                if let Some((_, cmd)) = self.action.as_ref() {
+                    ctx.emit_command(crate::command_with_args(cmd, y901_ui::json::Json::Null));
                 }
                 return EventResult::Redraw;
             }
@@ -219,7 +219,7 @@ mod tests {
         let mut a = ErrorState::new("e", "加载失败");
         let mut b = ErrorState::new("e", "加载失败")
             .description("连接超时")
-            .action("重试", || {});
+            .action("确定", y901_ui::Command::app("error_state:activate", y901_ui::json::Json::Null));
         let mut cache = LayoutCache::new();
         let c = Constraints::loose(Size::new(400.0, 400.0));
         assert!(b.measure(&Metrics, c, &mut cache).h > a.measure(&Metrics, c, &mut cache).h);
@@ -227,18 +227,15 @@ mod tests {
 
     #[test]
     fn retry_only_fires_inside_its_rect() {
-        let hit = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let h2 = hit.clone();
-        let mut e = ErrorState::new("e", "t").action("重试", move || {
-            h2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        });
+        
+        let mut e = ErrorState::new("e", "t").action("确定", y901_ui::Command::app("error_state:activate", y901_ui::json::Json::Null));
         let mut cache = LayoutCache::new();
         e.arrange(Rect::new(0.0, 0.0, 400.0, 200.0), &Metrics, &mut cache);
         let mut ctx = EventCtx::new(None, Size::new(400.0, 200.0));
         e.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(4.0, 4.0), button: y901_ui::MouseButton::Left });
-        assert_eq!(hit.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(ctx.commands.is_empty());
         let r = e.action_rect;
         e.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(r.x + 4.0, r.y + 4.0), button: y901_ui::MouseButton::Left });
-        assert_eq!(hit.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(ctx.commands.len(), 1);
     }
 }

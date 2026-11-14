@@ -12,7 +12,12 @@ impl Host for H {
         for _ in 0..4 { if !tree.dispatch(&UiEvent::Tick).is_handled() { break; } }
         for _ in tree.poll_subscriptions(Instant::now()) {}
     }
-    fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool { false }
+    fn command(&mut self, _t: &mut UiTree, cmd: Command) -> bool {
+        if let Command::App { name, args } = cmd {
+            eprintln!("[example] command {} args={:?}", name, args);
+        }
+        true
+    }
 }
 
 fn row(id: &'static str, label: &'static str, items: Vec<String>, sel: Option<usize>) -> Flex {
@@ -23,6 +28,7 @@ fn row(id: &'static str, label: &'static str, items: Vec<String>, sel: Option<us
         .push(Box::new(
             ComboBox::new(id, items)
                 .selected(sel)
+                .command(y901_ui::Command::app("combo_box:select", y901_ui::json::Json::Null))
                 .flex_item(FlexItem { height: y901_ui::widget::Dimension::Px(32.0), ..FlexItem::NO_LIMITS })
                 .flex_item(FlexItem::fixed(260.0, 32.0)),
         ))

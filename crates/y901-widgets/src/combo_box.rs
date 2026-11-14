@@ -31,7 +31,10 @@ pub struct ComboBox {
     id: String,
     items: Vec<String>,
     selected: Option<usize>,
-    on_change: Option<Box<dyn Fn(usize)>>,
+    /// 选中项变化时发出的命令（args = {"index": i}）。
+    command: Option<y901_ui::Command>,
+    /// 待发送的命令（`absorb_shared` 没有 `ctx`，由 `event` 代发）。
+    pending_command: Option<y901_ui::Command>,
     /// popup 侧写入的选中项（由 `ComboList` 设置）。
     shared: Rc<Cell<Option<usize>>>,
     rect: Rect,
@@ -45,7 +48,8 @@ impl ComboBox {
             id: id.into(),
             items: items.into_iter().map(Into::into).collect(),
             selected: None,
-            on_change: None,
+            command: None,
+            pending_command: None,
             shared: Rc::new(Cell::new(None)),
             rect: Rect::ZERO,
             item: FlexItem::default(),
@@ -59,8 +63,8 @@ impl ComboBox {
     }
 
     /// 选中变化回调。
-    pub fn on_change(mut self, f: impl Fn(usize) + 'static) -> Self {
-        self.on_change = Some(Box::new(f));
+    pub fn command(mut self, cmd: y901_ui::Command) -> Self {
+        self.command = Some(cmd);
         self
     }
 
@@ -102,8 +106,9 @@ impl ComboBox {
             return false;
         }
         self.selected = Some(i);
-        if let Some(cb) = self.on_change.as_ref() {
-            cb(i);
+        if let Some(cmd) = self.command.as_ref() {
+            let args = y901_ui::json::Json::obj().set("index", i as i32);
+            self.pending_command = Some(crate::command_with_args(cmd, args));
         }
         true
     }
@@ -156,8 +161,14 @@ impl Widget for ComboBox {
 
     fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
         // 先吸收 popup 的选中结果（上次点击写入的）
-        if matches!(event, UiEvent::Tick | UiEvent::MouseUp { .. }) && self.absorb_shared() {
-            return EventResult::Redraw;
+        if matches!(event, UiEvent::Tick | UiEvent::MouseUp { .. }) {
+            let changed = self.absorb_shared();
+            if let Some(cmd) = self.pending_command.take() {
+                ctx.emit_command(cmd);
+            }
+            if changed {
+                return EventResult::Redraw;
+            }
         }
         match event {
             UiEvent::MouseUp { pos, .. } if self.box_rect().contains(*pos) => {
@@ -362,13 +373,7 @@ mod tests {
 
     #[test]
     fn popup_writes_selection_back_to_combo() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-        let hits = Arc::new(AtomicUsize::new(0));
-        let h2 = hits.clone();
-        let mut cb = ComboBox::new("c", vec!["a", "b"]).on_change(move |_| {
-            h2.fetch_add(1, Ordering::SeqCst);
-        });
+        let mut cb = ComboBox::new("c", vec!["a", "b"]).command(y901_ui::Command::app("combo_box:select", y901_ui::json::Json::Null));
         let mut cache = LayoutCache::new();
         cb.arrange(Rect::new(0.0, 0.0, 200.0, BOX_H), &Metrics, &mut cache);
         // 模拟 popup 侧写入 index 1
@@ -376,9 +381,9 @@ mod tests {
         let mut ctx = EventCtx::new(None, Size::new(400.0, 400.0));
         assert_eq!(cb.event(&mut ctx, &UiEvent::Tick), EventResult::Redraw);
         assert_eq!(cb.selected_index(), Some(1));
-        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(ctx.commands.len(), 1, "选中后应发出命令");
         // 第二次 Tick：已吸收，无变化
         assert_eq!(cb.event(&mut ctx, &UiEvent::Tick), EventResult::Ignored);
-        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(ctx.commands.len(), 1, "选中后应发出命令");
     }
 }

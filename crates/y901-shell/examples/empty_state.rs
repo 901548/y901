@@ -11,7 +11,12 @@ impl Host for H {
         for _ in 0..4 { if !tree.dispatch(&UiEvent::Tick).is_handled() { break; } }
         for _ in tree.poll_subscriptions(Instant::now()) {}
     }
-    fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool { false }
+    fn command(&mut self, _t: &mut UiTree, cmd: Command) -> bool {
+        if let Command::App { name, args } = cmd {
+            eprintln!("[example] command {} args={:?}", name, args);
+        }
+        true
+    }
 }
 
 fn build() -> UiTree {
@@ -20,7 +25,7 @@ fn build() -> UiTree {
     let a = EmptyState::new("a", "暂无数据").flex_item(FlexItem::height(140.0));
     let b = EmptyState::new("b", "还没有文件")
         .description("点击上方按钮上传第一个文件")
-        .action("上传", || {})
+        .action("上传", y901_ui::Command::app("empty_state:activate", y901_ui::json::Json::Null))
         .flex_item(FlexItem::height(220.0));
     let root = Flex::column("root")
         .background(bg)

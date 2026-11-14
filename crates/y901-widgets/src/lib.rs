@@ -75,3 +75,15 @@ pub use combo_box::{ComboBox};
 pub use skeleton::{Skeleton, SkeletonShape};
 pub use popover::{Popover};
 pub use badge::{Badge, BadgeKind};
+
+/// 把一条命令的 `args` 替换成新的（`Command` 本身没有 `with_args`，只能重建）。
+///
+/// 为什么在组件层而不是 `y901-ui`：这只是"带上本次事件的参数"的便利函数，
+/// 属于组件约定而非框架能力；框架侧保持 `Command` 的极简定义。
+pub(crate) fn command_with_args(cmd: &y901_ui::Command, args: y901_ui::json::Json) -> y901_ui::Command {
+    use y901_ui::Command;
+    match cmd {
+        Command::App { name, .. } => Command::app(name.clone(), args),
+        Command::Node { target, action, .. } => Command::node(target.clone(), action.clone(), args),
+    }
+}

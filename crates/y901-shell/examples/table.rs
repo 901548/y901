@@ -11,7 +11,12 @@ impl Host for H {
         for _ in 0..4 { if !tree.dispatch(&UiEvent::Tick).is_handled() { break; } }
         for _ in tree.poll_subscriptions(Instant::now()) {}
     }
-    fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool { false }
+    fn command(&mut self, _t: &mut UiTree, cmd: Command) -> bool {
+        if let Command::App { name, args } = cmd {
+            eprintln!("[example] command {} args={:?}", name, args);
+        }
+        true
+    }
 }
 
 fn row(name: &str, size: &str, mtime: &str) -> Vec<String> {
@@ -33,6 +38,7 @@ fn build() -> UiTree {
         .row(row("diagram.svg", "96 KB", "2026-11-09 17:31"))
         .row(row("data.csv", "2.4 MB", "2026-11-02 11:58"))
         .selected(Some(1))
+        .command(y901_ui::Command::app("table:select", y901_ui::json::Json::Null))
         .flex_item(FlexItem::height(32.0 + 5.0 * 28.0));
 
     let root = Flex::column("root")

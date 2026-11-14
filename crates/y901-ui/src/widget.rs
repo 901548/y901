@@ -1055,6 +1055,15 @@ impl EventCtx {
         self.redraw = true;
     }
 
+    /// 发送一条**意图命令**：`App` 走应用层（`Host::command`），`Node` 由树路由到目标节点
+    /// 并转成 `UiEvent::Action`。这是组件联动的唯一通道（互不认识对方）。
+    pub fn emit_command(&mut self, cmd: crate::command::Command) {
+        match cmd {
+            crate::command::Command::App { name, args } => self.emit_app(name, args),
+            node @ crate::command::Command::Node { .. } => self.commands.push(node),
+        }
+    }
+
     /// 请求打开一个**模态**浮层（阻塞底层事件）。
     pub fn request_modal_popup(
         &mut self,
