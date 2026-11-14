@@ -34,17 +34,26 @@ fn runtime_idles_when_nothing_to_do() {
     // 为何不直接匹配整行 `if was_busy { 0 } else { idle_wait_ms() }`：
     // rustfmt 会把它折成多行，那样断言会因为“没有独立一行”而假红。
     // 只要这两个 token 还在同一段赋值里，语义就没变。
+    // 从计算起点开始取：`tick_due_ms`（含 idle_wait_ms）在 `let wait_ms` 之前。
     let wait_start = common
-        .find("let wait_ms")
+        .find("let tick_due_ms")
+        .or_else(|| common.find("let wait_ms"))
         .expect("run_loop 必须计算 wait_ms");
-    let wait_expr = &common[wait_start..(wait_start + 200).min(common.len())];
+    // 取足够长的片段：如今 wait_ms 由 tick_due_ms（帧预算与
+    // Tick 到期时间的较小值）计算，比原来多几行。
+    let wait_expr = &common[wait_start..(wait_start + 900).min(common.len())];
     assert!(
         wait_expr.contains("was_busy"),
         "wait_ms 的计算必须参考 was_busy（忙时不睡），实测片段：{wait_expr}"
     );
     assert!(
         wait_expr.contains("idle_wait_ms()"),
-        "wait_ms 必须来自 idle_wait_ms()，实测片段：{wait_expr}"
+        "wait_ms 的闲档必须来自 idle_wait_ms()，实测片段：{wait_expr}"
+    );
+    // 忙档不再是 `0`（那会让软后端空转烧 CPU），而是 16ms 帧预算。
+    assert!(
+        wait_expr.contains("16"),
+        "wait_ms 的忙档应为 16ms 帧预算，实测片段：{wait_expr}"
     );
 }
 

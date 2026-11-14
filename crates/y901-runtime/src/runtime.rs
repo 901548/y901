@@ -60,7 +60,25 @@ pub fn run_loop<W: WindowBackend>(
         let frame_start = Instant::now();
 
         // ---- 1. 事件 ----
-        let wait_ms = if was_busy { 0 } else { idle_wait_ms() };
+        // **帧预算**：忙档不再 `wait=0`（那会让软后端空转烧 CPU），而是 16ms ≈ 60fps；
+        // 闲档取 `min(idle_wait, 距下次 Tick 到期)`，让空闲动画也能按节拍出帧。
+        let tick_due_ms = {
+            let period = if was_busy {
+                std::time::Duration::from_millis(16)
+            } else {
+                std::time::Duration::from_millis(idle_wait_ms() as u64)
+            };
+            period
+                .checked_sub(last_tick_at.elapsed())
+                .map(|d| d.as_millis() as u32)
+                .unwrap_or(0)
+        };
+        let idle_ms = idle_wait_ms();
+        let wait_ms = if was_busy {
+            16
+        } else {
+            idle_ms.min(tick_due_ms)
+        };
         let Some(raws) = window.wait_events(wait_ms) else {
             return Ok(());
         };
