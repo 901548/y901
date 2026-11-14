@@ -4,6 +4,9 @@
 //! 可以超出父容器、自带 150ms 弹出动画、点外部/`Esc` 由框架关闭。
 //! 内容可以是容器（`Flex` 等）—— 框架的 popup 渲染已改为递归 `render_pass`。
 //!
+//! 锚点坐标系：构造期的 `anchor` 只作为**布局尺寸/命中兜底**；
+//! 真正弹出用的是**布局后的 `self.rect`**（避免父容器拉伸导致的偏移）。
+//!
 //! 为什么 `measure` 返回**锚点尺寸**而不是 0×0：命中测试按 `rect()` 走，
 //! 零尺寸节点永远收不到点击。代价：本组件在布局里占一块与锚点同样大的空白
 //! （`render` 不画任何东西）。
@@ -90,12 +93,18 @@ impl Widget for Popover {
         let UiEvent::MouseUp { pos, .. } = event else {
             return EventResult::Ignored;
         };
-        if !self.anchor.contains(*pos) {
+        // **用布局后的 `self.rect`**（而不是构造期传入的 `anchor`）：
+        // 父容器（如 `Flex`）会把子节点拉伸/定位，构造期坐标与实际位置不一致。
+        let hit = if self.rect.w > 0.0 && self.rect.h > 0.0 {
+            self.rect
+        } else {
+            self.anchor
+        };
+        if !hit.contains(*pos) {
             return EventResult::Ignored;
         }
         let content = (self.factory)();
-        let anchor = self.anchor;
-        ctx.request_popup(Box::new(move || content), anchor);
+        ctx.request_popup(Box::new(move || content), hit);
         EventResult::Redraw
     }
 

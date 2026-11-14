@@ -2,8 +2,11 @@
 //!
 //! 用途：数据到达前的"形状预告"，比空白或 Spinner 更少引起布局跳动。
 //!
-//! 脉冲动画：由 `UiEvent::Tick` 驱动 alpha 在 0.35↔0.55 之间呼吸（组件内自驱动，
-//! 因为框架尚无"组件内启动动画"的入口——见 README 已知限制）。
+//! 脉冲动画：由 `UiEvent::Tick` 驱动，alpha 在 0.35↔0.55 之间**连续插值**（三角波）。
+//!
+//! 为什么不用 `ctx.start_animation`：`Animate` 是**一次性 from→to**（没有 loop/repeat 字段），
+//! 无法表达"无限呼吸"；每帧检测完成再重新 arm 与自驱动等价。
+//! 待框架加上 `Animate::repeat(..)` 后再迁移。
 
 use y901_ui::widget::{Dimension, FlexItem};
 use y901_ui::{
@@ -56,7 +59,8 @@ pub struct Skeleton {
     rect: Rect,
     item: FlexItem,
     pulse: bool,
-    up: bool,
+    /// 呼吸相位（0..=1 的三角波），每次 Tick 推进一步。
+    phase: f32,
 }
 
 impl Skeleton {
@@ -69,7 +73,7 @@ impl Skeleton {
             rect: Rect::ZERO,
             item: FlexItem::default(),
             pulse: true,
-            up: true,
+            phase: 0.0,
         }
     }
 
@@ -164,7 +168,11 @@ impl Widget for Skeleton {
 
     fn event(&mut self, _ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
         if self.pulse && matches!(event, UiEvent::Tick) {
-            self.up = !self.up;
+            // 相位每次 Tick 推进 1/12，到 1 归零 → 周期性循环
+            self.phase += 1.0 / 12.0;
+            if self.phase > 1.0 {
+                self.phase = 0.0;
+            }
             return EventResult::Redraw;
         }
         EventResult::Ignored
@@ -175,12 +183,17 @@ impl Widget for Skeleton {
             return;
         }
         let base = ctx.theme().divider_color();
+        // **连续插值**：0.35 → 0.55 → 0.35（而不是两个值跳变）
         let alpha = if !self.pulse {
             0.45
-        } else if self.up {
-            0.55
         } else {
-            0.35
+            // 三角波：0 → 1 → 0（连续，不是二值跳变）
+            let t = if self.phase <= 0.5 {
+                self.phase * 2.0
+            } else {
+                (1.0 - self.phase) * 2.0
+            };
+            0.35 + 0.20 * t
         };
         let color = Color::rgba(base.r, base.g, base.b, alpha);
 

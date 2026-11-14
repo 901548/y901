@@ -4,7 +4,8 @@
 //! 选中 = accent 轨道（`BUTTON Pressed` 底）、滑块靠右。
 //!
 //! **动画**：本版滑块**即时**移动。原因：`RenderCtx::animation(key)` 只能**读**本帧快照，
-//! 而启动动画的入口 `UiTree::animate(..)` 在树侧、组件拿不到（`EventCtx` 没有 start_animation）。
+//! 动画走框架：`EventCtx::start_animation` 发起 → `UiTree::animate` 推进 →
+//! 每帧快照 → `render` 里 `RenderCtx::animation(key)` 读进度。
 //! 等框架补一个"组件内请求动画"的 API 后，这里把 `knob_x` 改成按 progress 插值即可（已在代码里留位）。
 
 use y901_ui::widget::FlexItem;
