@@ -14,8 +14,16 @@ impl Host for H {
     fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool { false }
 }
 
+/// 示例主题：`Y901_THEME=light` 时用 LIGHT，否则 DARK。
+fn example_theme() -> Theme {
+    match std::env::var("Y901_THEME").ok().as_deref() {
+        Some("light") => y901_ui::theme::LIGHT,
+        _ => Theme::DARK,
+    }
+}
+
 fn build() -> UiTree {
-    let theme = Theme::DARK;
+    let theme = example_theme();
     let bg = theme.style(Role::PANEL, State::Normal).bg;
     let root = Flex::row("root")
         .background(bg)
@@ -33,5 +41,6 @@ fn build() -> UiTree {
 }
 
 fn main() -> Result<(), String> {
-    create_runtime().run(Box::new(H), Box::new(build), Options { width: 560, height: 120, ..Default::default() })
+    create_runtime().run(Box::new(H), Box::new(build), Options {
+            theme: Some(example_theme()), width: 560, height: 120, ..Default::default() })
 }

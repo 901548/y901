@@ -37,10 +37,11 @@ impl BadgeKind {
         }
     }
 
-    /// 文字色（彩色底用白字，Default 用主题文字色）。
-    fn fg(self) -> Color {
+    /// 文字色：彩色底用白字；`Default` 用主题正文色
+    ///（否则 LIGHT 主题下浅底上白字看不清）。
+    fn fg(self, theme: &y901_ui::Theme) -> Color {
         match self {
-            BadgeKind::Default => Color::WHITE,
+            BadgeKind::Default => theme.style(y901_ui::Role::TEXT, y901_ui::State::Normal).fg,
             _ => Color::WHITE,
         }
     }
@@ -130,7 +131,7 @@ impl Widget for Badge {
         if self.dot_only {
             return c.constrain(Size::new(DOT_D, DOT_D));
         }
-        let style = TextStyle::fg(self.kind.fg());
+        let style = TextStyle::fg(Color::WHITE);
         let tw = m.measure_text(&self.text, &style).w;
         c.constrain(Size::new(tw + PAD_X * 2.0, BADGE_H))
     }
@@ -174,7 +175,7 @@ impl Widget for Badge {
         if self.dot_only {
             return;
         }
-        let style = TextStyle::fg(self.kind.fg());
+        let style = TextStyle::fg(self.kind.fg(ctx.theme()));
         let tw = ctx.measure_text(&self.text, &style).w;
         let tx = self.rect.x + (self.rect.w - tw) * 0.5;
         let ty = self.rect.y + (self.rect.h - ctx.line_height(&style)) * 0.5;
