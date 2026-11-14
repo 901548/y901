@@ -1,4 +1,7 @@
 [package]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/901548/y901"
+description = "Terminal grid, reflow and cell width primitives for Y901."
 name = "y901-core"
 version.workspace = true
 edition.workspace = true
