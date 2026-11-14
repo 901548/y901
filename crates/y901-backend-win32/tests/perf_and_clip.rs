@@ -50,7 +50,9 @@ fn runtime_idles_when_nothing_to_do() {
         wait_expr.contains("idle_wait_ms()"),
         "wait_ms 的闲档必须来自 idle_wait_ms()，实测片段：{wait_expr}"
     );
-    // 忙档不再是 `0`（那会让软后端空转烧 CPU），而是 16ms 帧预算。
+    // 忙档现在分两种：**自节流后端（D3D11 Present(1) vsync）不睡**，
+    // 否则保留 16ms 帧预算（软后端靠它限速）。若忙档又回到无条件 `0`，
+    // 软后端会空转；若取消自节流分支，D3D11 会回到 30fps 双重节流。
     //
     // **必须锚定在 `let wait_ms` 之后**：前面 `tick_due_ms` 的分支里也有一个
     // `from_millis(16)`，若只用 `wait_expr.contains("16")`，即使把 `wait_ms` 的忙档改回 `0`
@@ -60,8 +62,12 @@ fn runtime_idles_when_nothing_to_do() {
         .nth(1)
         .expect("wait_expr 应包含 let wait_ms（否则断言锚点已失效）");
     assert!(
+        after_wait.contains("self_paced"),
+        "wait_ms 的忙档必须区分自节流后端（锚定 let wait_ms 之后），实测：{after_wait}"
+    );
+    assert!(
         after_wait.contains("16"),
-        "wait_ms 的忙档应为 16ms 帧预算（锚定 let wait_ms 之后），实测：{after_wait}"
+        "wait_ms 的非自节流忙档应保留 16ms 帧预算，实测：{after_wait}"
     );
 
     // Tick 节拍必须参考 `wants_tick` 订阅者，否则闲置动画只能 10fps。
