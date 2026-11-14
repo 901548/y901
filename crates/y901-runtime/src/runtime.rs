@@ -16,6 +16,9 @@
 //! **没有搬进来的**（在各自后端实现，不进本文件）：
 //! 窗口创建、事件来源初始化、IME 定位、光标形状、快照、字体请求、Present 细节。
 
+#[path = "profile.rs"]
+mod profile;
+
 use std::time::Instant;
 
 use crate::{translate, Host, RawEvent};
@@ -44,11 +47,13 @@ pub fn run_loop<W: WindowBackend>(
 ) -> Result<(), String> {
     let started = Instant::now();
     let profile = std::env::var_os("Y901_PROFILE").is_some();
+    // **零开销**：未开启时为 `None`，下面只有一次 `if let`。
+    let mut profiler: Option<profile::FrameProfile> = if profile {
+        Some(profile::FrameProfile::new())
+    } else {
+        None
+    };
     let mut first_frame_done = false;
-    let mut stat_frames: u32 = 0;
-    let mut stat_total_us: u128 = 0;
-    let mut stat_max_us: u128 = 0;
-    let mut stat_since = Instant::now();
     // 上一帧是否有工作：有工作时不得等待，否则 Win32 会在每帧都“睡”一次。
     let mut was_busy = false;
     // 上一帧的实际耗时（布局 + 绘制 + 呈现），供帧预算补偿使用。
@@ -174,19 +179,16 @@ pub fn run_loop<W: WindowBackend>(
         window.after_present(tree, host);
 
         // ---- 7. 统计 ----
-        if profile {
-            let us = frame_start.elapsed().as_micros();
-            stat_frames += 1;
-            stat_total_us += us;
-            stat_max_us = stat_max_us.max(us);
-            if stat_since.elapsed().as_millis() >= 2000 {
-                let avg = stat_total_us / stat_frames.max(1) as u128;
-                eprintln!("[profile] frames={stat_frames} avg={avg}us max={stat_max_us}us");
-                stat_frames = 0;
-                stat_total_us = 0;
-                stat_max_us = 0;
-                stat_since = Instant::now();
-            }
+        if let Some(p) = profiler.as_mut() {
+            p.record(
+                frame_start.elapsed().as_micros() as u64,
+                profile::FrameMeta {
+                    had_work,
+                    need_layout,
+                    presented: matches!(outcome, RenderOutcome::Presented),
+                    present_ms: last_frame_ms,
+                },
+            );
         }
 
         was_busy = had_work || matches!(outcome, RenderOutcome::Presented);
