@@ -69,6 +69,11 @@ fn build() -> UiTree {
         .background(card_bg)
         .radius(8.0)
         .border(theme.divider_color(), 1.0)
+        // **padding 分档（有意设计，不是遗漏）**：
+        //   16 = 密集列表（历史/行表）
+        //   20 = 常规卡片
+        //   24 = 页面边距
+        // 不同层级用不同节奏；不要为了"统一"而抹平层级差异。
         .padding(Edges::all(20.0))
         .gap(12.0)
         .push(Box::new(form_row(

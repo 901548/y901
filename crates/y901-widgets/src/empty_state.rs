@@ -119,10 +119,21 @@ impl Widget for EmptyState {
         // 后续 `ctx.fill_*` 需要 `&mut ctx`（否则 E0502）。
         let (muted, text_fg, icon_bg, accent) = {
             let theme = ctx.theme();
+            let panel = theme.style(Role::PANEL, State::Hovered).bg;
+            let text = theme.style(Role::TEXT, State::Normal).fg;
+            // **图标盘提亮**：之前直接用 `PANEL Hovered`，与窗口底色差不多，
+            // 实测对比度仅 85/255（而 ErrorState 的语义盘是 373）。这里向 `TEXT fg`
+            // 混 40%，既保持中性不偏蓝，又能看得见。
+            let icon_bg = y901_ui::Color::rgba(
+                panel.r + (text.r - panel.r) * 0.40,
+                panel.g + (text.g - panel.g) * 0.40,
+                panel.b + (text.b - panel.b) * 0.40,
+                1.0,
+            );
             (
                 theme.muted_text_color(),
-                theme.style(Role::TEXT, State::Normal).fg,
-                theme.style(Role::PANEL, State::Hovered).bg,
+                text,
+                icon_bg,
                 theme.style(Role::BUTTON, State::Pressed).bg,
             )
         };
