@@ -71,6 +71,12 @@ pub struct Grid {
     /// 在 Flex 中的尺寸约束
     item: crate::FlexItem,
     row_heights: Vec<f32>,
+    /// `measure` 阶段算出的**每列内容宽**。
+    ///
+    /// 供 `arrange` 在"最终 rect 与 measure 约束不同"时**重解轨道**用 —— 见 `arrange` 里的说明。
+    col_content: Vec<f32>,
+    /// `measure` 阶段算出的**每行内容高**（同上）。
+    row_content: Vec<f32>,
     /// 显式定位：子控件 id → 占用区间。未出现在这里的走顺序排布。
     placements: HashMap<String, GridSpan>,
     /// 每行一个列占用集；二维冲突检测就是"所有相关行都不重叠"。
@@ -134,6 +140,8 @@ impl Grid {
             col_widths: Vec::new(),
             item: crate::FlexItem::default(),
             row_heights: Vec::new(),
+            col_content: Vec::new(),
+            row_content: Vec::new(),
             placements: HashMap::new(),
             occupancy: Vec::new(),
             version: 0,
@@ -311,7 +319,13 @@ impl Grid {
         content_of: impl Fn(usize) -> f32,
     ) -> Vec<f32> {
         if tracks.is_empty() {
-            return vec![available.max(0.0)];
+            // 无界可用空间（父容器是 `Dimension::Auto`）时不能把 `f32::INFINITY` 传下去：
+            // 它会让整棵子树的 rect 变成 inf → 画面全空。退化为 0 让内容自己撑开。
+            return vec![if available.is_finite() {
+                available.max(0.0)
+            } else {
+                0.0
+            }];
         }
         let n = tracks.len();
         let gaps = gap * (n.saturating_sub(1)) as f32;
@@ -331,6 +345,18 @@ impl Grid {
                 GridTrack::Fraction(f) => weight += f.max(0.0),
             }
         }
+        // **无界可用空间时把"自由空间"归零**。
+        //
+        // 为什么必须处理：父 Flex 用 `Dimension::Auto` 测量子项时会传
+        // `Constraints { max: INFINITY }`（见 `layout.rs:248`）。若直接拿它算
+        // `free = INF - gaps - used = INF`，每条 `Fraction` 轨道都会得到 `INF`，
+        // 于是 `Grid::measure` 返回 `INF`，整棵树被推成 inf 坐标 —— **画面全空**。
+        // 这正是 `examples/image_gallery.rs` 修前完全空白的原因。
+        let available = if available.is_finite() {
+            available
+        } else {
+            gaps + used
+        };
         let free = (available - gaps - used).max(0.0);
         if weight > 0.0 {
             for (i, t) in tracks.iter().enumerate() {
@@ -365,6 +391,8 @@ impl Grid {
         spans: &[(usize, usize, f32)],
     ) -> Vec<f32> {
         let m = tracks.len().max(1);
+        // 同 `resolve_tracks`：无界可用空间时退化为"只看内容"，不要算出 inf。
+        let available = if available.is_finite() { available } else { 0.0 };
         let mut p = vec![0.0f32; m + 1];
 
         // 约束按"终点 b"分桶，便于一遍扫描
@@ -937,12 +965,51 @@ impl Widget for Grid {
             + self.gap.1 * (self.row_heights.len().saturating_sub(1)) as f32
             + self.padding.top
             + self.padding.bottom;
-        constraints.constrain(Size::new(total_w, total_h))
+        // 存下内容尺寸：`arrange` 可能在**不同大小的 rect** 上重新分配（`FlexItem::fill()` 的常见情形）。
+        self.col_content = col_content;
+        self.row_content = row_content;
+        constraints.constrain(Size::new(
+            if total_w.is_finite() { total_w } else { 0.0 },
+            if total_h.is_finite() { total_h } else { 0.0 },
+        ))
     }
 
     fn arrange(&mut self, rect: Rect, metrics: &dyn TextMetrics, cache: &mut LayoutCache) {
         self.rect = rect;
-        if self.col_widths.is_empty() {
+        // **按最终 rect 重解轨道**。
+        //
+        // 为什么必须重解：`FlexItem::fill()` 的 Grid 会先被 `Flex` 用**无界约束** measure
+        // （`Fraction` 轨道此时只能退化为 0 或内容宽），随后才拿到**有限**的 arrange rect。
+        // 只信 `measure` 的缓存会让子项被排成 0 尺寸 —— 表现为整块区域**完全空白**
+        // （`examples/image_gallery.rs` 修前正是如此）。
+        //
+        // 跨格/自动跨格的情形仍然走缓存：它们的分配依赖区间约束求解，重解需要完整重跑
+        // `resolve_by_spans`，留待后续（当前无示例依赖该路径）。
+        let any_span = self
+            .placements
+            .values()
+            .any(|s| s.col_span() > 1 || s.row_span() > 1)
+            || !self.auto_spans.is_empty();
+        if !any_span {
+            let inner_w = (rect.w - self.padding.left - self.padding.right).max(0.0);
+            let inner_h = (rect.h - self.padding.top - self.padding.bottom).max(0.0);
+            let cc = std::mem::take(&mut self.col_content);
+            let rc = std::mem::take(&mut self.row_content);
+            let cw = Self::resolve_tracks(&self.cols, inner_w, self.gap.0, |i| {
+                cc.get(i).copied().unwrap_or(0.0)
+            });
+            let rh = Self::resolve_tracks(&self.rows, inner_h, self.gap.1, |i| {
+                rc.get(i).copied().unwrap_or(0.0)
+            });
+            if !cw.is_empty() {
+                self.col_widths = cw;
+            }
+            if !rh.is_empty() {
+                self.row_heights = rh;
+            }
+            self.col_content = cc;
+            self.row_content = rc;
+        } else if self.col_widths.is_empty() {
             self.fallback_tracks(rect);
         }
         let rects = self.child_rects();

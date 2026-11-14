@@ -126,6 +126,38 @@ pub struct Instance {
     pub params: [f32; 4],
 }
 
+/// 2×2 盒式降采样（RGBA8），用于生成图片 mip 链。
+///
+/// 奇数尺寸时最后一列/行按边界复制（代价是边缘略微拖影，收益是不会越界）。
+/// 注意：在 sRGB 编码空间做平均会**略微偏暗**（正确做法是先线性化再平均），
+/// 这里与 Y901 现有混合路径（同样在 sRGB 空间）保持一致；若将来把渲染目标换成
+/// `_SRGB`，本函数需要同步改为"先线性化再平均"。
+fn downsample_2x2(w: u32, h: u32, src: &[u8]) -> (u32, u32, Vec<u8>) {
+    let nw = (w / 2).max(1);
+    let nh = (h / 2).max(1);
+    let mut out = vec![0u8; (nw * nh * 4) as usize];
+    for y in 0..nh {
+        for x in 0..nw {
+            let mut acc = [0u32; 4];
+            for dy in 0..2u32 {
+                for dx in 0..2u32 {
+                    let sx = (x * 2 + dx).min(w - 1);
+                    let sy = (y * 2 + dy).min(h - 1);
+                    let i = ((sy * w + sx) * 4) as usize;
+                    for c in 0..4 {
+                        acc[c] += src[i + c] as u32;
+                    }
+                }
+            }
+            let o = ((y * nw + x) * 4) as usize;
+            for c in 0..4 {
+                out[o + c] = (acc[c] / 4) as u8;
+            }
+        }
+    }
+    (nw, nh, out)
+}
+
 /// 一个绘制批次：实例区间 + 用哪张纹理。
 ///
 /// 为什么用"区间"而不是重新排序：图集实例的 Z 序就是数组顺序，
@@ -1148,6 +1180,33 @@ impl Context {
             self.as_ptr(),
             texture.as_ptr(),
             0,
+            null(),
+            data.data,
+            data.row_pitch,
+            data.slice_pitch,
+        );
+    }
+
+    /// 更新**指定 mip 级**（`DstSubresource = level`）。
+    ///
+    /// 与 [`Context::update_subresource`] 的唯一区别是把 `DstSubresource` 从硬编码的 `0`
+    /// 换成调用方给的层级 —— 上传图片 mip 链需要它。
+    ///
+    /// # Safety
+    ///
+    /// `level` 必须小于纹理的 `mip_levels`；`data` 的行距/深度必须与**该级**的尺寸匹配。
+    /// 违反后果：`UpdateSubresource` 会越界读 `data`（D3D11 对该错误不报错，直接崩或读脏）。
+    unsafe fn update_subresource_level(
+        &self,
+        texture: &Texture,
+        level: u32,
+        data: &SubresourceData,
+    ) {
+        let table = vtbl::<ContextVtbl>(self.as_ptr());
+        (table.update_subresource)(
+            self.as_ptr(),
+            texture.as_ptr(),
+            level,
             null(),
             data.data,
             data.row_pitch,
@@ -2283,13 +2342,41 @@ impl Gfx {
         let Some(device) = self.device.as_ref() else {
             return Err("gfx is not initialized".to_string());
         };
+        let Some(context) = self.context.as_ref() else {
+            return Err("immediate context is not initialized".to_string());
+        };
         if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
             return Err("invalid texture size or data".to_string());
         }
+
+        // **生成完整 mip 链**（2×2 盒式缩小，直到 1×1）。
+        //
+        // 为什么必须要有：采样器是 `MIN_MAG_MIP_LINEAR`，但纹理只有 1 级时
+        // 缩小采样退化成 bilinear —— 大图缩到缩略图尺寸会出现锯齿/闪烁。
+        // 这里在 CPU 侧逐级生成，再用 `update_subresource_level` 把每一级写进
+        // 对应子资源（**不改 vtable**：`UpdateSubresource` 本来就有 `DstSubresource` 参数）。
+        let mut levels: Vec<(u32, u32, Vec<u8>)> = Vec::new();
+        levels.push((
+            width,
+            height,
+            rgba[..(width * height * 4) as usize].to_vec(),
+        ));
+        loop {
+            let (lw, lh) = {
+                let last = levels.last().expect("levels 至少有一级");
+                (last.0, last.1)
+            };
+            if lw == 1 && lh == 1 {
+                break;
+            }
+            let (nw, nh, next) = downsample_2x2(lw, lh, &levels.last().expect("last").2);
+            levels.push((nw, nh, next));
+        }
+
         let desc = Texture2DDesc {
             width,
             height,
-            mip_levels: 1,
+            mip_levels: levels.len() as u32,
             array_size: 1,
             format: 28, // DXGI_FORMAT_R8G8B8A8_UNORM
             sample_desc: SampleDesc {
@@ -2301,12 +2388,16 @@ impl Gfx {
             cpu_access_flags: 0,
             misc_flags: 0,
         };
-        let data = SubresourceData {
-            data: rgba.as_ptr() as *const c_void,
-            row_pitch: width * 4,
-            slice_pitch: width * height * 4,
-        };
-        let texture = device.create_texture_2d(&desc, &data)?;
+        let texture = device.create_texture_2d_empty(&desc)?;
+        for (level, (lw, lh, data)) in levels.iter().enumerate() {
+            let sub = SubresourceData {
+                data: data.as_ptr() as *const c_void,
+                row_pitch: lw * 4,
+                slice_pitch: lw * lh * 4,
+            };
+            context.update_subresource_level(&texture, level as u32, &sub);
+        }
+        // SRV 用 `null` 描述 → 覆盖全部 mip 级（这正是我们要的）。
         let srv = device.create_shader_resource_view(&texture)?;
         Ok((texture, srv))
     }
