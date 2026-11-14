@@ -581,3 +581,33 @@ let list = ListView::new("chat", 24.0)
 - **正确做法（待实施）**：合入前先 SetForegroundWindow(hwnd) 并处理 WM_ACTIVATE，
   或改用 SendInput（走真实输入队列）而不是 PostMessage（投递到窗口消息队列）。
 - **记录时间**：2026-11-14，提交  adcaab / df0331 时记录。
+
+## 18. 组件 API：意图用 Command 表达
+
+六个组件**不持有应用逻辑**，只表达"发生了什么"。事件通过 `Command` 发出，
+由应用层（`Host::command`）或另一个节点（`Command::Node` → `UiEvent::Action`）接收。
+
+| 组件 | 构造/配置 | 发出的命令参数 |
+|---|---|---|
+| `Switch` | `.command(Command)` | `args = bool`（切换后的状态） |
+| `Alert` | `.on_dismiss(Command)` | `args = null` |
+| `Table` | `.command(Command)` | `args = {"row": usize}` |
+| `EmptyState` | `.action(label, Command)` | `args = null` |
+| `ErrorState` | `.action(label, Command)` | `args = null` |
+| `ComboBox` | `.command(Command)` | `args = {"index": usize}` |
+
+```rust
+use y901_ui::{Command, json::Json};
+
+let sw = Switch::new("wifi", false)
+    .command(Command::app("settings:wifi", Json::Null));
+```
+
+两条路由（互不影响）：
+
+- `Command::App { name, args }` → `Host::command`（应用自己解释 `name`）
+- `Command::Node { target, action, args }` → 树按 `target` 投递 `UiEvent::Action`，
+  **组件之间无需互相认识**
+
+组件侧发命令用 `EventCtx::emit_command`；`Command` 没有 `with_args`，
+需要替换参数时用 `y901_widgets::command_with_args(&cmd, args)`（重建，不改框架定义）。
