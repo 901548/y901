@@ -23,6 +23,9 @@
 
 #![deny(missing_docs)]
 pub mod button;
+pub mod empty_state;
+pub mod spinner;
+pub mod table;
 pub mod checkbox;
 pub mod context_menu;
 pub mod image;
