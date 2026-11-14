@@ -894,6 +894,12 @@ pub struct EventCtx {
     pub popup_requests: Vec<PopupRequest>,
     /// 请求关闭的浮层 id（分发结束后由树执行）。
     pub close_popup_requests: Vec<String>,
+    /// 组件请求启动的属性动画（`key`, `Animate`）。
+    ///
+    /// 为何是"请求队列"而不是直接调 `UiTree::animate`：`EventCtx` 刻意不持有树
+    /// （只有值拷贝，见结构体文档），所以用与 `popup_requests` 完全同构的方式交给 UiTree 消费。
+    #[doc(hidden)]
+    pub anim_requests: Vec<(u64, crate::animation::Animate)>,
     /// **DPI 缩放**（96 = 100%）。
     ///
     /// 为何要在事件里有它：命中测试必须与绘制用**同一个**尺寸。
@@ -924,6 +930,7 @@ impl EventCtx {
             ime_candidate: None,
             popup_requests: Vec::new(),
             close_popup_requests: Vec::new(),
+            anim_requests: Vec::new(),
             // 默认 1.0：测试与非布局路径行为不变；真实值由 `UiTree` 在 `layout()` 后写入。
             scale: 1.0,
         }
@@ -1036,6 +1043,15 @@ impl EventCtx {
     /// 传入不存在的 id 不会 panic（树侧返回 false）。
     pub fn request_close_popup(&mut self, id: impl Into<String>) {
         self.close_popup_requests.push(id.into());
+        self.redraw = true;
+    }
+
+    /// 请求启动一个**属性动画**：分发结束后由 `UiTree` 提交到 `animate()`。
+    ///
+    /// 输入：`key`（用 `animation::key_of(&format!("{id}-xxx"))` 生成）与 `anim`。
+    /// 副作用：只压入请求；**同 key 重复请求 = 覆盖**（与 `UiTree::animate` 一致）。
+    pub fn start_animation(&mut self, key: u64, anim: crate::animation::Animate) {
+        self.anim_requests.push((key, anim));
         self.redraw = true;
     }
 

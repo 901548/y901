@@ -162,6 +162,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn event_ctx_start_animation_pushes_request() {
+        use crate::widget::EventCtx;
+        let mut ctx = EventCtx::new(None, crate::geometry::Size::new(100.0, 100.0));
+        let key = key_of("probe");
+        assert!(ctx.anim_requests.is_empty());
+        ctx.start_animation(
+            key,
+            Animate::new(
+                0.0,
+                1.0,
+                std::time::Duration::from_millis(120),
+                Easing::EaseOutCubic,
+            ),
+        );
+        assert_eq!(ctx.anim_requests.len(), 1);
+        assert_eq!(ctx.anim_requests[0].0, key);
+    }
+
+    #[test]
+    fn start_animation_marks_redraw_and_is_drainable() {
+        use crate::widget::EventCtx;
+        let mut ctx = EventCtx::new(None, crate::geometry::Size::new(10.0, 10.0));
+        assert!(!ctx.redraw, "初始不应要求重绘");
+        ctx.start_animation(
+            key_of("x"),
+            Animate::new(
+                0.0,
+                1.0,
+                std::time::Duration::from_millis(80),
+                Easing::Linear,
+            ),
+        );
+        assert!(ctx.redraw, "请求动画应顺带标记重绘");
+        // 与 UiTree 的消费方式一致：take 后队列应为空
+        let drained: Vec<(u64, Animate)> = std::mem::take(&mut ctx.anim_requests);
+        assert_eq!(drained.len(), 1);
+        assert!(ctx.anim_requests.is_empty());
+    }
+
+    #[test]
     fn linear_easing_is_identity() {
         for i in 0..=10 {
             let t = i as f32 / 10.0;

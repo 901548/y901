@@ -2412,6 +2412,17 @@ impl UiTree {
                 self.open_popup(widget, req.anchor);
             }
         }
+        // 组件请求的属性动画：交给 `animate()`。节点取本次命中的 `ctx.target`（空则 None）。
+        if !ctx.anim_requests.is_empty() {
+            let node = if ctx.target.is_empty() {
+                None
+            } else {
+                Some(ctx.target.clone())
+            };
+            for (key, anim) in std::mem::take(&mut ctx.anim_requests) {
+                self.animate(key, anim, node.as_deref());
+            }
+        }
 
         match ctx.pointer_capture.take() {
             Some(PointerCapture::Capture(id)) => {

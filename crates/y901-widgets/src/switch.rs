@@ -18,6 +18,8 @@ const TRACK_W: f32 = 44.0;
 const TRACK_H: f32 = 24.0;
 /// 滑块与轨道内边距。
 const PAD: f32 = 2.0;
+/// 滑块过渡时长（毫秒）。
+const SLIDE_MS: u64 = 120;
 
 /// 开关控件。
 pub struct Switch {
@@ -114,6 +116,17 @@ impl Widget for Switch {
             UiEvent::MouseUp { pos, .. } if self.rect.contains(*pos) => {
                 ctx.request_focus(self.id.clone());
                 self.toggle();
+                // 滑块过渡：开 → from 0 到 1；关 → from 1 到 0。
+                // 走框架动画系统（EventCtx::start_animation → UiTree::animate →
+                // 每帧快照 → render 里 ctx.animation(key) 读进度）。
+                let to = if self.checked { 1.0 } else { 0.0 };
+                let anim = y901_ui::animation::Animate::new(
+                    1.0 - to,
+                    to,
+                    std::time::Duration::from_millis(SLIDE_MS),
+                    y901_ui::animation::Easing::EaseOutCubic,
+                );
+                ctx.start_animation(y901_ui::animation::key_of(&format!("{}-slide", self.id)), anim);
                 EventResult::Redraw
             }
             UiEvent::Key { key, .. } if matches!(key, y901_ui::Key::Enter) => {
