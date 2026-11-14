@@ -1791,6 +1791,13 @@ impl UiTree {
             if self.popups.iter().any(|p| p.modal) {
                 ctx.fill_rect(viewport, crate::Color::rgba(0.0, 0.0, 0.0, 0.55));
             }
+            // **popup 也要递归渲染：**原先只调 `popup.widget.render(ctx)`，
+            // 导致 `Flex`/`Grid` 这类"靠子节点绘制"的容器在弹层里
+            // 只有面板尺寸、内容全空（ComboBox 用自绘制的 ComboList 所以没暴露）。
+            // 这里改成与普通树同一套递归入口，并复用一小份缓存。
+            let mut popup_path: Vec<usize> = Vec::new();
+            let mut popup_rects: Vec<Rect> = Vec::new();
+            let mut popup_clips: Vec<Option<Rect>> = Vec::new();
             for popup in self.popups.iter_mut() {
                 if popup.rect.is_empty() {
                     continue;
@@ -1811,7 +1818,17 @@ impl UiTree {
                     // scale 下限 0.8：再小会让文字糊成一团，且 rect 可能算成负尺寸
                     let scale = (0.8 + 0.2 * progress).clamp(0.6, 1.0);
                     ctx.push_transform(anchor, scale);
-                    popup.widget.render(ctx);
+                    popup_path.clear();
+                    popup_rects.clear();
+                    popup_clips.clear();
+                    render_pass(
+                        popup.widget.as_mut(),
+                        ctx,
+                        &dirty,
+                        &mut popup_path,
+                        &mut popup_rects,
+                        &mut popup_clips,
+                    );
                     ctx.pop_transform();
                     // 淡入：用背景色盖一层 (1-progress) 透明度的膜
                     let bg = ctx.background_color();
@@ -1820,7 +1837,17 @@ impl UiTree {
                         crate::Color::rgba(bg.r, bg.g, bg.b, (1.0 - progress).clamp(0.0, 1.0)),
                     );
                 } else {
-                    popup.widget.render(ctx);
+                    popup_path.clear();
+                    popup_rects.clear();
+                    popup_clips.clear();
+                    render_pass(
+                        popup.widget.as_mut(),
+                        ctx,
+                        &dirty,
+                        &mut popup_path,
+                        &mut popup_rects,
+                        &mut popup_clips,
+                    );
                 }
             }
             ctx.pop_clip();
