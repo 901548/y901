@@ -355,12 +355,23 @@ impl UiTree {
     pub fn tick_animations(&mut self, dt: std::time::Duration) -> bool {
         // 先推进所有动画（不碰 self 的其他字段，避免借用冲突）
         let mut dirty_nodes: Vec<String> = Vec::new();
+        // **popup 动画需要全帧重绘**：
+        // popup 在 `push_popup` 里用 `node = None` 启动开启动画（它不在普通节点索引里），
+        // 而标脏只能按 node id 进行 → 动画虽然在走，**却没有任何东西变脏**，
+        // 于是下一帧直接 Skip Present；弹层的"淡入膜"（alpha = 1-progress）
+        // 就永远停在第一帧的值上，把 popup 内容盖死。
+        let mut popup_animating = false;
         for a in self.animations.iter_mut() {
             let running = a.anim.tick(dt);
             if let Some(n) = a.node.clone() {
                 dirty_nodes.push(n);
+            } else if running {
+                popup_animating = true;
             }
             let _ = running;
+        }
+        if popup_animating {
+            self.dirty = DirtyRegion::full();
         }
         // 再把完成的项搬出来（FnOnce 回调需要拥有权）
         let mut completed: Vec<ActiveAnim> = Vec::new();
