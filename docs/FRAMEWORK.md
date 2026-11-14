@@ -549,3 +549,21 @@ let list = ListView::new("chat", 24.0)
   2. **`Dimension::Flex` 与 `wrap` 同时使用时，flex 因子被忽略**（按内容尺寸分行）——
      因为 flex 宽度取决于同行其他子项，与“先分行再分配”**互相依赖**。
   3. **absolute / aspect-ratio 仍不做**（与“父容器分配 rect”模型冲突）。
+
+## 16. 已知限制：渲染
+
+### Grid + Image 组合渲染空白（未修复，需 PIX/RenderDoc）
+
+- **现象**：examples/image_gallery.rs（Grid 里放 Image）**整帧空白** —— 连同一棵树里的
+  文字和背景都不显示；屏幕只剩清屏色。
+- **触发条件**：D3D 后端 + cached RT 路径 + **批次列表中含图片批次**（Batch.image = Some(id)）
+  + 容器为 Grid。**Flex + Image 正常，Grid + 文字正常**，所以单组件使用不受影响。
+- **已排除**（均为实测）：clip 栈泄漏（4 push ↔ 4 pop 配平）、blit 未执行（双方都进入）、
+  scissor 为空（双方都是整窗 is_full=true）、脏区分块（双方都是单块全屏）、
+  实例超限（69 ≪ 10000）、Present 失败（返回 S_OK）。
+- **已知差异**：空白场景 atches=8（含 3 个图片批次）vs 正常场景 atches=1（无图片），
+  差异被压缩到批次循环（d3d11.rs 的 or b in batches）。
+- **静态审查未发现解释**：图集绑 	0/s0、图片绑 	1 共用 s0，画完只切回 pixel shader，
+  槽位无冲突；draw_instances(n, b.start) 语义待核实。
+- **下一步**：逐批次打印 start/count/image 与 DrawInstanced 实参，或直接上 PIX/RenderDoc 抓帧。
+- **记录时间**：2026-11-14，commit db86941 之前即存在。
