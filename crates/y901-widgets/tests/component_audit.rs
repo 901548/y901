@@ -139,7 +139,6 @@ fn arrange_each(components: &mut [Box<dyn Widget>], cache: &mut LayoutCache) {
 /// 已知问题(审计发现):TextInput 的语义 label 为空——外部工具只能靠 id 辨认节点。
 /// 其余组件都有可读 label;修复后去掉 ignore 应转绿。
 #[test]
-#[ignore = "已知问题:TextInput 的 semantics.label 为空(外部工具无法按名称辨认输入框)"]
 fn text_input_semantics_has_label() {
     let input = TextInput::new("p-input");
     let sem = input.semantics();
@@ -255,7 +254,6 @@ fn measure_under_unbounded_constraints_stays_finite() {
 /// 框架的 needs_paint 保证未布局节点实际不会被渲染,所以只是防线缺口,不是画面 bug;
 /// 但与其他组件的"判空早退"纪律不一致。修复后去掉 ignore 应转绿。
 #[test]
-#[ignore = "已知问题:Button/TextLabel 未布局(rect=0)时仍绘制,缺判空早退"]
 fn legacy_components_render_without_layout_draw_nothing() {
     let mut b = Button::new("p-button", "确定");
     let mut rec = Rec::new(1.0);
@@ -372,7 +370,6 @@ fn switch_enter_and_space_toggle_and_emit_command() {
 /// 只有 MouseUp 路径调用了 `start_animation`,键盘路径直接跳变,
 /// 与鼠标路径的平滑过渡不一致。修复后去掉 ignore 应转绿。
 #[test]
-#[ignore = "已知问题:Switch 键盘切换(Enter/空格)未发起动画,滑块瞬间跳变"]
 fn switch_keyboard_toggle_starts_animation() {
     let mut sw = Switch::new("sw", false);
     let mut cache = LayoutCache::new();

@@ -6,6 +6,9 @@
 //!
 //! **\u96f6\u5f00\u9500**\uff1a`run_loop` \u91cc\u53ea\u6709 `Option<FrameProfile>` \u7684\u4e00\u6b21 `if let`\uff1b
 //! \u73af\u5883\u53d8\u91cf\u672a\u8bbe\u65f6 `profiler == None`\uff0c**\u4e0d\u5206\u914d\u3001\u4e0d\u8ba1\u65f6\u3001\u4e0d\u8ba1\u6570**\u3002
+//!
+//! **口径**：`us` 是**循环总耗时**（含空闲等待）。用 `presented` 字段区分空闲帧与呈现帧；
+//! 空闲帧的 `us` 反映的是**等待时长**，不是渲染耗时。
 
 use std::time::Instant;
 

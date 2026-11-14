@@ -214,6 +214,9 @@ impl Widget for TextLabel {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
+        if self.rect.w <= 0.0 || self.rect.h <= 0.0 {
+            return;
+        }
         ctx.draw_text(
             Pos::new(self.rect.x, self.rect.y),
             &self.current_text(),

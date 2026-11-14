@@ -232,6 +232,9 @@ impl Widget for Button {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
+        if self.rect.w <= 0.0 || self.rect.h <= 0.0 {
+            return;
+        }
         // 颜色全部来自主题：组件不持有任何业务色
         // 优先级：Disabled > Selected > Pressed > Hovered > Normal。
         // Selected 是**持久**状态（"当前选中的主题"），必须始终可见；

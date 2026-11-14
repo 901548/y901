@@ -847,6 +847,17 @@ impl Widget for TextInput {
         } else {
             self.buffer.text().to_string()
         };
+        // **空输入框要有名字**：之前 label 直接取缓冲区文本，
+        // 空的时候就是空串，外部工具无法按名辨认。用 placeholder 兜底，
+        // 再没有就叫 "TextInput"。
+        // **不能用 placeholder 兜底**：`password_placeholder.rs` 明确要求占位提示
+        // 不得进入语义 label（否则敏感应用的提示会被外部工具读走）。
+        // 这里只在**完全空**时给一个中性名字。
+        let label = if label.is_empty() {
+            "TextInput".to_string()
+        } else {
+            label
+        };
         let sem = Semantics::default()
             .exposed(true)
             .label(label)
