@@ -149,6 +149,17 @@ impl Widget for Switch {
                     || matches!(key, y901_ui::Key::Char(' ')) =>
             {
                 self.toggle();
+                // **键盘切换也要发动画**：否则 Enter/Space 是硬跳，鼠标却是平滑过渡，
+                // 同一控件两种行为不一致（component_audit 的测试就是抓这个）。
+                let to = if self.checked { 1.0 } else { 0.0 };
+                self.anim_from = 1.0 - to;
+                let anim = y901_ui::animation::Animate::new(
+                    1.0 - to,
+                    to,
+                    std::time::Duration::from_millis(SLIDE_MS),
+                    y901_ui::animation::Easing::EaseOutCubic,
+                );
+                ctx.start_animation(y901_ui::animation::key_of(&format!("{}-slide", self.id)), anim);
                 self.emit(ctx);
                 EventResult::Redraw
             }
