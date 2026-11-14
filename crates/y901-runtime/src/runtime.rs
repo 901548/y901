@@ -51,10 +51,11 @@ pub fn run_loop<W: WindowBackend>(
     let mut stat_since = Instant::now();
     // 上一帧是否有工作：有工作时不得等待，否则 Win32 会在每帧都“睡”一次。
     let mut was_busy = false;
+    // 上一帧的实际耗时（布局 + 绘制 + 呈现），供帧预算补偿使用。
+    let mut last_frame_ms: u64 = 0;
     // 后端是否**自节流**（D3D11 的 `Present(1)` 会阻塞到 vsync）。
     // 为何要猜：软后端（GDI）不自节流，若一律 `wait=0` 会空转烧 CPU；
     // 而 D3D11 若再多睡 16ms 就与 vsync 叠加成 30fps。故用"上一帧呈现耗时"判定。
-    let mut self_paced = false;
     // 上一帧的时间点（供动画 dt）。
     let mut last_tick = Instant::now();
     // 最近一次发出 `UiEvent::Tick` 的时间（供 Tick 节拍）。
@@ -80,13 +81,10 @@ pub fn run_loop<W: WindowBackend>(
         };
         let idle_ms = idle_wait_ms();
         let wait_ms = if was_busy {
-            // 自节流后端：不睡，让 `Present(1)` 的 vsync 单独定节拍；
-            // 否则保留 16ms 帧预算（软后端靠它限速，否则空转）。
-            if self_paced {
-                0
-            } else {
-                16
-            }
+            // **帧预算补偿**：16ms 是"帧周期上限"，不是"固定睡眠" ——
+            // 若本帧已经花了 该花的时间（布局 + 绘制 + 呈现），就只补足差额。
+            // 否则"固定 16ms 睡 + 5~8ms 工作"会把帧周期拉到 21~24ms（≈40fps）。
+            16u64.saturating_sub(last_frame_ms) as u32
         } else {
             idle_ms.min(tick_due_ms)
         };
@@ -162,13 +160,10 @@ pub fn run_loop<W: WindowBackend>(
         // skip/Present 判定在 `WindowBackend::render`，返回 `RenderOutcome`。
         // `UiTree::render` 的空 dirty 是**防御性 guard**（不决定 Present）。
         // 本循环只看 `RenderOutcome`，不查 `tree.dirty()`。
-        let present_started = Instant::now();
+        let frame_started = Instant::now();
         let outcome = window.render(tree)?;
-        // 呈现若耗时 ≥ 8ms，说明后端在等 vsync（自节流）。
-        if matches!(outcome, RenderOutcome::Presented) {
-            let ms = present_started.elapsed().as_millis() as u64;
-            self_paced = ms >= 8;
-        }
+        // 本帧实际耗时（含呈现），用于帧预算补偿。
+        last_frame_ms = frame_started.elapsed().as_millis() as u64;
         if !first_frame_done {
             first_frame_done = true;
             eprintln!(

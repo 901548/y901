@@ -61,13 +61,17 @@ fn runtime_idles_when_nothing_to_do() {
         .split("let wait_ms")
         .nth(1)
         .expect("wait_expr 应包含 let wait_ms（否则断言锚点已失效）");
+    // 忙档：**帧预算补偿** —— 16ms 减去上一帧耗时，而不是固定睡 16ms。
+    // 两条回归都要被抳住：
+    //   1) 回到"固定 16ms" → 帧周期被拉长（40fps）；
+    //   2) 回到"忙档无条件 0" → 软后端空转烧 CPU。
     assert!(
-        after_wait.contains("self_paced"),
-        "wait_ms 的忙档必须区分自节流后端（锚定 let wait_ms 之后），实测：{after_wait}"
+        after_wait.contains("saturating_sub"),
+        "wait_ms 的忙档应做帧预算补偿（锚定 let wait_ms 之后），实测：{after_wait}"
     );
     assert!(
-        after_wait.contains("16"),
-        "wait_ms 的非自节流忙档应保留 16ms 帧预算，实测：{after_wait}"
+        after_wait.contains("last_frame_ms"),
+        "wait_ms 的忙档必须参考上一帧耗时，实测：{after_wait}"
     );
 
     // Tick 节拍必须参考 `wants_tick` 订阅者，否则闲置动画只能 10fps。
