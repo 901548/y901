@@ -10,12 +10,8 @@ use y901_ui::{
     TextStyle, TextMetrics, UiEvent, Widget,
 };
 
-/// 图标直径。
-const ICON_D: f32 = 48.0;
 /// 内圈直径（从图标直径派生，避免两个磁数各自漂移）。
-const INNER_D: f32 = ICON_D * 0.42;
-/// 操作按钮高度。
-const ACTION_H: f32 = 32.0;
+const INNER_D: f32 = super::state_layout::ICON_D * 0.42;
 
 /// 错误状态占位。
 pub struct ErrorState {
@@ -65,14 +61,7 @@ impl ErrorState {
 
     /// 期望高度：图标 + 标题 +（说明）+（按钮）。
     fn content_height(&self) -> f32 {
-        let mut h = (ICON_D + 16.0 + 24.0) * self.scale;
-        if self.description.is_some() {
-            h += (8.0 + 18.0) * self.scale;
-        }
-        if self.action.is_some() {
-            h += (16.0 + ACTION_H) * self.scale;
-        }
-        h
+        super::state_layout::content_height(self.scale, self.description.is_some(), self.action.is_some())
     }
 }
 
@@ -102,13 +91,7 @@ impl Widget for ErrorState {
         _cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
-        let w = 120.0 * self.scale;
-        self.action_rect = Rect::new(
-            rect.x + (rect.w - w) * 0.5,
-            rect.bottom() - (ACTION_H + 8.0) * self.scale,
-            w,
-            ACTION_H * self.scale,
-        );
+        self.action_rect = super::state_layout::action_rect(rect, self.scale);
     }
 
     fn flex(&self) -> FlexItem {
@@ -149,21 +132,21 @@ impl Widget for ErrorState {
         let cx = self.rect.x + self.rect.w * 0.5;
         // 错误红圆形占位（半透明底 + 实心内圈）
         ctx.fill_round_rect(
-            Rect::new(cx - ICON_D * self.scale * 0.5, y, ICON_D * self.scale, ICON_D * self.scale),
+            Rect::new(cx - super::state_layout::ICON_D * self.scale * 0.5, y, super::state_layout::ICON_D * self.scale, super::state_layout::ICON_D * self.scale),
             Color::rgba(error_red.r, error_red.g, error_red.b, 0.18),
-            (ICON_D * self.scale) * 0.5,
+            (super::state_layout::ICON_D * self.scale) * 0.5,
         );
         ctx.fill_round_rect(
             Rect::new(
                 cx - INNER_D * self.scale * 0.5,
-                y + ICON_D * self.scale * 0.5 - INNER_D * self.scale * 0.5,
+                y + super::state_layout::ICON_D * self.scale * 0.5 - INNER_D * self.scale * 0.5,
                 INNER_D * self.scale,
                 INNER_D * self.scale,
             ),
             error_red,
             INNER_D * self.scale * 0.5,
         );
-        y += (ICON_D + 16.0) * self.scale;
+        y += (super::state_layout::ICON_D + 16.0) * self.scale;
 
         // 标题：错误红
         let title_style = TextStyle::fg(error_red);
@@ -184,7 +167,7 @@ impl Widget for ErrorState {
             ctx.fill_round_rect(self.action_rect, accent, 6.0);
             let style = TextStyle::fg(Color::WHITE);
             let lw = ctx.measure_text(label, &style).w;
-            let ly = self.action_rect.y + (ACTION_H * self.scale - ctx.line_height(&style)) * 0.5;
+            let ly = self.action_rect.y + (super::state_layout::ACTION_H * self.scale - ctx.line_height(&style)) * 0.5;
             ctx.draw_text(
                 Pos::new(self.action_rect.x + (self.action_rect.w - lw) * 0.5, ly),
                 label,
