@@ -144,6 +144,12 @@ impl Widget for ComboBox {
         self.item
     }
 
+    /// 需要每帧 `Tick`：用来**吸收 popup 回传的选中项**
+    /// （popup 与父组件不共享状态，只能靠共享单元 + Tick 同步）。
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     fn rect(&self) -> Rect {
         self.rect
     }

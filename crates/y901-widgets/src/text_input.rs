@@ -549,6 +549,11 @@ impl Widget for TextInput {
         self.ensure_caret_visible();
     }
 
+    /// 只有获焦时才需要每帧 `Tick`（光标闪烁）；未获焦时不占用每帧广播。
+    fn wants_tick(&self) -> bool {
+        self.focused
+    }
+
     fn rect(&self) -> Rect {
         self.rect
     }

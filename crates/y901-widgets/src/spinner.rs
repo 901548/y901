@@ -88,6 +88,12 @@ impl Widget for Spinner {
         self.item
     }
 
+    /// **声明需要每帧 `Tick`**：框架只给 `wants_tick() == true` 的节点发 Tick
+    /// （`tree.rs` 的广播门控），否则轮转/脉冲类组件永远不会动。
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     fn rect(&self) -> Rect {
         self.rect
     }
