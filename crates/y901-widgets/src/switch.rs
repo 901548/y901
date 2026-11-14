@@ -141,7 +141,10 @@ impl Widget for Switch {
                 self.emit(ctx);
                 EventResult::Redraw
             }
-            UiEvent::Key { key, .. } if matches!(key, y901_ui::Key::Enter) => {
+            UiEvent::Key { key, .. }
+                if matches!(key, y901_ui::Key::Enter)
+                    || matches!(key, y901_ui::Key::Char(' ')) =>
+            {
                 self.toggle();
                 self.emit(ctx);
                 EventResult::Redraw

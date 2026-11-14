@@ -12,6 +12,8 @@ use y901_ui::{
 
 /// 图标直径。
 const ICON_D: f32 = 48.0;
+/// 内圈直径（从图标直径派生，避免两个磁数各自漂移）。
+const INNER_D: f32 = ICON_D * 0.42;
 /// 操作按钮高度。
 const ACTION_H: f32 = 32.0;
 
@@ -152,9 +154,14 @@ impl Widget for ErrorState {
             (ICON_D * self.scale) * 0.5,
         );
         ctx.fill_round_rect(
-            Rect::new(cx - 10.0 * self.scale, y + ICON_D * self.scale * 0.5 - 10.0 * self.scale, 20.0 * self.scale, 20.0 * self.scale),
+            Rect::new(
+                cx - INNER_D * self.scale * 0.5,
+                y + ICON_D * self.scale * 0.5 - INNER_D * self.scale * 0.5,
+                INNER_D * self.scale,
+                INNER_D * self.scale,
+            ),
             error_red,
-            10.0 * self.scale,
+            INNER_D * self.scale * 0.5,
         );
         y += (ICON_D + 16.0) * self.scale;
 
