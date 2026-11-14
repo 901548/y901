@@ -290,6 +290,7 @@ pub fn flex_measure_into(
     cache: &mut LayoutCache,
     measured: &mut Vec<(Size, FlexItem)>,
 ) -> Size {
+    let scale = metrics.scale();
     measured.clear();
     // 主轴无界时，子节点在主轴方向不设上限（ScrollView 场景）
     let inner_max = Size::new(
@@ -324,7 +325,7 @@ pub fn flex_measure_into(
         };
 
         let main = match main_dim {
-            Dimension::Px(v) => v,
+            Dimension::Px(v) => v * scale,
             Dimension::Percent(p) => {
                 let base = match axis {
                     Axis::Horizontal => inner_max.w,
@@ -339,7 +340,7 @@ pub fn flex_measure_into(
             Dimension::Flex(_) | Dimension::Auto => main_content,
         };
         let cross = match cross_dim {
-            Dimension::Px(v) => v,
+            Dimension::Px(v) => v * scale,
             Dimension::Percent(p) => {
                 let base = match axis {
                     Axis::Horizontal => inner_max.h,
@@ -436,6 +437,7 @@ pub fn flex_arrange_with(
     cache: &mut LayoutCache,
     measured: &[(Size, FlexItem)],
 ) {
+    let scale = metrics.scale();
     if children.is_empty() {
         return;
     }
@@ -471,8 +473,8 @@ pub fn flex_arrange_with(
             flex_total += factor;
         } else {
             fixed_total += match (axis, main_dim) {
-                (Axis::Horizontal, Dimension::Px(v)) => v,
-                (Axis::Vertical, Dimension::Px(v)) => v,
+                (Axis::Horizontal, Dimension::Px(v)) => v * scale,
+                (Axis::Vertical, Dimension::Px(v)) => v * scale,
                 (Axis::Horizontal, Dimension::Percent(p)) if inner.w.is_finite() => {
                     inner.w * (p / 100.0)
                 }
@@ -518,7 +520,7 @@ pub fn flex_arrange_with(
         let main = match main_dim.flex_factor() {
             Some(factor) if flex_total > 0.0 => leftover * factor / flex_total,
             _ => match main_dim {
-                Dimension::Px(v) => v,
+                Dimension::Px(v) => v * scale,
                 Dimension::Percent(p) if inner.w.is_finite() && inner.h.is_finite() => match axis {
                     Axis::Horizontal => inner.w * (p / 100.0),
                     Axis::Vertical => inner.h * (p / 100.0),
@@ -538,7 +540,7 @@ pub fn flex_arrange_with(
             Axis::Vertical => size.w,
         };
         let cross = match cross_dim {
-            Dimension::Px(v) => v,
+            Dimension::Px(v) => v * scale,
             Dimension::Percent(p) if cross_avail.is_finite() => cross_avail * (p / 100.0),
             _ => match align {
                 Align::Stretch => cross_avail,
@@ -1674,3 +1676,4 @@ mod wrap_tests {
         assert_eq!(rects[1].y, 0.0, "b 撑满行高：{rects:?}");
     }
 }
+

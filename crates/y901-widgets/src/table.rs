@@ -149,7 +149,7 @@ impl Table {
         let mut flex_weight = 0.0f32;
         for c in &self.columns {
             match c.width {
-                Dimension::Px(v) => fixed += v.max(0.0),
+                Dimension::Px(v) => fixed += v.max(0.0) * self.scale,
                 Dimension::Flex(f) => flex_weight += f.max(0.0),
                 _ => fixed += FLEX_MIN_W,
             }
@@ -159,7 +159,7 @@ impl Table {
         let mut x = self.rect.x;
         for c in &self.columns {
             let w = match c.width {
-                Dimension::Px(v) => v.max(0.0),
+                Dimension::Px(v) => v.max(0.0) * self.scale,
                 Dimension::Flex(f) if flex_weight > 0.0 => {
                     (rest * f.max(0.0) / flex_weight).max(FLEX_MIN_W.min(rest))
                 }
