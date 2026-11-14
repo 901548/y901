@@ -28,6 +28,8 @@ pub struct Switch {
     checked: bool,
     /// 状态变化时发出的命令（args = bool）。见 crate::command_with_args。
     command: Option<y901_ui::Command>,
+    /// 本次过渡的起始值（0.0 = 左，1.0 = 右）。
+    anim_from: f32,
     rect: Rect,
     item: FlexItem,
 }
@@ -39,6 +41,7 @@ impl Switch {
             id: id.into(),
             checked,
             command: None,
+            anim_from: 0.0,
             rect: Rect::ZERO,
             item: FlexItem::default(),
         }
@@ -131,6 +134,7 @@ impl Widget for Switch {
                 // 走框架动画系统（EventCtx::start_animation → UiTree::animate →
                 // 每帧快照 → render 里 ctx.animation(key) 读进度）。
                 let to = if self.checked { 1.0 } else { 0.0 };
+                self.anim_from = 1.0 - to; // 从对立端开始
                 let anim = y901_ui::animation::Animate::new(
                     1.0 - to,
                     to,
@@ -171,15 +175,25 @@ impl Widget for Switch {
         };
         let track = Rect::new(self.rect.x, self.rect.y, self.rect.w, self.rect.h);
         let radius = self.rect.h * 0.5;
-        ctx.fill_round_rect(track, if self.checked { on_bg } else { off_bg }, radius);
+        // **插值**：进度来自框架动画（事件里 start_animation 发起），不是硬切。
+        let key = y901_ui::animation::key_of(&format!("{}-slide", self.id));
+        let p = ctx.animation(key).clamp(0.0, 1.0);
+        let target = if self.checked { 1.0 } else { 0.0 };
+        let t = (self.anim_from + (target - self.anim_from) * p).clamp(0.0, 1.0);
+        let blend = |a: Color, b: Color| {
+            Color::rgba(
+                a.r + (b.r - a.r) * t,
+                a.g + (b.g - a.g) * t,
+                a.b + (b.b - a.b) * t,
+                1.0,
+            )
+        };
+        ctx.fill_round_rect(track, blend(off_bg, on_bg), radius);
 
         // \u6ed1\u5757\uff1a\u76f4\u5f84 = \u9ad8 - 2*pad\uff08\u6309 rect \u5b9e\u9645\u5c3a\u5bf8\u7b97\uff0c\u81ea\u52a8\u9002\u5e94 DPI\uff09
         let d = (self.rect.h - 2.0 * PAD).max(2.0);
-        let kx = if self.checked {
-            self.rect.x + self.rect.w - PAD - d * 0.5
-        } else {
-            self.rect.x + PAD + d * 0.5
-        };
+        let travel = (self.rect.w - 2.0 * PAD - d).max(0.0);
+        let kx = self.rect.x + PAD + d * 0.5 + travel * t;
         ctx.fill_round_rect(
             Rect::new(kx - d * 0.5, self.rect.y + self.rect.h * 0.5 - d * 0.5, d, d),
             knob,

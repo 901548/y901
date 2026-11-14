@@ -2,14 +2,13 @@
 use std::time::Instant;
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
-use y901_ui::{Command, Edges, Flex, FlexItem, Rect, Role, State, Theme, UiEvent, UiTree, Widget};
+use y901_ui::{Command, Edges, Flex, FlexItem, Rect, Role, State, Theme, UiTree, Widget};
 use y901_widgets::popover::Popover;
 use y901_widgets::{Button, TextLabel};
 
 struct H;
 impl Host for H {
     fn idle(&mut self, tree: &mut UiTree) {
-        for _ in 0..4 { if !tree.dispatch(&UiEvent::Tick).is_handled() { break; } }
         for _ in tree.poll_subscriptions(Instant::now()) {}
     }
     fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool { false }
