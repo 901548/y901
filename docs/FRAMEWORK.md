@@ -642,3 +642,12 @@ let sw = Switch::new("wifi", false)
 - `muted_text_color()`：`text` 前景向 `panel` 背景插值 35%
 - `divider_color()`：`panel` 背景向 `text` 前景插值 12%
 - `is_dark()`：按 `panel` 背景亮度判定，供上述方法分支
+
+### WidgetStyle 的边界（容器型 vs 语义型）
+
+`WidgetStyle` **只覆盖容器型视觉表面**：`bg` / `bg_to` / `radius` / `border`。
+它**不覆盖语义色** —— `Switch` 的轨道色、`ErrorState` 的红、`EmptyState` 的灰都来自 `Theme`，
+因为它们必须随 DARK/LIGHT 自动适配；要换这些颜色请改 `Theme`，而不是传 `WidgetStyle`。
+
+已提供 `.style()` 的两个示例：`Alert`（底色调 + 圆角）、`Table`（表头底色）。
+`Badge` / `ComboBox` 同样支持；`Popover` **不支持** —— 它自身不渲染任何像素（内容由 popup 层绘制）。

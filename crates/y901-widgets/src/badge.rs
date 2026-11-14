@@ -73,6 +73,8 @@ pub struct Badge {
     dot_only: bool,
     rect: Rect,
     item: FlexItem,
+    /// 可选样式覆盖（仅容器型表面）。
+    style: Option<crate::style::WidgetStyle>,
     /// DPI 缩放（`measure` 里唯一写入；未测过时 1.0）。
     scale: f32,
 }
@@ -87,6 +89,7 @@ impl Badge {
             dot_only: false,
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            style: None,
             scale: 1.0,
         }
     }
@@ -100,6 +103,7 @@ impl Badge {
             dot_only: true,
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            style: None,
             scale: 1.0,
         }
     }
@@ -107,6 +111,15 @@ impl Badge {
     /// 设置语义类型。
     pub fn kind(mut self, kind: BadgeKind) -> Self {
         self.kind = kind;
+        self
+    }
+
+    /// **覆盖容器型表面**（背景 / 描边 / 圆角）。
+    ///
+    /// 注意：语义色（如 switch 轨道、error 红、empty 灰）**不**由它覆盖 ——
+    /// 那些走 `Theme`，否则会破坏 DARK/LIGHT 自适应。
+    pub fn style(mut self, style: crate::style::WidgetStyle) -> Self {
+        self.style = Some(style);
         self
     }
 
@@ -170,11 +183,14 @@ impl Widget for Badge {
             let theme = ctx.theme();
             theme.style(Role::PANEL, State::Hovered).bg
         };
-        let bg = self.kind.bg(ctx.theme()).unwrap_or(fallback);
+        let bg = self.style.and_then(|s| s.bg).or_else(|| self.kind.bg(ctx.theme())).unwrap_or(fallback);
         let radius = if self.dot_only {
             self.rect.w.min(self.rect.h) * 0.5
         } else {
-            self.rect.h * 0.5
+            match self.style.map(|s| s.radius) {
+                Some(r) if r > 0.0 => r,
+                _ => self.rect.h * 0.5,
+            }
         };
         ctx.fill_round_rect(self.rect, bg, radius);
         if self.dot_only {

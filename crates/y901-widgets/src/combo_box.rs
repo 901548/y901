@@ -39,6 +39,8 @@ pub struct ComboBox {
     shared: Rc<Cell<Option<usize>>>,
     rect: Rect,
     item: FlexItem,
+    /// 可选样式覆盖（仅容器型表面）。
+    style: Option<crate::style::WidgetStyle>,
     /// **DPI 缩放**（`measure` 里唯一写入点；未 measure 时 1.0 = 兜底）。
     scale: f32,
 }
@@ -55,6 +57,7 @@ impl ComboBox {
             shared: Rc::new(Cell::new(None)),
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            style: None,
             scale: 1.0,
         }
     }
@@ -68,6 +71,15 @@ impl ComboBox {
     /// 选中变化回调。
     pub fn command(mut self, cmd: y901_ui::Command) -> Self {
         self.command = Some(cmd);
+        self
+    }
+
+    /// **覆盖容器型表面**（背景 / 描边 / 圆角）。
+    ///
+    /// 注意：语义色（如 switch 轨道、error 红、empty 灰）**不**由它覆盖 ——
+    /// 那些走 `Theme`，否则会破坏 DARK/LIGHT 自适应。
+    pub fn style(mut self, style: crate::style::WidgetStyle) -> Self {
+        self.style = Some(style);
         self
     }
 
@@ -216,8 +228,15 @@ impl Widget for ComboBox {
             )
         };
         let b = self.box_rect();
-        ctx.fill_round_rect(b, box_bg, 4.0);
-        ctx.stroke_round_rect(b, box_border, 1.0, 4.0);
+        // **样式覆盖**：底色 / 描边 / 圆角
+        let box_bg = self.style.and_then(|s| s.bg).unwrap_or(box_bg);
+        let box_border = self.style.and_then(|s| s.border).unwrap_or(box_border);
+        let radius = match self.style.map(|s| s.radius) {
+            Some(r) if r > 0.0 => r,
+            _ => 4.0 * self.scale,
+        };
+        ctx.fill_round_rect(b, box_bg, radius);
+        ctx.stroke_round_rect(b, box_border, 1.0, radius);
 
         let style = TextStyle::fg(text_fg);
         let ty = b.y + (b.h - ctx.line_height(&style)) * 0.5;

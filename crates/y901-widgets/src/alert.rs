@@ -63,6 +63,8 @@ pub struct Alert {
     command: Option<y901_ui::Command>,
     rect: Rect,
     item: FlexItem,
+    /// 可选样式覆盖（仅容器型表面）。
+    style: Option<crate::style::WidgetStyle>,
     /// **DPI 缩放**（`measure` 里唯一写入点；未 measure 时 1.0 = 兜底）。
     scale: f32,
     dismiss_rect: Rect,
@@ -79,6 +81,7 @@ impl Alert {
             command: None,
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            style: None,
             scale: 1.0,
             dismiss_rect: Rect::ZERO,
         }
@@ -93,6 +96,15 @@ impl Alert {
     /// 追加"关闭"按钮与回调。
     pub fn on_dismiss(mut self, cmd: y901_ui::Command) -> Self {
         self.command = Some(cmd);
+        self
+    }
+
+    /// **覆盖容器型表面**（背景 / 描边 / 圆角）。
+    ///
+    /// 注意：语义色（如 switch 轨道、error 红、empty 灰）**不**由它覆盖 ——
+    /// 那些走 `Theme`，否则会破坏 DARK/LIGHT 自适应。
+    pub fn style(mut self, style: crate::style::WidgetStyle) -> Self {
+        self.style = Some(style);
         self
     }
 
@@ -185,6 +197,8 @@ impl Widget for Alert {
                 theme.muted_text_color(),
             )
         };
+        // **样式覆盖**：只接管底色/描边/圆角，强调色条仍走语义色。
+        let bg = self.style.and_then(|s| s.bg).unwrap_or(bg);
         let tint = Color::rgba(accent.r, accent.g, accent.b, 0.10);
         ctx.fill_rect(self.rect, bg);
         ctx.fill_rect(self.rect, tint);
@@ -241,6 +255,7 @@ impl Widget for Alert {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use y901_ui::Color;
     use y901_ui::layout::LayoutCache;
 
     struct Metrics;
@@ -278,5 +293,12 @@ mod tests {
         let r = a.dismiss_rect;
         a.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(r.x + 4.0, r.y + 4.0), button: y901_ui::MouseButton::Left });
         assert_eq!(ctx.commands.len(), 1, "点×应发出命令");
+    }
+
+    #[test]
+    fn style_is_stored_for_container_surface() {
+        let st = crate::style::WidgetStyle::default().bg(Color::rgba(0.1, 0.2, 0.3, 1.0)).radius(3.0);
+        let a = Alert::new("a", AlertKind::Info, "t").style(st);
+        assert_eq!(a.style, Some(st), "style 应被保存（render 里用它覆盖底色）");
     }
 }
