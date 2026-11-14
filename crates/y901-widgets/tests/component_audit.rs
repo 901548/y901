@@ -548,7 +548,6 @@ fn table_selected_out_of_range_is_rejected() {
 /// 期望:聚焦后 ↑↓ 在选项间移动、Enter 确认、Esc 关闭下拉
 /// (Menu 已有完整的键盘导航实现可对照搬运)。
 #[test]
-#[ignore = "已知问题:ComboBox 无键盘导航(↑↓/Enter/Esc 均未实现)"]
 fn combo_box_keyboard_navigation() {
     let mut cb = ComboBox::new("cb", vec!["甲", "乙", "丙"]).selected(Some(0));
     let mut cache = LayoutCache::new();

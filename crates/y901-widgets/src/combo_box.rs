@@ -187,6 +187,52 @@ impl Widget for ComboBox {
             }
         }
         match event {
+            // **闭合态键盘**：↑↓ 直接改选中（不打开列表），Enter 打开列表。
+            UiEvent::Key { key, .. } => {
+                let n = self.items.len();
+                let changed = match key {
+                    y901_ui::Key::Down if n > 0 => {
+                        let cur = self.selected.unwrap_or(0);
+                        let next = (cur + 1).min(n - 1);
+                        if Some(next) != self.selected {
+                            self.selected = Some(next);
+                            if let Some(cmd) = self.command.as_ref() {
+                                let args = y901_ui::json::Json::obj().set("index", next as i32);
+                                self.pending_command = Some(crate::command_with_args(cmd, args));
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    y901_ui::Key::Up if n > 0 => {
+                        let cur = self.selected.unwrap_or(0);
+                        let next = cur.saturating_sub(1);
+                        if Some(next) != self.selected {
+                            self.selected = Some(next);
+                            if let Some(cmd) = self.command.as_ref() {
+                                let args = y901_ui::json::Json::set(
+                                    y901_ui::json::Json::obj(),
+                                    "index",
+                                    next as i32,
+                                );
+                                self.pending_command = Some(crate::command_with_args(cmd, args));
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                };
+                if changed {
+                    if let Some(cmd) = self.pending_command.take() {
+                        ctx.emit_command(cmd);
+                    }
+                    return EventResult::Redraw;
+                }
+                EventResult::Ignored
+            }
             UiEvent::MouseUp { pos, .. } if self.box_rect().contains(*pos) => {
                 ctx.request_focus(self.id.clone());
                 let popup_id = self.popup_id();
