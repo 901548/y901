@@ -103,3 +103,17 @@ extern "C" {
     #[wasm_bindgen(method, js_name = "addEventListener")]
     pub fn add_event_listener(this: &EventTarget, kind: &str, cb: &Closure<dyn FnMut(JsValue)>);
 }
+/// `Uint8ClampedArray`——`ImageData` 的像素入参。
+///
+/// **手写而不用 `js_sys`**：`js-sys` 在离线环境解析不到，而我们只需要"建一个长度 + 整块写入"两个操作（见 `docs/WASM.md` D6）。
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = "Uint8ClampedArray")]
+    pub type Uint8ClampedArray;
+
+    #[wasm_bindgen(constructor)]
+    pub fn new(length: u32) -> Uint8ClampedArray;
+
+    #[wasm_bindgen(method, js_name = "set")]
+    pub fn set_from(this: &Uint8ClampedArray, src: &[u8], offset: u32);
+}

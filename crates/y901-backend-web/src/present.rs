@@ -1,37 +1,38 @@
-//! 呈现：软后端产出的 RGBA 像素 → `putImageData`（见 `docs/WASM.md` §3.2）。
+//! 呈现：软后端产出的 BGRA 像素 → `putImageData`（见 `docs/WASM.md` §3.2）。
 
-use crate::bindings::HtmlCanvasElement;
+use crate::bindings::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData, Uint8ClampedArray};
 
 /// 画布呈现器。
 pub struct Present {
     /// canvas 句柄。
     pub canvas: HtmlCanvasElement,
-    /// 已分配的像素缓冲（RGBA）。
-    pub pixels: Vec<u8>,
+    /// 2D 上下文（`getContext("2d")`）。
+    pub ctx: Option<CanvasRenderingContext2d>,
 }
 
 impl Present {
-    /// 用 canvas 构造；像素缓冲在 S1 按尺寸分配。
+    /// 用 canvas 构造；上下文在这里取一次，后续每帧复用。
     pub fn new(canvas: HtmlCanvasElement) -> Self {
-        Self {
-            canvas,
-            pixels: Vec::new(),
-        }
+        let ctx = canvas.get_context_2d();
+        Self { canvas, ctx }
     }
 
-    /// 整幅上屏。`pixels` 是**软后端产出的 BGRA**；浏览器要 RGBA，先换通道。
+    /// 整幅上屏。`pixels` 是**软后端产出的 BGRA**，浏览器要 RGBA。
     pub fn present(&mut self, pixels: &[u8], w: u32, h: u32) {
+        let Some(ctx) = self.ctx.as_ref() else {
+            return; // 没取到 2D 上下文：静默跳过上屏（不崩）
+        };
         let rgba = bgra_to_rgba(pixels);
-        self.pixels = rgba;
-        // 真正的 ImageData + putImageData 在下一步接上（需要 2D 上下文句柄与
-        // `Uint8ClampedArray` 构造）；此处只保证像素已按浏览器所需的通道序排好。
-        let _ = (w, h);
+        let arr = Uint8ClampedArray::new(rgba.len() as u32);
+        arr.set_from(&rgba, 0);
+        let data = ImageData::new(&arr.into(), w, h);
+        ctx.put_image_data(&data, 0.0, 0.0);
     }
 }
 
 /// **纯函数**：BGRA → RGBA，逐像素换 R/B 通道，alpha 不变。
 ///
-/// 为什么不就地改：调用方给的是软后端的缓冲，可能是它自己的复用缓冲；
+/// 为什么不就地改：调用方给的是软后端的复用缓冲；
 /// 这里返回新 `Vec` 更安全，也便于单测。
 pub fn bgra_to_rgba(src: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(src.len());
@@ -41,7 +42,6 @@ pub fn bgra_to_rgba(src: &[u8]) -> Vec<u8> {
         out.push(px[0]); // B ← R
         out.push(px[3]); // A
     }
-    // 末尾不足 4 字节时补 0，保持长度是 4 的倍数（不会发生，但别静默丢字节）
     while out.len() % 4 != 0 {
         out.push(0);
     }
@@ -54,10 +54,8 @@ mod tests {
 
     #[test]
     fn bgra_to_rgba_swaps_red_and_blue() {
-        // BGRA: (B=10, G=20, R=30, A=255) → RGBA: (30, 20, 10, 255)
         let src = [10u8, 20, 30, 255, 1, 2, 3, 4];
-        let out = bgra_to_rgba(&src);
-        assert_eq!(out, vec![30, 20, 10, 255, 3, 2, 1, 4]);
+        assert_eq!(bgra_to_rgba(&src), vec![30, 20, 10, 255, 3, 2, 1, 4]);
     }
 
     #[test]
