@@ -76,6 +76,12 @@ use y901_ui::{Cursor, Key, Modifiers, MouseButton, Pos, Size, UiTree};
 use crate::backend::D3dBackend;
 use crate::ime::{handle_ime_message, ImeAction, ImeState};
 
+thread_local! {
+    /// 每个 GUI 线程一个高分辨率可等待定时器句柄；进程退出时由系统回收。
+    static FRAME_TIMER: std::cell::Cell<windows_sys::Win32::Foundation::HANDLE> =
+        const { std::cell::Cell::new(std::ptr::null_mut()) };
+}
+
 /// 跨线程唤醒句柄：后台线程（PTY 读、RPC）用它打断主循环的阻塞等待。
 ///
 /// 为什么需要：主循环空闲时阻塞在 `MsgWaitForMultipleObjectsEx` 上（0% CPU），
@@ -1302,13 +1308,40 @@ impl Window {
     /// 为什么不能无限等：PTY 输出走的是 channel 而不是 Windows 消息，
     /// 主循环必须周期性醒来 `pump` 一次，所以这里用**有限超时**。
     pub fn wait_message(&self, timeout_ms: u32) -> bool {
-        // SAFETY：`MsgWaitForMultipleObjectsEx` 不接收句柄数组（`null` + count 0），
-        // 只等待本线程的消息队列；超时参数是纯数值。
-        // 违反后果：跨线程调用会等错队列 —— 表现为“卡住不动”或空转占满 CPU。
+        use windows_sys::Win32::System::Threading::{
+            CreateWaitableTimerExW, SetWaitableTimer, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+        };
+        // **高分辨率等待**：`MsgWaitForMultipleObjectsEx` 的超时精度受系统定时器
+        // （约 15.6ms）限制 —— 16ms 的帧预算会落在 15.6/31.2 两档上，帧率在 32–64fps
+        // 之间摆动。这里改用**进程级**高分辨率可等待定时器担任"到点"，
+        // 精度 ~1ms，且**不用 `timeBeginPeriod`**（不抬高全系统定时器频率）。
         unsafe {
-            // 第 1 个参数 0 表示不等待任何句柄，只看消息队列。
+            let timer = FRAME_TIMER.with(|slot| {
+                if slot.get().is_null() {
+                    let h = CreateWaitableTimerExW(
+                        std::ptr::null(),
+                        std::ptr::null(),
+                        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                        0x001F_0003, // TIMER_ALL_ACCESS
+                    );
+                    slot.set(h);
+                }
+                slot.get()
+            });
+            // 只在**短超时**（帧预算级别）才用高分辨率定时器：
+            // 长等待（闲置 100ms）用旧路径已经足够，且避免定时器
+            // 在长等待中的状态异常导致空转（实测：闲置界面 7000次/秒）。
+            if timeout_ms <= 32 && !timer.is_null() && timer as isize != -1 {
+                // 相对时间（单位 100ns，负数 = 相对）
+                let due: i64 = -(timeout_ms as i64 * 10_000);
+                let _ = SetWaitableTimer(timer, &due, 0, None, std::ptr::null(), 0);
+                let handles = [timer];
+                // 无限等待：定时器到点或消息到达都会唤醒
+                let r = MsgWaitForMultipleObjectsEx(1, handles.as_ptr(), u32::MAX, QS_ALLINPUT, 0);
+                return r != 258;
+            }
+            // 降级：定时器创建失败时保持旧行为
             let r = MsgWaitForMultipleObjectsEx(0, std::ptr::null(), timeout_ms, QS_ALLINPUT, 0);
-            // WAIT_OBJECT_0..WAIT_OBJECT_0+1 都可能出现；超时是 WAIT_TIMEOUT(258)
             r != 258
         }
     }
