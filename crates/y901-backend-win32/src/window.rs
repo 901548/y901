@@ -622,8 +622,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_CHAR => {
             // 临时诊断：确认 wndproc 到底收到了什么键。
-            eprintln!();
-            // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
+                        // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
             // 只在全屏下生效：普通窗口的 Esc 仍作为普通按键上报（用户可能用它取消输入）。
             if is_fullscreen_window(hwnd) && msg == WM_KEYDOWN && wparam as u32 == VK_ESCAPE as u32
             {
@@ -1135,8 +1134,7 @@ impl Window {
                         bottom: 0,
                     };
                     if GetWindowRect(self.hwnd, &mut q) != 0 {
-                        eprintln!();
-                    }
+                                            }
                 }
             } else {
                 // `SetWindowLongPtrW` 返回 0 既可能是“旧样式本就是 0”也可能是失败，
@@ -1172,8 +1170,7 @@ impl Window {
                     bottom: 0,
                 };
                 if GetWindowRect(self.hwnd, &mut q) != 0 {
-                    eprintln!();
-                }
+                                    }
             }
         }
         self.fullscreen = on;
@@ -1441,7 +1438,7 @@ impl Window {
         self.backend.as_mut()?.take_snapshot()
     }
 
-    /// 峙区列表的上限：超过就降级为整窗重绘。
+    /// 脏区列表的上限：超过就降级为整窗重绘。
     ///
     /// 取一个跨线程唤醒句柄（`Send + Sync`），交给后台线程在"有数据了"时调用。
     ///

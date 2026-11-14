@@ -61,7 +61,7 @@ impl WidgetStyle {
     /// 注：`WidgetStyle` **没有前景色字段**（它只表达背景/描边），
     /// 所以这里只表达无背景；文字颜色请取
     /// `theme.muted_text_color()` 并传给控件的 `color(...)`。
-    pub fn muted(_theme: &Theme) -> Self {
+    pub fn muted() -> Self {
         Self::default()
     }
 
