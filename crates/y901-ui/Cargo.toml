@@ -12,7 +12,7 @@ edition.workspace = true
 [dependencies]
 # 布局原语（区间集）放在 core：它是纯数据，且不依赖本 crate（无循环）。
 # 代价：ui 因此间接引入 core 的依赖 `unicode-width`。
-y901-core = { path = "../y901-core", version = "0.1.19" }
+y901-core = { path = "../y901-core", version = "0.1.20" }
 
 [dev-dependencies]
-y901-render = { path = "../y901-render", version = "0.1.19" }
+y901-render = { path = "../y901-render", version = "0.1.20" }
