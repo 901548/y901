@@ -264,6 +264,38 @@ impl Widget for Table {
                     EventResult::Ignored
                 }
             }
+            // **键盘选行**：↑↓ 移动选中，**到边界停住**（不循环，与 ComboBox 一致）。
+            //
+            // 滚动：`Table` 目前**没有滚动机制**（渲染直接遍历全部行，
+            // 溢出部分被父容器裁剪），因此**不存在"跟随滚动"可做**；
+            // 等 Table 真正引入虚拟列表时再加。
+            UiEvent::Key { key, .. } => {
+                let n = self.rows.len();
+                if n == 0 {
+                    return EventResult::Ignored;
+                }
+                // 无选中时：↓ 选第一行（不是第二行），↑ 选最后一行。
+                let next = match (key, self.selected) {
+                    (y901_ui::Key::Down, None) => Some(0),
+                    (y901_ui::Key::Down, Some(cur)) => Some((cur + 1).min(n - 1)),
+                    (y901_ui::Key::Up, None) => Some(n - 1),
+                    (y901_ui::Key::Up, Some(cur)) => Some(cur.saturating_sub(1)),
+                    _ => None,
+                };
+                match next {
+                    Some(idx) if Some(idx) != self.selected => {
+                        self.selected = Some(idx);
+                        if let Some(cmd) = self.command.as_ref() {
+                            let args = y901_ui::json::Json::obj().set("row", idx as i32);
+                            ctx.emit_command(crate::command_with_args(cmd, args));
+                        }
+                        EventResult::Redraw
+                    }
+                    // 到边界：不变更也不重绘，但表示"我处理了这个键"
+                    Some(_) => EventResult::Handled,
+                    None => EventResult::Ignored,
+                }
+            }
             _ => EventResult::Ignored,
         }
     }

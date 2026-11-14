@@ -567,7 +567,6 @@ fn combo_box_keyboard_navigation() {
 /// 已知问题:Table 无键盘导航。
 /// 期望:↑↓ 在行间移动选中(TreeView 的键盘模式可搬运)。
 #[test]
-#[ignore = "已知问题:Table 无键盘导航(↑↓ 选行未实现)"]
 fn table_keyboard_navigation() {
     let mut t = Table::new("t")
         .column(TableColumn::flex("名称"))
