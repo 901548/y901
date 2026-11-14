@@ -73,6 +73,8 @@ pub struct Badge {
     dot_only: bool,
     rect: Rect,
     item: FlexItem,
+    /// DPI 缩放（`measure` 里唯一写入；未测过时 1.0）。
+    scale: f32,
 }
 
 impl Badge {
@@ -85,6 +87,7 @@ impl Badge {
             dot_only: false,
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            scale: 1.0,
         }
     }
 
@@ -97,6 +100,7 @@ impl Badge {
             dot_only: true,
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            scale: 1.0,
         }
     }
 
@@ -128,12 +132,13 @@ impl Widget for Badge {
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
+        self.scale = m.scale();
         if self.dot_only {
-            return c.constrain(Size::new(DOT_D, DOT_D));
+            return c.constrain(Size::new(DOT_D * self.scale, DOT_D * self.scale));
         }
         let style = TextStyle::fg(Color::WHITE);
         let tw = m.measure_text(&self.text, &style).w;
-        c.constrain(Size::new(tw + PAD_X * 2.0, BADGE_H))
+        c.constrain(Size::new(tw + PAD_X * 2.0 * self.scale, BADGE_H * self.scale))
     }
 
     fn arrange(

@@ -25,6 +25,8 @@ pub struct Spinner {
     phase: usize,
     rect: Rect,
     item: FlexItem,
+    /// 缩放后的直径（0.0 = 尚未测量）。
+    size_scaled: f32,
 }
 
 impl Spinner {
@@ -36,6 +38,7 @@ impl Spinner {
             phase: 0,
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            size_scaled: 0.0,
         }
     }
 
@@ -68,11 +71,12 @@ impl Widget for Spinner {
 
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
-        c.constrain(Size::new(self.size, self.size))
+        self.size_scaled = self.size * m.scale();
+        c.constrain(Size::new(self.size_scaled, self.size_scaled))
     }
 
     fn arrange(
@@ -107,7 +111,8 @@ impl Widget for Spinner {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
-        let side = self.size.min(self.rect.w).min(self.rect.h);
+        let want = if self.size_scaled > 0.0 { self.size_scaled } else { self.size * ctx.scale() };
+        let side = want.min(self.rect.w).min(self.rect.h);
         if side <= 0.0 {
             return;
         }

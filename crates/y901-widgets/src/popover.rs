@@ -24,6 +24,8 @@ pub struct Popover {
     factory: Box<dyn Fn() -> Box<dyn Widget>>,
     rect: Rect,
     item: FlexItem,
+    /// DPI 缩放（`measure` 里唯一写入；未测过时 1.0）。
+    scale: f32,
 }
 
 impl Popover {
@@ -39,6 +41,7 @@ impl Popover {
             factory: Box::new(factory),
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            scale: 1.0,
         }
     }
 
@@ -65,10 +68,11 @@ impl Widget for Popover {
 
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
+        self.scale = m.scale();
         c.constrain(Size::new(self.anchor.w, self.anchor.h))
     }
 

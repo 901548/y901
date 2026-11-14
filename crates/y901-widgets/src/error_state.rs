@@ -23,6 +23,8 @@ pub struct ErrorState {
     action: Option<(String, y901_ui::Command)>,
     rect: Rect,
     item: FlexItem,
+    /// DPI 缩放（`measure` 里唯一写入；未测过时 1.0）。
+    scale: f32,
     action_rect: Rect,
 }
 
@@ -36,6 +38,7 @@ impl ErrorState {
             action: None,
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            scale: 1.0,
             action_rect: Rect::ZERO,
         }
     }
@@ -60,12 +63,12 @@ impl ErrorState {
 
     /// 期望高度：图标 + 标题 +（说明）+（按钮）。
     fn content_height(&self) -> f32 {
-        let mut h = ICON_D + 16.0 + 24.0;
+        let mut h = (ICON_D + 16.0 + 24.0) * self.scale;
         if self.description.is_some() {
-            h += 8.0 + 18.0;
+            h += (8.0 + 18.0) * self.scale;
         }
         if self.action.is_some() {
-            h += 16.0 + ACTION_H;
+            h += (16.0 + ACTION_H) * self.scale;
         }
         h
     }
@@ -82,10 +85,11 @@ impl Widget for ErrorState {
 
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
+        self.scale = m.scale();
         c.constrain(Size::new(c.max.w, self.content_height()))
     }
 
@@ -96,12 +100,12 @@ impl Widget for ErrorState {
         _cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
-        let w = 120.0f32;
+        let w = 120.0 * self.scale;
         self.action_rect = Rect::new(
             rect.x + (rect.w - w) * 0.5,
-            rect.bottom() - ACTION_H - 8.0,
+            rect.bottom() - (ACTION_H + 8.0) * self.scale,
             w,
-            ACTION_H,
+            ACTION_H * self.scale,
         );
     }
 
@@ -143,26 +147,26 @@ impl Widget for ErrorState {
         let cx = self.rect.x + self.rect.w * 0.5;
         // \u9519\u8bef\u7ea2\u5706\u5f62\u5360\u4f4d\uff08\u534a\u900f\u660e\u5e95 + \u5b9e\u5fc3\u5185\u5708\uff09
         ctx.fill_round_rect(
-            Rect::new(cx - ICON_D * 0.5, y, ICON_D, ICON_D),
+            Rect::new(cx - ICON_D * self.scale * 0.5, y, ICON_D * self.scale, ICON_D * self.scale),
             Color::rgba(error_red.r, error_red.g, error_red.b, 0.18),
-            ICON_D * 0.5,
+            (ICON_D * self.scale) * 0.5,
         );
         ctx.fill_round_rect(
-            Rect::new(cx - 10.0, y + ICON_D * 0.5 - 10.0, 20.0, 20.0),
+            Rect::new(cx - 10.0 * self.scale, y + ICON_D * self.scale * 0.5 - 10.0 * self.scale, 20.0 * self.scale, 20.0 * self.scale),
             error_red,
-            10.0,
+            10.0 * self.scale,
         );
-        y += ICON_D + 16.0;
+        y += (ICON_D + 16.0) * self.scale;
 
         // \u6807\u9898\uff1a\u9519\u8bef\u7ea2
         let title_style = TextStyle::fg(error_red);
         let tw = ctx.measure_text(&self.title, &title_style).w;
         ctx.draw_text(Pos::new(cx - tw * 0.5, y), &self.title, &title_style);
-        y += 24.0;
+        y += 24.0 * self.scale;
 
         // \u8bf4\u660e\uff1a\u5f31\u5316\u8272
         if let Some(desc) = self.description.as_ref() {
-            y += 8.0;
+            y += 8.0 * self.scale;
             let style = TextStyle::fg(muted);
             let dw = ctx.measure_text(desc, &style).w;
             ctx.draw_text(Pos::new(cx - dw * 0.5, y), desc, &style);
@@ -173,7 +177,7 @@ impl Widget for ErrorState {
             ctx.fill_round_rect(self.action_rect, accent, 6.0);
             let style = TextStyle::fg(Color::WHITE);
             let lw = ctx.measure_text(label, &style).w;
-            let ly = self.action_rect.y + (ACTION_H - ctx.line_height(&style)) * 0.5;
+            let ly = self.action_rect.y + (ACTION_H * self.scale - ctx.line_height(&style)) * 0.5;
             ctx.draw_text(
                 Pos::new(self.action_rect.x + (self.action_rect.w - lw) * 0.5, ly),
                 label,
