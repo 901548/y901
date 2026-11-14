@@ -8,6 +8,7 @@ members = [
     "crates/y901-extras",
     "crates/y901-runtime",
     "crates/y901-backend-win32",
+  "crates/y901-backend-web",
     "crates/y901-shell",
     "crates/y901-backend-x11",
     "crates/y901-render",
