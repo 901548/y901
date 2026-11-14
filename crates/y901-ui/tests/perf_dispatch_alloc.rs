@@ -115,7 +115,7 @@ fn dispatch_allocs_per_event() {
     let mut tree = UiTree::new(flat(100));
     tree.layout(Size::new(400.0, 400.0), &Mono);
 
-    // \u9884\u70ed\uff1a\u9996\u6b21 dispatch \u4f1a\u5efa\u7acb focus/\u7d22\u5f15\u7b49\u4e00\u6b21\u6027\u72b6\u6001
+    // 预热：首次 dispatch 会建立 focus/索引等一次性状态
     let ev = UiEvent::Key {
         key: Key::Char('a'),
         modifiers: Modifiers::default(),

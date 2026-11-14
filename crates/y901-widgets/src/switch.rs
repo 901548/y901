@@ -89,8 +89,8 @@ impl Widget for Switch {
     }
 
     fn role(&self) -> Role {
-        // \u6ca1\u6709 `Role::CHECKBOX` \u5e38\u91cf\uff08Theme \u53ea\u5b9a\u4e49\u4e86 8 \u4e2a\u69fd\u4f4d\uff09\uff0c
-        // \u7528 BUTTON \u69fd\u4f4d\u53d6\u8272\uff0c\u8bed\u4e49\u4e0a\u901a\u8fc7 `prop("checked")` \u8868\u8fbe\u3002
+        // 没有 `Role::CHECKBOX` 常量（Theme 只定义了 8 个槽位），
+        // 用 BUTTON 槽位取色，语义上通过 `prop("checked")` 表达。
         Role::BUTTON
     }
 
@@ -161,7 +161,7 @@ impl Widget for Switch {
         if self.rect.w <= 0.0 || self.rect.h <= 0.0 {
             return;
         }
-        // \u5148\u53d6\u8272\u518d\u7ed8\u5236\uff08\u907f\u5f00 `&ctx` / `&mut ctx` \u51b2\u7a81\uff09
+        // 先取色再绘制（避开 `&ctx` / `&mut ctx` 冲突）
         let (on_bg, off_bg, knob) = {
             let theme = ctx.theme();
             let panel = theme.style(Role::PANEL, State::Normal).bg;
@@ -190,7 +190,7 @@ impl Widget for Switch {
         };
         ctx.fill_round_rect(track, blend(off_bg, on_bg), radius);
 
-        // \u6ed1\u5757\uff1a\u76f4\u5f84 = \u9ad8 - 2*pad\uff08\u6309 rect \u5b9e\u9645\u5c3a\u5bf8\u7b97\uff0c\u81ea\u52a8\u9002\u5e94 DPI\uff09
+        // 滑块：直径 = 高 - 2*pad（按 rect 实际尺寸算，自动适应 DPI）
         let d = (self.rect.h - 2.0 * PAD).max(2.0);
         let travel = (self.rect.w - 2.0 * PAD - d).max(0.0);
         let kx = self.rect.x + PAD + d * 0.5 + travel * t;
@@ -243,10 +243,10 @@ mod tests {
         let mut cache = LayoutCache::new();
         sw.arrange(Rect::new(0.0, 0.0, 44.0, 24.0), &Metrics, &mut cache);
         let mut ctx = EventCtx::new(None, Size::new(200.0, 100.0));
-        // \u5916\u90e8\u70b9\u51fb\uff1a\u4e0d\u53d8
+        // 外部点击：不变
         sw.event(&mut ctx, &UiEvent::MouseUp { pos: y901_ui::Pos::new(200.0, 200.0), button: y901_ui::MouseButton::Left });
         assert!(!sw.checked());
-        // \u5185\u90e8\u70b9\u51fb\uff1a\u5207\u6362 + \u56de\u8c03
+        // 内部点击：切换 + 回调
         sw.event(&mut ctx, &UiEvent::MouseUp { pos: y901_ui::Pos::new(20.0, 12.0), button: y901_ui::MouseButton::Left });
         assert!(sw.checked());
         assert_eq!(ctx.commands.len(), 1, "应发出一条命令");

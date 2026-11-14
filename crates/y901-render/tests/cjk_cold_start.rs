@@ -125,9 +125,9 @@ fn no_scaling_means_zero_mip_generation() {
         let _ = e.glyph(c);
     }
 
-    // \u6ce8\u610f\uff1a\u8fd9\u91cc\u4e0d\u80fd\u76f4\u63a5\u6570 mip\uff0c\u53ea\u80fd\u95f4\u63a5\u9a8c\u8bc1\uff1a
-    // \u5982\u679c mip \u88ab\u751f\u6210\u4e86\uff0c\u518d\u8c03 ensure_mips \u5c31\u4f1a\u7acb\u5373\u8fd4\u56de\u4e14\u4e0d\u82b1\u65f6\u95f4\u3002
-    // \u6240\u4ee5\u6bd4\u8f83"\u9996\u6b21 ensure_mips \u7684\u8017\u65f6"\u4e0e"\u5df2\u751f\u6210\u540e\u518d\u8c03"\u7684\u8017\u65f6\u3002
+    // 注意：这里不能直接数 mip，只能间接验证：
+    // 如果 mip 被生成了，再调 ensure_mips 就会立即返回且不花时间。
+    // 所以比较"首次 ensure_mips 的耗时"与"已生成后再调"的耗时。
     let t = Instant::now();
     for &c in &chars[..50] {
         let _ = e.ensure_mips_upto(c, 0);

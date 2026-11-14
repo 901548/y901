@@ -486,7 +486,7 @@ let list = ListView::new("chat", 24.0)
 - **后续建议**：若之后还要加参数（如 letter_spacing / 9 号以上），再打包为 struct。
   **当前不阻塞功能，记录为技术债。**
 
-### DPI × scale：字号已接入（高度常量待做）
+### DPI × scale：布局层统一缩放（已封板）
 
 - **当前状态（已完成）**：
   - **基准字号**：`FontConfig.size × dpi_scale`（`window.rs` 用 `GetDpiForWindow(hwnd)/96.0`）。
@@ -496,10 +496,22 @@ let list = ListView::new("chat", 24.0)
   - `px_final = px × dpi_scale × map_scale()`：**两个 scale 来源不同**（设备 DPI vs 变换栈），不重复。
   - `TextMetrics::scale()` 已修正为返回**窗口级** DPI（字段注入）。
     **实测：`GetDpiForSystem()`=96 而窗口 DPI=120** —— PMv2 进程下不能用系统 DPI。
-- **已知中间态缺陷（下一轮必须修）**：
-  - **高度常量尚未乘 scale**（`TAB_BAR_H` / `TOOLBAR_H` / `ITEM_H` / `ROW_H` 等约 12 组、约 18 个常量）。
-  - 125% 下**字从 16→20，但标签栏仍 32px** → **文字会顶边/裁切**。
-  - 不随 scale 的约 10 个（`split::DIVIDER` 1px、`CARET_W`、`BAR_WIDTH`、`CHECK_W`、`RADIUS`等）**应保持不变**。
+- **DPI 缩放契约（已封板，改动前请先读这一节）**：
+  1. **布局层统一缩 `Dimension::Px`**：`layout.rs` 的 `flex_measure_into` /
+     `flex_arrange_with` 从 `metrics.scale()` 取 scale，把 6 处 `Dimension::Px(v)`
+     一律解析为 `v * scale`。**新增解析点必须走同一条路，不得直接 `match` 出 `v`。**
+  2. **组件内部消费 `Px` 时自己乘 `self.scale`，且只乘一次**：`Table::column_layout`
+     （列宽自算）、`Skeleton`（形状宽度自算）这类"不走布局层"的路径由组件负责。
+     已在 `measure` 里写入 `self.scale` 的组件：Table / Spinner / EmptyState / ErrorState /
+     Alert / ComboBox / Skeleton / Popover / Badge。
+  3. **`f32` 常量（行高 / padding / 图标直径）由组件自己乘 `self.scale`**，
+     布局层不碰它们。
+  4. **禁止双缩**：`Dimension::Px` 已经由布局层乘过 scale，组件**不得**再对它乘一次；
+     需要"随 DPI 变的裸尺寸"就用 `f32` 常量，不要塞进 `Px`。
+  5. **测试契约**：`scale == 1.0` 时 `n * 1.0 == n`，因此 `hash-gate` 基线
+     （`0x39AE41C1697CBFD0`）在任何 DPI 改造后都应保持不变；若变了，说明动了渲染字节。
+  6. **像素证据链（125%）**：Spinner `rect` 16×16 → **20×20**、Table 行距 28 → **35**、
+     Badge 高 18 → **22**、Alert 色条 3 → **4**。
 - **hash-gate 基线**：当前为 **`0x39AE41C1697CBFD0`**（门禁已固定 `Y901_TEST_DPI_SCALE=1.0`）。
 - **曾经的错误归因（已更正）**：
   当时记录过 `0x87DECF871BB90AFF`，并写成"原因：基准字号 16→20 @125%"。

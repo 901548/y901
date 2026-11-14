@@ -176,7 +176,7 @@ impl Widget for Alert {
             let theme = ctx.theme();
             self.kind.accent(theme)
         };
-        // \u80cc\u666f\uff1a\u4e3b\u9898\u5e95\u8272 + \u4e00\u5c42\u975e\u5e38\u6de1\u7684 kind \u8272\u504f
+        // 背景：主题底色 + 一层非常淡的 kind 色偏
         let (bg, text_fg, muted) = {
             let theme = ctx.theme();
             (
@@ -188,7 +188,7 @@ impl Widget for Alert {
         let tint = Color::rgba(accent.r, accent.g, accent.b, 0.10);
         ctx.fill_rect(self.rect, bg);
         ctx.fill_rect(self.rect, tint);
-        // \u5de6\u4fa7\u8c03\u6574\u8272\u6761
+        // 左侧调整色条
         ctx.fill_rect(
             Rect::new(self.rect.x, self.rect.y, BAR_W * self.scale, self.rect.h),
             accent,
@@ -210,7 +210,7 @@ impl Widget for Alert {
         }
 
         if self.command.is_some() {
-            // \u5173\u95ed\uff1a\u4e00\u4e2a\u00d7\uff08\u7528\u6587\u5b57\u753b\uff0c\u4e0d\u65b0\u589e\u56fe\u5143\uff09
+            // 关闭：一个×（用文字画，不新增图元）
             let style = TextStyle::fg(muted);
             let w = ctx.measure_text("×", &style).w;
             ctx.draw_text(

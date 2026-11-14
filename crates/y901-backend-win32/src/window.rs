@@ -2239,30 +2239,30 @@ mod physical_font_size_tests {
         );
     }
 }
-/// **DPI \u2192 \u7f29\u653e\u6bd4**\u7684\u5951\u7ea6\u6d4b\u8bd5\uff08\u7eaf\u51fd\u6570\uff0c\u65e0\u9700\u771f\u5b9e\u7a97\u53e3\uff09\u3002
+/// **DPI → 缩放比**的契约测试（纯函数，无需真实窗口）。
 #[cfg(test)]
 mod scale_from_dpi_tests {
     use super::scale_from_dpi;
 
-    /// 100% \u663e\u793a\u5668\uff1a96 DPI \u2192 1.0\u3002
+    /// 100% 显示器：96 DPI → 1.0。
     #[test]
     fn dpi_96_is_scale_one() {
         assert_eq!(scale_from_dpi(96), 1.0);
     }
 
-    /// 125% \u663e\u793a\u5668\uff08120 DPI\uff09\u2192 1.25 \u2014\u2014 \u672c\u673a\u5b9e\u6d4b\u503c\u3002
+    /// 125% 显示器（120 DPI）→ 1.25 —— 本机实测值。
     #[test]
     fn dpi_120_is_scale_125() {
         assert_eq!(scale_from_dpi(120), 1.25);
     }
 
-    /// 150% \u663e\u793a\u5668\uff08144 DPI\uff09\u2192 1.5\u3002
+    /// 150% 显示器（144 DPI）→ 1.5。
     #[test]
     fn dpi_144_is_scale_150() {
         assert_eq!(scale_from_dpi(144), 1.5);
     }
 
-    /// \u9632\u5fa1\uff1a`GetDpiForWindow` \u8fd4\u56de 0\uff08\u5931\u8d25\uff09\u65f6\u5f52\u4e00\uff0c\u4e0d\u4f1a\u5f97\u5230 0 \u500d\u7f29\u653e\u3002
+    /// 防御：`GetDpiForWindow` 返回 0（失败）时归一，不会得到 0 倍缩放。
     #[test]
     fn dpi_zero_falls_back_to_one() {
         assert_eq!(scale_from_dpi(0), 1.0);

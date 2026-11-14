@@ -135,7 +135,7 @@ impl Widget for ErrorState {
         if self.rect.w <= 0.0 || self.rect.h <= 0.0 {
             return;
         }
-        // \u5148\u62f7\u989c\u8272\uff1a`ctx.theme()` \u6301\u6709 `&ctx`\uff0c\u540e\u7eed\u7ed8\u5236\u8981 `&mut ctx`\u3002
+        // 先拷颜色：`ctx.theme()` 持有 `&ctx`，后续绘制要 `&mut ctx`。
         let error_red = ctx.theme().error_color();
         let (muted, accent) = {
             let theme = ctx.theme();
@@ -147,7 +147,7 @@ impl Widget for ErrorState {
 
         let mut y = self.rect.y + 8.0;
         let cx = self.rect.x + self.rect.w * 0.5;
-        // \u9519\u8bef\u7ea2\u5706\u5f62\u5360\u4f4d\uff08\u534a\u900f\u660e\u5e95 + \u5b9e\u5fc3\u5185\u5708\uff09
+        // 错误红圆形占位（半透明底 + 实心内圈）
         ctx.fill_round_rect(
             Rect::new(cx - ICON_D * self.scale * 0.5, y, ICON_D * self.scale, ICON_D * self.scale),
             Color::rgba(error_red.r, error_red.g, error_red.b, 0.18),
@@ -165,13 +165,13 @@ impl Widget for ErrorState {
         );
         y += (ICON_D + 16.0) * self.scale;
 
-        // \u6807\u9898\uff1a\u9519\u8bef\u7ea2
+        // 标题：错误红
         let title_style = TextStyle::fg(error_red);
         let tw = ctx.measure_text(&self.title, &title_style).w;
         ctx.draw_text(Pos::new(cx - tw * 0.5, y), &self.title, &title_style);
         y += 24.0 * self.scale;
 
-        // \u8bf4\u660e\uff1a\u5f31\u5316\u8272
+        // 说明：弱化色
         if let Some(desc) = self.description.as_ref() {
             y += 8.0 * self.scale;
             let style = TextStyle::fg(muted);
@@ -179,7 +179,7 @@ impl Widget for ErrorState {
             ctx.draw_text(Pos::new(cx - dw * 0.5, y), desc, &style);
         }
 
-        // \u91cd\u8bd5\u6309\u94ae
+        // 重试按钮
         if let Some((label, _)) = self.action.as_ref() {
             ctx.fill_round_rect(self.action_rect, accent, 6.0);
             let style = TextStyle::fg(Color::WHITE);

@@ -2487,7 +2487,7 @@ impl UiTree {
 
     /// 上一次 Tick 广播时**声明需要心跳的节点数**。
     ///
-    /// `run_loop` 用它选 Tick 节拍：`> 0` 就说明"即使没有事件也有人要帧"\u3002
+    /// `run_loop` 用它选 Tick 节拍：`> 0` 就说明"即使没有事件也有人要帧"。
     pub fn tick_subscribers(&self) -> usize {
         self.tick_subscribers
     }
