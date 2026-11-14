@@ -121,6 +121,19 @@ impl Theme {
     /// 槽位数。新增角色必须落在这几个槽里，否则会被折叠到 panel。
     pub const SLOTS: usize = 8;
 
+    /// **弱化文字色**：比 `text` 暗、比 `border` 亮，用于说明文字 / 状态栏。
+    ///
+    /// 为什么做成方法而不是新槽位：`SLOTS = 8` 是对外契约（`slot()` 线性查表），
+    /// 加槽会破坏所有既有 `Theme` 常量；而"弱化文字"是**派生色**，不是独立角色。
+    pub fn muted_text_color(&self) -> Color {
+        Color::rgba(0.55, 0.58, 0.65, 1.0)
+    }
+
+    /// **分割线颜色**：比 `border` 亮一点、比输入框边框暗，保证 1px 线在深底上可见。
+    pub fn divider_color(&self) -> Color {
+        Color::rgba(0.16, 0.18, 0.22, 1.0)
+    }
+
     /// 把任意角色映射到槽位；未知角色落到 "panel"。
     pub const fn slot(role: Role) -> usize {
         // Role 是开放字符串，只能线性比对（6 次 str 比较，可忽略）
@@ -173,12 +186,12 @@ impl Theme {
             // panel
             [
                 Style::new(
-                    Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.05, 0.05, 0.07, 1.0),
+                    Color::rgba(0.92, 0.94, 0.98, 1.0),
+                    Color::rgba(0.07, 0.08, 0.10, 1.0),
                 ),
                 Style::new(
-                    Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.08, 0.08, 0.10, 1.0),
+                    Color::rgba(0.92, 0.94, 0.98, 1.0),
+                    Color::rgba(0.10, 0.12, 0.15, 1.0),
                 ),
                 Style::new(
                     Color::rgba(0.90, 0.92, 0.96, 1.0),
@@ -196,26 +209,26 @@ impl Theme {
             // button
             [
                 Style::new(
-                    Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.16, 0.18, 0.24, 1.0),
+                    Color::rgba(0.96, 0.97, 1.0, 1.0),
+                    Color::rgba(0.18, 0.21, 0.28, 1.0),
                 )
                 .with_padding(Edges::symmetric(12.0, 6.0))
                 .with_radius(4.0),
                 Style::new(
-                    Color::rgba(0.95, 0.97, 1.0, 1.0),
-                    Color::rgba(0.22, 0.26, 0.34, 1.0),
-                )
-                .with_padding(Edges::symmetric(12.0, 6.0))
-                .with_radius(4.0),
-                Style::new(
-                    Color::rgba(1.0, 1.0, 1.0, 1.0),
-                    Color::rgba(0.30, 0.42, 0.60, 1.0),
+                    Color::rgba(0.99, 1.0, 1.0, 1.0),
+                    Color::rgba(0.24, 0.29, 0.38, 1.0),
                 )
                 .with_padding(Edges::symmetric(12.0, 6.0))
                 .with_radius(4.0),
                 Style::new(
                     Color::rgba(1.0, 1.0, 1.0, 1.0),
-                    Color::rgba(0.20, 0.30, 0.45, 1.0),
+                    Color::rgba(0.26, 0.44, 0.72, 1.0),
+                )
+                .with_padding(Edges::symmetric(12.0, 6.0))
+                .with_radius(4.0),
+                Style::new(
+                    Color::rgba(1.0, 1.0, 1.0, 1.0),
+                    Color::rgba(0.20, 0.33, 0.55, 1.0),
                 )
                 .with_padding(Edges::symmetric(12.0, 6.0))
                 .with_radius(4.0),
@@ -228,16 +241,26 @@ impl Theme {
             ],
             // text_input
             [
-                Style::new(
-                    Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.10, 0.11, 0.14, 1.0),
-                )
-                .with_padding(Edges::symmetric(8.0, 4.0)),
-                Style::new(
-                    Color::rgba(0.90, 0.92, 0.96, 1.0),
-                    Color::rgba(0.12, 0.13, 0.17, 1.0),
-                )
-                .with_padding(Edges::symmetric(8.0, 4.0)),
+                Style {
+                    // **可见边框**：原先只有"比 panel 亮一档"的底色，在深色主题里
+                    // 输入框几乎融进背景（`static_page` 观察到的第一个问题）。
+                    border: Color::rgba(0.24, 0.27, 0.34, 1.0),
+                    ..Style::new(
+                        Color::rgba(0.92, 0.94, 0.98, 1.0),
+                        Color::rgba(0.11, 0.12, 0.16, 1.0),
+                    )
+                }
+                .with_padding(Edges::symmetric(8.0, 4.0))
+                .with_radius(4.0),
+                Style {
+                    border: Color::rgba(0.34, 0.42, 0.56, 1.0),
+                    ..Style::new(
+                        Color::rgba(0.94, 0.96, 1.0, 1.0),
+                        Color::rgba(0.13, 0.15, 0.19, 1.0),
+                    )
+                }
+                .with_padding(Edges::symmetric(8.0, 4.0))
+                .with_radius(4.0),
                 Style::new(
                     Color::rgba(0.90, 0.92, 0.96, 1.0),
                     Color::rgba(0.13, 0.14, 0.18, 1.0),
@@ -269,12 +292,12 @@ impl Theme {
                     Color::rgba(0.06, 0.06, 0.08, 1.0),
                 ),
                 Style::new(
-                    Color::rgba(0.90, 0.93, 0.98, 1.0),
-                    Color::rgba(0.12, 0.14, 0.18, 1.0),
+                    Color::rgba(0.92, 0.95, 1.0, 1.0),
+                    Color::rgba(0.16, 0.19, 0.26, 1.0),
                 ),
                 Style::new(
                     Color::rgba(1.0, 1.0, 1.0, 1.0),
-                    Color::rgba(0.16, 0.20, 0.28, 1.0),
+                    Color::rgba(0.20, 0.26, 0.36, 1.0),
                 ),
                 Style::new(
                     Color::rgba(1.0, 1.0, 1.0, 1.0),
@@ -287,11 +310,11 @@ impl Theme {
             ],
             // scrollbar
             [
-                Style::new(Color::TRANSPARENT, Color::rgba(0.22, 0.24, 0.30, 1.0)),
-                Style::new(Color::TRANSPARENT, Color::rgba(0.28, 0.31, 0.38, 1.0)),
-                Style::new(Color::TRANSPARENT, Color::rgba(0.38, 0.43, 0.55, 1.0)),
-                Style::new(Color::TRANSPARENT, Color::rgba(0.22, 0.24, 0.30, 1.0)),
-                Style::new(Color::TRANSPARENT, Color::rgba(0.15, 0.16, 0.20, 1.0)),
+                Style::new(Color::TRANSPARENT, Color::rgba(0.30, 0.33, 0.42, 1.0)),
+                Style::new(Color::TRANSPARENT, Color::rgba(0.38, 0.42, 0.53, 1.0)),
+                Style::new(Color::TRANSPARENT, Color::rgba(0.48, 0.54, 0.68, 1.0)),
+                Style::new(Color::TRANSPARENT, Color::rgba(0.30, 0.33, 0.42, 1.0)),
+                Style::new(Color::TRANSPARENT, Color::rgba(0.18, 0.20, 0.26, 1.0)),
             ],
             // list_item —— A1：暂与 panel 同色（零视觉变化）
             // list_item —— A2a：逐字复制 list 槽位（列表项的 hover/selected 本就是项语义）
@@ -301,12 +324,12 @@ impl Theme {
                     Color::rgba(0.06, 0.06, 0.08, 1.0),
                 ),
                 Style::new(
-                    Color::rgba(0.90, 0.93, 0.98, 1.0),
-                    Color::rgba(0.12, 0.14, 0.18, 1.0),
+                    Color::rgba(0.92, 0.95, 1.0, 1.0),
+                    Color::rgba(0.16, 0.19, 0.26, 1.0),
                 ),
                 Style::new(
                     Color::rgba(1.0, 1.0, 1.0, 1.0),
-                    Color::rgba(0.16, 0.20, 0.28, 1.0),
+                    Color::rgba(0.20, 0.26, 0.36, 1.0),
                 ),
                 Style::new(
                     Color::rgba(1.0, 1.0, 1.0, 1.0),

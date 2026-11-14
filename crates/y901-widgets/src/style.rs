@@ -7,7 +7,7 @@
 //! 3. **不引入业务语义**：这里只有颜色/圆角/描边这些**绘制参数**，
 //!    框架不认识"按钮长什么样才算对"，只负责把参数交给渲染。
 
-use y901_ui::Color;
+use y901_ui::{Color, Role, State, Theme};
 
 /// 单个控件的可选样式覆盖。所有字段都是"可选/零值即不覆盖"。
 ///
@@ -56,6 +56,57 @@ pub struct WidgetStyle {
 }
 
 impl WidgetStyle {
+    /// **弱化文字**的样式。
+    ///
+    /// 注：`WidgetStyle` **没有前景色字段**（它只表达背景/描边），
+    /// 所以这里只表达无背景；文字颜色请取
+    /// `theme.muted_text_color()` 并传给控件的 `color(...)`。
+    pub fn muted(_theme: &Theme) -> Self {
+        Self::default()
+    }
+
+    /// **分割线**：1px 高的线条用这个样式 + `FlexItem::height(1.0)`。
+    pub fn divider(theme: &Theme) -> Self {
+        Self {
+            bg: Some(theme.divider_color()),
+            radius: 0.0,
+            ..Self::default()
+        }
+    }
+
+    /// **输入框**：取 `text_input` 槽位的底色与边框色，圆角 4。
+    pub fn input_field(theme: &Theme) -> Self {
+        let s = theme.style(Role::TEXT_INPUT, State::Normal);
+        Self {
+            bg: Some(s.bg),
+            border: Some(s.border),
+            border_width: 1.0,
+            radius: 4.0,
+            ..Self::default()
+        }
+    }
+
+    /// **主按钮**：取 `button` 槽位的按下态底色，圆角 6。
+    pub fn primary_button(theme: &Theme) -> Self {
+        let s = theme.style(Role::BUTTON, State::Pressed);
+        Self {
+            bg: Some(s.bg),
+            radius: 6.0,
+            ..Self::default()
+        }
+    }
+
+    /// **次按钮**：比 panel 亮一档的底色 + 1px 边框，圆角 6。
+    pub fn secondary_button(theme: &Theme) -> Self {
+        let panel = theme.style(Role::PANEL, State::Hovered);
+        Self {
+            bg: Some(panel.bg),
+            border: Some(theme.divider_color()),
+            border_width: 1.0,
+            radius: 6.0,
+            ..Self::default()
+        }
+    }
     /// 背景纯色。
     pub fn bg(mut self, color: Color) -> Self {
         self.bg = Some(color);

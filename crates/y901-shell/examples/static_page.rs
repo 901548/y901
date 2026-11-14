@@ -1,15 +1,16 @@
-//! 极简静态页面：只为观察**基础渲染质量**（文字清晰度、对齐、间距、颜色、圆角）。
+//! 极简静态页面 v2：观察**基础渲染质量 + 主题观感**。
 //!
-//! 刻意只用 `Flex` + `TextLabel` + `TextInput` + `Button`：不用 Grid / Image / ListView。
+//! 只用 `Flex` + `TextLabel` + `TextInput` + `Button`（不用 Grid / Image / ListView）。
+//! 所有颜色来自 `Theme::DARK`（含 `muted_text_color()` / `divider_color()`），
+//! 所有样式来自 `WidgetStyle` 的语义构造器（`input_field` / `primary_button` / ...）。
+//!
 //! 运行：`cargo run --example static_page`
-//!
-//! 规格：800x600、padding 24、gap 16、字号 24/14/13/12、控件高 32、尺寸取 4/8/12/16/24。
 
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
 use y901_ui::{
-    widget::Dimension, Align, Color, Command, Edges, Flex, FlexItem, Justify, Role, State, Theme,
-    UiEvent, UiTree,
+    widget::Dimension, Align, Command, Edges, Flex, FlexItem, Justify, Role, State, Theme, UiEvent,
+    UiTree,
 };
 use y901_widgets::style::WidgetStyle;
 use y901_widgets::{Button, TextInput, TextLabel};
@@ -29,42 +30,23 @@ impl Host for Shell {
     }
 }
 
-/// 调色板：**全部来自 `Theme::DARK`**，不硬编码色值。
-struct Palette {
-    bg: Color,
-    fg: Color,
-    muted: Color,
-    border: Color,
-    accent: Color,
-}
-
-fn palette() -> Palette {
-    let panel = Theme::DARK.style(Role::PANEL, State::Normal);
-    let button = Theme::DARK.style(Role::BUTTON, State::Normal);
-    Palette {
-        bg: panel.bg,
-        fg: panel.fg,
-        muted: panel.border,
-        border: panel.border,
-        accent: button.bg,
-    }
-}
-
-/// 一行"标签（右对齐、固定宽）+ 输入框"。
-///
-/// 注：`TextLabel` 没有 align 参数，所以右对齐是用"宽度固定的行 + `justify(End)`"实现的；
-/// 这是本次唯一一处 API 不顺手的地方（已在报告里记录）。
+/// 一行"标签（右对齐、固定 80）+ 输入框"。
 fn form_row(
     id: &'static str,
     label: &'static str,
     value: &'static str,
-    input: FlexItem,
-    p: &Palette,
+    input_item: FlexItem,
+    theme: &Theme,
 ) -> Flex {
+    let text_fg = theme.style(Role::TEXT, State::Normal).fg;
     let label_cell = Flex::row(format!("{id}-lbl"))
         .justify(Justify::End)
         .flex_item(FlexItem::width(80.0))
-        .push(Box::new(TextLabel::new(format!("{id}-lbl-t"), label).size(14.0).color(p.fg)));
+        .push(Box::new(
+            TextLabel::new(format!("{id}-lbl-t"), label)
+                .size(14.0)
+                .color(text_fg),
+        ));
 
     Flex::row(format!("{id}-row"))
         .gap(16.0)
@@ -73,90 +55,100 @@ fn form_row(
         .push(Box::new(
             TextInput::new(format!("{id}-in"))
                 .with_text(value)
-                .flex_item(input),
+                .widget_style(WidgetStyle::input_field(theme))
+                .flex_item(input_item),
         ))
 }
 
 fn build() -> UiTree {
-    let p = palette();
+    let theme = Theme::DARK;
+    let panel_bg = theme.style(Role::PANEL, State::Normal).bg;
+    // 卡片：比 panel 亮一档（同一个槽位的 Hovered 态），不新增槽位。
+    let card_bg = theme.style(Role::PANEL, State::Hovered).bg;
+    let text_fg = theme.style(Role::TEXT, State::Normal).fg;
+    let muted = theme.muted_text_color();
 
-    // 1px 分割线：用"1px 高的 Flex + 背景色"表达（框架暂无 Divider 组件）。
     let divider = Flex::row("divider")
-        .background(p.border)
+        .background(theme.divider_color())
         .flex_item(FlexItem::height(1.0));
 
-    let primary = WidgetStyle::default().bg(p.accent).radius(6.0);
-    let secondary = WidgetStyle::default()
-        .bg(p.muted)
-        .radius(6.0)
-        .border(p.border, 1.0);
-
-    let root = Flex::column("root")
-        .background(p.bg)
-        .padding(Edges::all(24.0))
-        .gap(16.0)
-        // 1. 标题
-        .push(Box::new(
-            TextLabel::new("title", "设置")
-                .size(24.0)
-                .bold()
-                .color(p.fg),
-        ))
-        // 2. 说明
-        .push(Box::new(
-            TextLabel::new("hint", "修改后点击保存生效")
-                .size(13.0)
-                .color(p.muted),
-        ))
-        // 3. 分割线
-        .push(Box::new(divider))
-        // 4. 表单区
-        .push(Box::new(
-            Flex::column("form")
-                .gap(12.0)
-                .push(Box::new(form_row(
-                    "user",
-                    "用户名",
-                    "admin",
-                    FlexItem { width: Dimension::Flex(1.0), height: Dimension::Px(32.0), ..FlexItem::NO_LIMITS },
-                    &p,
-                )))
-                .push(Box::new(form_row(
-                    "pass",
-                    "密码",
-                    "••••••••",
-                    FlexItem { width: Dimension::Flex(1.0), height: Dimension::Px(32.0), ..FlexItem::NO_LIMITS },
-                    &p,
-                )))
-                .push(Box::new(form_row(
-                    "port",
-                    "端口",
-                    "8080",
-                    FlexItem::fixed(100.0, 32.0),
-                    &p,
-                ))),
-        ))
-        // 5. 按钮行（右对齐）
+    let card = Flex::column("card")
+        .background(card_bg)
+        .padding(Edges::all(20.0))
+        .gap(12.0)
+        .push(Box::new(form_row(
+            "user",
+            "用户名",
+            "admin",
+            FlexItem {
+                width: Dimension::Flex(1.0),
+                height: Dimension::Px(32.0),
+                ..FlexItem::NO_LIMITS
+            },
+            &theme,
+        )))
+        .push(Box::new(form_row(
+            "pass",
+            "密码",
+            "••••••••",
+            FlexItem {
+                width: Dimension::Flex(1.0),
+                height: Dimension::Px(32.0),
+                ..FlexItem::NO_LIMITS
+            },
+            &theme,
+        )))
+        .push(Box::new(form_row(
+            "port",
+            "端口",
+            "8080",
+            FlexItem::fixed(100.0, 32.0),
+            &theme,
+        )))
         .push(Box::new(
             Flex::row("actions")
                 .gap(8.0)
                 .justify(Justify::End)
                 .push(Box::new(
                     Button::new("cancel", "取消")
-                        .style(secondary)
+                        .style(WidgetStyle::secondary_button(&theme))
                         .flex_item(FlexItem::height(32.0)),
                 ))
                 .push(Box::new(
                     Button::new("save", "保存")
-                        .style(primary)
+                        .style(WidgetStyle::primary_button(&theme))
                         .flex_item(FlexItem::height(32.0)),
                 )),
+        ));
+
+    let root = Flex::column("root")
+        .background(panel_bg)
+        .padding(Edges::all(24.0))
+        .gap(16.0)
+        .push(Box::new(
+            TextLabel::new("title", "设置")
+                .size(24.0)
+                .bold()
+                .color(text_fg),
         ))
-        // 6. 状态文字
+        .push(Box::new(
+            TextLabel::new("hint", "修改后点击保存生效")
+                .size(13.0)
+                .color(muted),
+        ))
+        .push(Box::new(divider))
+        .push(Box::new(card))
+        // spacer：把状态文字推到底部
+        .push(Box::new(
+            Flex::row("spacer").flex_item(FlexItem {
+                height: Dimension::Flex(1.0),
+                ..FlexItem::NO_LIMITS
+            }),
+        ))
         .push(Box::new(
             TextLabel::new("status", "上次保存：2026-11-14 10:30")
                 .size(12.0)
-                .color(p.muted),
+                .color(muted),
         ));
 
     UiTree::new(Box::new(root))
