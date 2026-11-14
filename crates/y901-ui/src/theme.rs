@@ -126,12 +126,20 @@ impl Theme {
     /// 为什么做成方法而不是新槽位：`SLOTS = 8` 是对外契约（`slot()` 线性查表），
     /// 加槽会破坏所有既有 `Theme` 常量；而"弱化文字"是**派生色**，不是独立角色。
     pub fn muted_text_color(&self) -> Color {
-        Color::rgba(0.55, 0.58, 0.65, 1.0)
+        // **用亮度求中性灰**：三通道取同一个值，B-R = 0。
+        //
+        // 旧值 (0.55,0.58,0.65) 的 B-R = 0.10，在深底上看起来是"淡蓝"而不是"灰"
+        // —— 说明文字不应带色彩倾向（`static_page` 里实测得到的）。
+        let fg = self.style(Role::TEXT, State::Normal).fg;
+        let l = (0.299 * fg.r + 0.587 * fg.g + 0.114 * fg.b) * 0.64;
+        let l = l.max(0.35); // 可读性下限：不能暗到看不清
+        Color::rgba(l, l, l, 1.0)
     }
 
     /// **分割线颜色**：比 `border` 亮一点、比输入框边框暗，保证 1px 线在深底上可见。
     pub fn divider_color(&self) -> Color {
-        Color::rgba(0.16, 0.18, 0.22, 1.0)
+        // 分割线是**中性元素**：不应偏蓝（旧值 B-R = 0.06）。
+        Color::rgba(0.18, 0.18, 0.18, 1.0)
     }
 
     /// 把任意角色映射到槽位；未知角色落到 "panel"。
@@ -244,7 +252,8 @@ impl Theme {
                 Style {
                     // **可见边框**：原先只有"比 panel 亮一档"的底色，在深色主题里
                     // 输入框几乎融进背景（`static_page` 观察到的第一个问题）。
-                    border: Color::rgba(0.24, 0.27, 0.34, 1.0),
+                    // 中性灰（旧值 B-R = 0.10：输入框边框不应带蓝）
+                    border: Color::rgba(0.27, 0.27, 0.27, 1.0),
                     ..Style::new(
                         Color::rgba(0.92, 0.94, 0.98, 1.0),
                         Color::rgba(0.11, 0.12, 0.16, 1.0),
@@ -253,7 +262,8 @@ impl Theme {
                 .with_padding(Edges::symmetric(8.0, 4.0))
                 .with_radius(4.0),
                 Style {
-                    border: Color::rgba(0.34, 0.42, 0.56, 1.0),
+                    // 悬停态更亮，但仍然中性（旧值 B-R = 0.22，是全页最偏蓝的一处）
+                    border: Color::rgba(0.40, 0.40, 0.40, 1.0),
                     ..Style::new(
                         Color::rgba(0.94, 0.96, 1.0, 1.0),
                         Color::rgba(0.13, 0.15, 0.19, 1.0),
