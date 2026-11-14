@@ -14,7 +14,7 @@ use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
 use y901_ui::grid::{Grid, GridTrack};
 use y901_ui::image::{ImageFit, ImageStyle};
-use y901_ui::{Color, Command, Edges, Flex, FlexItem, UiEvent, UiTree};
+use y901_ui::{Color, Command, Edges, Flex, FlexItem, UiTree};
 use y901_widgets::image::Image;
 use y901_widgets::TextLabel;
 
@@ -24,12 +24,7 @@ const SAMPLE_PNG: &[u8] = include_bytes!("assets/quadrants.png");
 struct GalleryDemo;
 
 impl Host for GalleryDemo {
-    fn idle(&mut self, tree: &mut UiTree) {
-        for _ in 0..4 {
-            if !tree.dispatch(&UiEvent::Tick).is_handled() {
-                break;
-            }
-        }
+    fn idle(&mut self, _tree: &mut UiTree) {
     }
 
     fn command(&mut self, _tree: &mut UiTree, _cmd: Command) -> bool {

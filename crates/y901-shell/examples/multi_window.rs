@@ -11,7 +11,7 @@
 
 use y901_runtime::{Host, Options, WindowFactory};
 use y901_shell::create_runtime;
-use y901_ui::{Color, Command, Edges, Flex, FlexItem, UiEvent, UiTree};
+use y901_ui::{Color, Command, Edges, Flex, FlexItem, UiTree};
 use y901_widgets::TextLabel;
 
 /// 最小 Host：每帧推进 Tick。
@@ -20,9 +20,6 @@ struct Shell;
 impl Host for Shell {
     fn idle(&mut self, tree: &mut UiTree) {
         for _ in 0..8 {
-            if !tree.dispatch(&UiEvent::Tick).is_handled() {
-                break;
-            }
         }
         for _ in tree.poll_subscriptions(std::time::Instant::now()) {}
     }

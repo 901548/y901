@@ -10,7 +10,7 @@
 
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
-use y901_ui::{Color, Command, Edges, Flex, FlexItem, Json, UiEvent, UiTree};
+use y901_ui::{Color, Command, Edges, Flex, FlexItem, Json, UiTree};
 use y901_widgets::{Button, TextLabel};
 
 /// 极简 Host：驱动 Tick，并处理按钮产生的**应用命令**。
@@ -19,13 +19,8 @@ struct DemoHost {
 }
 
 impl Host for DemoHost {
-    fn idle(&mut self, tree: &mut UiTree) {
+    fn idle(&mut self, _tree: &mut UiTree) {
         // Tick 是组件心跳（动画、轮询）。没有组件需要时立即返回，不占 CPU。
-        for _ in 0..4 {
-            if !tree.dispatch(&UiEvent::Tick).is_handled() {
-                break;
-            }
-        }
     }
 
     fn command(&mut self, tree: &mut UiTree, cmd: Command) -> bool {

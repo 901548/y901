@@ -9,7 +9,7 @@
 
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
-use y901_ui::{Color, Command, Edges, Flex, FlexItem, UiEvent, UiTree};
+use y901_ui::{Color, Command, Edges, Flex, FlexItem, UiTree};
 use y901_widgets::tree_view::{TreeItem, TreeView};
 
 /// 造一棵 3 层树，其中 `src` 下有 200 个文件用来展示虚拟化。
@@ -53,12 +53,7 @@ impl TreeDemo {
 }
 
 impl Host for TreeDemo {
-    fn idle(&mut self, tree: &mut UiTree) {
-        for _ in 0..4 {
-            if !tree.dispatch(&UiEvent::Tick).is_handled() {
-                break;
-            }
-        }
+    fn idle(&mut self, _tree: &mut UiTree) {
     }
 
     fn command(&mut self, _tree: &mut UiTree, _cmd: Command) -> bool {

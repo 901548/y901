@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
-use y901_ui::{Color, Command, Edges, Flex, FlexItem, UiEvent, UiTree};
+use y901_ui::{Color, Command, Edges, Flex, FlexItem, UiTree};
 use y901_widgets::TextLabel;
 
 /// 最小 `Host`：每帧推进 Tick，并消耗定时订阅。
@@ -25,9 +25,6 @@ impl Host for Shell {
     fn idle(&mut self, tree: &mut UiTree) {
         // Tick 有上限：防止某个控件每帧都要求再一帧而死循环。
         for _ in 0..8 {
-            if !tree.dispatch(&UiEvent::Tick).is_handled() {
-                break;
-            }
         }
         // 定时订阅即使没有消费者也要排空，否则会积压。
         for _ in tree.poll_subscriptions(Instant::now()) {}

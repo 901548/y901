@@ -12,7 +12,7 @@
 
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
-use y901_ui::{Color, Command, Edges, Flex, FlexItem, Json, UiEvent, UiTree};
+use y901_ui::{Color, Command, Edges, Flex, FlexItem, Json, UiTree};
 use y901_widgets::{Button, ProgressBar, TextLabel};
 
 /// 计数的应用状态。
@@ -38,12 +38,7 @@ impl CounterApp {
 }
 
 impl Host for CounterApp {
-    fn idle(&mut self, tree: &mut UiTree) {
-        for _ in 0..4 {
-            if !tree.dispatch(&UiEvent::Tick).is_handled() {
-                break;
-            }
-        }
+    fn idle(&mut self, _tree: &mut UiTree) {
     }
 
     fn command(&mut self, tree: &mut UiTree, cmd: Command) -> bool {

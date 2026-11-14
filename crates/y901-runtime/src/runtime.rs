@@ -53,6 +53,8 @@ pub fn run_loop<W: WindowBackend>(
     let mut was_busy = false;
     // 上一帧的时间点（供动画 dt）。
     let mut last_tick = Instant::now();
+    // 最近一次发出 `UiEvent::Tick` 的时间（供 Tick 节拍）。
+    let mut last_tick_at = Instant::now();
 
     loop {
         let frame_start = Instant::now();
@@ -159,9 +161,22 @@ pub fn run_loop<W: WindowBackend>(
 
         was_busy = had_work || matches!(outcome, RenderOutcome::Presented);
 
-        // ---- 8. 空闲时推一次 Tick（PTY/定时器靠它推进） ----
-        if !had_work && matches!(outcome, RenderOutcome::Skipped) {
+        // ---- 8. Tick 节拍 ----
+        //
+        // **不再依赖 `RenderOutcome::Skipped`**：旧写法只在"本帧没干活"
+        // 且"当前帧被跳过"时才发 Tick，而只要窗口持续
+        // Presented（例如有任何东西在标脏），Skipped 就永远不会出现
+        // —— 于是 `wants_tick()` 组件（Spinner/Skeleton/ComboBox）永远收不到心跳。
+        //
+        // 现在按时间节拍发：有工作（16ms ≈ 60fps）；空闲（`idle_wait_ms`）。
+        let tick_period = if had_work || was_busy {
+            std::time::Duration::from_millis(16)
+        } else {
+            std::time::Duration::from_millis(idle_wait_ms() as u64)
+        };
+        if last_tick_at.elapsed() >= tick_period {
             let _ = tree.dispatch(&UiEvent::Tick);
+            last_tick_at = Instant::now();
         }
     }
 }
