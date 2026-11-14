@@ -567,3 +567,17 @@ let list = ListView::new("chat", 24.0)
   槽位无冲突；draw_instances(n, b.start) 语义待核实。
 - **下一步**：逐批次打印 start/count/image 与 DrawInstanced 实参，或直接上 PIX/RenderDoc 抓帧。
 - **记录时间**：2026-11-14，commit db86941 之前即存在。
+
+## 17. 测试基础设施待办
+
+### 无焦点窗口上的合成鼠标事件不可靠
+
+- **现象**：用 PostMessage(WM_LBUTTONDOWN/WM_LBUTTONUP) 向**未激活**窗口合成点击时，
+  事件经常根本到不了控件（实测 ComboBox：312 条 Tick 日志，**0 条 MouseUp** 日志），
+  于是"点开下拉 → 选中某项"的视觉验证无法完成。
+- **影响范围**：只影响**依赖鼠标交互的视觉验证**（目前是 ComboBox 的选中回填）。
+  **不影响组件代码正确性** —— combo_box::tests::popup_writes_selection_back_to_combo
+  已覆盖完整链路（popup 写 shared → Tick 吸收 → selected 更新 → 回调恰好触发一次）。
+- **正确做法（待实施）**：合入前先 SetForegroundWindow(hwnd) 并处理 WM_ACTIVATE，
+  或改用 SendInput（走真实输入队列）而不是 PostMessage（投递到窗口消息队列）。
+- **记录时间**：2026-11-14，提交  adcaab / df0331 时记录。
