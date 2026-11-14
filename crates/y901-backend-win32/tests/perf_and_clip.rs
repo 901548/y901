@@ -51,9 +51,30 @@ fn runtime_idles_when_nothing_to_do() {
         "wait_ms 的闲档必须来自 idle_wait_ms()，实测片段：{wait_expr}"
     );
     // 忙档不再是 `0`（那会让软后端空转烧 CPU），而是 16ms 帧预算。
+    //
+    // **必须锚定在 `let wait_ms` 之后**：前面 `tick_due_ms` 的分支里也有一个
+    // `from_millis(16)`，若只用 `wait_expr.contains("16")`，即使把 `wait_ms` 的忙档改回 `0`
+    // 测试仍会通过 —— 那是一条空转断言。
+    let after_wait = wait_expr
+        .split("let wait_ms")
+        .nth(1)
+        .expect("wait_expr 应包含 let wait_ms（否则断言锚点已失效）");
     assert!(
-        wait_expr.contains("16"),
-        "wait_ms 的忙档应为 16ms 帧预算，实测片段：{wait_expr}"
+        after_wait.contains("16"),
+        "wait_ms 的忙档应为 16ms 帧预算（锚定 let wait_ms 之后），实测：{after_wait}"
+    );
+
+    // Tick 节拍必须参考 `wants_tick` 订阅者，否则闲置动画只能 10fps。
+    // 从 `has_tick_consumers` 起取：那一行才是读 `tick_subscribers()` 的地方，
+    // 而 `tick_period` 的 if 里用的是本地变量名。
+    let tick_start = common
+        .find("let has_tick_consumers")
+        .or_else(|| common.find("let tick_period"))
+        .expect("run_loop 必须计算 tick_period");
+    let tick_expr = &common[tick_start..(tick_start + 320).min(common.len())];
+    assert!(
+        tick_expr.contains("tick_subscribers"),
+        "tick_period 的忙档必须包含 tick_subscribers，实测：{tick_expr}"
     );
 }
 
