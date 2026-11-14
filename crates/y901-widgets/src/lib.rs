@@ -23,6 +23,10 @@
 
 #![deny(missing_docs)]
 pub mod button;
+pub mod combo_box;
+pub mod skeleton;
+pub mod popover;
+pub mod badge;
 pub mod alert;
 pub mod switch;
 pub mod error_state;
@@ -67,3 +71,7 @@ pub use tabs::Tabs;
 pub use text_input::{Clipboard, MemoryClipboard, NullClipboard, TextInput};
 pub use tooltip::{Tooltip, TooltipHost};
 pub use tree_view::{TreeItem, TreeView};
+pub use combo_box::{ComboBox};
+pub use skeleton::{Skeleton, SkeletonShape};
+pub use popover::{Popover};
+pub use badge::{Badge, BadgeKind};
