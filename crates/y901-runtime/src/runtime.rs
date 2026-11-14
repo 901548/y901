@@ -63,7 +63,8 @@ pub fn run_loop<W: WindowBackend>(
         // **帧预算**：忙档不再 `wait=0`（那会让软后端空转烧 CPU），而是 16ms ≈ 60fps；
         // 闲档取 `min(idle_wait, 距下次 Tick 到期)`，让空闲动画也能按节拍出帧。
         let tick_due_ms = {
-            let period = if was_busy {
+            let busy = was_busy;
+            let period = if busy {
                 std::time::Duration::from_millis(16)
             } else {
                 std::time::Duration::from_millis(idle_wait_ms() as u64)
@@ -187,7 +188,9 @@ pub fn run_loop<W: WindowBackend>(
         // —— 于是 `wants_tick()` 组件（Spinner/Skeleton/ComboBox）永远收不到心跳。
         //
         // 现在按时间节拍发：有工作（16ms ≈ 60fps）；空闲（`idle_wait_ms`）。
-        let tick_period = if had_work || was_busy {
+        // **`wants_tick` 订阅者也算忙**：否则闲置的 Spinner/Skeleton 只能 10fps。
+        let has_tick_consumers = tree.tick_subscribers() > 0;
+        let tick_period = if had_work || was_busy || has_tick_consumers {
             std::time::Duration::from_millis(16)
         } else {
             std::time::Duration::from_millis(idle_wait_ms() as u64)

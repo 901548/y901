@@ -233,6 +233,12 @@ pub struct UiTree {
     /// 为何要存：事件分发（`event` / `send_focus`）拿不到 `metrics`，
     /// 但命中测试需要与绘制同一个尺寸。存在这里后拷贝进 `EventCtx`。
     scale: f32,
+    /// **上一次 Tick 广播时 `wants_tick() == true` 的节点数**。
+    ///
+    /// 为何要存：`run_loop` 要据此决定 Tick 节拍（16ms 还是 idle_wait）。
+    /// 若只看"上一帧有没有呈现"，闲置的 Spinner/Skeleton 会被当成无事可做
+    /// → Tick 100ms 一次 → 动画 10fps。
+    tick_subscribers: usize,
     /// 活动中的动画（key → 动画）。**同 key 重新设置即打断旧动画**。
     animations: Vec<ActiveAnim>,
     root: Box<dyn Widget>,
@@ -432,6 +438,7 @@ impl UiTree {
     /// 调用方必须随后调 `layout(viewport, metrics)`，否则 `rect_of` 全为空。
     pub fn new(root: Box<dyn Widget>) -> Self {
         let mut this = Self {
+            tick_subscribers: 0,
             animations: Vec::new(),
             pending_texture_releases: Vec::new(),
             scale: 1.0,
@@ -2478,6 +2485,13 @@ impl UiTree {
         merged
     }
 
+    /// 上一次 Tick 广播时**声明需要心跳的节点数**。
+    ///
+    /// `run_loop` 用它选 Tick 节拍：`> 0` 就说明"即使没有事件也有人要帧"\u3002
+    pub fn tick_subscribers(&self) -> usize {
+        self.tick_subscribers
+    }
+
     fn dispatch_broadcast(&mut self, event: &UiEvent) -> EventResult {
         let viewport = self.viewport;
         let mut ctx = EventCtx::new(self.focus.clone(), viewport);
@@ -2486,7 +2500,12 @@ impl UiTree {
         let mut acc = EventResult::Ignored;
         let mut rects = std::mem::take(&mut self.broadcast_rects);
         rects.clear();
-        broadcast(self.root.as_mut(), &mut ctx, event, &mut acc, &mut rects);
+        let mut subs = 0usize;
+        broadcast(self.root.as_mut(), &mut ctx, event, &mut acc, &mut rects, &mut subs);
+        if matches!(event, UiEvent::Tick) {
+            // **广播之后**才写入：`wants_tick()` 是组件在本次分发后的意愿。
+            self.tick_subscribers = subs;
+        }
         self.broadcast_rects = rects;
         self.finish_dispatch(ctx, acc)
     }
@@ -2631,10 +2650,15 @@ fn broadcast(
     event: &UiEvent,
     acc: &mut EventResult,
     redraw_rects: &mut Vec<Rect>,
+    tick_subscribers: &mut usize,
 ) {
     // `Tick` 是每帧心跳：只发给显式订阅的节点（`wants_tick`），
     // 否则每帧 8 轮 × 全树虚调用。其他广播事件（Focus/Resize）照常全员送达。
-    let wants = !matches!(event, UiEvent::Tick) || node.wants_tick();
+    let is_tick = matches!(event, UiEvent::Tick);
+    if is_tick && node.wants_tick() {
+        *tick_subscribers += 1;
+    }
+    let wants = !is_tick || node.wants_tick();
     let r = if wants {
         node.event(ctx, event)
     } else {
@@ -2648,7 +2672,7 @@ fn broadcast(
     *acc = acc.merge(r);
     if let Some(children) = node.children_mut() {
         for child in children.iter_mut() {
-            broadcast(child.as_mut(), ctx, event, acc, redraw_rects);
+            broadcast(child.as_mut(), ctx, event, acc, redraw_rects, tick_subscribers);
         }
     }
 }
