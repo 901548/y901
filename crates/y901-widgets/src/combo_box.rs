@@ -39,6 +39,8 @@ pub struct ComboBox {
     shared: Rc<Cell<Option<usize>>>,
     rect: Rect,
     item: FlexItem,
+    /// **DPI 缩放**（`measure` 里唯一写入点；未 measure 时 1.0 = 兜底）。
+    scale: f32,
 }
 
 impl ComboBox {
@@ -53,6 +55,7 @@ impl ComboBox {
             shared: Rc::new(Cell::new(None)),
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            scale: 1.0,
         }
     }
 
@@ -86,7 +89,7 @@ impl ComboBox {
 
     /// 闭合框矩形。
     fn box_rect(&self) -> Rect {
-        Rect::new(self.rect.x, self.rect.y, self.rect.w, BOX_H.min(self.rect.h))
+        Rect::new(self.rect.x, self.rect.y, self.rect.w, (BOX_H * self.scale).min(self.rect.h))
     }
 
     /// 当前显示的文字。
@@ -129,11 +132,12 @@ impl Widget for ComboBox {
 
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
-        c.constrain(Size::new(c.max.w, BOX_H))
+        self.scale = m.scale();
+        c.constrain(Size::new(c.max.w, BOX_H * self.scale))
     }
 
     fn arrange(
@@ -215,7 +219,7 @@ impl Widget for ComboBox {
 
         let style = TextStyle::fg(text_fg);
         let ty = b.y + (b.h - ctx.line_height(&style)) * 0.5;
-        ctx.draw_text(Pos::new(b.x + 10.0, ty), self.display_text(), &style);
+        ctx.draw_text(Pos::new(b.x + 10.0 * self.scale, ty), self.display_text(), &style);
 
         let arrow = "▾";
         let astyle = TextStyle::fg(muted);

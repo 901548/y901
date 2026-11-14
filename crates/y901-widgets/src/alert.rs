@@ -63,6 +63,8 @@ pub struct Alert {
     command: Option<y901_ui::Command>,
     rect: Rect,
     item: FlexItem,
+    /// **DPI 缩放**（`measure` 里唯一写入点；未 measure 时 1.0 = 兜底）。
+    scale: f32,
     dismiss_rect: Rect,
 }
 
@@ -77,6 +79,7 @@ impl Alert {
             command: None,
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            scale: 1.0,
             dismiss_rect: Rect::ZERO,
         }
     }
@@ -116,14 +119,15 @@ impl Widget for Alert {
 
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
+        self.scale = m.scale();
         let h = if self.description.is_some() {
-            H_WITH_DESC
+            H_WITH_DESC * self.scale
         } else {
-            H_ONE_LINE
+            H_ONE_LINE * self.scale
         };
         c.constrain(Size::new(c.max.w, h))
     }
@@ -136,10 +140,10 @@ impl Widget for Alert {
     ) {
         self.rect = rect;
         self.dismiss_rect = Rect::new(
-            rect.right() - DISMISS_W,
-            rect.y + (rect.h - DISMISS_W) * 0.5,
-            DISMISS_W,
-            DISMISS_W,
+            rect.right() - DISMISS_W * self.scale,
+            rect.y + (rect.h - DISMISS_W * self.scale) * 0.5,
+            DISMISS_W * self.scale,
+            DISMISS_W * self.scale,
         );
     }
 
@@ -186,11 +190,11 @@ impl Widget for Alert {
         ctx.fill_rect(self.rect, tint);
         // \u5de6\u4fa7\u8c03\u6574\u8272\u6761
         ctx.fill_rect(
-            Rect::new(self.rect.x, self.rect.y, BAR_W, self.rect.h),
+            Rect::new(self.rect.x, self.rect.y, BAR_W * self.scale, self.rect.h),
             accent,
         );
 
-        let text_x = self.rect.x + BAR_W + 12.0;
+        let text_x = self.rect.x + (BAR_W + 12.0) * self.scale;
         let one_line = self.description.is_none();
         let title_style = TextStyle::fg(text_fg);
         let ty = if one_line {
@@ -202,7 +206,7 @@ impl Widget for Alert {
 
         if let Some(desc) = self.description.as_ref() {
             let style = TextStyle::fg(muted);
-            ctx.draw_text(Pos::new(text_x, ty + 22.0), desc, &style);
+            ctx.draw_text(Pos::new(text_x, ty + 22.0 * self.scale), desc, &style);
         }
 
         if self.command.is_some() {

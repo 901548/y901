@@ -68,6 +68,8 @@ pub struct Table {
     command: Option<y901_ui::Command>,
     rect: Rect,
     item: FlexItem,
+    /// **DPI 缩放**（`measure` 里唯一写入点；未 measure 时 1.0 = 兜底）。
+    scale: f32,
     hovered_row: Option<usize>,
 }
 
@@ -82,6 +84,7 @@ impl Table {
             command: None,
             rect: Rect::ZERO,
             item: FlexItem::default(),
+            scale: 1.0,
             hovered_row: None,
         }
     }
@@ -133,7 +136,7 @@ impl Table {
 
     /// 总高度（表头 + 所有行）。
     fn content_height(&self) -> f32 {
-        HEADER_H + self.rows.len() as f32 * ROW_H
+        HEADER_H * self.scale + self.rows.len() as f32 * ROW_H * self.scale
     }
 
     /// 按最终宽度算每列的实际 x 与宽度。
@@ -173,11 +176,11 @@ impl Table {
         if !self.rect.contains(pos) {
             return None;
         }
-        let y = pos.y - self.rect.y - HEADER_H;
+        let y = pos.y - self.rect.y - HEADER_H * self.scale;
         if y < 0.0 {
             return None;
         }
-        let idx = (y / ROW_H) as usize;
+        let idx = (y / (ROW_H * self.scale)) as usize;
         (idx < self.rows.len()).then_some(idx)
     }
 }
@@ -193,10 +196,11 @@ impl Widget for Table {
 
     fn measure(
         &mut self,
-        _m: &dyn TextMetrics,
+        m: &dyn TextMetrics,
         c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
+        self.scale = m.scale();
         let want_w = c.max.w;
         c.constrain(Size::new(want_w, self.content_height()))
     }
@@ -261,7 +265,7 @@ impl Widget for Table {
         ctx.push_clip(self.rect);
 
         // 表头
-        let header = Rect::new(self.rect.x, self.rect.y, self.rect.w, HEADER_H);
+        let header = Rect::new(self.rect.x, self.rect.y, self.rect.w, HEADER_H * self.scale);
         ctx.fill_rect(header, header_bg);
         let cols = self.column_layout();
         let header_style = TextStyle::fg(muted);
@@ -269,14 +273,14 @@ impl Widget for Table {
             let Some((x, w)) = cols.get(i).copied() else {
                 break;
             };
-            draw_cell(ctx, col, &col.title, x, header.y, w, HEADER_H, &header_style, muted);
+            draw_cell(ctx, col, &col.title, x, header.y, w, HEADER_H * self.scale, &header_style, muted, self.scale);
             let _ = text_fg;
         }
 
         // 行
         let mut visible = 0usize;
         for (r, cells) in self.rows.iter().enumerate() {
-            let y = self.rect.y + HEADER_H + r as f32 * ROW_H;
+            let y = self.rect.y + HEADER_H * self.scale + r as f32 * ROW_H * self.scale;
             if y >= self.rect.bottom() {
                 break;
             }
@@ -289,14 +293,14 @@ impl Widget for Table {
             } else {
                 row_bg
             };
-            ctx.fill_rect(Rect::new(self.rect.x, y, self.rect.w, ROW_H), bg);
+            ctx.fill_rect(Rect::new(self.rect.x, y, self.rect.w, ROW_H * self.scale), bg);
             let style = TextStyle::fg(text_fg);
             for (i, col) in self.columns.iter().enumerate() {
                 let Some((x, w)) = cols.get(i).copied() else {
                     break;
                 };
                 let text = cells.get(i).map(String::as_str).unwrap_or("");
-                draw_cell(ctx, col, text, x, y, w, ROW_H, &style, text_fg);
+                draw_cell(ctx, col, text, x, y, w, ROW_H * self.scale, &style, text_fg, self.scale);
             }
             visible += 1;
         }
@@ -330,6 +334,7 @@ fn draw_cell(
     h: f32,
     style: &TextStyle,
     fallback: y901_ui::Color,
+    scale: f32,
 ) {
     let _ = fallback;
     if text.is_empty() {
@@ -338,8 +343,8 @@ fn draw_cell(
     let tw = ctx.measure_text(text, style).w;
     let tx = match col.align {
         Align::Center => x + (w - tw) * 0.5,
-        Align::End => x + w - CELL_PAD - tw,
-        _ => x + CELL_PAD,
+        Align::End => x + w - CELL_PAD * scale - tw,
+        _ => x + CELL_PAD * scale,
     };
     let ty = y + (h - ctx.line_height(style)) * 0.5;
     ctx.draw_text(Pos::new(tx, ty), text, style);
