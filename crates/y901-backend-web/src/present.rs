@@ -35,8 +35,10 @@ impl Present {
 /// 为什么不就地改：调用方给的是软后端的复用缓冲；
 /// 这里返回新 `Vec` 更安全，也便于单测。
 pub fn bgra_to_rgba(src: &[u8]) -> Vec<u8> {
+    // **像素顺序必须翻转**：软后端的缓冲以另一种顺序排列（实测直接照搬会得到 180° 旋转的画面）。
+    // 此处按**整体逆序**读源像素，再按 BGRA→RGBA 换通道；两者叠加后切反了那个 180°。
     let mut out = Vec::with_capacity(src.len());
-    for px in src.chunks_exact(4) {
+    for px in src.chunks_exact(4).rev() {
         out.push(px[2]); // R ← B
         out.push(px[1]); // G
         out.push(px[0]); // B ← R
@@ -53,9 +55,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bgra_to_rgba_swaps_red_and_blue() {
+    fn bgra_to_rgba_swaps_channels_in_reverse_pixel_order() {
+        // 源像素 A=(B10,G20,R30,A255)、B=(B1,G2,R3,A4)。
+        // 输出顺序为逆序：先 B 的 RGBA（ 3,2,1,4），再 A 的（ 30,20,10,255）。
         let src = [10u8, 20, 30, 255, 1, 2, 3, 4];
-        assert_eq!(bgra_to_rgba(&src), vec![30, 20, 10, 255, 3, 2, 1, 4]);
+        assert_eq!(bgra_to_rgba(&src), vec![3, 2, 1, 4, 30, 20, 10, 255]);
     }
 
     #[test]
@@ -63,8 +67,11 @@ mod tests {
         let src: Vec<u8> = (0..40u8).collect();
         let out = bgra_to_rgba(&src);
         assert_eq!(out.len(), src.len());
-        for (i, px) in src.chunks_exact(4).enumerate() {
-            assert_eq!(out[i * 4 + 3], px[3], "alpha 必须原样保留");
+        // 像素顺序逆序，因此第 i 个输出像素对应源的第 (n-1-i) 个。
+        let n = src.len() / 4;
+        for (i, out_px) in out.chunks_exact(4).enumerate() {
+            let src_px = &src[(n - 1 - i) * 4..];
+            assert_eq!(out_px[3], src_px[3], "alpha 必须原样保留");
         }
     }
 }
