@@ -1,6 +1,6 @@
 //! 呈现：软后端产出的 BGRA 像素 → `putImageData`（见 `docs/WASM.md` §3.2）。
 
-use crate::bindings::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData, Uint8ClampedArray};
+use crate::bindings::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 /// 画布呈现器。
 pub struct Present {
@@ -24,10 +24,14 @@ impl Present {
             return; // 没取到 2D 上下文：静默跳过上屏（不崩）
         };
         let rgba = bgra_to_rgba(pixels, w, h);
-        let arr = Uint8ClampedArray::new(rgba.len() as u32);
-        arr.set_from(&rgba, 0);
-        let data = ImageData::new(&arr.into(), w, h);
-        ctx.put_image_data(&data, 0.0, 0.0);
+        // **绕过 `Uint8ClampedArray::new` + `set`**：实测发现那条路径把数据读反了
+        // （画面 180°）。现在用 `createImageData` 内部的 data 数组逐字节写入。
+        let image_data = ctx.create_image_data(w, h);
+        let data = image_data.data();
+        for (i, &byte) in rgba.iter().enumerate() {
+            data.set_index(i as u32, byte);
+        }
+        ctx.put_image_data(&image_data, 0.0, 0.0);
     }
 }
 

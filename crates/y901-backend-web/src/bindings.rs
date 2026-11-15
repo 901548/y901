@@ -59,6 +59,10 @@ extern "C" {
     /// 整幅上屏（见 `docs/WASM.md` §3.2）。
     #[wasm_bindgen(method, js_name = "putImageData")]
     pub fn put_image_data(this: &CanvasRenderingContext2d, data: &ImageData, dx: f64, dy: f64);
+
+    /// `createImageData(w, h)`：建一张空图像（可直接写入像素）。
+    #[wasm_bindgen(method, js_name = "createImageData")]
+    pub fn create_image_data(this: &CanvasRenderingContext2d, w: u32, h: u32) -> ImageData;
 }
 
 /// `ImageData`。
@@ -70,6 +74,10 @@ extern "C" {
     /// `new ImageData(new Uint8ClampedArray(w*h*4), w, h)`。
     #[wasm_bindgen(constructor)]
     pub fn new(pixels: &JsValue, width: u32, height: u32) -> ImageData;
+
+    /// 图像的像素数组（`Uint8ClampedArray`）。
+    #[wasm_bindgen(method, getter)]
+    pub fn data(this: &ImageData) -> Uint8ClampedArray;
 }
 
 /// 键盘事件。
@@ -130,6 +138,10 @@ extern "C" {
 
     #[wasm_bindgen(method, js_name = "set")]
     pub fn set_from(this: &Uint8ClampedArray, src: &[u8], offset: u32);
+
+    /// `data[i] = v`。**用 `indexing_setter`**（JS 没有 `setIndex` 方法，那会静默失败）。
+    #[wasm_bindgen(method, structural, indexing_setter)]
+    pub fn set_index(this: &Uint8ClampedArray, index: u32, value: u8);
 }
 /// `Document`——用来按 id 取 canvas（页面约定见 `docs/WASM.md` §3.2）。
 #[wasm_bindgen]
