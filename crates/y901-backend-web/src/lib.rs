@@ -362,9 +362,6 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     //
     // - `composing`：正在拼音组字。组字期间的 `keydown` 与 `input` 都**不能**当成用户输入。
     let composing = Rc::new(std::cell::Cell::new(false));
-    // **上一次已提交的串**：用来去重——某些浏览器在
-    // `compositionend` 之后会把同一串再写回 `value` 并发一次 `input`。
-    let last_committed: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     // **坐标换算所需：UI 树的 y 是"从底部往上"，DOM 的 `offsetY` 是"从顶部往下"。**
     // 公式在 `keys::to_ui_y`（带单测），这里只把画布高度抓一份。
     let canvas_h = state.canvas.height() as f32;
@@ -572,10 +569,8 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             let evs = Rc::clone(&events);
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
                 let ce: &bindings::CompositionEvent = val.unchecked_ref();
-                let pre = ce.data();
-                bindings::console_log(&format!("[DBG-IME] compositionupdate data={:?}", pre));
                 evs.borrow_mut().push_back(RawEvent::Ime {
-                    text: pre,
+                    text: ce.data(),
                     composition: true,
                 });
             });
@@ -588,29 +583,22 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             });
         }
 
-        // ---- compositionend：**在这里提交**，并把已提交串记下来用于去重 ----
+        // ---- compositionend：**提交唯一一次** ----
         //
-        // 为何提交在这里而不是等 `input`：不同浏览器的事件顺序不同。
-        // 若 `input` 先于本事件到达，那时还处于组字态（`composing == true`），
-        // 会被忽略 → 提交丢失，界面上的预编辑串就停在那里。
-        // 在本事件提交并**清空 value**，则无论顺序如何都只提交一次。
-        //
-        // 为何还要 `last_committed`：个别浏览器会在本事件**之后**把
-        // 同一串再写回 `value` 并发 `input`，那一次必须被认出并丢弃。
+        // 实测（[DBG-IME]）：`compositionend.data` 就是完整的提交串（“你好”、“设置”），
+        // 而 `input` 事件**根本不会触发**。所以这里就是文本的唯一出口，
+        // 既不需要 `input` 监听，也不需要任何去重标志。
         {
             let evs = Rc::clone(&events);
             let composing_for = Rc::clone(&composing);
-            let last_for = Rc::clone(&last_committed);
             let input_for_clear = input_js.clone();
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
                 let ce: &bindings::CompositionEvent = val.unchecked_ref();
                 let text = ce.data();
-                bindings::console_log(&format!("[DBG-IME] compositionend data={:?}", text));
                 composing_for.set(false);
                 let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
                 el.set_value("");
                 if !text.is_empty() {
-                    *last_for.borrow_mut() = text.clone();
                     evs.borrow_mut().push_back(RawEvent::Ime {
                         text,
                         composition: false,
@@ -626,46 +614,6 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             });
         }
 
-        // ---- input：**字符输入的唯一出口** ----
-        //
-        // 无论英文字符还是中文选词提交，浏览器都会在文本进入 input 后发这个事件。
-        // 因此它天然不会重复、也不用猜幻影按键。
-        {
-            let evs = Rc::clone(&events);
-            let composing_for = Rc::clone(&composing);
-            let last_for = Rc::clone(&last_committed);
-            let input_for_read = input_js.clone();
-            let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
-                let el: &bindings::HtmlInputElement = input_for_read.unchecked_ref();
-                // 组字中：不读也不清（清了会丢掉正在组的字）。
-                if composing_for.get() {
-                    return;
-                }
-                let text = el.value();
-                bindings::console_log(&format!("[DBG-IME] input value={:?}", text));
-                if text.is_empty() {
-                    return;
-                }
-                el.set_value("");
-                // **去重**：与刚在 `compositionend` 提交过的串相同 ⇒ 这是浏览器的回写，丢弃。
-                if *last_for.borrow() == text {
-                    return;
-                }
-                // 统一走 `Ime { composition: false }` → 运行时翻译成 `UiEvent::Text`，
-                // 一次插入一串，无论长短。
-                evs.borrow_mut().push_back(RawEvent::Ime {
-                    text,
-                    composition: false,
-                });
-            });
-            let target: bindings::EventTarget = input_js.clone().unchecked_into();
-            target.add_event_listener("input", &handler);
-            listeners.push(Listener {
-                target,
-                kind: "input".to_string(),
-                handler,
-            });
-        }
     }
 
     state.ime_input = ime_input;

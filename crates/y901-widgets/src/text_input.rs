@@ -250,6 +250,15 @@ impl TextInput {
     /// 当前文本内容（不含 IME 预编辑串）。
     ///
     /// 返回：`&str`（借用内部缓冲，零拷贝）。副作用：无。
+    /// 当前预编辑串（IME 组字中的拼音）。
+    ///
+    /// **读取用**：预编辑串与 `buffer` 是两份独立状态，提交（`UiEvent::Text`）
+    /// 时必须清空，否则会与提交后的正文重叠渲染。
+    pub fn preedit(&self) -> &str {
+        &self.preedit
+    }
+
+    /// 当前正文（不含预编辑串）。
     pub fn text(&self) -> &str {
         self.buffer.text()
     }
@@ -617,6 +626,10 @@ impl Widget for TextInput {
                 if !self.focused {
                     return EventResult::Ignored;
                 }
+                // **提交即消费预编辑串**：`Compose` 只写 `preedit`，`Text` 才写 `buffer`。
+                // 若不清，上一次 `compositionupdate` 的字串会继续被画在游标处，
+                // 看上去就像"多出一个字"。
+                self.preedit.clear();
                 self.buffer.insert_str(text);
                 self.touch();
                 EventResult::Relayout
@@ -1447,5 +1460,23 @@ mod tests {
         assert_eq!(w.role(), Role::TEXT_INPUT);
         assert_eq!(Axis::Horizontal, Axis::Horizontal);
         let _ = set_text_args("x");
+    }
+
+    /// **提交即消费预编辑串**：`Compose` 写 `preedit`，`Text` 写 `buffer` 并清 `preedit`。
+    ///
+    /// 为何要测：真机上曾出现"多出一个字"，就是因为提交后 `preedit`
+    /// 没清，界面把它叠在正文上又画了一遍。
+    #[test]
+    fn text_commit_clears_preedit() {
+        let mut input = TextInput::new("t");
+        let mut ctx = EventCtx::new(None, Size::new(200.0, 60.0));
+
+        input.event(&mut ctx, &UiEvent::Focus(true));
+        input.event(&mut ctx, &UiEvent::Compose("shezhi".into()));
+        assert_eq!(input.preedit(), "shezhi", "组字中应显示拼音");
+
+        input.event(&mut ctx, &UiEvent::Text("设置".into()));
+        assert_eq!(input.text(), "设置", "提交的正文应进 buffer");
+        assert!(input.preedit().is_empty(), "提交后必须清空预编辑串");
     }
 }
