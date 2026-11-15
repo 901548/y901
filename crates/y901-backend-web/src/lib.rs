@@ -14,7 +14,7 @@ use wasm_bindgen::prelude::Closure;
 use y901_render::soft::SoftBackend;
 use y901_runtime::window::{RenderOutcome, WindowBackend};
 use y901_runtime::{Host, RawEvent};
-use y901_ui::{Size, UiTree};
+use y901_ui::{RenderCtx, Size, UiTree};
 
 pub mod bindings;
 pub mod font;
@@ -94,6 +94,21 @@ impl WindowBackend for WasmWindow<'_> {
         }
         self.soft.clear();
         tree.render(self.soft);
+
+        // [DBG-CORNER] 临时探针：缓冲左上红、右下蓝。
+        self.soft.fill_rect(
+            y901_ui::Rect::new(0.0, 0.0, 60.0, 60.0),
+            y901_ui::Color::rgba(1.0, 0.0, 0.0, 1.0),
+        );
+        self.soft.fill_rect(
+            y901_ui::Rect::new(
+                (self.soft.width() as f32) - 60.0,
+                (self.soft.height() as f32) - 60.0,
+                60.0,
+                60.0,
+            ),
+            y901_ui::Color::rgba(0.0, 0.0, 1.0, 1.0),
+        );
 
         let (w, h) = self.viewport();
         let pixels = self.soft.pixels().to_vec();
