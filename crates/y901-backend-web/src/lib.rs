@@ -57,6 +57,8 @@ impl WasmState {
                         tree.invalidate_all();
                     }
                 }
+                // **同步 Y 翻转所用的高度**（否则拉伸后鼠标全错）。
+                self.canvas_h.set(h as f32);
                 self.events
                     .borrow_mut()
                     .push_back(RawEvent::Resize { w, h });
@@ -66,14 +68,7 @@ impl WasmState {
         // ---- 鼠标光标形状（P4）----
         if let Some((x, y)) = self.pending_cursor.take() {
             if let Some(tree) = self.tree.as_ref() {
-                // [DBG-CURSOR] 临时：同时打命中 id 与光标结果，定位"只有端口生效"。
-                let hit = tree.cursor_at(y901_ui::Pos::new(x, y));
-                bindings::console_log(&format!(
-                    "[DBG-CURSOR] pos=({x:.0},{y:.0}) hit={:?} cursor={:?}",
-                    tree.hit_test(y901_ui::Pos::new(x, y)),
-                    hit
-                ));
-                let css = match hit {
+                let css = match tree.cursor_at(y901_ui::Pos::new(x, y)) {
                     y901_ui::Cursor::Pointer => "pointer",
                     y901_ui::Cursor::Text => "text",
                     y901_ui::Cursor::ResizeHorizontal => "ew-resize",
@@ -83,7 +78,10 @@ impl WasmState {
                 };
                 // **只改单个属性**：`setAttribute("style", ...)` 会整条覆盖，
                 // 把页面 CSS 的 `width/height` 也抹掉（resize 就此失效）。
-                self.canvas.style().set_property("cursor", css);
+                // **`important`**：防止页面里任何 `canvas { cursor: … }` 规则把它盖掉。
+                self.canvas
+                    .style()
+                    .set_property_with_priority("cursor", css, "important");
             }
         }
     }
@@ -137,6 +135,12 @@ pub struct WasmState {
     /// 为何不在 `resize` 回调里直接改：回调拿不到 `WasmState`（只捕获共享句柄），
     /// 而改尺寸要同时动 `canvas` / `soft` / `tree`，只能在帧循环里做。
     pub pending_resize: Rc<std::cell::Cell<bool>>,
+    /// **当前画布高度**（用于 DOM 坐标→UI 坐标的 Y 翻转）。
+    ///
+    /// **为何不在回调里直接读 `canvas.height()`**：回调拿不到 `WasmState`；
+    /// 而这个值**必须随 resize 变化** —— 旧代码用安装时的快照，
+    /// 窗口拉伸后 Y 翻转就彻底错位（"只有端口偶尔生效"就是这个原因）。
+    pub canvas_h: Rc<std::cell::Cell<f32>>,
     /// **待处理的光标位置**（UI 坐标），同理：命中测试需要 `tree`。
     pub pending_cursor: Rc<std::cell::Cell<Option<(f32, f32)>>>,
     /// **隐藏的 IME 承接 `input`**（为 `None` 时表示页面没有 `document.body`）。
@@ -245,6 +249,7 @@ impl WasmState {
             tree: None,
             host: None,
             events: Rc::new(RefCell::new(VecDeque::new())),
+            canvas_h: Rc::new(std::cell::Cell::new(0.0)),
             pending_resize: Rc::new(std::cell::Cell::new(false)),
             pending_cursor: Rc::new(std::cell::Cell::new(None)),
             ime_input: None,
@@ -432,7 +437,9 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     let composing = Rc::new(std::cell::Cell::new(false));
     // **坐标换算所需：UI 树的 y 是"从底部往上"，DOM 的 `offsetY` 是"从顶部往下"。**
     // 公式在 `keys::to_ui_y`（带单测），这里只把画布高度抓一份。
-    let canvas_h = state.canvas.height() as f32;
+    // **实时高度**：回调读它做 Y 翻转，resize 后由 `apply_pending` 更新。
+    let canvas_h = Rc::clone(&state.canvas_h);
+    canvas_h.set(state.canvas.height() as f32);
 
     // **P3：建一个隐藏 `input` 做输入法承接元素**。
     // 它是拼音组字事件的**唯一**来源；不建它，中文永远输不进去。
@@ -460,11 +467,12 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     {
         let evs = Rc::clone(&events);
         let cursor_for = Rc::clone(&state.pending_cursor);
+        let canvas_h = Rc::clone(&canvas_h);
         let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
             let me: &bindings::MouseEvent = val.unchecked_ref();
             let (mx, my) = (
                 me.offset_x() as f32,
-                keys::to_ui_y(canvas_h, me.offset_y() as f32),
+                keys::to_ui_y(canvas_h.get(), me.offset_y() as f32),
             );
             // **记下待处理的光标位置**：命中测试需要 `tree`，回调里拿不到。
             cursor_for.set(Some((mx, my)));
@@ -482,6 +490,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // ---- mousedown（顺手把焦点抢到 canvas）----
     {
         let evs = Rc::clone(&events);
+        let canvas_h = Rc::clone(&canvas_h);
         let ime_input_for_focus = ime_input.clone();
         let canvas_for_focus =
             Some(canvas_js.clone().unchecked_into::<bindings::HtmlCanvasElement>());
@@ -492,7 +501,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             };
             evs.borrow_mut().push_back(RawEvent::MouseDown {
                 x: me.offset_x() as f32,
-                y: keys::to_ui_y(canvas_h, me.offset_y() as f32),
+                y: keys::to_ui_y(canvas_h.get(), me.offset_y() as f32),
                 button,
             });
             // **关键：先 `preventDefault()` 再抢焦点**。
@@ -523,6 +532,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // ---- mouseup ----
     {
         let evs = Rc::clone(&events);
+        let canvas_h = Rc::clone(&canvas_h);
         let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
             let me: &bindings::MouseEvent = val.unchecked_ref();
             let Some(button) = keys::button_from_dom(me.button()) else {
@@ -530,7 +540,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             };
             evs.borrow_mut().push_back(RawEvent::MouseUp {
                 x: me.offset_x() as f32,
-                y: keys::to_ui_y(canvas_h, me.offset_y() as f32),
+                y: keys::to_ui_y(canvas_h.get(), me.offset_y() as f32),
                 button,
             });
         });
@@ -558,7 +568,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             );
             evs.borrow_mut().push_back(RawEvent::Wheel {
                 x: me.offset_x() as f32,
-                y: keys::to_ui_y(canvas_h, me.offset_y() as f32),
+                y: keys::to_ui_y(canvas_h.get(), me.offset_y() as f32),
                 delta: keys::wheel_delta_from_dom(we.delta_y()),
                 mods,
             });
@@ -707,6 +717,8 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         });
     }
 
+    // **首帧先同步一次尺寸**：HTML 里 canvas 属性是 800x600，而 CSS 尺寸可能不同。
+    state.pending_resize.set(true);
     state.ime_input = ime_input;
     state.listeners = listeners;
     Ok(())

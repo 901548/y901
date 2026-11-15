@@ -87,6 +87,18 @@ extern "C" {
     #[wasm_bindgen(method, js_name = "setProperty")]
     pub fn set_property(this: &CssStyleDeclaration, name: &str, value: &str);
 
+    /// `style.setProperty(name, value, priority)`。
+    ///
+    /// `priority = "important"` 用来盖过页面 CSS 里可能存在的
+    /// 全局 `canvas { cursor: ... }` 防守规则。
+    #[wasm_bindgen(method, js_name = "setProperty")]
+    pub fn set_property_with_priority(
+        this: &CssStyleDeclaration,
+        name: &str,
+        value: &str,
+        priority: &str,
+    );
+
     /// `canvas.focus()`\uff1a\u70b9\u51fb\u540e\u628a\u952e\u76d8\u7126\u70b9\u62a2\u5230 canvas \u4e0a\u3002
     #[wasm_bindgen(method)]
     pub fn focus(this: &HtmlCanvasElement);
