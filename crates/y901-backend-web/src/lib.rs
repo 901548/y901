@@ -222,7 +222,7 @@ impl WasmRuntime {
 
         // **P1：挂鼠标/滚轮监听器**。用 `listeners` 是否为空做幂等守卫：
         // 重复 `install()` 不会把同一事件注册两遍（否则每次移动会产生双倍事件）。
-        install_mouse_listeners(&mut state)?;
+        install_listeners(&mut state)?;
         Ok(())
     }
 
@@ -275,7 +275,7 @@ impl WasmRuntime {
 }
 
 
-/// **P1：挂鼠标与滚轮监听器**。
+/// **P1/P2：挂鼠标、滚轮与键盘监听器**。
 ///
 /// 三条硬规则，都写进注释以免下次被"优化"掉：
 ///
@@ -284,7 +284,7 @@ impl WasmRuntime {
 /// 2. **`wheel` 必须 `{ passive: false }`**：被动监听器里 `preventDefault()` 无效且控制台报警。
 /// 3. **用 `unchecked_ref` 而不是 `dyn_into`**：监听器是按事件名注册的，类型已知，
 ///    再做一次 `instanceof` 只会让每次鼠标移动多一実 JS 往返。
-fn install_mouse_listeners(state: &mut WasmState) -> Result<(), String> {
+fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // 幂等守卫：重复 `install()` 不能把同一事件注册两遍（否则一次移动产生两个事件）。
     if !state.listeners.is_empty() {
         return Ok(());
@@ -398,6 +398,63 @@ fn install_mouse_listeners(state: &mut WasmState) -> Result<(), String> {
         listeners.push(Listener {
             target,
             kind: "wheel".to_string(),
+            handler,
+        });
+    }
+
+    // ---- keydown（P2）----
+    //
+    // 框架的 `RawEvent` **没有 `KeyUp` 变体**（只有 `KeyDown` / `SystemKeyDown` / `Char` / `Ime`，
+    // 见 `y901-runtime` 的 `RawEvent` 与 `translate()`），因此这里只挂 `keydown`。
+    // 要支持 keyup 必须先给 runtime 加变体并让三个后端同步，不属于本轮范围。
+    {
+        let evs = Rc::clone(&events);
+        let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
+            let ke: &bindings::KeyboardEvent = val.unchecked_ref();
+            let code = ke.code();
+            let key = ke.key();
+            let mods = keys::mods_from_event(
+                ke.ctrl_key(),
+                ke.shift_key(),
+                ke.alt_key(),
+                ke.meta_key(),
+            );
+
+            if let Some(k) = keys::key_from_dom(&code, &key) {
+                evs.borrow_mut().push_back(RawEvent::KeyDown { key: k, mods });
+            }
+            // **文本插入单独发**：Ctrl/Alt 组合不产生字符（否则
+            // Ctrl+C 会在输入框里插一个 "c"）。
+            if !mods.ctrl && !mods.alt {
+                if let Some(c) = keys::char_from_dom(&key) {
+                    evs.borrow_mut().push_back(RawEvent::Char { c });
+                }
+            }
+            // 阻止浏览器默认：Tab 跳焦点、空格/方向键/翻页键滚页、
+            // Backspace 后退导航。文本插入是我们自己发的 `Char`，不受影响。
+            if matches!(
+                code.as_str(),
+                "Tab"
+                    | "Space"
+                    | "Backspace"
+                    | "ArrowUp"
+                    | "ArrowDown"
+                    | "ArrowLeft"
+                    | "ArrowRight"
+                    | "Home"
+                    | "End"
+                    | "PageUp"
+                    | "PageDown"
+            ) {
+                let ev: &bindings::Event = val.unchecked_ref();
+                ev.prevent_default();
+            }
+        });
+        let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
+        target.add_event_listener("keydown", &handler);
+        listeners.push(Listener {
+            target,
+            kind: "keydown".to_string(),
             handler,
         });
     }
