@@ -64,6 +64,21 @@ IME：canvas 无法承载输入法。做法是在 canvas 上叠一个**透明的
 | `Focus` | 单 canvas，焦点由 DOM 元素决定；`EventCtx` 的 focus 路径仍生效，但页面级失焦只上报一次 `Focus(false)` |
 | 光标形状 | 仅 `canvas.style.cursor` 的有限映射 |
 
+## 4.5 换字体（页面侧，不需重建）
+
+页面用的字体是**运行时 `fetch` 的静态资源**，不编进 wasm，因此换字体不需要 `wasm-pack build`：
+
+1. 把任意 **TTF / OTF / TTC** 放到 `www/fonts/default.ttf`（文件名固定）；
+2. 同步修改 `www/index.html` 里字体 URL 的版本参数：
+   `fetch('./fonts/default.ttf?v=...')` —— **不改就会一直读浏览器缓存的旧字体**（这个坑已踩过）；
+3. 刷新页面，Console 会打印 `[y901] font swapped in`；解析失败时会打印
+   `[y901] 字体解析失败（N 字节）：<reason>`，而不是静默失败。
+
+选字建议：`SimHei`（黑体）字形粗糙、字重单一，只适合验证渲染链路；
+看效果建议换成 **微软雅黑 `msyh.ttc`**、**思源黑体 `SourceHanSans`** 或 **Noto Sans CJK**。
+注意：`TTC` 是字体集（容器），能否被 `MyFontEngine` 直接解析尚未验证；
+若报解析失败，取其中单个字体导出为 TTF 再用。
+
 ## 5. 测试与验证策略
 
 1. **golden test**：给定固定 `UiTree`，wasm 与桌面软后端产出的 `frame_hash` 必须相等（dpr=1.0）；

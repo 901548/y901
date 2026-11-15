@@ -56,8 +56,25 @@ struct MinimalHost;
 impl Host for MinimalHost {
     fn idle(&mut self, _tree: &mut y901_ui::UiTree) {}
 
-    fn command(&mut self, _tree: &mut y901_ui::UiTree, _cmd: Command) -> bool {
-        false // 忽略所有命令：管线验证不依赖命令处理
+    fn command(&mut self, _tree: &mut y901_ui::UiTree, cmd: Command) -> bool {
+        // **让命令可见**：之前这里无条件 `false`，点“保存”什么都不会发生，
+        // 也看不出到底有没有命令到达。现在先打印，再按名字回应。
+        let name = match &cmd {
+            Command::App { name, .. } => name.as_str(),
+            Command::Node { action, .. } => action.as_str(),
+        };
+        console_log(&format!("[y901] command: {name} ({cmd:?})"));
+        match name {
+            "save" => {
+                console_log("[y901] 保存成功（demo host：仅日志，不做真实持久化）");
+                true
+            }
+            "cancel" => {
+                console_log("[y901] 已取消");
+                true
+            }
+            _ => false, // 其他命令交回树处理
+        }
     }
 }
 

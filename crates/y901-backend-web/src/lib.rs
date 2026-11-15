@@ -432,14 +432,25 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 ke.meta_key(),
             );
 
-            if let Some(k) = keys::key_from_dom(&code, &key) {
-                evs.borrow_mut().push_back(RawEvent::KeyDown { key: k, mods });
-            }
-            // **文本插入单独发**：Ctrl/Alt 组合不产生字符（否则
-            // Ctrl+C 会在输入框里插一个 "c"）。
-            if !mods.ctrl && !mods.alt {
-                if let Some(c) = keys::char_from_dom(&key) {
-                    evs.borrow_mut().push_back(RawEvent::Char { c });
+            // **一次按键只发一个事件**：可打印字符只发 `Char`，
+            // 不再发 `KeyDown{Key::Char(c)}`。
+            //
+            // 为何：`TextInput::handle_key` 对 `Key::Char(c)`（text_input.rs:456）与
+            // `UiEvent::Text`（text_input.rs:616）**都会插字符**，
+            // 两条事件都发就会变成 `aaddmmiinn`。
+            // 桌面端不双发是因为它在 `WM_KEYDOWN` 里已经把
+            // 可打印键过滤掉了（交给 `WM_CHAR`）。
+            let printable = if !mods.ctrl && !mods.alt {
+                keys::char_from_dom(&key)
+            } else {
+                None
+            };
+            match printable {
+                Some(c) => evs.borrow_mut().push_back(RawEvent::Char { c }),
+                None => {
+                    if let Some(k) = keys::key_from_dom(&code, &key) {
+                        evs.borrow_mut().push_back(RawEvent::KeyDown { key: k, mods });
+                    }
                 }
             }
             // 阻止浏览器默认：Tab 跳焦点、空格/方向键/翻页键滚页、

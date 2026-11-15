@@ -6,7 +6,7 @@
 
 use y901_ui::widget::Dimension;
 use y901_ui::theme::Theme;
-use y901_ui::{Align, Color, Edges, Flex, FlexItem, Justify, Role, State, UiTree};
+use y901_ui::{Align, Color, Edges, Flex, FlexItem, Json, Justify, Role, State, UiTree};
 use y901_widgets::style::WidgetStyle;
 use y901_widgets::table::{Table, TableColumn};
 use y901_widgets::{Button, TextInput, TextLabel};
@@ -72,11 +72,15 @@ pub fn build_demo_page() -> UiTree {
                 .justify(Justify::End)
                 .push(Box::new(
                     Button::new("cancel", "取消")
+                        // **发命令而不是默认的 "click"**：
+                        // Button 默认发 `Command::App { name: "click" }`，两个按钮无法区分。
+                        .on_click("cancel", Json::Null)
                         .style(WidgetStyle::secondary_button(&theme))
                         .flex_item(FlexItem::height(32.0)),
                 ))
                 .push(Box::new(
                     Button::new("save", "保存")
+                        .on_click("save", Json::Null)
                         .style(WidgetStyle::primary_button(&theme))
                         .flex_item(FlexItem::height(32.0)),
                 )),
