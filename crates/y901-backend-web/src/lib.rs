@@ -294,43 +294,34 @@ impl WasmRuntime {
 ///
 /// **一次按键只发一个事件**：可打印字符（无 ctrl/alt）只发 `Char`；否则发 `KeyDown`。
 /// 两条都发会让 `TextInput` 插两次（`aaddmmiinn`）。
+/// **keydown 处理器：只管控制键。**
+///
+/// **字符输入已经不在这里发了**——那一切交给隐藏 `<input>` 的 `input` 事件。
+/// 原因：keydown 无法区分"用户真按了一个字符键"与"输入法提交后的幻影按键"，
+/// 之前靠 `keyCode == 229` 与 60ms 时间窗口去猜，既会重复也会误吞。
+/// `input` 事件由浏览器在"文本真正进入元素"时统一触发，天然不会重复。
+///
+/// 这里只剩两件事：把**非打印键**翻译成 `RawEvent::KeyDown`，以及阻止浏览器默认行为。
 fn keydown_handler(
     events: Rc<RefCell<VecDeque<RawEvent>>>,
-    ime_end_ms: Rc<std::cell::Cell<f64>>,
+    composing: Rc<std::cell::Cell<bool>>,
 ) -> Closure<dyn FnMut(JsValue)> {
     Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
         let ke: &bindings::KeyboardEvent = val.unchecked_ref();
-        // **组字期间不当按键**：拼音字母不能被当成要输入的字符。
-        if ke.is_composing() {
-            return;
-        }
-        // **幻影 keydown**：输入法选词完成时，浏览器在 `compositionend` 之后
-        // 紧跟一个 `keydown`（常报 `keyCode = 229`），此时 `isComposing` 已为 false。
-        // 不拦它，刚提交的中文就会被当成普通字符再插一次
-        // （“请求” 变“请求请求”）。两道保险：229 代码 + 提交后时间窗口。
-        if ke.key_code() == 229 {
-            return;
-        }
-        if bindings::date_now() - ime_end_ms.get() < 60.0 {
+        // 组字期间不当按键：拼音字母不能影响控制键路径。
+        if composing.get() || ke.is_composing() {
             return;
         }
         let code = ke.code();
         let key = ke.key();
+        // 可打印字符**不在这里处理**：`input` 事件会负责它。
+        if keys::char_from_dom(&key).is_some() && !ke.ctrl_key() && !ke.alt_key() {
+            return;
+        }
         let mods =
             keys::mods_from_event(ke.ctrl_key(), ke.shift_key(), ke.alt_key(), ke.meta_key());
-
-        let printable = if !mods.ctrl && !mods.alt {
-            keys::char_from_dom(&key)
-        } else {
-            None
-        };
-        match printable {
-            Some(c) => events.borrow_mut().push_back(RawEvent::Char { c }),
-            None => {
-                if let Some(k) = keys::key_from_dom(&code, &key) {
-                    events.borrow_mut().push_back(RawEvent::KeyDown { key: k, mods });
-                }
-            }
+        if let Some(k) = keys::key_from_dom(&code, &key) {
+            events.borrow_mut().push_back(RawEvent::KeyDown { key: k, mods });
         }
         // 阻止浏览器默认：Tab 跳焦点、空格/方向键/翻页键滚页、Backspace 后退导航。
         if matches!(
@@ -367,10 +358,13 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // wasm-bindgen 的外部类型本身就是 `JsValue` 的包装；clippy 提示这里无需 `.into()`。
     let canvas_js: JsValue = state.canvas.clone();
     let events = Rc::clone(&state.events);
-    // **上次 `compositionend` 的时间戳（毫秒）**：给 `keydown_handler` 用来拦
-    // 输入法提交后紧跟的幻影 keydown。两处共享，所以在这里声明。
-    #[allow(clippy::redundant_clone)]
-    let ime_end_ms = Rc::new(std::cell::Cell::new(0.0f64));
+    // **IME 共享状态**（三处共用：keydown、input、composition）：
+    //
+    // - `composing`：正在拼音组字。组字期间的 `keydown` 与 `input` 都**不能**当成用户输入。
+    // - `suppress_input_once`：提交时已经发过 `Ime{composition:false}`，紧跟着的 `input`
+    //   事件必须被忽略，否则同一串字会插两次。
+    let composing = Rc::new(std::cell::Cell::new(false));
+    let suppress_input_once = Rc::new(std::cell::Cell::new(false));
     // **坐标换算所需：UI 树的 y 是"从底部往上"，DOM 的 `offsetY` 是"从顶部往下"。**
     // 公式在 `keys::to_ui_y`（带单测），这里只把画布高度抓一份。
     let canvas_h = state.canvas.height() as f32;
@@ -524,7 +518,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // **两个目标都要挂**：焦点在 canvas 上时事件到 canvas，焦点在隐藏 input 上
     // （IME 模式）时到 input。两者不会同时收到，因此不会双发。
     {
-        let mk = || keydown_handler(Rc::clone(&events), Rc::clone(&ime_end_ms));
+        let mk = || keydown_handler(Rc::clone(&events), Rc::clone(&composing));
         let on_canvas = mk();
         let canvas_target: bindings::EventTarget = canvas_js.clone().unchecked_into();
         canvas_target.add_event_listener("keydown", &on_canvas);
@@ -550,11 +544,13 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // `compositionstart/update/end` 全部来自那个隐藏 input：拼音组字只会发给
     // **可编辑元素**，canvas 永远收不到。
     if let Some(input_js) = ime_input.as_ref() {
-        // start：清空 input 的旧值，并告知上层"开始预编辑"（空串）。
+        // ---- compositionstart：进入组字态，清空旧值 ----
         {
             let evs = Rc::clone(&events);
+            let composing_for = Rc::clone(&composing);
             let input_for_clear = input_js.clone();
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
+                composing_for.set(true);
                 let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
                 el.set_value("");
                 evs.borrow_mut().push_back(RawEvent::Ime {
@@ -570,7 +566,8 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 handler,
             });
         }
-        // update：实时预编辑串（输入框里显示拼音）。
+
+        // ---- compositionupdate：预编辑串（只画不提交）----
         {
             let evs = Rc::clone(&events);
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
@@ -588,18 +585,22 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 handler,
             });
         }
-        // end：提交（`composition = false` → 运行时翻译成 `UiEvent::Text`），
-        // 并清空 input，否则下一次输入会累加。
+
+        // ---- compositionend：**只提交一次**，并让紧跟的 `input` 被忽略 ----
+        //
+        // 顺序：浏览器在 `compositionend` 之后还会发一次 `input`，两者都携带同一串
+        // 提交文本。在这里提交、并置 `suppress_input_once`，就能保证**只插一次**；
+        // 若某个浏览器不发那个 `input`，文本也不会丢。
         {
             let evs = Rc::clone(&events);
+            let composing_for = Rc::clone(&composing);
+            let suppress_for = Rc::clone(&suppress_input_once);
             let input_for_clear = input_js.clone();
-            let ime_end_for_handler = Rc::clone(&ime_end_ms);
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
                 let ce: &bindings::CompositionEvent = val.unchecked_ref();
                 let text = ce.data();
-                // **记下提交时刻**：紧跟着的 `keydown` 属于幻影，要被
-                // `keydown_handler` 里的时间窗口拦掉。
-                ime_end_for_handler.set(bindings::date_now());
+                composing_for.set(false);
+                suppress_for.set(true);
                 let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
                 el.set_value("");
                 if !text.is_empty() {
@@ -614,6 +615,48 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             listeners.push(Listener {
                 target,
                 kind: "compositionend".to_string(),
+                handler,
+            });
+        }
+
+        // ---- input：**字符输入的唯一出口** ----
+        //
+        // 无论英文字符还是中文选词提交，浏览器都会在文本进入 input 后发这个事件。
+        // 因此它天然不会重复、也不用猜幻影按键。
+        {
+            let evs = Rc::clone(&events);
+            let composing_for = Rc::clone(&composing);
+            let suppress_for = Rc::clone(&suppress_input_once);
+            let input_for_read = input_js.clone();
+            let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
+                let el: &bindings::HtmlInputElement = input_for_read.unchecked_ref();
+                // 组字中：不读也不清（清了会丢掉正在组的字）。
+                if composing_for.get() {
+                    return;
+                }
+                // 刚在 `compositionend` 提交过：清掉这一次的值，不重复发送。
+                if suppress_for.get() {
+                    suppress_for.set(false);
+                    el.set_value("");
+                    return;
+                }
+                let text = el.value();
+                if text.is_empty() {
+                    return;
+                }
+                el.set_value("");
+                // 统一走 `Ime { composition: false }` → 运行时翻译成 `UiEvent::Text`，
+                // 一次插入一串，无论长短。
+                evs.borrow_mut().push_back(RawEvent::Ime {
+                    text,
+                    composition: false,
+                });
+            });
+            let target: bindings::EventTarget = input_js.clone().unchecked_into();
+            target.add_event_listener("input", &handler);
+            listeners.push(Listener {
+                target,
+                kind: "input".to_string(),
                 handler,
             });
         }
