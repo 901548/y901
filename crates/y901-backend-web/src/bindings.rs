@@ -210,8 +210,8 @@ extern "C" {
     pub type JsObject;
 
     /// `new Object()`\u3002
-    #[wasm_bindgen(constructor, js_class = "Object")]
-    pub fn new_object() -> JsObject;
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> JsObject;
 
     /// `obj[key] = value`\u3002
     #[wasm_bindgen(method, structural, indexing_setter)]

@@ -11,10 +11,19 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use wasm_bindgen::prelude::Closure;
+use wasm_bindgen::{JsCast, JsValue};
 use y901_render::soft::SoftBackend;
 use y901_runtime::window::{RenderOutcome, WindowBackend};
 use y901_runtime::{Host, RawEvent};
 use y901_ui::{Size, UiTree};
+
+thread_local! {
+    /// **[DBG] 已打印过几次事件日志**。仅 P1 验收用，下一轮删除。
+    ///
+    /// 为何用 `thread_local` 而不放 `WasmState`：`wait_events` 的 `self` 是 `WasmWindow`
+    /// （只借了 `soft`/`present`/`canvas`/事件缓冲），拿不到整个 state。
+    static DBG_EVENTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
 
 pub mod bindings;
 pub mod font;
@@ -109,7 +118,20 @@ impl WindowBackend for WasmWindow<'_> {
         // **浏览器不会阻塞等待**：节奏由 rAF 决定。
         // 有就全取，没有就空 —— 与桌面 `wait_events` 的"可阻塞"语义不同，
         // 这一差异已写进 `docs/WASM.md`。
-        Some(self.events.borrow_mut().drain(..).collect())
+        let drained: Vec<RawEvent> = self.events.borrow_mut().drain(..).collect();
+        // [DBG-EVENTS] 临时：验证事件确实进了队列（验收后删除）。用 thread_local 计数限前 20 条，避免刷屏。
+        if !drained.is_empty() {
+            let n = DBG_EVENTS.with(|c| c.get());
+            if n < 20 {
+                DBG_EVENTS.with(|c| c.set(n + 1));
+                bindings::console_log(&format!(
+                    "[DBG-EVENTS] {} 个事件（第 {} 次）",
+                    drained.len(),
+                    n + 1
+                ));
+            }
+        }
+        Some(drained)
     }
 
     fn viewport(&self) -> (u32, u32) {
@@ -208,6 +230,10 @@ impl WasmRuntime {
                 tree.invalidate_all();
             }
         }
+
+        // **P1：挂鼠标/滚轮监听器**。用 `listeners` 是否为空做幂等守卫：
+        // 重复 `install()` 不会把同一事件注册两遍（否则每次移动会产生双倍事件）。
+        install_mouse_listeners(&mut state)?;
         Ok(())
     }
 
@@ -257,6 +283,138 @@ impl WasmRuntime {
             std::time::Duration::from_millis(16),
         )
     }
+}
+
+
+/// **P1：挂鼠标与滚轮监听器**。
+///
+/// 三条硬规则，都写进注释以免下次被"优化"掉：
+///
+/// 1. **闭包只捕获事件队列**，绝不碰 `WasmState`。事件可能在帧中途抵达，
+///    那时 `WasmState` 正被 `&mut` 借用，闭包里碰它就会拿不到借而丢事件。
+/// 2. **`wheel` 必须 `{ passive: false }`**：被动监听器里 `preventDefault()` 无效且控制台报警。
+/// 3. **用 `unchecked_ref` 而不是 `dyn_into`**：监听器是按事件名注册的，类型已知，
+///    再做一次 `instanceof` 只会让每次鼠标移动多一実 JS 往返。
+fn install_mouse_listeners(state: &mut WasmState) -> Result<(), String> {
+    // 幂等守卫：重复 `install()` 不能把同一事件注册两遍（否则一次移动产生两个事件）。
+    if !state.listeners.is_empty() {
+        return Ok(());
+    }
+
+    // canvas 默认不可聚焦；不设 `tabindex` 就永远收不到键盘事件。
+    state.canvas.set_attribute("tabindex", "0");
+
+    // wasm-bindgen 的外部类型本身就是 `JsValue` 的包装；clippy 提示这里无需 `.into()`。
+    let canvas_js: JsValue = state.canvas.clone();
+    let events = Rc::clone(&state.events);
+    let mut listeners: Vec<Listener> = Vec::with_capacity(4);
+
+    // ---- mousemove ----
+    {
+        let evs = Rc::clone(&events);
+        let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
+            let me: &bindings::MouseEvent = val.unchecked_ref();
+            evs.borrow_mut().push_back(RawEvent::MouseMove {
+                x: me.offset_x() as f32,
+                y: me.offset_y() as f32,
+            });
+        });
+        let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
+        target.add_event_listener("mousemove", &handler);
+        listeners.push(Listener {
+            target,
+            kind: "mousemove".to_string(),
+            handler,
+        });
+    }
+
+    // ---- mousedown（顺手把焦点抢到 canvas）----
+    {
+        let evs = Rc::clone(&events);
+        let canvas = canvas_js.clone().unchecked_into::<bindings::HtmlCanvasElement>();
+        let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
+            let me: &bindings::MouseEvent = val.unchecked_ref();
+            let Some(button) = keys::button_from_dom(me.button()) else {
+                return; // 侧键（后退/前进）框架没有语义，丢弃
+            };
+            evs.borrow_mut().push_back(RawEvent::MouseDown {
+                x: me.offset_x() as f32,
+                y: me.offset_y() as f32,
+                button,
+            });
+            // 后续键盘事件的前提。
+            canvas.focus();
+        });
+        let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
+        target.add_event_listener("mousedown", &handler);
+        listeners.push(Listener {
+            target,
+            kind: "mousedown".to_string(),
+            handler,
+        });
+    }
+
+    // ---- mouseup ----
+    {
+        let evs = Rc::clone(&events);
+        let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
+            let me: &bindings::MouseEvent = val.unchecked_ref();
+            let Some(button) = keys::button_from_dom(me.button()) else {
+                return;
+            };
+            evs.borrow_mut().push_back(RawEvent::MouseUp {
+                x: me.offset_x() as f32,
+                y: me.offset_y() as f32,
+                button,
+            });
+        });
+        let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
+        target.add_event_listener("mouseup", &handler);
+        listeners.push(Listener {
+            target,
+            kind: "mouseup".to_string(),
+            handler,
+        });
+    }
+
+    // ---- wheel（必须非被动）----
+    {
+        let evs = Rc::clone(&events);
+        let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
+            let we: &bindings::WheelEvent = val.unchecked_ref();
+            // WheelEvent 继承 MouseEvent：坐标与修饰键都能从同一个 JS 对象取。
+            let me: &bindings::MouseEvent = val.unchecked_ref();
+            let mods = keys::mods_from_event(
+                me.ctrl_key(),
+                me.shift_key(),
+                me.alt_key(),
+                me.meta_key(),
+            );
+            evs.borrow_mut().push_back(RawEvent::Wheel {
+                x: me.offset_x() as f32,
+                y: me.offset_y() as f32,
+                delta: keys::wheel_delta_from_dom(we.delta_y()),
+                mods,
+            });
+            // 阻止页面跟着滚（需配合下面的 passive: false）。
+            let ev: &bindings::Event = val.unchecked_ref();
+            ev.prevent_default();
+        });
+        let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
+        // **为何不传 `{ passive: false }`**：浏览器对 `wheel` 的"默认被动"仅适用于
+        // `window` / `document` / `body`；挂在 **canvas 元素上的 wheel 监听器默认就是非被动**的，
+        // `preventDefault()` 直接生效。若将来改挂在 `window` 上，就必须换回
+        // `add_event_listener_with_options(..., { passive: false })`（绑定已就位）。
+        target.add_event_listener("wheel", &handler);
+        listeners.push(Listener {
+            target,
+            kind: "wheel".to_string(),
+            handler,
+        });
+    }
+
+    state.listeners = listeners;
+    Ok(())
 }
 
 /// 调度下一帧：先 drop 旧闭包，再 wrap 新闭包并存起来。
