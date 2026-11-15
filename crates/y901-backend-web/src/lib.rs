@@ -371,10 +371,13 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             "style",
             "position:fixed;opacity:0;width:1px;height:1px;left:0;top:0;z-index:-1;border:0;padding:0;",
         );
+        element.set_attribute("type", "text");
         element.set_attribute("autocomplete", "off");
         element.set_attribute("autocapitalize", "off");
         element.set_attribute("spellcheck", "false");
         let _ = body.append_child(&element);
+        // [DBG-INPUT] 临时：确认 input 真的进了 DOM。
+        bindings::console_log("[DBG-INPUT] hidden input appended to body");
         Some(JsValue::from(element))
     })();
     let mut listeners: Vec<Listener> = Vec::with_capacity(4);
@@ -414,6 +417,13 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 y: keys::to_ui_y(canvas_h, me.offset_y() as f32),
                 button,
             });
+            // **关键：先 `preventDefault()` 再抢焦点**。
+            // canvas 上有 `tabindex="0"`，浏览器在 `mousedown` 的**默认动作**里会把焦点移到
+            // canvas；不阻止默认动作的话，我们 `input.focus()` 的结果在事件结束后被抢走。
+            {
+                let ev: &bindings::Event = val.unchecked_ref();
+                ev.prevent_default();
+            }
             // **把焦点给隐藏 input**（而不是 canvas），输入法才会启动；
             // 没有 input（极罕见：页面没有 body）时退回 canvas，至少保证英文可用。
             if let Some(input_js) = ime_input_for_focus.as_ref() {
@@ -421,6 +431,15 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 input.focus();
             } else if let Some(canvas) = canvas_for_focus.as_ref() {
                 canvas.focus();
+            }
+            // [DBG-FOCUS] 临时：看焦点真正落在了谁身上。
+            if let Some(win) = bindings::global_window() {
+                let tag = win
+                    .document()
+                    .and_then(|d| d.active_element())
+                    .map(|e| e.tag_name())
+                    .unwrap_or_else(|| "<none>".to_string());
+                bindings::console_log(&format!("[DBG-FOCUS] activeElement = {tag}"));
             }
         });
         let target: bindings::EventTarget = canvas_js.clone().unchecked_into();

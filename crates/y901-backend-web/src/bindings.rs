@@ -258,6 +258,10 @@ extern "C" {
     /// `document.createElement(tag)`。
     #[wasm_bindgen(method, js_name = "createElement")]
     pub fn create_element(this: &Document, tag: &str) -> Element;
+
+    /// `document.activeElement`——**调试用**：确认焦点到底在谁身上。
+    #[wasm_bindgen(method, getter, js_name = "activeElement")]
+    pub fn active_element(this: &Document) -> Option<Element>;
 }
 
 /// DOM `Element`（取到后用 `unchecked_into` 转成 `HtmlCanvasElement`）。
@@ -276,6 +280,14 @@ extern "C" {
     /// 不加 `structural` 的话 wasm-bindgen 会在 JS 侧做 `instanceof Element` 检查。
     #[wasm_bindgen(method, structural, js_name = "appendChild")]
     pub fn append_child(this: &Element, child: &Element) -> Element;
+
+    /// `element.tagName`（大写，如 `"CANVAS"` / `"INPUT"`）。
+    #[wasm_bindgen(method, getter, js_name = "tagName")]
+    pub fn tag_name(this: &Element) -> String;
+
+    /// `element.id`。
+    #[wasm_bindgen(method, getter)]
+    pub fn id(this: &Element) -> String;
 }
 
 /// `HTMLInputElement`——**隐藏的 IME 承接元素**。
