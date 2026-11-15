@@ -15,6 +15,28 @@ use y901_render::font_engine::MyFontEngine;
 use y901_runtime::Host;
 use y901_ui::{Command, Size};
 
+/// 把 Rust panic 转成 `console.error`（**仅诊断用**）。
+///
+/// 为何需要：wasm 上 panic 被译成 `unreachable`，浏览器只报
+/// `RuntimeError: unreachable`，**不给行号**。装上 hook 后 console 里会多一行
+/// `[y901] PANIC: panicked at crates/...:LINE:COL`，定位才有依据。
+pub fn set_panic_hook() {
+    use std::sync::Once;
+    static HOOK: Once = Once::new();
+    HOOK.call_once(|| {
+        std::panic::set_hook(Box::new(|info| {
+            console_error(&format!("[y901] PANIC: {info}"));
+        }));
+    });
+}
+
+#[wasm_bindgen]
+extern "C" {
+    /// `console.error`（手写，不引入 web-sys）。
+    #[wasm_bindgen(js_name = "console.error")]
+    fn console_error(s: &str);
+}
+
 thread_local! {
     /// 当前页面的分享状态。
     ///
@@ -40,6 +62,8 @@ impl Host for MinimalHost {
 /// 页面在 `www/index.html`（见 `docs/WASM.md` §3.2）。
 #[wasm_bindgen]
 pub fn y901_start() -> Result<(), JsValue> {
+    set_panic_hook();
+
     let window = y901_backend_web::bindings::global_window()
         .ok_or_else(|| JsValue::from_str("Y901: 没有 window（不在浏览器里？）"))?;
     let document = window
