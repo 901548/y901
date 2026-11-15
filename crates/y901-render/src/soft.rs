@@ -79,6 +79,8 @@ pub struct SoftBackend {
     dpi_scale: f32,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
     clear_color: Color,
+    /// **[DBG] `(origin.y, by, glyph_h, bearing_y, clip.y, clip.h)`** —— 定位缩放路径的 Y 坐标。
+    pub dbg_abs: Option<(f32, f32, f32, f32, f32, f32)>,
 }
 
 impl SoftBackend {
@@ -127,6 +129,7 @@ impl SoftBackend {
             cell,
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
+            dbg_abs: None,
             dpi_scale: 1.0,
         })
     }
@@ -151,6 +154,7 @@ impl SoftBackend {
             text: font,
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
+            dbg_abs: None,
             dpi_scale: 1.0,
         })
     }
@@ -811,6 +815,21 @@ impl RenderCtx for SoftBackend {
                             sg.slot.bearing_y * scale
                         };
                         let by = (origin.y + ascent * scale + eff_bearing).floor() as i32;
+                        // [DBG-MARK] 在字形起点画一根红线：看它落在数字的上/下/中哪里。
+                        if ch == '8' {
+                            self.fill_rect(
+                                Rect::new(origin.x, by as f32, 50.0, 1.0),
+                                Color::rgba(1.0, 0.0, 0.0, 1.0),
+                            );
+                        }
+                        if self.dbg_abs.is_none() && ch == '8' {
+                            let (cy, chh) = match self.state.current_clip() {
+                                Some(c) => (c.y, c.h),
+                                None => (-1.0, -1.0),
+                            };
+                            self.dbg_abs =
+                                Some((origin.y, by as f32, sg.h as f32 * scale, eff_bearing, cy, chh));
+                        }
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
                         let dh = (sg.h as f32 * scale).round().max(1.0) as i32;
