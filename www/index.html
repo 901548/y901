@@ -13,7 +13,8 @@
   <canvas id="y901-canvas" width="800" height="600"></canvas>
 
   <script type="module">
-    import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js';
+    // `?v=` 参数用于破浏览器缓存：每次重建都换一个值。
+import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=reverse-3';
 
     async function run() {
       await init();
