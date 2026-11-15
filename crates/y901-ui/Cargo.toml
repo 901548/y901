@@ -10,6 +10,9 @@ edition.workspace = true
 # 不认识 D3D11，不认识 PTY，不认识 Win32，也不认识任何具体业务。
 # 所有平台能力经 trait 由应用层注入；所有业务语义由应用层解释。
 [dependencies]
+# wasm 上 `std::time::Instant::now()` 会 panic（time not implemented）；
+# `web_time::Instant` 与它 API 一致，native 上直接转发给 std。
+web-time = "1"
 # 布局原语（区间集）放在 core：它是纯数据，且不依赖本 crate（无循环）。
 # 代价：ui 因此间接引入 core 的依赖 `unicode-width`。
 y901-core = { path = "../y901-core", version = "0.1.20" }

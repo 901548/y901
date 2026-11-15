@@ -19,7 +19,7 @@
 #[path = "profile.rs"]
 mod profile;
 
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::{translate, Host, RawEvent};
 use y901_ui::{Size, UiEvent, UiTree};

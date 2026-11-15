@@ -7,7 +7,8 @@
 //! `offset_for_x`。解决办法是在 measure/render 时缓存一份"字符 → X"的排版表，
 //! 事件阶段查表即可，O(log n) 定位，不需要把 `TextMetrics` 塞进事件。
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use y901_ui::text::TextBuffer;
 use y901_ui::{

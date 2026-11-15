@@ -4,6 +4,7 @@
 //! 拿到的矩形与语义与实际渲染完全一致（同一棵树算出来的）。
 
 use std::collections::HashMap;
+use web_time::Instant;
 
 use crate::event::{EventPhase, PointerCapture};
 use crate::event::{EventResult, UiEvent};
@@ -1369,7 +1370,7 @@ impl UiTree {
             sub.rev = rev;
             sub.last_sem = sem;
             sub.interval = interval;
-            sub.next_due = std::time::Instant::now() + interval;
+            sub.next_due = Instant::now() + interval;
             return true;
         }
 
@@ -1378,7 +1379,7 @@ impl UiTree {
             rev,
             last_sem: sem,
             interval,
-            next_due: std::time::Instant::now() + interval,
+            next_due: Instant::now() + interval,
         });
         true
     }
@@ -1421,7 +1422,7 @@ impl UiTree {
     ///
     /// - 差分：`patch` 只包含变化的字段；
     /// - 节流：每个订阅有 `interval`，到期才检查一次，窗口内的多次变化合并成一次。
-    pub fn poll_subscriptions(&mut self, now: std::time::Instant) -> Vec<crate::json::Json> {
+    pub fn poll_subscriptions(&mut self, now: Instant) -> Vec<crate::json::Json> {
         use crate::json::Json;
 
         // **懒清理**：先剔除"目标节点已不存在"的订阅。
@@ -2837,7 +2838,7 @@ struct Subscription {
     /// 最小推送间隔。
     interval: std::time::Duration,
     /// 下次允许检查的时间点。
-    next_due: std::time::Instant,
+    next_due: Instant,
 }
 
 /// 节点状态指纹：语义面哈希 + 组件 revision。

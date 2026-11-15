@@ -6,7 +6,8 @@
 //! 因此：悬停开始时 `wants_tick() -> true`（才会收到 Tick），
 //! 弹出后立刻改回 `false`（**空闲不再被唤醒**，这是验收项之一）。
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use y901_ui::{
     Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Role, Semantics, Size, State,

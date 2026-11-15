@@ -10,7 +10,7 @@
 //! **口径**：`us` 是**循环总耗时**（含空闲等待）。用 `presented` 字段区分空闲帧与呈现帧；
 //! 空闲帧的 `us` 反映的是**等待时长**，不是渲染耗时。
 
-use std::time::Instant;
+use web_time::Instant;
 
 /// \u4e00\u5e27\u7684\u5f52\u56e0\u4fe1\u606f\uff08\u53ea\u5728 profile \u5f00\u542f\u65f6\u6784\u9020\uff09\u3002
 #[derive(Clone, Copy, Default)]

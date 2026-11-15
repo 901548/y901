@@ -7,6 +7,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+# wasm 上 `std::time::Instant::now()` 会 panic（time not implemented）；
+# `web_time::Instant` 与它 API 一致，native 上直接转发给 std。
+web-time = "1"
 # PNG decode: pure Rust (png -> flate2 -> miniz_oxide). Zero C.
 png = "0.17"
 y901-core = { path = "../y901-core", version = "0.1.20" }
