@@ -806,6 +806,21 @@ impl RenderCtx for SoftBackend {
             if ch != ' ' {
                 // 按当前缩放选一级字形（level 0 = L0，与不缩放时逐像素相同）
                 if let Some(sg) = self.text.glyph_at_scale(ch, scale) {
+                    if self.dbg_probe.is_none() && ch == '8' {
+                        let (cy, chh) = match self.state.current_clip() {
+                            Some(c) => (c.y, c.h),
+                            None => (-1.0, -1.0),
+                        };
+                        self.dbg_probe = Some((
+                            ch,
+                            sg.slot.bearing_y as i32,
+                            sg.h,
+                            ascent,
+                            origin.y,
+                            cy,
+                            chh,
+                        ));
+                    }
                     if sg.w > 0 && sg.h > 0 {
                         let atlas_size = self.text.atlas_size() as usize;
                         // 基线：布局始终用原字号的 bearing，屏幕位置再乘缩放因子
