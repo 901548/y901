@@ -17,12 +17,14 @@ use y901_ui::{Size, UiTree};
 
 pub mod bindings;
 pub mod font;
+pub mod font_engine;
 pub mod frame;
 pub mod input;
 pub mod keys;
 pub mod present;
 
 pub use bindings::HtmlCanvasElement;
+pub use font_engine::WasmFontEngine;
 pub use frame::{frame_step, FrameStats};
 pub use input::{KeyInput, MouseInput, WheelInput};
 pub use present::Present;
