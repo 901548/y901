@@ -155,6 +155,24 @@ impl WasmRuntime {
             .map_err(|_| "WasmRuntime 状态被重入借用".to_string())?;
         state.host = Some(host);
         state.tree = Some(tree);
+
+        // **首次布局**：桌面在 `run_loop` 前有 `window.resize(&mut tree)`，
+        // wasm 侧一直缺这一步 —— 组件 rect 全是 0，首帧 `dirty` 为空，
+        // `render` 直接返回 `Skipped`，canvas 只剩页面 CSS 底色（看上去全黑）。
+        //
+        // 为何要解构：`tree.layout(..., &soft)` 同时可变借用 `tree` 与不可变借用 `soft`，
+        // 两者同属一个结构体，只能分开借。
+        {
+            let WasmState {
+                canvas, soft, tree, ..
+            } = &mut *state;
+            if let Some(tree) = tree.as_mut() {
+                let (w, h) = (canvas.width(), canvas.height());
+                tree.layout(Size::new(w as f32, h as f32), soft);
+                // 布局完后必须标脏：否则首帧仍然会被判为 `Skipped`。
+                tree.invalidate_all();
+            }
+        }
         Ok(())
     }
 
