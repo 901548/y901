@@ -20,6 +20,8 @@
 
 #![deny(missing_docs)]
 pub mod demo;
+#[cfg(target_arch = "wasm32")]
+pub mod wasm_entry;
 pub use demo::build_demo_page;
 pub mod clipboard;
 pub mod secret;

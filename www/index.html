@@ -14,15 +14,13 @@
 
   <script type="module">
     // pkg/ 由 wasm-bindgen 生成（见 package.json 的 build 脚本 / README）。
-    import init from './pkg/y901_backend_web.js';
+    import init, { y901_start } from './pkg/y901_shell.js';
 
     init()
       .then(() => {
         // 胶水加载完成后，调用示例入口（若存在）。
         // 约定：wasm 侧导出 `start()` 用来创建运行时并出第一帧。
-        if (typeof window.y901_start === 'function') {
-          window.y901_start();
-        }
+        y901_start();
       })
       .catch((err) => console.error('[y901] wasm 初始化失败：', err));
   </script>
