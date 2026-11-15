@@ -97,8 +97,84 @@ impl WindowBackend for WasmWindow<'_> {
     }
 }
 
+impl WasmState {
+    /// 从一个 canvas 构造：软后端按 canvas 尺寸分配像素缓冲，`Present` 取一次 2D 上下文。
+    pub fn new(canvas: HtmlCanvasElement) -> Result<Self, String> {
+        let (w, h) = (canvas.width(), canvas.height());
+        let soft = SoftBackend::new(
+            w,
+            h,
+            Box::new(crate::font_engine::WasmFontEngine::new()),
+            Size::new(8.0, 16.0),
+            None,
+        )?;
+        let cloned: HtmlCanvasElement = canvas.clone().into();
+        let present = Present::new(cloned);
+        Ok(Self {
+            canvas,
+            soft,
+            present,
+            tree: None,
+            host: None,
+            events: VecDeque::new(),
+            last_frame_ms: 0.0,
+        })
+    }
+}
+
 /// 浏览器端运行时。`run` 与 rAF 循环在 S1-b 实现。
 pub struct WasmRuntime {
     /// 共享状态（rAF 回调通过 `Rc` 克隆持有）。
     pub state: Rc<RefCell<WasmState>>,
+}
+
+impl WasmRuntime {
+    /// 从一个 canvas 构造运行时。
+    pub fn new(canvas: HtmlCanvasElement) -> Result<Self, String> {
+        Ok(Self {
+            state: Rc::new(RefCell::new(WasmState::new(canvas)?)),
+        })
+    }
+
+    /// 把 `host` 与建好的 `tree` 装进状态，准备出帧。
+    ///
+    /// 这里**只做装载**：rAF 循环的调度器留到下一次提交（见 `docs/WASM.md` S1-b 拆分）。
+    pub fn install(&mut self, host: Box<dyn Host>, tree: UiTree) -> Result<(), String> {
+        let mut state = self
+            .state
+            .try_borrow_mut()
+            .map_err(|_| "WasmRuntime 状态被重入借用".to_string())?;
+        state.host = Some(host);
+        state.tree = Some(tree);
+        Ok(())
+    }
+
+    /// 推一帧：把 `tree` / `host` 借出来，套上 `WasmWindow` 薄包装，交给 `frame_step`。
+    ///
+    /// **为什么单独暴露**：rAF 回调与测试都调它；`try_borrow_mut` 防同帧重入。
+    pub fn tick(&mut self) -> Result<FrameStats, String> {
+        let mut state = self
+            .state
+            .try_borrow_mut()
+            .map_err(|_| "WasmRuntime 状态被重入借用".to_string())?;
+        let WasmState {
+            soft,
+            present,
+            canvas,
+            tree,
+            host,
+            events,
+            ..
+        } = &mut *state;
+        let tree = tree.as_mut().ok_or("tree 尚未安装")?;
+        let host = host.as_mut().ok_or("host 尚未安装")?;
+        let host: &mut dyn Host = host.as_mut();
+        let events: Vec<RawEvent> = events.drain(..).collect();
+        let mut window = WasmWindow {
+            soft,
+            present,
+            canvas,
+        };
+        frame_step(&mut window, tree, host, &events)
+    }
 }

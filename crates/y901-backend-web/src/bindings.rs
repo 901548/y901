@@ -14,6 +14,13 @@ extern "C" {
 
     #[wasm_bindgen(method, js_name = "requestAnimationFrame")]
     pub fn request_animation_frame(this: &Window, cb: &Closure<dyn FnMut(f64)>);
+
+    /// 全局 `window` 对象。
+    #[wasm_bindgen(js_name = "window")]
+    pub fn global_window() -> Option<Window>;
+
+    #[wasm_bindgen(method, getter)]
+    pub fn document(this: &Window) -> Option<Document>;
 }
 
 /// `HtmlCanvasElement`。
@@ -116,4 +123,20 @@ extern "C" {
 
     #[wasm_bindgen(method, js_name = "set")]
     pub fn set_from(this: &Uint8ClampedArray, src: &[u8], offset: u32);
+}
+/// `Document`——用来按 id 取 canvas（页面约定见 `docs/WASM.md` §3.2）。
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = "Document")]
+    pub type Document;
+
+    #[wasm_bindgen(method, js_name = "getElementById")]
+    pub fn get_element_by_id(this: &Document, id: &str) -> Option<Element>;
+}
+
+/// DOM `Element`（取到后用 `unchecked_into` 转成 `HtmlCanvasElement`）。
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = "Element")]
+    pub type Element;
 }
