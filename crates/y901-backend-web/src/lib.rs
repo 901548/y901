@@ -17,11 +17,6 @@ use y901_runtime::window::{RenderOutcome, WindowBackend};
 use y901_runtime::{Host, RawEvent};
 use y901_ui::{Size, UiTree};
 
-thread_local! {
-    /// **[DBG] 上一次记录的焦点 id**（仅验收用）。
-    static DBG_FOCUS: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
-}
-
 pub mod bindings;
 pub mod font;
 pub mod font_engine;
@@ -304,10 +299,15 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
 
     // canvas 默认不可聚焦；不设 `tabindex` 就永远收不到键盘事件。
     state.canvas.set_attribute("tabindex", "0");
+    // 去掉焦点时浏览器给 canvas 画的**白色轮廓**（默认 `:focus-visible` 样式）。
+    state.canvas.set_attribute("style", "outline: none;");
 
     // wasm-bindgen 的外部类型本身就是 `JsValue` 的包装；clippy 提示这里无需 `.into()`。
     let canvas_js: JsValue = state.canvas.clone();
     let events = Rc::clone(&state.events);
+    // **坐标换算所需：UI 树的 y 是"从底部往上"，DOM 的 `offsetY` 是"从顶部往下"。**
+    // 公式在 `keys::to_ui_y`（带单测），这里只把画布高度抓一份。
+    let canvas_h = state.canvas.height() as f32;
     let mut listeners: Vec<Listener> = Vec::with_capacity(4);
 
     // ---- mousemove ----
@@ -317,7 +317,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             let me: &bindings::MouseEvent = val.unchecked_ref();
             evs.borrow_mut().push_back(RawEvent::MouseMove {
                 x: me.offset_x() as f32,
-                y: me.offset_y() as f32,
+                y: keys::to_ui_y(canvas_h, me.offset_y() as f32),
             });
         });
         let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
@@ -338,15 +338,9 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             let Some(button) = keys::button_from_dom(me.button()) else {
                 return; // 侧键（后退/前进）框架没有语义，丢弃
             };
-            let (mx, my) = (me.offset_x() as f32, me.offset_y() as f32);
-            // [DBG-MD] 临时：确认点击事件真的根据坐标进了队列。
-            bindings::console_log(&format!(
-                "[DBG-MD] x={} y={} btn={:?}",
-                mx, my, button
-            ));
             evs.borrow_mut().push_back(RawEvent::MouseDown {
-                x: mx,
-                y: my,
+                x: me.offset_x() as f32,
+                y: keys::to_ui_y(canvas_h, me.offset_y() as f32),
                 button,
             });
             // 后续键盘事件的前提。
@@ -371,7 +365,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             };
             evs.borrow_mut().push_back(RawEvent::MouseUp {
                 x: me.offset_x() as f32,
-                y: me.offset_y() as f32,
+                y: keys::to_ui_y(canvas_h, me.offset_y() as f32),
                 button,
             });
         });
@@ -399,7 +393,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             );
             evs.borrow_mut().push_back(RawEvent::Wheel {
                 x: me.offset_x() as f32,
-                y: me.offset_y() as f32,
+                y: keys::to_ui_y(canvas_h, me.offset_y() as f32),
                 delta: keys::wheel_delta_from_dom(we.delta_y()),
                 mods,
             });
@@ -543,20 +537,6 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
                     &evs,
                     std::time::Duration::from_millis(dt_ms as u64),
                 );
-                // [DBG-FOCUS] 临时：focus 变化时打一次，看点击到底有没有把焦点给出去。
-                let now_focus = tree.focus().map(|s| s.to_string());
-                let changed = DBG_FOCUS.with(|c| {
-                    let prev = c.borrow().clone();
-                    if prev != now_focus {
-                        *c.borrow_mut() = now_focus.clone();
-                        true
-                    } else {
-                        false
-                    }
-                });
-                if changed {
-                    bindings::console_log(&format!("[DBG-FOCUS] focus={:?}", now_focus));
-                }
             }
         }
         // ---- 排下一帧（必须在上面的借用结束之后）----

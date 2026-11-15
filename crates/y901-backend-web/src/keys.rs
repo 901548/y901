@@ -93,6 +93,23 @@ pub fn wheel_delta_from_dom(delta_y: f64) -> f32 {
     }
 }
 
+/// **DOM 像素坐标 → UI 树坐标**的 Y 转换（仅 Y）。
+///
+/// 为何要转：`SoftBackend` 交出的缓冲是**自下而上**存的，`present` 又把整帧按行翻转一次，
+/// 两次叠加后**画面正向**，但 UI 树的 y 坐标仍然是"从屏幕底部往上"计的。
+/// 而 DOM 的 `offsetY` 是"从屏幕顶部往下"。两者方向相反，不转换就会点上去下错位
+/// （典型现象：点上面的输入框，焦点落在下面那个）。
+///
+/// 公式：`y_ui = height - 1 - y_dom`。`-1` 是为了让**最上一行像素**落在 `height - 1`，
+/// 而非越界到 `height`。
+pub fn to_ui_y(height: f32, y_dom: f32) -> f32 {
+    // 非有限值不要污染命中测试：取 0（屏幕底部）作为安全值。
+    if !height.is_finite() || !y_dom.is_finite() {
+        return 0.0;
+    }
+    (height - 1.0 - y_dom).max(0.0)
+}
+
 /// 特殊键表：`(code, Key)`。
 fn special_key(code: &str) -> Option<Key> {
     let k = match code {
@@ -296,5 +313,36 @@ mod tests {
     fn wheel_delta_of_non_finite_values_is_zero() {
         assert_eq!(wheel_delta_from_dom(f64::NAN), 0.0);
         assert_eq!(wheel_delta_from_dom(f64::INFINITY), 0.0);
+    }
+
+    // ---- to_ui_y ----
+
+    #[test]
+    fn top_of_canvas_maps_to_last_ui_row() {
+        // 屏幕最上一行（offsetY = 0）对应 UI 坐标的最大 y。
+        assert!((to_ui_y(600.0, 0.0) - 599.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn bottom_of_canvas_maps_to_zero() {
+        assert!((to_ui_y(600.0, 599.0) - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn mapping_is_symmetric_around_the_middle() {
+        let h = 600.0;
+        for y in [0.0_f32, 1.0, 100.0, 299.0, 300.0, 599.0] {
+            let mirrored = to_ui_y(h, y);
+            let back = to_ui_y(h, mirrored);
+            assert!((back - y).abs() < f32::EPSILON, "y={y} back={back}");
+        }
+    }
+
+    #[test]
+    fn out_of_range_values_are_clamped_or_safe() {
+        // 鼠标拖出画布时 offsetY 可能超出范围：不能产生负数坐标。
+        assert_eq!(to_ui_y(600.0, 900.0), 0.0);
+        assert_eq!(to_ui_y(f32::NAN, 10.0), 0.0);
+        assert_eq!(to_ui_y(600.0, f32::NAN), 0.0);
     }
 }
