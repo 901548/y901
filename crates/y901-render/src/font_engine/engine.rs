@@ -377,7 +377,17 @@ impl MyFontEngine {
         let g = self.cache.get(&(ch, 0u8, self.px_key()))?;
         // 回退：从 wanted 往下找第一个真正存在的级
         for level in (1..=wanted).rev() {
-            if let Some(slot) = g.mip_at(level) {
+            // **mip 的 bearing 要从基字形继承**：实测 `mip_at()` 返回的
+            // `bearing_y` 是 0，而基字形是负值。丢失它会让字形整体
+            // 下移（顶部被裁、底部溢出）。按层级折算继承基字形的 bearing。
+            if let Some(mut slot) = g.mip_at(level) {
+                let factor = 1.0 / (1u32 << level) as f32;
+                if slot.bearing_y == 0.0 && g.bearing_y != 0 {
+                    slot.bearing_y = g.bearing_y as f32 * factor;
+                }
+                if slot.bearing_x == 0.0 && g.bearing_x != 0 {
+                    slot.bearing_x = g.bearing_x as f32 * factor;
+                }
                 return Some(MipSelection {
                     level,
                     glyph: g,
