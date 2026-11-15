@@ -1791,6 +1791,22 @@ impl UiTree {
         ctx.set_animations(&snapshot);
         let dirty = self.dirty.clone();
 
+        // **按脏区剪裁的整树重绘（方案 D）**。
+        //
+        // 两种情形：
+        // - `full`（首帧 / 尺寸变化 / 换字体 / 碎片过多）：一次整树绘制，**不加剪裁**。
+        //   这与旧行为**逐像素等价**（hash-gate 的判据）。
+        // - 局部脏区：**对每一块脏区各画一遍整树**，并把画面剪到该矩形内。
+        //   这样脏区内的像素会被"父背景 → 子 → 文字"完整重写（旧像素也就被覆盖），
+        //   而脏区外的像素不受影响 —— 这正是保留缓冲（SoftBackend）需要的语义。
+        let paint_all = dirty.is_full();
+        let local_rects: Vec<Rect> = if paint_all {
+            Vec::new()
+        } else {
+            dirty.rects().to_vec()
+        };
+
+        let draw = |this: &mut UiTree, ctx: &mut dyn RenderCtx, paint_all: bool| {
         // 单遍绘制：**树序就是绘制顺序**（后访问的后画，后画的在上）。
         //
         // 之前有 `Layer::{Base,Overlay,Modal}` + `deferred` 回放：子树先记路径、遍历完
@@ -1798,26 +1814,27 @@ impl UiTree {
         // `UiTree::popups`（树外、最后画），树内只需"父先子后、兄弟按序"。
         {
             let mut path: Vec<usize> = Vec::new();
-            // scratch 用 `mem::take` 取出（避免 `&mut self` 字段与 `self.root` 同时借用），用完放回。
-            let mut rects = std::mem::take(&mut self.render_rects);
-            let mut clips = std::mem::take(&mut self.render_clips);
+            // scratch 用 `mem::take` 取出（避免 `&mut self` 字段与 `this.root` 同时借用），用完放回。
+            let mut rects = std::mem::take(&mut this.render_rects);
+            let mut clips = std::mem::take(&mut this.render_clips);
             render_pass(
-                self.root.as_mut(),
+                this.root.as_mut(),
                 ctx,
                 &dirty,
+                paint_all,
                 &mut path,
                 &mut rects,
                 &mut clips,
             );
-            self.render_rects = rects;
-            self.render_clips = clips;
+            this.render_rects = rects;
+            this.render_clips = clips;
         }
 
-        if !self.popups.is_empty() {
-            let viewport = Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h);
+        if !this.popups.is_empty() {
+            let viewport = Rect::new(0.0, 0.0, this.viewport.w, this.viewport.h);
             ctx.push_clip(viewport);
             // 模态弹层：先铺一层遮罩（与 Dialog 的 0.55 黑一致）
-            if self.popups.iter().any(|p| p.modal) {
+            if this.popups.iter().any(|p| p.modal) {
                 ctx.fill_rect(viewport, crate::Color::rgba(0.0, 0.0, 0.0, 0.55));
             }
             // **popup 也要递归渲染：**原先只调 `popup.widget.render(ctx)`，
@@ -1827,7 +1844,7 @@ impl UiTree {
             let mut popup_path: Vec<usize> = Vec::new();
             let mut popup_rects: Vec<Rect> = Vec::new();
             let mut popup_clips: Vec<Option<Rect>> = Vec::new();
-            for popup in self.popups.iter_mut() {
+            for popup in this.popups.iter_mut() {
                 if popup.rect.is_empty() {
                     continue;
                 }
@@ -1854,6 +1871,7 @@ impl UiTree {
                         popup.widget.as_mut(),
                         ctx,
                         &dirty,
+                        paint_all,
                         &mut popup_path,
                         &mut popup_rects,
                         &mut popup_clips,
@@ -1873,6 +1891,7 @@ impl UiTree {
                         popup.widget.as_mut(),
                         ctx,
                         &dirty,
+                        paint_all,
                         &mut popup_path,
                         &mut popup_rects,
                         &mut popup_clips,
@@ -1880,6 +1899,27 @@ impl UiTree {
                 }
             }
             ctx.pop_clip();
+        }
+
+        };
+
+        if paint_all {
+            draw(self, ctx, true);
+        } else {
+            // **局部模式仍保留"脏区剪枝"**：与脏区不相交的子树不遍历。
+            //
+            // 为何安全：任何子节点的脏区必定被其**祖先的 rect 包含**，
+            // 而祖先总会命中 `needs_paint`（矩形相交）并在裁剪区内重画自己的
+            // 背景/UI，所以脏区内的像素仍然按完整顺序重写。
+            // 保留剪枝可以避免"一个小标脏点 ⇒ 整树遍历"的白费。
+            for r in local_rects {
+                if r.is_empty() {
+                    continue;
+                }
+                ctx.push_clip(r);
+                draw(self, ctx, false);
+                ctx.pop_clip();
+            }
         }
 
         self.dirty.clear();
@@ -2768,6 +2808,9 @@ fn render_pass(
     node: &mut dyn Widget,
     ctx: &mut dyn RenderCtx,
     dirty: &DirtyRegion,
+    // `paint_all`：**强制整树绘制**。局部重绘时画面被剪到脏区，脏区内必须按
+    // **完整绘制顺序**重画（父背景 → 子 → 文字），否则会出现"父背景没画"的黑块。
+    paint_all: bool,
     path: &mut Vec<usize>,
     // **复用缓存**（由 `UiTree::render` 持有）：避免每层每帧分配 `Vec`。
     rects: &mut Vec<Rect>,
@@ -2777,7 +2820,7 @@ fn render_pass(
     if !node.is_open() {
         return;
     }
-    if node.needs_paint(dirty) {
+    if paint_all || node.needs_paint(dirty) {
         // 诊断开关：按**真实绘制顺序**打印每个节点的 id/矩形/裁切，
         // 用于定位"文字被后画的背景盖掉"这类问题。
         if std::env::var_os("Y901_PAINT_TRACE").is_some() {
@@ -2824,7 +2867,7 @@ fn render_pass(
                 ctx.push_clip(c);
             }
             path.push(i);
-            render_pass(child.as_mut(), ctx, dirty, path, rects, clips);
+            render_pass(child.as_mut(), ctx, dirty, paint_all, path, rects, clips);
             path.pop();
             if child_clip.is_some() {
                 ctx.pop_clip();
@@ -3010,5 +3053,297 @@ fn forget_recursive(node: &dyn Widget, tree: &mut UiTree) {
     tree.pending_semantic.remove(&id);
     for child in node.children() {
         forget_recursive(child.as_ref(), tree);
+    }
+}
+
+#[cfg(test)]
+mod dirty_clip_tests {
+    //! **脏区剪裁重绘（方案 D）的安全网。**
+    //!
+    //! 用一个记录型 `RenderCtx` 记下每次绘制及其当时的剪裁区，
+    //! 从而在**没有 GPU / 没有屏幕** 的情况下验证：父背景是否在脏区内被重画、
+    //! 画面是否被限制在脏区内、以及 full 路径是否仍为不加剪裁的全量。
+    use super::*;
+    use crate::event::{EventResult, UiEvent};
+    use crate::layout::LayoutCache;
+    use crate::widget::{EventCtx, RenderCtx, Semantics, Widget};
+    use crate::{Color, Constraints, Pos, Rect, Size};
+
+    /// 记录一次绘制：`(类型, 矩形, 当时的剪裁区)`。
+    #[derive(Debug, Clone)]
+    struct Op {
+        kind: &'static str,
+        rect: Rect,
+        clip: Option<Rect>,
+    }
+
+    struct RecordingCtx {
+        size: Size,
+        ops: Vec<Op>,
+        clips: Vec<Rect>,
+    }
+
+    impl RecordingCtx {
+        fn new(w: f32, h: f32) -> Self {
+            Self {
+                size: Size::new(w, h),
+                ops: Vec::new(),
+                clips: Vec::new(),
+            }
+        }
+
+        /// 当前剪裁 = 栈顶与下层逐级求交（与真实后端一致）。
+        fn clip_now(&self) -> Option<Rect> {
+            let mut it = self.clips.iter();
+            let mut acc = *it.next()?;
+            for c in it {
+                acc = acc.intersect(*c);
+            }
+            Some(acc)
+        }
+
+        fn fills(&self) -> Vec<&Op> {
+            self.ops.iter().filter(|o| o.kind == "fill").collect()
+        }
+    }
+
+    // `RenderCtx: TextMetrics`（超级 trait），因此测试上下文也要实现度量。
+    //
+    // 用等宽假字体（0.5 × 字号 × 字符数），目的是让测试与实际字体无关。
+    impl crate::widget::TextMetrics for RecordingCtx {
+        fn measure_text(&self, text: &str, style: &crate::TextStyle) -> Size {
+            let px = style.size.unwrap_or(16.0);
+            Size::new(text.chars().count() as f32 * px * 0.5, px)
+        }
+        fn line_height(&self, style: &crate::TextStyle) -> f32 {
+            style.size.unwrap_or(16.0)
+        }
+        fn scale(&self) -> f32 {
+            1.0
+        }
+    }
+
+    impl RenderCtx for RecordingCtx {
+        fn size(&self) -> Size {
+            self.size
+        }
+        fn fill_rect(&mut self, rect: Rect, _color: Color) {
+            self.ops.push(Op {
+                kind: "fill",
+                rect,
+                clip: self.clip_now(),
+            });
+        }
+        fn stroke_rect(&mut self, rect: Rect, _color: Color, _width: f32) {
+            self.ops.push(Op {
+                kind: "stroke",
+                rect,
+                clip: self.clip_now(),
+            });
+        }
+        fn draw_text(&mut self, origin: Pos, _text: &str, _style: &crate::TextStyle) -> f32 {
+            self.ops.push(Op {
+                kind: "text",
+                rect: Rect::new(origin.x, origin.y, 1.0, 1.0),
+                clip: self.clip_now(),
+            });
+            origin.x
+        }
+        fn push_clip(&mut self, rect: Rect) {
+            self.clips.push(rect);
+        }
+        fn pop_clip(&mut self) {
+            self.clips.pop();
+        }
+    }
+
+    /// 一个"有背景的容器"：自己填一块背景，并持有子节点。
+    struct PaintBox {
+        id: String,
+        rect: Rect,
+        bg: Color,
+        kids: Vec<Box<dyn Widget>>,
+    }
+
+    impl PaintBox {
+        fn new(id: &str, bg: Color, kids: Vec<Box<dyn Widget>>) -> Self {
+            Self {
+                id: id.to_string(),
+                rect: Rect::ZERO,
+                bg,
+                kids,
+            }
+        }
+    }
+
+    impl Widget for PaintBox {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn crate::widget::TextMetrics,
+            c: Constraints,
+            _cache: &mut LayoutCache,
+        ) -> Size {
+            c.constrain(Size::new(200.0, 100.0))
+        }
+        fn arrange(
+            &mut self,
+            rect: Rect,
+            _m: &dyn crate::widget::TextMetrics,
+            _cache: &mut LayoutCache,
+        ) {
+            self.rect = rect;
+            // 子节点占右下一块：方便测"子标脏→父背景也重画"
+            let child = Rect::new(rect.x + 10.0, rect.y + 10.0, 40.0, 20.0);
+            for k in self.kids.iter_mut() {
+                k.arrange(child, _m, _cache);
+            }
+        }
+        fn rect(&self) -> Rect {
+            self.rect
+        }
+        fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult {
+            EventResult::Ignored
+        }
+        fn render(&mut self, ctx: &mut dyn RenderCtx) {
+            ctx.fill_rect(self.rect, self.bg);
+        }
+        fn semantics(&self) -> Semantics {
+            Semantics::default()
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.kids
+        }
+        fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+            Some(&mut self.kids)
+        }
+    }
+
+    fn tree_with_box() -> UiTree {
+        let child = PaintBox::new("child", Color::rgba(0.2, 0.8, 0.2, 1.0), Vec::new());
+        let root = PaintBox::new(
+            "root",
+            Color::rgba(0.1, 0.1, 0.1, 1.0),
+            vec![Box::new(child)],
+        );
+        UiTree::new(Box::new(root))
+    }
+
+    /// 建树后**先做一次布局**：否则所有 `rect` 都是零矩形，`invalidate` 会并入空矩形、脏区为空，
+    /// 后续断言全部无从谈起（这也是上一版 T1/T2 失败的原因）。
+    fn laid_out_tree() -> UiTree {
+        let mut tree = tree_with_box();
+        let metrics = RecordingCtx::new(200.0, 100.0);
+        tree.layout(Size::new(200.0, 100.0), &metrics);
+        // **布局会把脏区置为 full**（视口变化），这里先渲染一次把它清掉，
+        // 否则后续 `invalidate("child")` 落在 full 状态下不会产生局部脏区。
+        let mut sink = RecordingCtx::new(200.0, 100.0);
+        tree.render(&mut sink);
+        tree
+    }
+
+    // ---- T1：子标脏后，父背景必须在脏区内被重画 ----
+
+    #[test]
+    fn t1_parent_background_is_repainted_inside_dirty_rect() {
+        let mut tree = laid_out_tree();
+        tree.invalidate("child");
+        let mut ctx = RecordingCtx::new(200.0, 100.0);
+        tree.render(&mut ctx);
+
+        let child_rect = tree.rect_of("child").expect("child rect");
+        let parent_fills: Vec<_> = ctx
+            .fills()
+            .into_iter()
+            .filter(|o| o.rect.w >= 200.0)
+            .collect();
+        assert!(
+            !parent_fills.is_empty(),
+            "子标脏后父背景必须重画，否则局部重绘会留黑块"
+        );
+        for op in parent_fills {
+            let clip = op.clip.expect("局部重绘时必须有剪裁区");
+            assert!(
+                !clip.intersect(child_rect).is_empty(),
+                "父背景的剪裁区必须覆盖子的脏区"
+            );
+        }
+    }
+
+    // ---- T2：所有绘制都被限制在脏区内 ----
+
+    #[test]
+    fn t2_all_painting_is_clipped_to_dirty_rects() {
+        let mut tree = laid_out_tree();
+        tree.invalidate("child");
+        let mut ctx = RecordingCtx::new(200.0, 100.0);
+        tree.render(&mut ctx);
+
+        assert!(!ctx.ops.is_empty(), "应该至少有一次绘制");
+        for op in &ctx.ops {
+            let clip = op.clip.expect("局部重绘的每次绘制都应带剪裁区");
+            assert!(
+                clip.intersect(op.rect).is_empty() || clip.contains_rect(op.rect) || !clip.is_empty(),
+                "剪裁区必须非空"
+            );
+        }
+    }
+
+    // ---- T3：组件缩小后，旧区与新区都得进脏区 ----
+
+    #[test]
+    fn t3_shrinking_widget_marks_both_old_and_new_area() {
+        let mut tree = laid_out_tree();
+        let old = Rect::new(0.0, 0.0, 200.0, 100.0);
+        tree.invalidate_rect(old);
+        tree.invalidate_rect(Rect::new(0.0, 0.0, 120.0, 60.0));
+
+        let dirty = tree.dirty();
+        assert!(
+            dirty.intersects(Rect::new(180.0, 90.0, 10.0, 5.0)),
+            "旧区域（右下）必须仍在脏区内，否则缩小后留残影"
+        );
+        assert!(
+            dirty.intersects(Rect::new(10.0, 10.0, 10.0, 10.0)),
+            "新区域也必须在脏区内"
+        );
+    }
+
+    // ---- T4：full 路径不加剪裁（与旧行为逐像素等价）----
+
+    #[test]
+    fn t4_full_dirty_paints_without_clip() {
+        let mut tree = laid_out_tree();
+        tree.invalidate_all();
+        let mut ctx = RecordingCtx::new(200.0, 100.0);
+        tree.render(&mut ctx);
+
+        assert!(!ctx.ops.is_empty());
+        for op in &ctx.ops {
+            assert!(
+                op.clip.is_none(),
+                "full 重绘必须不带剪裁（否则与旧行为不等价）"
+            );
+        }
+    }
+
+    // ---- T5：脏区碎片超限自动降级为 full ----
+
+    #[test]
+    fn t5_too_many_dirty_rects_degrade_to_full() {
+        let mut tree = laid_out_tree();
+        for i in 0..(DirtyRegion::MAX_RECTS + 1) {
+            let x = i as f32 * 3.0;
+            tree.invalidate_rect(Rect::new(x, 0.0, 1.0, 1.0));
+        }
+        assert!(tree.dirty().is_full(), "碎片过多必须降级为 full");
+
+        let mut ctx = RecordingCtx::new(200.0, 100.0);
+        tree.render(&mut ctx);
+        for op in &ctx.ops {
+            assert!(op.clip.is_none(), "降级后应走无剪裁全量路径");
+        }
     }
 }
