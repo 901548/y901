@@ -15,7 +15,7 @@ impl Present {
     pub fn new(canvas: HtmlCanvasElement) -> Self {
         let ctx = canvas.get_context("2d");
         // **构建标识**：用于判断浏览器跑的是不是最新 wasm（缓存会让旧产物存活）。
-        crate::bindings::console_log("Y901-BUILD pixel-order=reverse-4");
+        crate::bindings::console_log("Y901-BUILD pixel-order=normal-5");
 
         Self { canvas, ctx }
     }
@@ -38,13 +38,11 @@ impl Present {
 /// 为什么不就地改：调用方给的是软后端的复用缓冲；
 /// 这里返回新 `Vec` 更安全，也便于单测。
 pub fn bgra_to_rgba(src: &[u8]) -> Vec<u8> {
-    // **必须逆序（经三轮实测确定）**：软后端交出的缓冲是**整体倒置**的（原因待查），
-    // 而 `ImageData` 期望左上原点；整条逆序正好抵消那个 180°。
-    //
-    // 为何之前一度判定“不需要翻转”：当时强刷后浏览器仍跑的是 `normal-1` 的**缓存产物**，
-    // 画面旋转是**缓存造成的假象**。现在带构建标识（`reverse-3`），每次都能确认跑的是哪个产物。
+    // **保持源序（角标探针已证实）**：软后端产出的缓冲就是左上原点的（在缓冲左上画红块、右下
+    // 画蓝块，屏幕上红块落在右下 → 说明只有一次翻转，且它来自这里的逆序）。
+    // 历史：`.rev()` 引入的 180° 是因为当时浏览器跑的是缓存产物，导致“去掉 rev 也不变”的假象。
     let mut out = Vec::with_capacity(src.len());
-    for px in src.chunks_exact(4).rev() {
+    for px in src.chunks_exact(4) {
         out.push(px[2]); // R ← B
         out.push(px[1]); // G
         out.push(px[0]); // B ← R
@@ -61,10 +59,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bgra_to_rgba_swaps_channels_in_reverse_order() {
-        // 源像素 A=(B10,G20,R30,A255)、B=(B1,G2,R3,A4)；输出**逆序**（先 B 再 A）。
+    fn bgra_to_rgba_swaps_channels_in_source_order() {
+        // 源像素 A=(B10,G20,R30,A255)、B=(B1,G2,R3,A4)；输出**保持源序**。
         let src = [10u8, 20, 30, 255, 1, 2, 3, 4];
-        assert_eq!(bgra_to_rgba(&src), vec![3, 2, 1, 4, 30, 20, 10, 255]);
+        assert_eq!(bgra_to_rgba(&src), vec![30, 20, 10, 255, 3, 2, 1, 4]);
     }
 
     #[test]
@@ -72,10 +70,8 @@ mod tests {
         let src: Vec<u8> = (0..40u8).collect();
         let out = bgra_to_rgba(&src);
         assert_eq!(out.len(), src.len());
-        let n = src.len() / 4;
         for (i, out_px) in out.chunks_exact(4).enumerate() {
-            // 逆序：输出第 i 个像素对应源的第 (n-1-i) 个像素。
-            assert_eq!(out_px[3], src[(n - 1 - i) * 4 + 3], "alpha 必须跟着自己的像素走");
+            assert_eq!(out_px[3], src[i * 4 + 3], "alpha 必须原样保留且顺序不变");
         }
     }
 }

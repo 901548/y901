@@ -12,10 +12,9 @@ use std::rc::Rc;
 
 use wasm_bindgen::prelude::Closure;
 use y901_render::soft::SoftBackend;
-use y901_ui::RenderCtx;
 use y901_runtime::window::{RenderOutcome, WindowBackend};
 use y901_runtime::{Host, RawEvent};
-use y901_ui::{Rect, Size, UiTree};
+use y901_ui::{Size, UiTree};
 
 pub mod bindings;
 pub mod font;
@@ -96,22 +95,6 @@ impl WindowBackend for WasmWindow<'_> {
         self.soft.clear();
         tree.render(self.soft);
 
-        // [DBG-CORNER] 临时探针：在左上角画红块、右下角画蓝块。
-        // 用于判定"翻转发生在哪一步"：若用户看到红块在右下，则倒置发生在
-        // `soft` 写入或 `present` 之前；若红块在左上，则倒置来自页面/CSS 层。
-        self.soft.fill_rect(
-            Rect::new(0.0, 0.0, 60.0, 60.0),
-            y901_ui::Color::rgba(1.0, 0.0, 0.0, 1.0),
-        );
-        self.soft.fill_rect(
-            Rect::new(
-                (self.soft.width() as f32) - 60.0,
-                (self.soft.height() as f32) - 60.0,
-                60.0,
-                60.0,
-            ),
-            y901_ui::Color::rgba(0.0, 0.0, 1.0, 1.0),
-        );
         let (w, h) = self.viewport();
         let pixels = self.soft.pixels().to_vec();
         self.present.present(&pixels, w, h);
