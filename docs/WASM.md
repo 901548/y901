@@ -106,23 +106,27 @@ IME：canvas 无法承载输入法。做法是在 canvas 上叠一个**透明的
 | `frame_hash` 测试 | `soft_backend.rs:134 fn frame_hash_is_deterministic()`，**未固定 DPI** | `soft_backend.rs` |
 | `hash-gate` | 显式 `Y901_TEST_DPI_SCALE=1.0` | `scripts/hash-gate.ps1` |
 
-### 8.1 `frame_step` 签名
+### 8.1 `frame_step` 签名（已实现，含 `dt` 与 `close_requested`）
 
 ```rust
-/// 消化一批"已到手"的事件并推进一帧；**不含阻塞等待、不含计时**。
 pub fn frame_step<W: WindowBackend>(
     window: &mut W,
     tree: &mut UiTree,
     host: &mut dyn Host,
     events: &[RawEvent],
+    dt: std::time::Duration,
 ) -> Result<FrameStats, String>;
 
-/// 本帧观测结果，供调用方做节拍 / 统计决策。
 pub struct FrameStats {
     pub had_work: bool,
     pub need_layout: bool,
     pub presented: bool,
+    pub close_requested: bool,
 }
 ```
 
-`Result` 保留原有的错误传播语义（`window.render(tree)?` 在桌面循环里就是 `?` 直接返回）。
+- `dt` 是**上一帧到本帧的时间步**，由调用方提供（桌面用 `Instant` 差值，wasm 用 rAF 时间戳差值）。
+  为什么必须显式传：动画推进依赖真实 dt，若在 `frame_step` 内部取 `Instant::now()` 则每帧 dt≈0，**动画静止**。
+- `close_requested` 承接 `RawEvent::Close`（桌面关窗）。以前它直接 `return`，现在改成标记，
+  由调用方决定是否停止；**wasm 侧忽略该标记**。
+- 首帧日志（`first_frame_done` / `started`）与 profile 统计**留在调用方**，不进 `frame_step`。

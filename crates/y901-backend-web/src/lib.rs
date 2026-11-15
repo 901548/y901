@@ -195,7 +195,7 @@ impl WasmRuntime {
             present,
             canvas,
         };
-        frame_step(&mut window, tree, host, &events)
+        frame_step(&mut window, tree, host, &events, std::time::Duration::from_millis(16))
     }
 }
 
@@ -222,7 +222,7 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
 
     let for_frame = Rc::clone(&state);
     let for_next = Rc::clone(&state);
-    let cb = Closure::new(move |_ts: f64| {
+    let cb = Closure::new(move |ts: f64| {
         // ---- 一帧 ----
         {
             let Ok(mut s) = for_frame.try_borrow_mut() else {
@@ -235,8 +235,16 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
                 tree,
                 host,
                 events,
+                last_frame_ms,
                 ..
             } = &mut *s;
+            // dt 来自 rAF 时间戳（毫秒）；首帧默认 16ms。
+            let dt_ms = if *last_frame_ms > 0.0 && ts > *last_frame_ms {
+                (ts - *last_frame_ms).clamp(1.0, 100.0)
+            } else {
+                16.0
+            };
+            *last_frame_ms = ts;
             if let (Some(tree), Some(host)) = (tree.as_mut(), host.as_mut()) {
                 let host: &mut dyn Host = host.as_mut();
                 let evs: Vec<RawEvent> = events.drain(..).collect();
@@ -245,7 +253,13 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
                     present,
                     canvas,
                 };
-                let _ = frame_step(&mut window, tree, host, &evs);
+                let _ = frame_step(
+                    &mut window,
+                    tree,
+                    host,
+                    &evs,
+                    std::time::Duration::from_millis(dt_ms as u64),
+                );
             }
         }
         // ---- 排下一帧（必须在上面的借用结束之后）----

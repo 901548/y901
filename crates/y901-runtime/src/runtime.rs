@@ -37,6 +37,102 @@ fn idle_wait_ms() -> u32 {
         .unwrap_or(100)
 }
 
+/// 一帧的观测结果。
+pub struct FrameStats {
+    /// 本帧是否有事件或布局工作。
+    pub had_work: bool,
+    /// 本帧是否重新布局。
+    pub need_layout: bool,
+    /// 本帧是否真正上屏。
+    pub presented: bool,
+    /// 事件里出现了 `RawEvent::Close`（桌面关窗）。
+    pub close_requested: bool,
+}
+
+/// 消化一批"已到手"的事件并推进一帧：**不阻塞、不计时**。
+///
+/// 覆盖：事件消化 → 命令/idle → 动画推进 → 重排 → 主题 → `after_frame` →
+/// `render` → `after_present`。
+///
+/// - `dt`：上一帧到本帧的时间步，**由调用方提供**（桌面用 `Instant`，wasm 用 rAF 时间戳）。
+/// - `close_requested`：以前 `RawEvent::Close` 会直接 `return`，现在改成标记，由调用方决定是否停止。
+/// - 首帧日志与 profile 统计**不进来**，它们属于调用方的职责。
+pub fn frame_step<W: WindowBackend>(
+    window: &mut W,
+    tree: &mut UiTree,
+    host: &mut dyn Host,
+    events: &[RawEvent],
+    dt: std::time::Duration,
+) -> Result<FrameStats, String> {
+    let (w, h) = window.viewport();
+    let viewport = Size::new(w as f32, h as f32);
+    let mut need_layout = false;
+    let mut had_work = false;
+    let mut close_requested = false;
+
+    // ---- 1. 事件 ----
+    for raw in events {
+        if matches!(raw, RawEvent::Close) {
+            close_requested = true;
+            continue;
+        }
+        if matches!(raw, RawEvent::Resize { .. }) {
+            need_layout = true;
+        }
+        had_work = true;
+        if let Some(ev) = translate(raw, viewport) {
+            // Host 先处理；已处理则不再往下分发。
+            if host.event(tree, &ev).is_handled() {
+                continue;
+            }
+            if tree.dispatch(&ev).needs_relayout() {
+                need_layout = true;
+            }
+        }
+    }
+
+    // ---- 2. 命令 + 空闲回调 ----
+    for cmd in tree.drain_commands() {
+        let _ = host.command(tree, cmd);
+    }
+    host.idle(tree);
+
+    // ---- 2.5 动画推进（每帧必须调）----
+    if tree.tick_animations(dt) {
+        had_work = true;
+    }
+
+    // ---- 3. 重排判定 ----
+    let external = tree.drain_external_invalidations();
+    let structural = tree.take_layout_request();
+    if need_layout || external > 0 || structural {
+        window.relayout(tree);
+    }
+
+    // ---- 4. 主题 ----
+    if let Some(theme) = host.take_theme_request() {
+        if let Err(err) = window.set_theme(theme) {
+            eprintln!("[y901] 切换主题失败: {err}");
+        } else {
+            tree.invalidate_all();
+        }
+    }
+
+    // ---- 5. 后端收尾（IME / 光标 / 快照 / 字体）----
+    window.after_frame(tree, host);
+
+    // ---- 6. 渲染 ----
+    let outcome = window.render(tree)?;
+    window.after_present(tree, host);
+
+    Ok(FrameStats {
+        had_work,
+        need_layout,
+        presented: matches!(outcome, RenderOutcome::Presented),
+        close_requested,
+    })
+}
+
 /// 跑事件循环直到窗口要求退出。
 ///
 /// 返回 `Ok(())` 表示正常退出（用户关闭窗口）；`Err` 表示后端报错。
@@ -57,7 +153,7 @@ pub fn run_loop<W: WindowBackend>(
     // 上一帧是否有工作：有工作时不得等待，否则 Win32 会在每帧都“睡”一次。
     let mut was_busy = false;
     // 上一帧的实际耗时（布局 + 绘制 + 呈现），供帧预算补偿使用。
-    let mut last_frame_ms: u64 = 0;
+    let last_frame_ms: u64 = 0;
     // 后端是否**自节流**（D3D11 的 `Present(1)` 会阻塞到 vsync）。
     // 为何要猜：软后端（GDI）不自节流，若一律 `wait=0` 会空转烧 CPU；
     // 而 D3D11 若再多睡 16ms 就与 vsync 叠加成 30fps。故用"上一帧呈现耗时"判定。
@@ -96,79 +192,16 @@ pub fn run_loop<W: WindowBackend>(
         let Some(raws) = window.wait_events(wait_ms) else {
             return Ok(());
         };
-        let (w, h) = window.viewport();
-        let viewport = Size::new(w as f32, h as f32);
-        let mut need_layout = false;
-        let mut had_work = false;
-
-        for raw in raws {
-            if matches!(raw, RawEvent::Close) {
-                return Ok(());
-            }
-            if matches!(raw, RawEvent::Resize { .. }) {
-                need_layout = true;
-            }
-            had_work = true;
-            if let Some(ev) = translate(&raw, viewport) {
-                // Host 先处理；已处理则不再往下发。
-                if host.event(tree, &ev).is_handled() {
-                    continue;
-                }
-                if tree.dispatch(&ev).needs_relayout() {
-                    need_layout = true;
-                }
-            }
-        }
-
-        // ---- 2. 命令 + 空闲回调 ----
-        for cmd in tree.drain_commands() {
-            let _ = host.command(tree, cmd);
-        }
-        host.idle(tree);
-
-        // ---- 2.5 动画推进（**每帧必须调**）----
-        //
-        // `UiTree::tick_animations` 之前**全仓没有调用点**（本轮修复）：
-        // 于是任何淡入/缩放动画的 `progress` 永远停在 0。
-        // 后果：弹层的"淡入膜"（`tree.rs` 用 `1-progress` 透明度的背景色盖一层）
-        // **永远不会消失** —— 菜单/面板"有框无字"就是这个原因。
-        // 用**真实 dt**（上一帧到本帧），不用固定步长，否则动画速度随帧率变。
         let tick_now = Instant::now();
         let dt = tick_now.saturating_duration_since(last_tick);
+        // ---- 1..6. 一帧的通用部分（与 wasm 共用）----
+        let stats = frame_step(window, tree, host, &raws, dt)?;
+        let (had_work, need_layout, presented) =
+            (stats.had_work, stats.need_layout, stats.presented);
+        if stats.close_requested {
+            return Ok(());
+        }
         last_tick = tick_now;
-        if tree.tick_animations(dt) {
-            // 有活跃动画 → 本帧算"有工作"，下一帧不睡眠，直到动画结束。
-            had_work = true;
-        }
-
-        // ---- 3. 重排判定 ----
-        let external = tree.drain_external_invalidations();
-        let structural = tree.take_layout_request();
-        if need_layout || external > 0 || structural {
-            window.relayout(tree);
-        }
-
-        // ---- 4. 主题 ----
-        if let Some(theme) = host.take_theme_request() {
-            if let Err(err) = window.set_theme(theme) {
-                eprintln!("[y901] 切换主题失败: {err}");
-            } else {
-                tree.invalidate_all();
-            }
-        }
-
-        // ---- 5. 后端专属收尾（IME / 光标 / 快照 / 字体） ----
-        window.after_frame(tree, host);
-
-        // ---- 6. 渲染 ----
-        //
-        // skip/Present 判定在 `WindowBackend::render`，返回 `RenderOutcome`。
-        // `UiTree::render` 的空 dirty 是**防御性 guard**（不决定 Present）。
-        // 本循环只看 `RenderOutcome`，不查 `tree.dirty()`。
-        let frame_started = Instant::now();
-        let outcome = window.render(tree)?;
-        // 本帧实际耗时（含呈现），用于帧预算补偿。
-        last_frame_ms = frame_started.elapsed().as_millis() as u64;
         if !first_frame_done {
             first_frame_done = true;
             eprintln!(
@@ -176,7 +209,6 @@ pub fn run_loop<W: WindowBackend>(
                 started.elapsed().as_secs_f64() * 1e3
             );
         }
-        window.after_present(tree, host);
 
         // ---- 7. 统计 ----
         if let Some(p) = profiler.as_mut() {
@@ -185,13 +217,13 @@ pub fn run_loop<W: WindowBackend>(
                 profile::FrameMeta {
                     had_work,
                     need_layout,
-                    presented: matches!(outcome, RenderOutcome::Presented),
+                    presented,
                     present_ms: last_frame_ms,
                 },
             );
         }
 
-        was_busy = had_work || matches!(outcome, RenderOutcome::Presented);
+        was_busy = had_work || presented;
 
         // ---- 8. Tick 节拍 ----
         //
