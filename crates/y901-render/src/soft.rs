@@ -395,7 +395,12 @@ impl SoftBackend {
                 if let Some(g) = glyph {
                     if g.width > 0 && g.height > 0 {
                         let bx = (pen_x + g.bearing_x as f32).floor() as i32;
-                        let by = (origin.y + ascent + g.bearing_y as f32).floor() as i32;
+                        // **字形超过 ascent 时补上挑量**：比如 SimHei 的数字比 ascent 高，
+                        // 不补的话顶部跑到 `origin.y` 之上，被裁剪成上半截断（"8080" → "ouou"）。
+                        // 只补"高出 ascent 的那部分"，小字形不受影响。
+                        let top_pad = (g.height as f32 - ascent).max(0.0);
+                        let by =
+                            (origin.y + ascent + top_pad + g.bearing_y as f32).floor() as i32;
                         for gy in 0..g.height as i32 {
                             let dy = by + gy;
                             if dy < 0 || dy >= self.height as i32 {
