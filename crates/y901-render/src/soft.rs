@@ -79,6 +79,8 @@ pub struct SoftBackend {
     dpi_scale: f32,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
     clear_color: Color,
+    /// **[DBG] 首个字形探针**：`(ch, bearing_y, height, ascent, origin.y, clip.y, clip.h)`。
+    pub dbg_probe: Option<(char, i32, u32, f32, f32, f32, f32)>,
 }
 
 impl SoftBackend {
@@ -127,6 +129,7 @@ impl SoftBackend {
             cell,
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
+            dbg_probe: None,
             dpi_scale: 1.0,
         })
     }
@@ -151,6 +154,7 @@ impl SoftBackend {
             text: font,
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
+            dbg_probe: None,
             dpi_scale: 1.0,
         })
     }
@@ -399,6 +403,14 @@ impl SoftBackend {
                         // 字形顶 = origin.y + ascent + bearing_y；`bearing_y` 为负且幅度大时
                         // （SimHei 的数字）顶部会跑到 origin.y 之上 → 被裁剪成上半截断
                         // （"8080" → "ouou"）。这里只补"溢出那部分"，不多补。
+                        if self.dbg_probe.is_none() {
+                            let (cy, chh) = match self.state.current_clip() {
+                                Some(c) => (c.y, c.h),
+                                None => (-1.0, -1.0),
+                            };
+                            self.dbg_probe =
+                                Some((ch, g.bearing_y, g.height, ascent, origin.y, cy, chh));
+                        }
                         let glyph_top = ascent + g.bearing_y as f32;
                         let top_pad = (-glyph_top).max(0.0);
                         let by =

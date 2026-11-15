@@ -95,6 +95,14 @@ impl WindowBackend for WasmWindow<'_> {
         self.soft.clear();
         tree.render(self.soft);
 
+        // [DBG-PROBE] 打印首个字形与当前裁剪区（定位数字削顶）。
+        if let Some((ch, by, gh, asc, oy, cy, chh)) = self.soft.dbg_probe.take() {
+            bindings::console_log(&format!(
+                "[DBG-PROBE] ch='{}' bearing_y={} height={} ascent={:.2} origin.y={:.2} clip.y={:.2} clip.h={:.2}",
+                ch, by, gh, asc, oy, cy, chh
+            ));
+        }
+
         let (w, h) = self.viewport();
         let pixels = self.soft.pixels().to_vec();
         self.present.present(&pixels, w, h);
