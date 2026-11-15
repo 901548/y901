@@ -81,6 +81,8 @@ pub struct SoftBackend {
     clear_color: Color,
     /// **[DBG] `(origin.y, by, glyph_h, bearing_y, clip.y, clip.h)`** —— 定位缩放路径的 Y 坐标。
     pub dbg_abs: Option<(f32, f32, f32, f32, f32, f32)>,
+    /// **[DBG]** `(base.bearing_y, base.height, slot.bearing_y, level)`。
+    pub dbg_bear: Option<(i32, u32, f32, usize)>,
 }
 
 impl SoftBackend {
@@ -130,6 +132,7 @@ impl SoftBackend {
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
             dbg_abs: None,
+            dbg_bear: None,
             dpi_scale: 1.0,
         })
     }
@@ -155,6 +158,7 @@ impl SoftBackend {
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
             dbg_abs: None,
+            dbg_bear: None,
             dpi_scale: 1.0,
         })
     }
@@ -821,6 +825,13 @@ impl RenderCtx for SoftBackend {
                                 Rect::new(origin.x, by as f32, 50.0, 1.0),
                                 Color::rgba(1.0, 0.0, 0.0, 1.0),
                             );
+                        }
+                        if self.dbg_bear.is_none() && ch == '8' {
+                            let base = self.text.glyph(ch).map(|g| (g.bearing_y, g.height));
+                            if let Some((by_, bh)) = base {
+                                self.dbg_bear =
+                                    Some((by_, bh, sg.slot.bearing_y, sg.level));
+                            }
                         }
                         if self.dbg_abs.is_none() && ch == '8' {
                             let (cy, chh) = match self.state.current_clip() {
