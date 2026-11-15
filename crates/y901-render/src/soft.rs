@@ -403,7 +403,8 @@ impl SoftBackend {
                         // 字形顶 = origin.y + ascent + bearing_y；`bearing_y` 为负且幅度大时
                         // （SimHei 的数字）顶部会跑到 origin.y 之上 → 被裁剪成上半截断
                         // （"8080" → "ouou"）。这里只补"溢出那部分"，不多补。
-                        if self.dbg_probe.is_none() {
+                        // 只抓数字（被削顶的是端口框里的 8080）
+                        if matches!(ch, '0'..='9') && self.dbg_probe.is_none() {
                             let (cy, chh) = match self.state.current_clip() {
                                 Some(c) => (c.y, c.h),
                                 None => (-1.0, -1.0),
