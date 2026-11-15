@@ -217,11 +217,12 @@ impl Widget for TextLabel {
         if self.rect.w <= 0.0 || self.rect.h <= 0.0 {
             return;
         }
-        ctx.draw_text(
-            Pos::new(self.rect.x, self.rect.y),
-            &self.current_text(),
-            &self.to_text_style(),
-        );
+        // **垂直居中**：以前直接用 `rect.y`（行框顶），于是字形贴在上边沿。
+        // 按"行框高 vs 容器高"的差值下移一半；容器比行框矮时保持贴顶（不上溢）。
+        let style = self.to_text_style();
+        let line_h = ctx.line_height(&style);
+        let dy = ((self.rect.h - line_h) * 0.5).max(0.0);
+        ctx.draw_text(Pos::new(self.rect.x, self.rect.y + dy), &self.current_text(), &style);
     }
 
     fn semantics(&self) -> Semantics {
