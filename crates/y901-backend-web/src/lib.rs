@@ -572,8 +572,10 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             let evs = Rc::clone(&events);
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
                 let ce: &bindings::CompositionEvent = val.unchecked_ref();
+                let pre = ce.data();
+                bindings::console_log(&format!("[DBG-IME] compositionupdate data={:?}", pre));
                 evs.borrow_mut().push_back(RawEvent::Ime {
-                    text: ce.data(),
+                    text: pre,
                     composition: true,
                 });
             });
@@ -603,6 +605,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
                 let ce: &bindings::CompositionEvent = val.unchecked_ref();
                 let text = ce.data();
+                bindings::console_log(&format!("[DBG-IME] compositionend data={:?}", text));
                 composing_for.set(false);
                 let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
                 el.set_value("");
@@ -639,6 +642,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                     return;
                 }
                 let text = el.value();
+                bindings::console_log(&format!("[DBG-IME] input value={:?}", text));
                 if text.is_empty() {
                     return;
                 }
