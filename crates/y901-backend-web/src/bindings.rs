@@ -16,8 +16,12 @@ extern "C" {
     pub fn request_animation_frame(this: &Window, cb: &Closure<dyn FnMut(f64)>);
 
     /// 全局 `window` 对象。
-    #[wasm_bindgen(js_name = "window")]
-    pub fn global_window() -> Option<Window>;
+    ///
+    /// **必须是全局对象而非函数**：`window` 是对象，`js_name = "window"` 写在 `fn` 上会生成
+    /// `window()` 调用，浏览器报 `TypeError: window is not a function`。
+    /// 用 `thread_local_v2`（wasm-bindgen 0.2.129 的推荐写法，`static` 已废弃）。
+    #[wasm_bindgen(thread_local_v2, js_name = "window")]
+    static GLOBAL_WINDOW: Window;
 
     #[wasm_bindgen(method, getter)]
     pub fn document(this: &Window) -> Option<Document>;
@@ -139,4 +143,13 @@ extern "C" {
 extern "C" {
     #[wasm_bindgen(js_name = "Element")]
     pub type Element;
+}
+
+/// 取全局 `window`（调用方便用）。
+pub fn global_window() -> Option<Window> {
+    // thread_local_v2 的访问器把 `&Window` 交给回调；拷一份 `JsValue` 再转回 `Window`。
+    GLOBAL_WINDOW.with(|w| {
+        let js: wasm_bindgen::JsValue = wasm_bindgen::JsValue::from(w);
+        Some(<Window as wasm_bindgen::JsCast>::unchecked_from_js(js))
+    })
 }
