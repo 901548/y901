@@ -28,7 +28,27 @@ pub use bindings::HtmlCanvasElement;
 pub use font_engine::WasmFontEngine;
 pub use frame::{frame_step, FrameStats};
 pub use input::{KeyInput, MouseInput, WheelInput};
+pub use keys::{button_from_dom, char_from_dom, key_from_dom, mods_from_event, wheel_delta_from_dom};
 pub use present::Present;
+
+/// 一个已注册的 DOM 监听器。
+///
+/// **为何要存起来**：`Closure` 一旦被 `drop`，JS 侧虽然还挂着监听器，
+/// 但一触发就抛 `closure invoked after dropped`。所以闭包必须跟着
+/// `WasmState` 活到页面结束。
+///
+/// **P0 阶段只定义不安装**：\u8fd9个结构会在 P1 里被真正填满\u3002
+pub struct Listener {
+    /// 挂在谁上（`window` 或 canvas）。
+    #[allow(dead_code)] // P1 注册时使用
+    pub target: bindings::EventTarget,
+    /// 事件名（`"mousemove"` / `"keydown"` …）。
+    #[allow(dead_code)] // P1 注册时使用
+    pub kind: String,
+    /// 回调本体（**持有它就是保存它**）。
+    #[allow(dead_code)] // P1 注册时使用
+    pub handler: Closure<dyn FnMut(wasm_bindgen::JsValue)>,
+}
 
 /// 浏览器端的全部可变状态。
 ///
@@ -49,7 +69,15 @@ pub struct WasmState {
     /// 业务层 host（`run` 时注入）。
     pub host: Option<Box<dyn Host>>,
     /// 本帧已排队的原始事件。
-    pub events: VecDeque<RawEvent>,
+    ///
+    /// **为何用 `Rc<RefCell<…>>` 而不是直接放 `VecDeque`**：DOM 回调只拿得到一个
+    /// 共享句柄（它在 JS 侧被调用时，`WasmState` 正被本帧借用）。
+    /// 让回调**只碰事件缓冲**、不碰整个 state，就不会撞上 `try_borrow_mut` 失败。
+    pub events: Rc<RefCell<VecDeque<RawEvent>>>,
+    /// 已注册的 DOM 监听器（**持有它们就是保证它们生效**）。
+    ///
+    /// P0 阶段为空；P1 起向这里压入。
+    pub listeners: Vec<Listener>,
     /// 上一帧的时间戳（毫秒）。
     pub last_frame_ms: f64,
     /// **当前这一帧的 rAF 回调**。
@@ -70,13 +98,18 @@ pub struct WasmWindow<'a> {
     pub soft: &'a mut SoftBackend,
     pub present: &'a mut Present,
     pub canvas: &'a HtmlCanvasElement,
+    /// 事件缓冲（DOM 回调往里写，`wait_events` 从里取）。
+    pub events: &'a Rc<RefCell<VecDeque<RawEvent>>>,
 }
 
 impl WindowBackend for WasmWindow<'_> {
     /// **非阻塞**：wasm 不使用 `run_loop`，本方法只被 `frame_step` 之外的路径调用。
     /// 按约定**永远返回 `Some`**（`None` 在桌面表示"窗口被关闭"）。
     fn wait_events(&mut self, _wait_ms: u32) -> Option<Vec<RawEvent>> {
-        Some(Vec::new())
+        // **浏览器不会阻塞等待**：节奏由 rAF 决定。
+        // 有就全取，没有就空 —— 与桌面 `wait_events` 的"可阻塞"语义不同，
+        // 这一差异已写进 `docs/WASM.md`。
+        Some(self.events.borrow_mut().drain(..).collect())
     }
 
     fn viewport(&self) -> (u32, u32) {
@@ -125,7 +158,8 @@ impl WasmState {
             present,
             tree: None,
             host: None,
-            events: VecDeque::new(),
+            events: Rc::new(RefCell::new(VecDeque::new())),
+            listeners: Vec::new(),
             last_frame_ms: 0.0,
             raf: Rc::new(RefCell::new(None::<Closure<dyn FnMut(f64)>>)),
         })
@@ -208,13 +242,20 @@ impl WasmRuntime {
         let tree = tree.as_mut().ok_or("tree 尚未安装")?;
         let host = host.as_mut().ok_or("host 尚未安装")?;
         let host: &mut dyn Host = host.as_mut();
-        let events: Vec<RawEvent> = events.drain(..).collect();
         let mut window = WasmWindow {
             soft,
             present,
             canvas,
+            events: &*events,
         };
-        frame_step(&mut window, tree, host, &events, std::time::Duration::from_millis(16))
+        let evs = window.wait_events(0).unwrap_or_default();
+        frame_step(
+            &mut window,
+            tree,
+            host,
+            &evs,
+            std::time::Duration::from_millis(16),
+        )
     }
 }
 
@@ -266,12 +307,13 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
             *last_frame_ms = ts;
             if let (Some(tree), Some(host)) = (tree.as_mut(), host.as_mut()) {
                 let host: &mut dyn Host = host.as_mut();
-                let evs: Vec<RawEvent> = events.drain(..).collect();
                 let mut window = WasmWindow {
                     soft,
                     present,
                     canvas,
+                    events: &*events,
                 };
+                let evs = window.wait_events(0).unwrap_or_default();
                 let _ = frame_step(
                     &mut window,
                     tree,
