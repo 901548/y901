@@ -32,6 +32,10 @@ IME：canvas 无法承载输入法。做法是在 canvas 上叠一个**透明的
 
 ### 3.2 呈现
 
+**页面约定**：页面必须提供 `<canvas id="y901-canvas">`。wasm 分支内部通过
+`document.get_element_by_id("y901-canvas")` 获取它，**`create_runtime()` 的签名保持不变**
+（桌面调用方不受影响）。
+
 软后端渲染到 `Vec<u8>`（RGBA），包成 `ImageData` 后 `putImageData` 到 2D context。
 尺寸变化时重建 `ImageData`；每帧一次整幅拷贝，S1 不做局部更新。
 
