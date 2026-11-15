@@ -2,6 +2,9 @@
 
 use crate::bindings::{CanvasRenderingContext2d, HtmlCanvasElement};
 
+/// 脏矩形（屏幕坐标，像素）：`(x, y, w, h)`。
+pub type RectPx = (u32, u32, u32, u32);
+
 /// 画布呈现器。
 pub struct Present {
     /// canvas 句柄。
@@ -21,14 +24,13 @@ impl Present {
     /// 上屏。`pixels` 是**软后端产出的 BGRA**，浏览器要 RGBA。
     ///
     /// 两种模式：
-    /// - `rects == None` 或 `rects == Some([])`：**整帧**上传（旧路径，逐像素等价）。
-    /// - `rects == Some([r1, r2, …])`：**只上传这些脏矩形**，每块单独 `putImageData`。
+    /// - `rects == None`：**整帧**上传（旧路径）。
+    /// - `rects == Some(list)`：**只上传这些脏矩形**，每块单独 `putImageData`。
     ///
-    /// **为什么局部上传是性能关键**：整帧 800×600 的 `putImageData` 每帧要跨 wasm/JS 边界搬运
-    /// ~1.9 MB，浏览器还要重建整幅 ImageData；局部上传的代价只与脏区面积成正比。
-    ///
-    /// 调用方保证 `rects` 已经裁剪到画布范围内（见 `WasmWindow::render`）。
-    pub fn present(&mut self, pixels: &[u8], w: u32, h: u32, rects: Option<&[(u32, u32, u32, u32)]>) {
+    /// **两条路径必须逐像素一致**：整帧路径按"屏幕行 ← 缓冲行 `h-1-y`"取行，
+    /// 局部路径对每个矩形做**同样的行映射**（见 `bgra_rect_to_rgba`）。
+    /// T8 单测把这条一致性钉死。
+    pub fn present(&mut self, pixels: &[u8], w: u32, h: u32, rects: Option<&[RectPx]>) {
         let Some(ctx) = self.ctx.as_ref() else {
             return; // 没取到 2D 上下文：静默跳过上屏（不崩）
         };
@@ -39,8 +41,6 @@ impl Present {
                     if rgba.is_empty() {
                         continue;
                     }
-                    // **每个脏区单独建一张 ImageData**：尺寸 = 脏区，位置由 `putImageData` 的
-                    // (x, y) 决定。这样浏览器只处理脏区像素。
                     let image_data = ctx.create_image_data(rw, rh);
                     let data = image_data.data();
                     for (i, &byte) in rgba.iter().enumerate() {
@@ -64,16 +64,10 @@ impl Present {
 
 /// **纯函数**：BGRA → RGBA，逐像素换 R/B 通道，alpha 不变。
 ///
-/// **不翻行**：软后端缓冲是**自上而下**行主序——桌面 GDI 上屏
-/// （`window.rs` 的 `biHeight: -height`，负值即自上而下 DIB）用的就是同一份缓冲，
-/// 如果这里再按行翻转，整帧会上下镜像（每列子元素逆序、文字倒置）。
-/// `ImageData` 同样要求自上而下，所以只需换通道。
-/// 为什么不就地改：调用方给的是软后端的复用缓冲；
-/// 这里返回新 `Vec` 更安全，也便于单测。
+/// **行映射**：软后端缓冲的存储方向与屏幕相反，因此输出第 `Y` 行取缓冲第 `h-1-Y` 行。
+/// 这条映射是**全局唯一约定**，`bgra_rect_to_rgba` 必须与之完全一致（T8 保证）。
+/// 为什么不就地改：调用方给的是软后端的复用缓冲；这里返回新 `Vec` 更安全，也便于单测。
 pub fn bgra_to_rgba(src: &[u8], w: u32, h: u32) -> Vec<u8> {
-    // **按行翻转（仅 Y 轴）**：四角探针已证实——四色块位置全对（说明
-    // `present` 的搬运与通道交换都没错），但 UI 180° 倒置 ⇒ 缓冲本身是**自下而上**的。
-    // 只翻 Y：若用整条 `.rev()`，X 也跟着翻，又回到 180°。
     let w = w as usize;
     let h = h as usize;
     let stride = w * 4;
@@ -91,13 +85,12 @@ pub fn bgra_to_rgba(src: &[u8], w: u32, h: u32) -> Vec<u8> {
     out
 }
 
-/// **纯函数**：从整帧 BGRA 缓冲里抠出 `(x, y, w, h)` 这一块，转成 RGBA（行主序）。
+/// **纯函数**：从整帧 BGRA 缓冲里抠出屏幕坐标下的 `(x, y, w, h)`，转成 RGBA（行主序）。
 ///
-/// 与 [`bgra_to_rgba`] 的关系：整帧函数是"全抠 + 换通道"，这里是"按脏矩形抠 + 换通道"。
-/// **两者对同一像素的结果必须一致**（T7 会验证）。
+/// **与 [`bgra_to_rgba`] 完全同一套行映射**：输出第 `k` 行（屏幕行 `y+k`）取缓冲行
+/// `frame_h - 1 - (y + k)`。X 方向不翻转。
 ///
-/// 边界处理：`(x, y, w, h)` 会被裁剪到帧内；越界部分不读、不产生字节。
-/// 返回空 `Vec` 表示该矩形与帧完全不相交。
+/// 边界处理：矩形被裁剪到帧内；越界部分不读、不产生字节；完全不相交返回空 `Vec`。
 pub fn bgra_rect_to_rgba(
     src: &[u8],
     frame_w: u32,
@@ -109,23 +102,24 @@ pub fn bgra_rect_to_rgba(
 ) -> Vec<u8> {
     let fw = frame_w as usize;
     let fh = frame_h as usize;
-    let stride = fw * 4;
     if fw == 0 || fh == 0 || w == 0 || h == 0 {
         return Vec::new();
     }
-    // 裁剪到帧内（右/下边界），左/上边界由 u32 保证非负。
+    let stride = fw * 4;
     let x0 = (x as usize).min(fw);
-    let y0 = (y as usize).min(fh);
     let x1 = (x as usize + w as usize).min(fw);
+    let y0 = (y as usize).min(fh);
     let y1 = (y as usize + h as usize).min(fh);
     if x1 <= x0 || y1 <= y0 {
         return Vec::new();
     }
     let rw = x1 - x0;
     let mut out = Vec::with_capacity(rw * (y1 - y0) * 4);
-    for row in y0..y1 {
-        let start = row * stride + x0 * 4;
-        let end = row * stride + x1 * 4;
+    // 屏幕行 y0..y1 ⇒ 缓冲行 (fh-1-y)，从下往上取，所以逐行递减。
+    for screen_y in y0..y1 {
+        let src_row = fh - 1 - screen_y;
+        let start = src_row * stride + x0 * 4;
+        let end = src_row * stride + x1 * 4;
         if end > src.len() {
             break;
         }
@@ -139,105 +133,193 @@ pub fn bgra_rect_to_rgba(
     out
 }
 
+/// **纯函数**：把浮点脏矩形转成整数像素矩形（左上取 floor、右下取 ceil）。
+///
+/// 为什么要 ceil：只取 floor 会**漏掉右/下边界那一列像素**，留下半个像素宽的残影。
+/// 为什么要 floor 左上：向内取整会漏掉紧贴左/上边界的像素。
+///
+/// 返回 `None` 表示裁剪后为空（完全在视口外或尺寸为零）。
+pub fn clamp_dirty_rect(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    viewport_w: u32,
+    viewport_h: u32,
+) -> Option<RectPx> {
+    if !(x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite()) {
+        return None;
+    }
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let x0 = x.floor().max(0.0) as u32;
+    let y0 = y.floor().max(0.0) as u32;
+    let x1 = (x + w).ceil().clamp(0.0, viewport_w as f32) as u32;
+    let y1 = (y + h).ceil().clamp(0.0, viewport_h as f32) as u32;
+    if x1 <= x0 || y1 <= y0 || x0 >= viewport_w || y0 >= viewport_h {
+        return None;
+    }
+    Some((x0, y0, x1 - x0, y1 - y0))
+}
+
+/// **纯函数**：判断这批脏矩形是否值得走"局部上传"。
+///
+/// 何时改用整帧：
+/// - **块数 > 8**：每块一次 `putImageData` 有固定开销（跨界调用 + ImageData 构造），
+///   碎块多时反而更慢；
+/// - **总面积 > 视口 50%**：整帧上传只多搬一点字节，却省掉多次调用的固定成本。
+///
+/// 这两个阈值来自"局部上传的收益 ∝ 脏区面积"，也是悬停/打字（小面积）与
+/// 滚动/尺寸变化（大面积）的分界。
+pub fn should_upload_partial(rects: &[RectPx], viewport_w: u32, viewport_h: u32) -> bool {
+    const MAX_RECTS: usize = 8;
+    const MAX_AREA_RATIO: f32 = 0.5;
+    if rects.is_empty() || rects.len() > MAX_RECTS {
+        return false;
+    }
+    let total: u64 = rects
+        .iter()
+        .map(|&(_, _, w, h)| w as u64 * h as u64)
+        .sum();
+    let vp = viewport_w as u64 * viewport_h as u64;
+    if vp == 0 {
+        return false;
+    }
+    (total as f32) <= vp as f32 * MAX_AREA_RATIO
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// **Y 轴按行翻转**：末行先出、行内顺序不变。
-    #[test]
-    fn flips_rows_not_columns() {
-        // 2x2：第 0 行 = [红, 绿]，第 1 行 = [蓝, 白]（BGRA）。
-        let src = [
-            0, 0, 255, 255, 0, 255, 0, 255, 255, 0, 0, 255, 255, 255, 255, 255,
-        ];
-        let out = bgra_to_rgba(&src, 2, 2);
-        assert_eq!(
-            out,
-            vec![0, 0, 255, 255, 255, 255, 255, 255, 255, 0, 0, 255, 0, 255, 0, 255]
-        );
-    }
-
-    #[test]
-    fn preserves_length_and_alpha_under_row_flip() {
-        let src: Vec<u8> = (0..24u8).collect();
-        let out = bgra_to_rgba(&src, 2, 3);
-        assert_eq!(out.len(), src.len());
-        let stride = 2 * 4;
-        for y in 0..3usize {
-            for x in 0..2usize {
-                assert_eq!(
-                    out[y * stride + x * 4 + 3],
-                    src[(2 - y) * stride + x * 4 + 3],
-                    "alpha 必须随着行翻转"
-                );
-            }
-        }
-    }
-
-    // ---- T6：4x4 整帧里抠 2x2，字节必须与原图对应区域一致 ----
-
-    /// 构造 4x4 帧：像素值为 `[B=x*10, G=y*10, R=100+idx, A=255]`，便于定位。
+    /// 4x4 帧：`B = x*10`、`G = y*10`、`R = 100 + y*4 + x`、`A = 255`。
     fn frame_4x4() -> Vec<u8> {
         let mut v = Vec::with_capacity(4 * 4 * 4);
         for y in 0..4u32 {
             for x in 0..4u32 {
-                v.push((x * 10) as u8); // B
-                v.push((y * 10) as u8); // G
-                v.push((100 + y * 4 + x) as u8); // R
-                v.push(255); // A
+                v.push((x * 10) as u8);
+                v.push((y * 10) as u8);
+                v.push((100 + y * 4 + x) as u8);
+                v.push(255);
             }
         }
         v
     }
 
+    /// 期望的 RGBA 像素（来自源 (x, y)）。
+    fn expect_px(x: u32, y: u32) -> [u8; 4] {
+        [
+            (100 + y * 4 + x) as u8, // R
+            (y * 10) as u8,          // G
+            (x * 10) as u8,          // B
+            255,                     // A
+        ]
+    }
+
+    /// 期望的屏幕像素：屏幕行 `sy` 对应缓冲行 `3-sy`（4x4 帧）。
+    fn expect_screen_px(x: u32, screen_y: u32) -> [u8; 4] {
+        expect_px(x, 3 - screen_y)
+    }
+
+    // ---- T6：抠图内容与源区域一致（含行映射）----
+
     #[test]
     fn t6_rect_extraction_matches_source_region() {
         let frame = frame_4x4();
-        // 抠 (1,1) 起的 2x2。
         let out = bgra_rect_to_rgba(&frame, 4, 4, 1, 1, 2, 2);
-        assert_eq!(out.len(), 2 * 2 * 4, "2x2 RGBA 应为 16 字节");
+        assert_eq!(out.len(), 16);
 
-        // 期望：按行主序，每像素 R←B, G, B←R, A。
+        // 输出第 0 行 = 屏幕行 1；第 1 行 = 屏幕行 2。X 不翻转。
         let mut want = Vec::new();
-        for y in 1..3u32 {
+        for screen_y in 1..3u32 {
             for x in 1..3u32 {
-                let r = (100 + y * 4 + x) as u8;
-                want.push(r); // R（源里的 R）
-                want.push((y * 10) as u8); // G
-                want.push((x * 10) as u8); // B（源里的 B）
-                want.push(255); // A
+                want.extend_from_slice(&expect_screen_px(x, screen_y));
             }
         }
-        assert_eq!(out, want, "抠图内容必须与原图对应区域逐字节一致");
+        assert_eq!(out, want, "抠图内容必须与源区域逐字节一致");
     }
 
-    // ---- T7：边界外像素绝不参与（验证 stride / 裁剪） ----
+    // ---- T7：不越界读（stride / 左右边界）----
 
     #[test]
     fn t7_rect_extraction_never_reads_outside_rect() {
         let frame = frame_4x4();
-        // 抠 (2,2) 起 2x2 ⇒ 正好右下角，行内只有 x=2,3，行只有 y=2,3。
         let out = bgra_rect_to_rgba(&frame, 4, 4, 2, 2, 2, 2);
         assert_eq!(out.len(), 16);
-
-        // 每行第一个像素的 R 应为 (2,2) 与 (3,2) 两个源像素，绝不能混入 x=0/1 的 B 值（0/10）。
-        let row0 = &out[0..8];
-        assert_eq!(row0[0], (100 + 2 * 4 + 2) as u8, "左上像素的 R 来自 (2,2)");
-        assert_eq!(row0[2], (2 * 10) as u8, "左上像素的 B 来自 (2,2) 的 B");
-        assert_eq!(row0[4], (100 + 2 * 4 + 3) as u8, "同排第二个像素来自 (3,2)");
-        assert_ne!(row0[2], 0, "绝不能取到 x=0 的 B 值");
-        assert_ne!(row0[2], 10, "绝不能取到 x=1 的 B 值");
+        // 第一行第一个像素 = 屏幕 (2,2)
+        assert_eq!(&out[0..4], &expect_screen_px(2, 2));
+        // 第二行第一个像素 = 屏幕 (2,3)
+        assert_eq!(&out[8..12], &expect_screen_px(2, 3));
+        // 绝不能混入 x=0/1 的 B 值
+        assert_ne!(out[2], 0);
+        assert_ne!(out[2], 10);
     }
 
-    /// 越界裁剪：请求超出帧的矩形，只返回帧内部分，不 panic。
+    /// 越界裁剪：不 panic，只返回帧内部分。
     #[test]
     fn t7b_rect_is_clamped_to_frame() {
         let frame = frame_4x4();
         let out = bgra_rect_to_rgba(&frame, 4, 4, 3, 3, 10, 10);
-        assert_eq!(out.len(), 4, "只剩右下 1x1 一个像素");
-        // 完全在帧外 ⇒ 空
+        assert_eq!(out.len(), 4, "只剩右下 1x1");
+        assert_eq!(&out[0..4], &expect_screen_px(3, 3));
         assert!(bgra_rect_to_rgba(&frame, 4, 4, 10, 10, 2, 2).is_empty());
-        // 零尺寸 ⇒ 空
         assert!(bgra_rect_to_rgba(&frame, 4, 4, 0, 0, 0, 2).is_empty());
+    }
+
+    // ---- T8：**两条路径一致性硬约束** ----
+
+    #[test]
+    fn t8_full_and_partial_paths_agree_byte_for_byte() {
+        let frame = frame_4x4();
+        let full = bgra_to_rgba(&frame, 4, 4);
+        // 脏区覆盖整帧：局部路径必须与整帧路径完全相同
+        let partial = bgra_rect_to_rgba(&frame, 4, 4, 0, 0, 4, 4);
+        assert_eq!(
+            full, partial,
+            "整帧与局部路径必须逐字节一致；不一致说明两者的 Y 映射不同（历史 Bug）"
+        );
+
+        // 再验证一次非整帧：任何矩形的输出都等于"从整帧结果里裁出来"的对应区域
+        let (x, y, w, h) = (1u32, 1u32, 2u32, 2u32);
+        let sub = bgra_rect_to_rgba(&frame, 4, 4, x, y, w, h);
+        let mut want = Vec::new();
+        for row in y..y + h {
+            let start = ((row * 4 + x) * 4) as usize;
+            want.extend_from_slice(&full[start..start + (w * 4) as usize]);
+        }
+        assert_eq!(sub, want, "局部抠图必须等于整帧结果的对应区域");
+    }
+
+    // ---- T9：分数坐标的脏区必须向外取整，覆盖右/下边界 ----
+
+    #[test]
+    fn t9_fractional_dirty_rect_is_expanded_outwards() {
+        // x=10.5, w=3.7 ⇒ 覆盖 [10.5, 14.2) ⇒ 整数像素 [10, 15)
+        let r = clamp_dirty_rect(10.5, 4.2, 3.7, 2.1, 100, 100).expect("应有结果");
+        assert_eq!(r.0, 10, "左边界向下取整");
+        assert_eq!(r.1, 4, "上边界向下取整");
+        assert_eq!(r.0 + r.2, 15, "右边界 = ceil(14.2) = 15");
+        assert_eq!(r.1 + r.3, 7, "下边界 = ceil(6.3) = 7");
+
+        // 完全在视口外 / 尺寸为零 ⇒ None
+        assert!(clamp_dirty_rect(200.0, 0.0, 10.0, 10.0, 100, 100).is_none());
+        assert!(clamp_dirty_rect(0.0, 0.0, 0.0, 10.0, 100, 100).is_none());
+        assert!(clamp_dirty_rect(f32::NAN, 0.0, 1.0, 1.0, 100, 100).is_none());
+    }
+
+    // ---- T10：局部上传阈值决策 ----
+
+    #[test]
+    fn t10_partial_upload_only_for_small_dirty_regions() {
+        // 小脏区：悬停/打字 → 走局部
+        assert!(should_upload_partial(&[(0, 0, 20, 20)], 800, 600));
+        // 面积超视口一半 → 整帧
+        assert!(!should_upload_partial(&[(0, 0, 800, 400)], 800, 600));
+        // 碎块过多 → 整帧（每块一次 putImageData 的固定开销）
+        let many: Vec<RectPx> = (0..9).map(|i| (i * 5, 0, 2, 2)).collect();
+        assert!(!should_upload_partial(&many, 800, 600));
+        // 空列表 → 不该走局部
+        assert!(!should_upload_partial(&[], 800, 600));
     }
 }

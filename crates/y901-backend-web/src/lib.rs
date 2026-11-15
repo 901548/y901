@@ -210,21 +210,15 @@ impl WindowBackend for WasmWindow<'_> {
         let full = tree.dirty().is_full();
         let (vw, vh) = self.viewport();
         // 快照（仅局部帧需要；全量帧传 `None` = 整帧上屏）。
-        let dirty_rects: Vec<(u32, u32, u32, u32)> = if full {
+        let dirty_rects: Vec<crate::present::RectPx> = if full {
             Vec::new()
         } else {
             tree.dirty()
                 .rects()
                 .iter()
-                .filter_map(|r| {
-                    let x0 = r.x.max(0.0) as u32;
-                    let y0 = r.y.max(0.0) as u32;
-                    let x1 = (r.x + r.w).clamp(0.0, vw as f32) as u32;
-                    let y1 = (r.y + r.h).clamp(0.0, vh as f32) as u32;
-                    let w = x1.saturating_sub(x0);
-                    let h = y1.saturating_sub(y0);
-                    (w > 0 && h > 0 && x0 < vw && y0 < vh).then_some((x0, y0, w, h))
-                })
+                // **向外取整**（左上 floor、右下 ceil）：只 floor 会漏掉右/下边界那一列像素，
+                // 留下半个像素宽的残影。逻辑与单测在 `present::clamp_dirty_rect`。
+                .filter_map(|r| crate::present::clamp_dirty_rect(r.x, r.y, r.w, r.h, vw, vh))
                 .collect()
         };
 
@@ -235,7 +229,10 @@ impl WindowBackend for WasmWindow<'_> {
 
         // 分开借用：`pixels` 只读借 `soft`，`present` 需要 `&mut self`。
         let WasmWindow { soft, present, .. } = self;
-        let partial = (!full && !dirty_rects.is_empty()).then_some(dirty_rects.as_slice());
+        // **何时才值得局部上传**：小脏区（悬停/打字）走局部；碎块多或面积过半走整帧
+        // （每块 `putImageData` 都有固定开销）。判据与单测在 `present::should_upload_partial`。
+        let partial = (!full && crate::present::should_upload_partial(&dirty_rects, vw, vh))
+            .then_some(dirty_rects.as_slice());
         present.present(soft.pixels(), vw, vh, partial);
         Ok(RenderOutcome::Presented)
     }

@@ -623,12 +623,9 @@ impl UiTree {
     /// 返回：`false` = 同 id 的浮层已存在（本次忽略）。
     /// 副作用：立刻重新布局（下一次 `layout` 会把它摆好）并标脏。
     pub fn open_popup(&mut self, widget: Box<dyn Widget>, anchor: Rect) -> bool {
-        // **打开弹层 ⇒ 强制整窗重绘**。
-        //
-        // 为何：局部重绘模式下每次绘制都被剪到脏区，而弹层覆盖的区域
-        // （含遮罩层）往往不在任何已标脏矩形内 → 弹层会只画出一部分。
-        // 这是方案 D 下的已知边界，用一次全量重绘兵底。
-        self.invalidate_all();
+        // 注意："打开弹层 ⇒ 整窗重绘"的契约在 **`push_popup` 里统一保证**
+        // （它设 `dirty = DirtyRegion::full()`），而不是在这两个入口各自加一行。
+        // 这样 `open_popup` 与 `open_modal_popup` 行为一致，也不依赖调用方顺序。
         self.push_popup(widget, anchor, false)
     }
 
@@ -653,6 +650,11 @@ impl UiTree {
             prev_focus,
         });
         self.layout_requested = true;
+        // **弹层打开的契约**：必须整窗重绘。
+        //
+        // 局部重绘模式下每次绘制都被剪到脏区，而弹层（及模态遮罩）
+        // 覆盖的区域亍往不在任何已标脏矩形内 → 不整窗重绘就会只画出一部分。
+        // 放在这里而不是各入口，是为了让 `open_popup` / `open_modal_popup` 自动兼容。
         self.dirty = DirtyRegion::full();
         // 弹出层开启动画：150ms 缓动。
         // key 取该浮层的 id，于是"同一浮层重开"会打断上一次动画而不是叠加。
