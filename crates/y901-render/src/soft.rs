@@ -403,20 +403,15 @@ impl SoftBackend {
                         // 字形顶 = origin.y + ascent + bearing_y；`bearing_y` 为负且幅度大时
                         // （SimHei 的数字）顶部会跑到 origin.y 之上 → 被裁剪成上半截断
                         // （"8080" → "ouou"）。这里只补"溢出那部分"，不多补。
-                        // 只抓**带裁剪区**的 8/0：跳过表格里无裁剪的数字，
-                        // 目标是端口输入框里被削顶的那个。
-                        if self.dbg_probe.is_none() && matches!(ch, '8' | '0') {
-                            if let Some(c) = self.state.current_clip() {
-                                self.dbg_probe = Some((
-                                    ch,
-                                    g.bearing_y,
-                                    g.height,
-                                    ascent,
-                                    origin.y,
-                                    c.y,
-                                    c.h,
-                                ));
-                            }
+                        // **不限制裁剪区**：只要碰到 '8' 就记一次（每帧首个）。
+                        // `clip` 无时仍记 -1，这样能分辨"压根没压裁剪"这种情况。
+                        if self.dbg_probe.is_none() && ch == '8' {
+                            let (cy, chh) = match self.state.current_clip() {
+                                Some(c) => (c.y, c.h),
+                                None => (-1.0, -1.0),
+                            };
+                            self.dbg_probe =
+                                Some((ch, g.bearing_y, g.height, ascent, origin.y, cy, chh));
                         }
                         let glyph_top = ascent + g.bearing_y as f32;
                         let top_pad = (-glyph_top).max(0.0);
