@@ -75,6 +75,10 @@ pub struct WasmState {
     /// 共享句柄（它在 JS 侧被调用时，`WasmState` 正被本帧借用）。
     /// 让回调**只碰事件缓冲**、不碰整个 state，就不会撞上 `try_borrow_mut` 失败。
     pub events: Rc<RefCell<VecDeque<RawEvent>>>,
+    /// **隐藏的 IME 承接 `input`**（为 `None` 时表示页面没有 `document.body`）。
+    ///
+    /// 存在理由：点击时要把焦点给它（而不是 canvas），输入法才会启动。
+    pub ime_input: Option<wasm_bindgen::JsValue>,
     /// 已注册的 DOM 监听器（**持有它们就是保证它们生效**）。
     ///
     /// P0 阶段为空；P1 起向这里压入。
@@ -177,6 +181,7 @@ impl WasmState {
             tree: None,
             host: None,
             events: Rc::new(RefCell::new(VecDeque::new())),
+            ime_input: None,
             listeners: Vec::new(),
             last_frame_ms: 0.0,
             raf: Rc::new(RefCell::new(None::<Closure<dyn FnMut(f64)>>)),
@@ -282,6 +287,50 @@ impl WasmRuntime {
 }
 
 
+/// **keydown 处理器。**
+///
+/// 抽成函数的理由：P3 起 keydown 要挂在**两个**目标上（canvas 与隐藏 input），
+/// 而 `Closure` 不能 clone，所以必须能生成份本。
+///
+/// **一次按键只发一个事件**：可打印字符（无 ctrl/alt）只发 `Char`；否则发 `KeyDown`。
+/// 两条都发会让 `TextInput` 插两次（`aaddmmiinn`）。
+fn keydown_handler(events: Rc<RefCell<VecDeque<RawEvent>>>) -> Closure<dyn FnMut(JsValue)> {
+    Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
+        let ke: &bindings::KeyboardEvent = val.unchecked_ref();
+        // **组字期间不当按键**：拼音字母不能被当成要输入的字符。
+        if ke.is_composing() {
+            return;
+        }
+        let code = ke.code();
+        let key = ke.key();
+        let mods =
+            keys::mods_from_event(ke.ctrl_key(), ke.shift_key(), ke.alt_key(), ke.meta_key());
+
+        let printable = if !mods.ctrl && !mods.alt {
+            keys::char_from_dom(&key)
+        } else {
+            None
+        };
+        match printable {
+            Some(c) => events.borrow_mut().push_back(RawEvent::Char { c }),
+            None => {
+                if let Some(k) = keys::key_from_dom(&code, &key) {
+                    events.borrow_mut().push_back(RawEvent::KeyDown { key: k, mods });
+                }
+            }
+        }
+        // 阻止浏览器默认：Tab 跳焦点、空格/方向键/翻页键滚页、Backspace 后退导航。
+        if matches!(
+            code.as_str(),
+            "Tab" | "Space" | "Backspace" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight"
+                | "Home" | "End" | "PageUp" | "PageDown"
+        ) {
+            let ev: &bindings::Event = val.unchecked_ref();
+            ev.prevent_default();
+        }
+    })
+}
+
 /// **P1/P2：挂鼠标、滚轮与键盘监听器**。
 ///
 /// 三条硬规则，都写进注释以免下次被"优化"掉：
@@ -308,6 +357,26 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // **坐标换算所需：UI 树的 y 是"从底部往上"，DOM 的 `offsetY` 是"从顶部往下"。**
     // 公式在 `keys::to_ui_y`（带单测），这里只把画布高度抓一份。
     let canvas_h = state.canvas.height() as f32;
+
+    // **P3：建一个隐藏 `input` 做输入法承接元素**。
+    // 它是拼音组字事件的**唯一**来源；不建它，中文永远输不进去。
+    // 它被放在屏幕外且 1x1 透明，看不见但可聚焦。
+    let ime_input: Option<JsValue> = (|| {
+        let window = bindings::global_window()?;
+        let document = window.document()?;
+        let body = document.body()?;
+        let element = document.create_element("input");
+        // 定位到屏幖外 + 完全透明；**不能用 `display:none`**（那样无法聚焦）。
+        element.set_attribute(
+            "style",
+            "position:fixed;opacity:0;width:1px;height:1px;left:0;top:0;z-index:-1;border:0;padding:0;",
+        );
+        element.set_attribute("autocomplete", "off");
+        element.set_attribute("autocapitalize", "off");
+        element.set_attribute("spellcheck", "false");
+        let _ = body.append_child(&element);
+        Some(JsValue::from(element))
+    })();
     let mut listeners: Vec<Listener> = Vec::with_capacity(4);
 
     // ---- mousemove ----
@@ -332,7 +401,9 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // ---- mousedown（顺手把焦点抢到 canvas）----
     {
         let evs = Rc::clone(&events);
-        let canvas = canvas_js.clone().unchecked_into::<bindings::HtmlCanvasElement>();
+        let ime_input_for_focus = ime_input.clone();
+        let canvas_for_focus =
+            Some(canvas_js.clone().unchecked_into::<bindings::HtmlCanvasElement>());
         let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
             let me: &bindings::MouseEvent = val.unchecked_ref();
             let Some(button) = keys::button_from_dom(me.button()) else {
@@ -343,8 +414,14 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 y: keys::to_ui_y(canvas_h, me.offset_y() as f32),
                 button,
             });
-            // 后续键盘事件的前提。
-            canvas.focus();
+            // **把焦点给隐藏 input**（而不是 canvas），输入法才会启动；
+            // 没有 input（极罕见：页面没有 body）时退回 canvas，至少保证英文可用。
+            if let Some(input_js) = ime_input_for_focus.as_ref() {
+                let input: &bindings::HtmlInputElement = input_js.unchecked_ref();
+                input.focus();
+            } else if let Some(canvas) = canvas_for_focus.as_ref() {
+                canvas.focus();
+            }
         });
         let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
         target.add_event_listener("mousedown", &handler);
@@ -418,70 +495,102 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     //
     // 框架的 `RawEvent` **没有 `KeyUp` 变体**（只有 `KeyDown` / `SystemKeyDown` / `Char` / `Ime`，
     // 见 `y901-runtime` 的 `RawEvent` 与 `translate()`），因此这里只挂 `keydown`。
-    // 要支持 keyup 必须先给 runtime 加变体并让三个后端同步，不属于本轮范围。
+    //
+    // **两个目标都要挂**：焦点在 canvas 上时事件到 canvas，焦点在隐藏 input 上
+    // （IME 模式）时到 input。两者不会同时收到，因此不会双发。
     {
-        let evs = Rc::clone(&events);
-        let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
-            let ke: &bindings::KeyboardEvent = val.unchecked_ref();
-            let code = ke.code();
-            let key = ke.key();
-            let mods = keys::mods_from_event(
-                ke.ctrl_key(),
-                ke.shift_key(),
-                ke.alt_key(),
-                ke.meta_key(),
-            );
-
-            // **一次按键只发一个事件**：可打印字符只发 `Char`，
-            // 不再发 `KeyDown{Key::Char(c)}`。
-            //
-            // 为何：`TextInput::handle_key` 对 `Key::Char(c)`（text_input.rs:456）与
-            // `UiEvent::Text`（text_input.rs:616）**都会插字符**，
-            // 两条事件都发就会变成 `aaddmmiinn`。
-            // 桌面端不双发是因为它在 `WM_KEYDOWN` 里已经把
-            // 可打印键过滤掉了（交给 `WM_CHAR`）。
-            let printable = if !mods.ctrl && !mods.alt {
-                keys::char_from_dom(&key)
-            } else {
-                None
-            };
-            match printable {
-                Some(c) => evs.borrow_mut().push_back(RawEvent::Char { c }),
-                None => {
-                    if let Some(k) = keys::key_from_dom(&code, &key) {
-                        evs.borrow_mut().push_back(RawEvent::KeyDown { key: k, mods });
-                    }
-                }
-            }
-            // 阻止浏览器默认：Tab 跳焦点、空格/方向键/翻页键滚页、
-            // Backspace 后退导航。文本插入是我们自己发的 `Char`，不受影响。
-            if matches!(
-                code.as_str(),
-                "Tab"
-                    | "Space"
-                    | "Backspace"
-                    | "ArrowUp"
-                    | "ArrowDown"
-                    | "ArrowLeft"
-                    | "ArrowRight"
-                    | "Home"
-                    | "End"
-                    | "PageUp"
-                    | "PageDown"
-            ) {
-                let ev: &bindings::Event = val.unchecked_ref();
-                ev.prevent_default();
-            }
-        });
-        let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
-        target.add_event_listener("keydown", &handler);
+        let mk = || keydown_handler(Rc::clone(&events));
+        let on_canvas = mk();
+        let canvas_target: bindings::EventTarget = canvas_js.clone().unchecked_into();
+        canvas_target.add_event_listener("keydown", &on_canvas);
         listeners.push(Listener {
-            target,
+            target: canvas_target,
             kind: "keydown".to_string(),
-            handler,
+            handler: on_canvas,
         });
+        if let Some(input_js) = ime_input.as_ref() {
+            let on_input = mk();
+            let input_target: bindings::EventTarget = input_js.clone().unchecked_into();
+            input_target.add_event_listener("keydown", &on_input);
+            listeners.push(Listener {
+                target: input_target,
+                kind: "keydown(ime)".to_string(),
+                handler: on_input,
+            });
+        }
     }
 
+    // ---- IME（P3）----
+    //
+    // `compositionstart/update/end` 全部来自那个隐藏 input：拼音组字只会发给
+    // **可编辑元素**，canvas 永远收不到。
+    if let Some(input_js) = ime_input.as_ref() {
+        // start：清空 input 的旧值，并告知上层"开始预编辑"（空串）。
+        {
+            let evs = Rc::clone(&events);
+            let input_for_clear = input_js.clone();
+            let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
+                let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
+                el.set_value("");
+                evs.borrow_mut().push_back(RawEvent::Ime {
+                    text: String::new(),
+                    composition: true,
+                });
+            });
+            let target: bindings::EventTarget = input_js.clone().unchecked_into();
+            target.add_event_listener("compositionstart", &handler);
+            listeners.push(Listener {
+                target,
+                kind: "compositionstart".to_string(),
+                handler,
+            });
+        }
+        // update：实时预编辑串（输入框里显示拼音）。
+        {
+            let evs = Rc::clone(&events);
+            let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
+                let ce: &bindings::CompositionEvent = val.unchecked_ref();
+                evs.borrow_mut().push_back(RawEvent::Ime {
+                    text: ce.data(),
+                    composition: true,
+                });
+            });
+            let target: bindings::EventTarget = input_js.clone().unchecked_into();
+            target.add_event_listener("compositionupdate", &handler);
+            listeners.push(Listener {
+                target,
+                kind: "compositionupdate".to_string(),
+                handler,
+            });
+        }
+        // end：提交（`composition = false` → 运行时翻译成 `UiEvent::Text`），
+        // 并清空 input，否则下一次输入会累加。
+        {
+            let evs = Rc::clone(&events);
+            let input_for_clear = input_js.clone();
+            let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
+                let ce: &bindings::CompositionEvent = val.unchecked_ref();
+                let text = ce.data();
+                let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
+                el.set_value("");
+                if !text.is_empty() {
+                    evs.borrow_mut().push_back(RawEvent::Ime {
+                        text,
+                        composition: false,
+                    });
+                }
+            });
+            let target: bindings::EventTarget = input_js.clone().unchecked_into();
+            target.add_event_listener("compositionend", &handler);
+            listeners.push(Listener {
+                target,
+                kind: "compositionend".to_string(),
+                handler,
+            });
+        }
+    }
+
+    state.ime_input = ime_input;
     state.listeners = listeners;
     Ok(())
 }

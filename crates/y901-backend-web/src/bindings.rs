@@ -114,6 +114,13 @@ extern "C" {
     /// `KeyboardEvent.metaKey`（\u2318 / Win\uff09\u3002\u53ea\u53d6\u4e0d\u7528\uff1a\u6846\u67b6\u7684 `Modifiers` \u6ca1\u6709 meta \u4f4d\u3002
     #[wasm_bindgen(method, getter, js_name = "metaKey")]
     pub fn meta_key(this: &KeyboardEvent) -> bool;
+
+    /// `KeyboardEvent.isComposing`：输入法正在组字。
+    ///
+    /// 组字期间的 `keydown` **不能**当普通按键处理，否则拼音字母会被当成
+    /// "要输入的字符"插进输入框。
+    #[wasm_bindgen(method, getter, js_name = "isComposing")]
+    pub fn is_composing(this: &KeyboardEvent) -> bool;
 }
 
 /// 鼠标事件。
@@ -243,6 +250,14 @@ extern "C" {
 
     #[wasm_bindgen(method, js_name = "getElementById")]
     pub fn get_element_by_id(this: &Document, id: &str) -> Option<Element>;
+
+    /// `document.body`。
+    #[wasm_bindgen(method, getter)]
+    pub fn body(this: &Document) -> Option<Element>;
+
+    /// `document.createElement(tag)`。
+    #[wasm_bindgen(method, js_name = "createElement")]
+    pub fn create_element(this: &Document, tag: &str) -> Element;
 }
 
 /// DOM `Element`（取到后用 `unchecked_into` 转成 `HtmlCanvasElement`）。
@@ -250,6 +265,51 @@ extern "C" {
 extern "C" {
     #[wasm_bindgen(js_name = "Element")]
     pub type Element;
+
+    /// `element.setAttribute(name, value)`。
+    #[wasm_bindgen(method, js_name = "setAttribute")]
+    pub fn set_attribute(this: &Element, name: &str, value: &str);
+
+    /// `parent.appendChild(child)`。
+    ///
+    /// 用 `structural`：参数声明为 `&Element`，但实际传的是 `HtmlInputElement`；
+    /// 不加 `structural` 的话 wasm-bindgen 会在 JS 侧做 `instanceof Element` 检查。
+    #[wasm_bindgen(method, structural, js_name = "appendChild")]
+    pub fn append_child(this: &Element, child: &Element) -> Element;
+}
+
+/// `HTMLInputElement`——**隐藏的 IME 承接元素**。
+///
+/// 为何要它：浏览器的输入法（拼音）只作用在**可编辑元素**上。canvas
+/// 收不到 `composition*` 事件，所以在页面里放一个 1px、透明的 input，把它设为焦点，
+/// 拼音组字就发到它身上，我们再转成 `RawEvent::Ime`。
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = "HTMLInputElement")]
+    pub type HtmlInputElement;
+
+    /// `input.value`。
+    #[wasm_bindgen(method, getter)]
+    pub fn value(this: &HtmlInputElement) -> String;
+
+    /// `input.value = v`。
+    #[wasm_bindgen(method, setter)]
+    pub fn set_value(this: &HtmlInputElement, v: &str);
+
+    /// `input.focus()`——**唤醒输入法的关键一步**。
+    #[wasm_bindgen(method)]
+    pub fn focus(this: &HtmlInputElement);
+}
+
+/// `CompositionEvent`：输入法组字事件。
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = "CompositionEvent")]
+    pub type CompositionEvent;
+
+    /// `event.data`：当前组字串（`compositionend` 时是最终提交串）。
+    #[wasm_bindgen(method, getter)]
+    pub fn data(this: &CompositionEvent) -> String;
 }
 
 /// 取全局 `window`（调用方便用）。
