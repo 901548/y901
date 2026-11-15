@@ -156,3 +156,10 @@ pub fn global_window() -> Option<Window> {
         Some(<Window as wasm_bindgen::JsCast>::unchecked_from_js(js))
     })
 }
+
+/// `console.log`。
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = "console.log")]
+    pub fn console_log(s: &str);
+}
