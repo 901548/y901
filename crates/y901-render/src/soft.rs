@@ -82,6 +82,11 @@ pub struct SoftBackend {
     /// **[DBG] 本帧最靠上的一次文字绘制**（origin.y, line_height, ascent, text）。
     /// 仅为定位"文字被削顶"用，确认后删除。
     pub dbg_top_text: Option<(f32, f32, f32, String)>,
+    /// **[DBG]** 上一次文字绘制的度量细节：
+    /// `(self.cell.h, engine.ascent(), cell_h_for_px, computed_ascent)`。
+    pub dbg_metrics: Option<(f32, f32, f32, f32)>,
+    /// **[DBG]** 首个非空字形的 `(bearing_y, height, width)`。
+    pub dbg_glyph: Option<(i32, u32, u32)>,
 }
 
 impl SoftBackend {
@@ -131,6 +136,8 @@ impl SoftBackend {
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
             dbg_top_text: None,
+            dbg_metrics: None,
+            dbg_glyph: None,
             dpi_scale: 1.0,
         })
     }
@@ -156,6 +163,8 @@ impl SoftBackend {
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
             dbg_top_text: None,
+            dbg_metrics: None,
+            dbg_glyph: None,
             dpi_scale: 1.0,
         })
     }
@@ -400,6 +409,8 @@ impl SoftBackend {
             0.8
         };
         let ascent = cell_h * ascent_ratio;
+        // [DBG] 记录度量（仅探针用）
+        self.dbg_metrics = Some((self.cell.h, self.text.ascent(), cell_h, ascent));
         let atlas_size = self.text.atlas_size() as usize;
         let mut pen_x = origin.x;
         let start = pen_x;
@@ -414,6 +425,9 @@ impl SoftBackend {
                 let glyph = self.text.glyph_at_size(ch, px_final).cloned();
                 if let Some(g) = glyph {
                     if g.width > 0 && g.height > 0 {
+                        if self.dbg_glyph.is_none() {
+                            self.dbg_glyph = Some((g.bearing_y, g.height, g.width));
+                        }
                         let bx = (pen_x + g.bearing_x as f32).floor() as i32;
                         let by = (origin.y + ascent + g.bearing_y as f32).floor() as i32;
                         for gy in 0..g.height as i32 {

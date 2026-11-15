@@ -101,6 +101,18 @@ impl WindowBackend for WasmWindow<'_> {
                 "[DBG-TXT] origin.y={:.1} line={:.1} ascent={:.1} text='{}'",
                 y, lh, asc, txt
             ));
+            if let Some((cell_h, eng_asc, cell_h_px, computed)) = self.soft.dbg_metrics {
+                bindings::console_log(&format!(
+                    "[DBG-TXT2] self.cell.h={:.2} engine.ascent()={:.2} cell_h_for_px={:.2} computed_ascent={:.2}",
+                    cell_h, eng_asc, cell_h_px, computed
+                ));
+            }
+            if let Some((by, gh, gw)) = self.soft.dbg_glyph.take() {
+                bindings::console_log(&format!(
+                    "[DBG-GLYPH] bearing_y={} height={} width={}",
+                    by, gh, gw
+                ));
+            }
         }
 
         let (w, h) = self.viewport();
