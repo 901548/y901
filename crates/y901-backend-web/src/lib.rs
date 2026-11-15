@@ -95,6 +95,15 @@ impl WindowBackend for WasmWindow<'_> {
         self.soft.clear();
         tree.render(self.soft);
 
+        // [DBG-PROBE] 缩放路径的实测坐标（定位"文字未居中"）。
+        if let Some((oy, asc, clamped, gh, cy, chh)) = self.soft.dbg_probe.take() {
+            // 裁剪区 = inner 上下各放宽 4px → 可反推 inner.y / inner.h
+            bindings::console_log(&format!(
+                "[DBG-PROBE] origin.y={:.2} ascent={:.2} by_clamped={:.2} glyph_h={:.2} clip.y={:.2} clip.h={:.2} => inner.y={:.2} inner.h={:.2} dy={:.2}",
+                oy, asc, clamped, gh, cy, chh, cy + 4.0, chh - 8.0, oy - (cy + 4.0)
+            ));
+        }
+
         let (w, h) = self.viewport();
         let pixels = self.soft.pixels().to_vec();
         self.present.present(&pixels, w, h);

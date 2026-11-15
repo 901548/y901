@@ -79,6 +79,8 @@ pub struct SoftBackend {
     dpi_scale: f32,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
     clear_color: Color,
+    /// **[DBG] 缩放路径探针**：`(origin.y, ascent, by_after_clamp, glyph_h, clip.y, clip.h)`。
+    pub dbg_probe: Option<(f32, f32, f32, f32, f32, f32)>,
 }
 
 impl SoftBackend {
@@ -127,6 +129,7 @@ impl SoftBackend {
             cell,
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
+            dbg_probe: None,
             dpi_scale: 1.0,
         })
     }
@@ -151,6 +154,7 @@ impl SoftBackend {
             text: font,
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
+            dbg_probe: None,
             dpi_scale: 1.0,
         })
     }
@@ -817,6 +821,20 @@ impl RenderCtx for SoftBackend {
                                     by = fitted;
                                 }
                             }
+                        }
+                        if self.dbg_probe.is_none() && ch == '8' {
+                            let (cy, chh) = match self.state.current_clip() {
+                                Some(c) => (c.y, c.h),
+                                None => (-1.0, -1.0),
+                            };
+                            self.dbg_probe = Some((
+                                origin.y,
+                                ascent * scale,
+                                by as f32,
+                                gh_f,
+                                cy,
+                                chh,
+                            ));
                         }
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
