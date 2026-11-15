@@ -14,7 +14,7 @@ use wasm_bindgen::prelude::Closure;
 use y901_render::soft::SoftBackend;
 use y901_runtime::window::{RenderOutcome, WindowBackend};
 use y901_runtime::{Host, RawEvent};
-use y901_ui::{Size, UiTree};
+use y901_ui::{RenderCtx, Size, UiTree};
 
 pub mod bindings;
 pub mod font;
@@ -94,6 +94,32 @@ impl WindowBackend for WasmWindow<'_> {
         }
         self.soft.clear();
         tree.render(self.soft);
+
+        // [CORNER-TEST] 四角颜色探针：**唯一目的是确认浏览器里跑的版本与 Y 轴方向**。
+        // 左上=红、右上=绿、左下=蓝、右下=黄。确诊后立即删除。
+        {
+            let (cw, chh) = (
+                self.soft.width() as f32,
+                self.soft.height() as f32,
+            );
+            let d = 40.0;
+            self.soft.fill_rect(
+                y901_ui::Rect::new(0.0, 0.0, d, d),
+                y901_ui::Color::rgba(1.0, 0.0, 0.0, 1.0),
+            ); // 红 —— 缓冲左上
+            self.soft.fill_rect(
+                y901_ui::Rect::new(cw - d, 0.0, d, d),
+                y901_ui::Color::rgba(0.0, 1.0, 0.0, 1.0),
+            ); // 绿 —— 缓冲右上
+            self.soft.fill_rect(
+                y901_ui::Rect::new(0.0, chh - d, d, d),
+                y901_ui::Color::rgba(0.0, 0.0, 1.0, 1.0),
+            ); // 蓝 —— 缓冲左下
+            self.soft.fill_rect(
+                y901_ui::Rect::new(cw - d, chh - d, d, d),
+                y901_ui::Color::rgba(1.0, 1.0, 0.0, 1.0),
+            ); // 黄 —— 缓冲右下
+        }
 
         let (w, h) = self.viewport();
         let pixels = self.soft.pixels().to_vec();

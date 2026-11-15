@@ -43,25 +43,16 @@ impl Present {
 /// `ImageData` 同样要求自上而下，所以只需换通道。
 /// 为什么不就地改：调用方给的是软后端的复用缓冲；
 /// 这里返回新 `Vec` 更安全，也便于单测。
-pub fn bgra_to_rgba(src: &[u8], w: u32, h: u32) -> Vec<u8> {
-    // **按行翻转（仅 Y 轴）**：`SoftBackend::pixels()` 交出的是**自下而上**的缓冲，
-    // 而 `ImageData` 要求自上而下。**不能整条 `.rev()`**（那会连 X 轴一起翻，得到 180°）。
-    //
-    // 这个结论经历了很多轮：四次探针（角标、字形、尺寸、像素顺序）+ 每次更换
-    // `?v=` 版本参数后才确定。之前“按行翻转无效”是**浏览器跑的旧产物**。
-    let w = w as usize;
-    let h = h as usize;
-    let stride = w * 4;
+pub fn bgra_to_rgba(src: &[u8], _w: u32, _h: u32) -> Vec<u8> {
+    // **[角标探针版本] 正序**：本次只做一件事——用四角颜色
+    // 确认浏览器里跑的到底是哪个版本、以及 Y 轴到底反不反。
+    // 证据出来之前不加任何翻转。
     let mut out = Vec::with_capacity(src.len());
-    for y in (0..h).rev() {
-        let row_start = y * stride;
-        let row_end = (row_start + stride).min(src.len());
-        for px in src[row_start..row_end].chunks_exact(4) {
-            out.push(px[2]); // R ← B
-            out.push(px[1]); // G
-            out.push(px[0]); // B ← R
-            out.push(px[3]); // A
-        }
+    for px in src.chunks_exact(4) {
+        out.push(px[2]); // R ← B
+        out.push(px[1]); // G
+        out.push(px[0]); // B ← R
+        out.push(px[3]); // A
     }
     out
 }
@@ -70,30 +61,20 @@ pub fn bgra_to_rgba(src: &[u8], w: u32, h: u32) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    /// 当前构建是**正序**（角标探针版）：只换通道、不翻行。
     #[test]
-    fn row_flip_reverses_rows_not_columns() {
-        // 2x2：第 0 行 = [红, 绿]，第 1 行 = [蓝, 白]（BGRA）。
-        let src = [
-            0, 0, 255, 255, 0, 255, 0, 255,
-            255, 0, 0, 255, 255, 255, 255, 255,
-        ];
-        let out = bgra_to_rgba(&src, 2, 2);
-        assert_eq!(
-            out,
-            vec![0, 0, 255, 255, 255, 255, 255, 255, 255, 0, 0, 255, 0, 255, 0, 255]
-        );
+    fn converts_channels_in_source_order() {
+        let src = [10u8, 20, 30, 255, 1, 2, 3, 4];
+        assert_eq!(bgra_to_rgba(&src, 2, 1), vec![30, 20, 10, 255, 3, 2, 1, 4]);
     }
 
     #[test]
-    fn row_flip_preserves_length_and_alpha() {
+    fn preserves_length_and_alpha() {
         let src: Vec<u8> = (0..24u8).collect();
         let out = bgra_to_rgba(&src, 2, 3);
         assert_eq!(out.len(), src.len());
-        let stride = 2 * 4;
-        for y in 0..3usize {
-            for x in 0..2usize {
-                assert_eq!(out[y * stride + x * 4 + 3], src[(2 - y) * stride + x * 4 + 3]);
-            }
+        for (i, px) in out.chunks_exact(4).enumerate() {
+            assert_eq!(px[3], src[i * 4 + 3], "alpha 必须随自己的像素");
         }
     }
 }
