@@ -14,8 +14,6 @@ impl Present {
     /// 用 canvas 构造；上下文在这里取一次，后续每帧复用。
     pub fn new(canvas: HtmlCanvasElement) -> Self {
         let ctx = canvas.get_context("2d");
-        // **构建标识**：用于判断浏览器跑的是不是最新 wasm（缓存会让旧产物存活）。
-        crate::bindings::console_log("Y901-BUILD pixel-order=row-flip-6");
 
         Self { canvas, ctx }
     }
