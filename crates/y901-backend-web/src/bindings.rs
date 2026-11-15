@@ -121,6 +121,13 @@ extern "C" {
     /// "要输入的字符"插进输入框。
     #[wasm_bindgen(method, getter, js_name = "isComposing")]
     pub fn is_composing(this: &KeyboardEvent) -> bool;
+
+    /// `KeyboardEvent.keyCode`（已废弃但仍普遍可用）。
+    ///
+    /// 用途：输入法组字相关的按键事件常报 `229`，这是识别
+    /// "这个 keydown 不是真实字符输入"的又一道保险。
+    #[wasm_bindgen(method, getter, js_name = "keyCode")]
+    pub fn key_code(this: &KeyboardEvent) -> u32;
 }
 
 /// 鼠标事件。
@@ -241,6 +248,7 @@ extern "C" {
     /// `data[i] = v`。**用 `indexing_setter`**（JS 没有 `setIndex` 方法，那会静默失败）。
     #[wasm_bindgen(method, structural, indexing_setter)]
     pub fn set_index(this: &Uint8ClampedArray, index: u32, value: u8);
+
 }
 /// `Document`——用来按 id 取 canvas（页面约定见 `docs/WASM.md` §3.2）。
 #[wasm_bindgen]
@@ -338,4 +346,16 @@ pub fn global_window() -> Option<Window> {
 extern "C" {
     #[wasm_bindgen(js_name = "console.log")]
     pub fn console_log(s: &str);
+}
+
+
+/// `Date.now()`——毫秒时间戳。
+///
+/// 用途：区分"输入法提交后紧跟的幻影 keydown"与"真实按键"。
+/// 为何用这个而不用 `performance.now()`：两者都行，`Date.now` 更普通，
+/// 且不需要 `performance` 对象。
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = Date, js_name = now)]
+    pub fn date_now() -> f64;
 }

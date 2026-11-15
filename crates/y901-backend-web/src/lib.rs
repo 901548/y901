@@ -294,11 +294,24 @@ impl WasmRuntime {
 ///
 /// **一次按键只发一个事件**：可打印字符（无 ctrl/alt）只发 `Char`；否则发 `KeyDown`。
 /// 两条都发会让 `TextInput` 插两次（`aaddmmiinn`）。
-fn keydown_handler(events: Rc<RefCell<VecDeque<RawEvent>>>) -> Closure<dyn FnMut(JsValue)> {
+fn keydown_handler(
+    events: Rc<RefCell<VecDeque<RawEvent>>>,
+    ime_end_ms: Rc<std::cell::Cell<f64>>,
+) -> Closure<dyn FnMut(JsValue)> {
     Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
         let ke: &bindings::KeyboardEvent = val.unchecked_ref();
         // **组字期间不当按键**：拼音字母不能被当成要输入的字符。
         if ke.is_composing() {
+            return;
+        }
+        // **幻影 keydown**：输入法选词完成时，浏览器在 `compositionend` 之后
+        // 紧跟一个 `keydown`（常报 `keyCode = 229`），此时 `isComposing` 已为 false。
+        // 不拦它，刚提交的中文就会被当成普通字符再插一次
+        // （“请求” 变“请求请求”）。两道保险：229 代码 + 提交后时间窗口。
+        if ke.key_code() == 229 {
+            return;
+        }
+        if bindings::date_now() - ime_end_ms.get() < 60.0 {
             return;
         }
         let code = ke.code();
@@ -354,6 +367,10 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // wasm-bindgen 的外部类型本身就是 `JsValue` 的包装；clippy 提示这里无需 `.into()`。
     let canvas_js: JsValue = state.canvas.clone();
     let events = Rc::clone(&state.events);
+    // **上次 `compositionend` 的时间戳（毫秒）**：给 `keydown_handler` 用来拦
+    // 输入法提交后紧跟的幻影 keydown。两处共享，所以在这里声明。
+    #[allow(clippy::redundant_clone)]
+    let ime_end_ms = Rc::new(std::cell::Cell::new(0.0f64));
     // **坐标换算所需：UI 树的 y 是"从底部往上"，DOM 的 `offsetY` 是"从顶部往下"。**
     // 公式在 `keys::to_ui_y`（带单测），这里只把画布高度抓一份。
     let canvas_h = state.canvas.height() as f32;
@@ -376,8 +393,6 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         element.set_attribute("autocapitalize", "off");
         element.set_attribute("spellcheck", "false");
         let _ = body.append_child(&element);
-        // [DBG-INPUT] 临时：确认 input 真的进了 DOM。
-        bindings::console_log("[DBG-INPUT] hidden input appended to body");
         Some(JsValue::from(element))
     })();
     let mut listeners: Vec<Listener> = Vec::with_capacity(4);
@@ -431,15 +446,6 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 input.focus();
             } else if let Some(canvas) = canvas_for_focus.as_ref() {
                 canvas.focus();
-            }
-            // [DBG-FOCUS] 临时：看焦点真正落在了谁身上。
-            if let Some(win) = bindings::global_window() {
-                let tag = win
-                    .document()
-                    .and_then(|d| d.active_element())
-                    .map(|e| e.tag_name())
-                    .unwrap_or_else(|| "<none>".to_string());
-                bindings::console_log(&format!("[DBG-FOCUS] activeElement = {tag}"));
             }
         });
         let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
@@ -518,7 +524,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // **两个目标都要挂**：焦点在 canvas 上时事件到 canvas，焦点在隐藏 input 上
     // （IME 模式）时到 input。两者不会同时收到，因此不会双发。
     {
-        let mk = || keydown_handler(Rc::clone(&events));
+        let mk = || keydown_handler(Rc::clone(&events), Rc::clone(&ime_end_ms));
         let on_canvas = mk();
         let canvas_target: bindings::EventTarget = canvas_js.clone().unchecked_into();
         canvas_target.add_event_listener("keydown", &on_canvas);
@@ -587,9 +593,13 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         {
             let evs = Rc::clone(&events);
             let input_for_clear = input_js.clone();
+            let ime_end_for_handler = Rc::clone(&ime_end_ms);
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
                 let ce: &bindings::CompositionEvent = val.unchecked_ref();
                 let text = ce.data();
+                // **记下提交时刻**：紧跟着的 `keydown` 属于幻影，要被
+                // `keydown_handler` 里的时间窗口拦掉。
+                ime_end_for_handler.set(bindings::date_now());
                 let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
                 el.set_value("");
                 if !text.is_empty() {
