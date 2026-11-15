@@ -40,6 +40,15 @@ impl WasmState {
     fn apply_pending(&mut self) {
         // ---- 窗口尺寸（P4）----
         if self.pending_resize.replace(false) {
+            // [DBG-RESIZE] 临时：看 client 与背存储尺寸、以及内联 style 是不是被我们写没了。
+            bindings::console_log(&format!(
+                "[DBG-RESIZE] client={}x{} canvas={}x{} style={:?}",
+                self.canvas.client_width(),
+                self.canvas.client_height(),
+                self.canvas.width(),
+                self.canvas.height(),
+                self.canvas.get_attribute("style")
+            ));
             let (w, h) = (
                 self.canvas.client_width().max(1),
                 self.canvas.client_height().max(1),
@@ -66,7 +75,10 @@ impl WasmState {
         // ---- 鼠标光标形状（P4）----
         if let Some((x, y)) = self.pending_cursor.take() {
             if let Some(tree) = self.tree.as_ref() {
-                let css = match tree.cursor_at(y901_ui::Pos::new(x, y)) {
+                let hit = tree.cursor_at(y901_ui::Pos::new(x, y));
+                // [DBG-CURSOR] 临时：命中测试到底给了什么光标。
+                bindings::console_log(&format!("[DBG-CURSOR] pos=({x:.0},{y:.0}) cursor={hit:?}"));
+                let css = match hit {
                     y901_ui::Cursor::Pointer => "pointer",
                     y901_ui::Cursor::Text => "text",
                     y901_ui::Cursor::ResizeHorizontal => "ew-resize",
@@ -694,6 +706,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         let target: bindings::EventTarget =
             <bindings::EventTarget as JsCast>::unchecked_from_js(JsValue::from(win));
         target.add_event_listener("resize", &handler);
+        bindings::console_log("[DBG-RESIZE] window resize listener registered");
         listeners.push(Listener {
             target,
             kind: "resize".to_string(),

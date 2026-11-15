@@ -64,6 +64,10 @@ extern "C" {
     #[wasm_bindgen(method, js_name = "setAttribute")]
     pub fn set_attribute(this: &HtmlCanvasElement, name: &str, value: &str);
 
+    /// `canvas.getAttribute(name)`——调试用：看内联 `style` 到底被写成了什么。
+    #[wasm_bindgen(method, js_name = "getAttribute")]
+    pub fn get_attribute(this: &HtmlCanvasElement, name: &str) -> Option<String>;
+
     /// `canvas.focus()`\uff1a\u70b9\u51fb\u540e\u628a\u952e\u76d8\u7126\u70b9\u62a2\u5230 canvas \u4e0a\u3002
     #[wasm_bindgen(method)]
     pub fn focus(this: &HtmlCanvasElement);
