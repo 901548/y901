@@ -127,16 +127,23 @@ impl WindowBackend for WasmWindow<'_> {
         if tree.dirty().is_empty() {
             return Ok(RenderOutcome::Skipped);
         }
-        // **只有全量脏时才清屏**。
+
+        // **wasm 上一律全量重绘**。
         //
-        // 为何：`SoftBackend` 是**持久缓冲**（上一帧的像素还在），而
-        // `UiTree::render` 会**跳过干净子树**（它内部按 `dirty` 剪裁）。
-        // 若每帧先 `clear()` 再只画脏区，未被重画的部分就会变成清屏色（黑）
-        // —— 这就是鼠标悬停时整屏变黑的原因。
-        // 桌面端不存在这个问题：D3D11 后端每帧重建画面清单、不依赖持久缓冲。
-        if tree.dirty().is_full() {
-            self.soft.clear();
-        }
+        // 为何：`UiTree::render` 不接受脏区参数，它读自己的 `self.dirty` 并
+        // **跳过干净子树**。在**持久缓冲**型后端上，局部重绘已属证实有缺陷：
+        // 悬停时被标脏的那一小块会覆盖上一帧，但父容器背景与裁剪
+        // 并不会重画，于是出现"哪个组件被悬停、哪个就消失/留白边"。
+        // 桌面端每帧重建图元列表，本来就是全量，因此从未暴露。
+        //
+        // `invalidate_all()` 把脏区置为 `full`，让 `render` 走全树；然后清屏。
+        // 性能代价是每帧重画整树——在 wasm 上这是可接受的，因为
+        // 上屏本来就是**整帧 `putImageData`**，省下的只是 CPU 重绘量。
+        //
+        // 底层缺陷（局部脏区在持久缓冲上不完整）仍在，这里是**绕开**而非修复；
+        // 它需要单独一轮去定位 `UiTree` 的脏区重绘与父容器背景的配合。
+        tree.invalidate_all();
+        self.soft.clear();
         tree.render(self.soft);
 
         let (w, h) = self.viewport();
