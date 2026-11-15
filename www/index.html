@@ -14,7 +14,7 @@
 
   <script type="module">
     // `?v=` 参数用于破浏览器缓存：每次重建都换一个值。
-import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=final-v1';
+import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=final-v2';
 
     async function run() {
       await init();
@@ -23,7 +23,8 @@ import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=final-
       y901_start();
 
       try {
-        const resp = await fetch('./fonts/default.ttf');
+        // **字体也要破缓存**：否则浏览器会一直用旧的 Consolas（这就是 SimHei “没生效”的原因）。
+        const resp = await fetch('./fonts/default.ttf?v=simhei-2');
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const buf = await resp.arrayBuffer();
         y901_font_loaded(new Uint8Array(buf));
