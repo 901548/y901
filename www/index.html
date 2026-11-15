@@ -14,7 +14,7 @@
 
   <script type="module">
     // `?v=` 参数用于破浏览器缓存：每次重建都换一个值。
-import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=v3-createImageData';
+import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=v4-final';
 
     async function run() {
       await init();
@@ -29,7 +29,7 @@ import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=v3-cre
         y901_font_loaded(new Uint8Array(buf));
         console.info('[y901] font swapped in');
       } catch (e) {
-        console.warn('[y901] 字体加载失败（保持零字形占位）：', e);
+        console.warn('[y901] 字体加载失败（保持零字形占位）：', e && (e.stack || e.message || e));
       }
     }
 

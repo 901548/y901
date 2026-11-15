@@ -100,8 +100,14 @@ pub fn y901_start() -> Result<(), JsValue> {
 pub fn y901_font_loaded(bytes: Vec<u8>) -> Result<(), JsValue> {
     // 与 `WasmFontEngine` 的格子保持一致：字号 16，cell 8x16。
     let cell = Size::new(8.0, 16.0);
-    let engine = MyFontEngine::new(bytes, 16.0, cell)
-        .map_err(|e| JsValue::from_str(&format!("Y901: 字体解析失败: {e}")))?;
+    let bytes_len = bytes.len();
+    let engine = match MyFontEngine::new(bytes, 16.0, cell) {
+        Ok(e) => e,
+        Err(e) => {
+            console_error(&format!("[y901] 字体解析失败（{} 字节）：{}", bytes_len, e));
+            return Err(JsValue::from_str(&format!("Y901: 字体解析失败: {e}")));
+        }
+    };
 
     let state = STATE
         .with(|slot| slot.borrow().clone())
