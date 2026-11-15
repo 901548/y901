@@ -361,10 +361,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // **IME 共享状态**（三处共用：keydown、input、composition）：
     //
     // - `composing`：正在拼音组字。组字期间的 `keydown` 与 `input` 都**不能**当成用户输入。
-    // - `suppress_input_once`：提交时已经发过 `Ime{composition:false}`，紧跟着的 `input`
-    //   事件必须被忽略，否则同一串字会插两次。
     let composing = Rc::new(std::cell::Cell::new(false));
-    let suppress_input_once = Rc::new(std::cell::Cell::new(false));
     // **坐标换算所需：UI 树的 y 是"从底部往上"，DOM 的 `offsetY` 是"从顶部往下"。**
     // 公式在 `keys::to_ui_y`（带单测），这里只把画布高度抓一份。
     let canvas_h = state.canvas.height() as f32;
@@ -586,29 +583,15 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             });
         }
 
-        // ---- compositionend：**只提交一次**，并让紧跟的 `input` 被忽略 ----
+        // ---- compositionend：**只放下标志，不发文本** ----
         //
-        // 顺序：浏览器在 `compositionend` 之后还会发一次 `input`，两者都携带同一串
-        // 提交文本。在这里提交、并置 `suppress_input_once`，就能保证**只插一次**；
-        // 若某个浏览器不发那个 `input`，文本也不会丢。
+        // 提交文本由紧跟着的 `input` 事件统一处理。这里如果也发，
+        // 就会与 `input` 重复（“你好” → “你好你好”）—— 这正是前两轮的错误。
+        // 注意：也**不清空 value**，否则浏览器随后写入的提交串会被我们提前抹掉。
         {
-            let evs = Rc::clone(&events);
             let composing_for = Rc::clone(&composing);
-            let suppress_for = Rc::clone(&suppress_input_once);
-            let input_for_clear = input_js.clone();
-            let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
-                let ce: &bindings::CompositionEvent = val.unchecked_ref();
-                let text = ce.data();
+            let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
                 composing_for.set(false);
-                suppress_for.set(true);
-                let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
-                el.set_value("");
-                if !text.is_empty() {
-                    evs.borrow_mut().push_back(RawEvent::Ime {
-                        text,
-                        composition: false,
-                    });
-                }
             });
             let target: bindings::EventTarget = input_js.clone().unchecked_into();
             target.add_event_listener("compositionend", &handler);
@@ -626,18 +609,11 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         {
             let evs = Rc::clone(&events);
             let composing_for = Rc::clone(&composing);
-            let suppress_for = Rc::clone(&suppress_input_once);
             let input_for_read = input_js.clone();
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
                 let el: &bindings::HtmlInputElement = input_for_read.unchecked_ref();
                 // 组字中：不读也不清（清了会丢掉正在组的字）。
                 if composing_for.get() {
-                    return;
-                }
-                // 刚在 `compositionend` 提交过：清掉这一次的值，不重复发送。
-                if suppress_for.get() {
-                    suppress_for.set(false);
-                    el.set_value("");
                     return;
                 }
                 let text = el.value();
