@@ -35,6 +35,10 @@ extern "C" {
     /// `console.error`（手写，不引入 web-sys）。
     #[wasm_bindgen(js_name = "console.error")]
     fn console_error(s: &str);
+
+    /// `console.log`。
+    #[wasm_bindgen(js_name = "console.log")]
+    fn console_log(s: &str);
 }
 
 thread_local! {
@@ -102,12 +106,29 @@ pub fn y901_font_loaded(bytes: Vec<u8>) -> Result<(), JsValue> {
     let state = STATE
         .with(|slot| slot.borrow().clone())
         .ok_or_else(|| JsValue::from_str("Y901: y901_start 尚未调用"))?;
+    // 先把真字体的度量打出来（诊断用，之后可删）。
+    let real_cell = Size::new(engine.cell_width(), engine.cell_height());
+    console_log(&format!(
+        "[y901] new font metrics: cell_w={}, cell_h={} (旧格子 {}x{})",
+        real_cell.w, real_cell.h, cell.w, cell.h
+    ));
+
     let mut s = state
         .try_borrow_mut()
         .map_err(|_| JsValue::from_str("Y901: 状态被重入借用"))?;
-    s.soft.set_font(Box::new(engine), cell);
-    if let Some(tree) = s.tree.as_mut() {
-        tree.invalidate_all();
+
+    // **用真字体的格子尺寸**，而不是沿用零字形时代的 8x16。
+    {
+        let WasmState {
+            canvas, soft, tree, ..
+        } = &mut *s;
+        soft.set_font(Box::new(engine), real_cell);
+        // **必须重排**：布局仍按旧行高算的话，字形会上溢出父容器并被削顶。
+        if let Some(tree) = tree.as_mut() {
+            let (w, h) = (canvas.width(), canvas.height());
+            tree.layout(Size::new(w as f32, h as f32), soft);
+            tree.invalidate_all();
+        }
     }
     Ok(())
 }
