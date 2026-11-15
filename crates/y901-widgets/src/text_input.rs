@@ -749,11 +749,10 @@ impl Widget for TextInput {
         ));
 
         let line_h = ctx.line_height(&self.style);
-        // **不放弃居中**：之前 `(inner.h - line_h).max(0.0)` 在"容器比行框矮"时
-        // 退化为贴顶，字形上半被 `push_clip(inner)` 切掉（"8080" → "ouou"）。
-        // 现在按**可用高度**居中：取行框高与容器高的较小者，余量一分为二。
-        let glyph_h = line_h.min(inner.h);
-        let text_y = inner.y + ((inner.h - glyph_h) * 0.5).max(0.0);
+        // **行框在 `inner` 里绝对居中**：不再 `max(0.0)`（它会在容器偏矮时
+        // 退化为贴顶），也不再按字形高取小（那会把字往下推到溢出）。
+        // 实测：inner=[222,242] (h=20)、line_h=16 → text_y = 224，行框 [224,240]，上下各 2px。
+        let text_y = inner.y + (inner.h - line_h) * 0.5;
         let origin_x = inner.x - self.scroll_x;
 
         // 占位提示：只在"真的一点内容都没有"时画（含 IME 预编辑也算内容）。

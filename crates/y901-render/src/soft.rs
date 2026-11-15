@@ -79,8 +79,6 @@ pub struct SoftBackend {
     dpi_scale: f32,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
     clear_color: Color,
-    /// **[DBG] 缩放路径探针**：`(origin.y, ascent, by_after_clamp, glyph_h, clip.y, clip.h)`。
-    pub dbg_probe: Option<(f32, f32, f32, f32, f32, f32)>,
 }
 
 impl SoftBackend {
@@ -129,7 +127,6 @@ impl SoftBackend {
             cell,
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
-            dbg_probe: None,
             dpi_scale: 1.0,
         })
     }
@@ -154,7 +151,6 @@ impl SoftBackend {
             text: font,
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
-            dbg_probe: None,
             dpi_scale: 1.0,
         })
     }
@@ -802,40 +798,8 @@ impl RenderCtx for SoftBackend {
                         let atlas_size = self.text.atlas_size() as usize;
                         // 基线：布局始终用原字号的 bearing，屏幕位置再乘缩放因子
                         let bx = (pen_x + sg.slot.bearing_x * scale).floor() as i32;
-                        let mut by =
+                        let by =
                             (origin.y + ascent * scale + sg.slot.bearing_y * scale).floor() as i32;
-                        // **钳入裁剪区**：`MipSlot` 的 `bearing_y` 在实测中为 0，
-                        // 于是字形顶部可能超出裁剪区而被切（"8080" → "ouou"）。
-                        // 这里把它钳回可见区：先保证顶不超出上界，再保证底不超出下界。
-                        let clamp_to = self.state.current_clip();
-                        let gh_f = (sg.h as f32 * scale).round().max(1.0);
-                        if let Some(c) = clamp_to {
-                            let top = c.y;
-                            let bottom = c.bottom();
-                            if (by as f32) < top {
-                                by = top.round() as i32;
-                            }
-                            if (by as f32) + gh_f > bottom {
-                                let fitted = (bottom - gh_f).round() as i32;
-                                if (fitted as f32) >= top {
-                                    by = fitted;
-                                }
-                            }
-                        }
-                        if self.dbg_probe.is_none() && ch == '8' {
-                            let (cy, chh) = match self.state.current_clip() {
-                                Some(c) => (c.y, c.h),
-                                None => (-1.0, -1.0),
-                            };
-                            self.dbg_probe = Some((
-                                origin.y,
-                                ascent * scale,
-                                by as f32,
-                                gh_f,
-                                cy,
-                                chh,
-                            ));
-                        }
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
                         let dh = (sg.h as f32 * scale).round().max(1.0) as i32;
