@@ -5,7 +5,7 @@
   <title>Y901 WASM</title>
   <style>
     html, body { margin: 0; height: 100%; background: #111; }
-    #y901-canvas { display: block; margin: 0 auto; background: #111; }
+    #y901-canvas { display: block; width: 100%; height: 100%; background: #111; }
   </style>
 </head>
 <body>
@@ -14,7 +14,7 @@
 
   <script type="module">
     // `?v=` 参数用于破浏览器缓存：每次重建都换一个值。
-import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=s2-ime-final2';
+import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=s2-p4';
 
     async function run() {
       await init();

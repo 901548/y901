@@ -32,6 +32,58 @@ pub use input::{KeyInput, MouseInput, WheelInput};
 pub use keys::{button_from_dom, char_from_dom, key_from_dom, mods_from_event, wheel_delta_from_dom};
 pub use present::Present;
 
+impl WasmState {
+    /// **处理回调里只能标记、不能直接做的两件事**：窗口尺寸变化、鼠标光标形状。
+    ///
+    /// 两者都需要 `tree`（命中测试 / 重排），而 DOM 回调拿不到 `WasmState`。
+    /// 因此回调只置标志，真正的动作在每帧开头做。
+    fn apply_pending(&mut self) {
+        // ---- 窗口尺寸（P4）----
+        if self.pending_resize.replace(false) {
+            let (w, h) = (
+                self.canvas.client_width().max(1),
+                self.canvas.client_height().max(1),
+            );
+            if w != self.canvas.width() || h != self.canvas.height() {
+                self.canvas.set_width(w);
+                self.canvas.set_height(h);
+                self.soft.resize(w, h);
+                // **尺寸变了 ⇒ 布局缓存必须作废**（与换字体同理）。
+                {
+                    let WasmState { soft, tree, .. } = self;
+                    if let Some(tree) = tree.as_mut() {
+                        tree.clear_layout_cache();
+                        tree.layout(Size::new(w as f32, h as f32), soft);
+                        tree.invalidate_all();
+                    }
+                }
+                self.events
+                    .borrow_mut()
+                    .push_back(RawEvent::Resize { w, h });
+            }
+        }
+
+        // ---- 鼠标光标形状（P4）----
+        if let Some((x, y)) = self.pending_cursor.take() {
+            if let Some(tree) = self.tree.as_ref() {
+                let css = match tree.cursor_at(y901_ui::Pos::new(x, y)) {
+                    y901_ui::Cursor::Pointer => "pointer",
+                    y901_ui::Cursor::Text => "text",
+                    y901_ui::Cursor::ResizeHorizontal => "ew-resize",
+                    y901_ui::Cursor::ResizeVertical => "ns-resize",
+                    y901_ui::Cursor::Grab => "grab",
+                    // 框架的 Default 是"不声明"，不能写成 CSS 的 `default`（那会抢掉
+                    // 父元素的光标），所以空字符串 = 不设置。
+                    y901_ui::Cursor::Default => "",
+                };
+                // 每次光标变化都整体重写内联样式：`outline:none` 不能丢（否则白边又回来）。
+                self.canvas
+                    .set_attribute("style", &format!("outline: none; cursor: {css};"));
+            }
+        }
+    }
+}
+
 /// 一个已注册的 DOM 监听器。
 ///
 /// **为何要存起来**：`Closure` 一旦被 `drop`，JS 侧虽然还挂着监听器，
@@ -75,6 +127,13 @@ pub struct WasmState {
     /// 共享句柄（它在 JS 侧被调用时，`WasmState` 正被本帧借用）。
     /// 让回调**只碰事件缓冲**、不碰整个 state，就不会撞上 `try_borrow_mut` 失败。
     pub events: Rc<RefCell<VecDeque<RawEvent>>>,
+    /// **待处理的窗口尺寸变化标志**。
+    ///
+    /// 为何不在 `resize` 回调里直接改：回调拿不到 `WasmState`（只捕获共享句柄），
+    /// 而改尺寸要同时动 `canvas` / `soft` / `tree`，只能在帧循环里做。
+    pub pending_resize: Rc<std::cell::Cell<bool>>,
+    /// **待处理的光标位置**（UI 坐标），同理：命中测试需要 `tree`。
+    pub pending_cursor: Rc<std::cell::Cell<Option<(f32, f32)>>>,
     /// **隐藏的 IME 承接 `input`**（为 `None` 时表示页面没有 `document.body`）。
     ///
     /// 存在理由：点击时要把焦点给它（而不是 canvas），输入法才会启动。
@@ -181,6 +240,8 @@ impl WasmState {
             tree: None,
             host: None,
             events: Rc::new(RefCell::new(VecDeque::new())),
+            pending_resize: Rc::new(std::cell::Cell::new(false)),
+            pending_cursor: Rc::new(std::cell::Cell::new(None)),
             ime_input: None,
             listeners: Vec::new(),
             last_frame_ms: 0.0,
@@ -257,6 +318,7 @@ impl WasmRuntime {
             .state
             .try_borrow_mut()
             .map_err(|_| "WasmRuntime 状态被重入借用".to_string())?;
+        state.apply_pending();
         let WasmState {
             soft,
             present,
@@ -391,12 +453,16 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // ---- mousemove ----
     {
         let evs = Rc::clone(&events);
+        let cursor_for = Rc::clone(&state.pending_cursor);
         let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
             let me: &bindings::MouseEvent = val.unchecked_ref();
-            evs.borrow_mut().push_back(RawEvent::MouseMove {
-                x: me.offset_x() as f32,
-                y: keys::to_ui_y(canvas_h, me.offset_y() as f32),
-            });
+            let (mx, my) = (
+                me.offset_x() as f32,
+                keys::to_ui_y(canvas_h, me.offset_y() as f32),
+            );
+            // **记下待处理的光标位置**：命中测试需要 `tree`，回调里拿不到。
+            cursor_for.set(Some((mx, my)));
+            evs.borrow_mut().push_back(RawEvent::MouseMove { x: mx, y: my });
         });
         let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
         target.add_event_listener("mousemove", &handler);
@@ -616,6 +682,25 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
 
     }
 
+    // ---- window resize（P4）----
+    //
+    // 挂在 **window** 上而不是 canvas：画布自身尺寸不变时，是窗口变化才会引起
+    // `clientWidth/Height` 变化（页面 CSS 里 canvas 是 100%。）
+    if let Some(win) = bindings::global_window() {
+        let pending = Rc::clone(&state.pending_resize);
+        let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
+            pending.set(true);
+        });
+        let target: bindings::EventTarget =
+            <bindings::EventTarget as JsCast>::unchecked_from_js(JsValue::from(win));
+        target.add_event_listener("resize", &handler);
+        listeners.push(Listener {
+            target,
+            kind: "resize".to_string(),
+            handler,
+        });
+    }
+
     state.ime_input = ime_input;
     state.listeners = listeners;
     Ok(())
@@ -650,6 +735,8 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
             let Ok(mut s) = for_frame.try_borrow_mut() else {
                 return; // 重入保护：不 panic，丢掉这一帧
             };
+            // 先处理"回调里只能标记"的两件事：窗口尺寸变化与鼠标光标形状。
+            s.apply_pending();
             let WasmState {
                 soft,
                 present,

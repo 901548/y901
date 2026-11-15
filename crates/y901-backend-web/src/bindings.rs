@@ -49,6 +49,14 @@ extern "C" {
     #[wasm_bindgen(method, js_name = "getContext")]
     pub fn get_context(this: &HtmlCanvasElement, kind: &str) -> Option<CanvasRenderingContext2d>;
 
+    /// `canvas.clientWidth`（CSS 像素）。
+    #[wasm_bindgen(method, getter, js_name = "clientWidth")]
+    pub fn client_width(this: &HtmlCanvasElement) -> u32;
+
+    /// `canvas.clientHeight`（CSS 像素）。
+    #[wasm_bindgen(method, getter, js_name = "clientHeight")]
+    pub fn client_height(this: &HtmlCanvasElement) -> u32;
+
     /// 设置 `tabindex`。
     ///
     /// **收键盘事件的前提**：`<canvas>` 默认不可聚焦，不设 `tabindex` 就永远收不到
