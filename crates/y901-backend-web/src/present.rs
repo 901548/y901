@@ -33,25 +33,19 @@ impl Present {
 
 /// **纯函数**：BGRA → RGBA，逐像素换 R/B 通道，alpha 不变。
 ///
+/// **不翻行**：软后端缓冲是**自上而下**行主序——桌面 GDI 上屏
+/// （`window.rs` 的 `biHeight: -height`，负值即自上而下 DIB）用的就是同一份缓冲，
+/// 如果这里再按行翻转，整帧会上下镜像（每列子元素逆序、文字倒置）。
+/// `ImageData` 同样要求自上而下，所以只需换通道。
 /// 为什么不就地改：调用方给的是软后端的复用缓冲；
 /// 这里返回新 `Vec` 更安全，也便于单测。
-pub fn bgra_to_rgba(src: &[u8], w: u32, h: u32) -> Vec<u8> {
-    // **按行翻转（仅 Y 轴）**：底层缓冲行序是自下而上，而 `ImageData` 要求自上而下。
-    // 不能用整条 `.rev()`：那会把 X 轴也翻过去，得到 180°（上下 + 左右同时翻）。
-    let w = w as usize;
-    let h = h as usize;
-    let stride = w * 4;
+pub fn bgra_to_rgba(src: &[u8], _w: u32, _h: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(src.len());
-    for y in (0..h).rev() {
-        let row_start = y * stride;
-        let row_end = (row_start + stride).min(src.len());
-        let row = &src[row_start..row_end];
-        for px in row.chunks_exact(4) {
-            out.push(px[2]); // R ← B
-            out.push(px[1]); // G
-            out.push(px[0]); // B ← R
-            out.push(px[3]); // A
-        }
+    for px in src.chunks_exact(4) {
+        out.push(px[2]); // R ← B
+        out.push(px[1]); // G
+        out.push(px[0]); // B ← R
+        out.push(px[3]); // A
     }
     out
 }
@@ -61,9 +55,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn row_flip_reverses_rows_not_columns() {
+    fn swap_changes_channels_not_row_order() {
         // 2x2：第 0 行 = [红, 绿]，第 1 行 = [蓝, 白]（BGRA）。
-        // 按行翻转后：先输出原第 1 行（蓝、白），再原第 0 行（红、绿），行内保持顺序。
+        // 只换通道：行序保持不变（软缓冲自上而下，ImageData 也自上而下）。
         let src = [
             0, 0, 255, 255, /* 红 */ 0, 255, 0, 255, /* 绿 */
             255, 0, 0, 255, /* 蓝 */ 255, 255, 255, 255, /* 白 */
@@ -72,24 +66,24 @@ mod tests {
         assert_eq!(
             out,
             vec![
-                0, 0, 255, 255, /* 蓝 */ 255, 255, 255, 255, /* 白 */
                 255, 0, 0, 255, /* 红 */ 0, 255, 0, 255, /* 绿 */
+                0, 0, 255, 255, /* 蓝 */ 255, 255, 255, 255, /* 白 */
             ]
         );
     }
 
     #[test]
-    fn row_flip_preserves_length_and_alpha() {
+    fn swap_preserves_length_alpha_and_row_order() {
         let src: Vec<u8> = (0..24u8).collect();
         let out = bgra_to_rgba(&src, 2, 3);
         assert_eq!(out.len(), src.len());
-        // 每行内 alpha 位置不变；行顺序翻转后，输出第 0 行来自源的最后一行。
+        // 行序不翻：输出 (y,x) 的 alpha 必须等于源 (y,x) 的 alpha。
+        // （通道互换不改变第 3 字节 alpha 的位置与数值。）
         let stride = 2 * 4;
         for y in 0..3usize {
             for x in 0..2usize {
-                let o = (y * stride) + x * 4 + 3;
-                let s_idx = ((2 - y) * stride) + x * 4 + 3;
-                assert_eq!(out[o], src[s_idx], "alpha 应随行翻转");
+                let i = (y * stride) + x * 4 + 3;
+                assert_eq!(out[i], src[i], "alpha 位置与数值都应原样保留");
             }
         }
     }
