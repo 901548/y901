@@ -19,6 +19,8 @@
 //! `cargo build` 通过（做类型检查），只是真正跑的时候会得到一个清楚的错误。
 
 #![deny(missing_docs)]
+pub mod demo;
+pub use demo::build_demo_page;
 pub mod clipboard;
 pub mod secret;
 pub mod snapshot;
