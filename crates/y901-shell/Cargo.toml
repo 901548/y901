@@ -24,6 +24,7 @@ y901-runtime = { path = "../y901-runtime", version = "0.1.20" }
 # 截图编码（纯 Rust）
 png = "0.17"
 y901-ui = { path = "../y901-ui", version = "0.1.20" }
+y901-render = { path = "../y901-render", version = "0.1.20" }
 y901-widgets = { path = "../y901-widgets", version = "0.1.20" }
 
 # **仅 wasm32**：浏览器后端。桌面构建完全不依赖它。
@@ -31,6 +32,7 @@ y901-widgets = { path = "../y901-widgets", version = "0.1.20" }
 y901-backend-web = { path = "../y901-backend-web" }
 y901-runtime = { path = "../y901-runtime", version = "0.1.20" }
 y901-ui = { path = "../y901-ui", version = "0.1.20" }
+y901-render = { path = "../y901-render", version = "0.1.20" }
 wasm-bindgen = "0.2"
 
 # wasm-pack 需要 cdylib 才能产出 .wasm；rlib 保留给桌面示例与测试链接。

@@ -13,16 +13,26 @@
   <canvas id="y901-canvas" width="800" height="600"></canvas>
 
   <script type="module">
-    // pkg/ 由 wasm-bindgen 生成（见 package.json 的 build 脚本 / README）。
-    import init, { y901_start } from './pkg/y901_shell.js';
+    import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js';
 
-    init()
-      .then(() => {
-        // 胶水加载完成后，调用示例入口（若存在）。
-        // 约定：wasm 侧导出 `start()` 用来创建运行时并出第一帧。
-        y901_start();
-      })
-      .catch((err) => console.error('[y901] wasm 初始化失败：', err));
+    async function run() {
+      await init();
+
+      // 先出占位帧（零字形），再异步取真字体；字体就绪后换装并全量重绘。
+      y901_start();
+
+      try {
+        const resp = await fetch('./fonts/default.ttf');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const buf = await resp.arrayBuffer();
+        y901_font_loaded(new Uint8Array(buf));
+        console.info('[y901] font swapped in');
+      } catch (e) {
+        console.warn('[y901] 字体加载失败（保持零字形占位）：', e);
+      }
+    }
+
+    run().catch((err) => console.error('[y901] 初始化失败：', err));
   </script>
 </body>
 </html>

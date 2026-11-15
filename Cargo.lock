@@ -599,6 +599,7 @@ dependencies = [
  "y901-backend-web",
  "y901-backend-win32",
  "y901-backend-x11",
+ "y901-render",
  "y901-runtime",
  "y901-ui",
  "y901-widgets",
