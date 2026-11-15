@@ -68,6 +68,25 @@ extern "C" {
     #[wasm_bindgen(method, js_name = "getAttribute")]
     pub fn get_attribute(this: &HtmlCanvasElement, name: &str) -> Option<String>;
 
+    /// `canvas.style`（`CSSStyleDeclaration`）。
+    ///
+    /// **为何用它而不是 `setAttribute("style", ...)`**：后者会**整条替换**内联
+    /// 样式，把页面 CSS 里的 `width/height` 一并抹掉（这正是上一轮 resize
+    /// 失效的原因）；`setProperty` 只改单个属性。
+    #[wasm_bindgen(method, getter, structural, js_name = "style")]
+    pub fn style(this: &HtmlCanvasElement) -> CssStyleDeclaration;
+}
+
+/// 元素的内联样式表。
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = "CSSStyleDeclaration")]
+    pub type CssStyleDeclaration;
+
+    /// `style.setProperty(name, value)`。
+    #[wasm_bindgen(method, js_name = "setProperty")]
+    pub fn set_property(this: &CssStyleDeclaration, name: &str, value: &str);
+
     /// `canvas.focus()`\uff1a\u70b9\u51fb\u540e\u628a\u952e\u76d8\u7126\u70b9\u62a2\u5230 canvas \u4e0a\u3002
     #[wasm_bindgen(method)]
     pub fn focus(this: &HtmlCanvasElement);

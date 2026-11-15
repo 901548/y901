@@ -40,15 +40,6 @@ impl WasmState {
     fn apply_pending(&mut self) {
         // ---- 窗口尺寸（P4）----
         if self.pending_resize.replace(false) {
-            // [DBG-RESIZE] 临时：看 client 与背存储尺寸、以及内联 style 是不是被我们写没了。
-            bindings::console_log(&format!(
-                "[DBG-RESIZE] client={}x{} canvas={}x{} style={:?}",
-                self.canvas.client_width(),
-                self.canvas.client_height(),
-                self.canvas.width(),
-                self.canvas.height(),
-                self.canvas.get_attribute("style")
-            ));
             let (w, h) = (
                 self.canvas.client_width().max(1),
                 self.canvas.client_height().max(1),
@@ -75,22 +66,17 @@ impl WasmState {
         // ---- 鼠标光标形状（P4）----
         if let Some((x, y)) = self.pending_cursor.take() {
             if let Some(tree) = self.tree.as_ref() {
-                let hit = tree.cursor_at(y901_ui::Pos::new(x, y));
-                // [DBG-CURSOR] 临时：命中测试到底给了什么光标。
-                bindings::console_log(&format!("[DBG-CURSOR] pos=({x:.0},{y:.0}) cursor={hit:?}"));
-                let css = match hit {
+                let css = match tree.cursor_at(y901_ui::Pos::new(x, y)) {
                     y901_ui::Cursor::Pointer => "pointer",
                     y901_ui::Cursor::Text => "text",
                     y901_ui::Cursor::ResizeHorizontal => "ew-resize",
                     y901_ui::Cursor::ResizeVertical => "ns-resize",
                     y901_ui::Cursor::Grab => "grab",
-                    // 框架的 Default 是"不声明"，不能写成 CSS 的 `default`（那会抢掉
-                    // 父元素的光标），所以空字符串 = 不设置。
-                    y901_ui::Cursor::Default => "",
+                    y901_ui::Cursor::Default => "default",
                 };
-                // 每次光标变化都整体重写内联样式：`outline:none` 不能丢（否则白边又回来）。
-                self.canvas
-                    .set_attribute("style", &format!("outline: none; cursor: {css};"));
+                // **只改单个属性**：`setAttribute("style", ...)` 会整条覆盖，
+                // 把页面 CSS 的 `width/height` 也抹掉（resize 就此失效）。
+                self.canvas.style().set_property("cursor", css);
             }
         }
     }
@@ -427,7 +413,8 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // canvas 默认不可聚焦；不设 `tabindex` 就永远收不到键盘事件。
     state.canvas.set_attribute("tabindex", "0");
     // 去掉焦点时浏览器给 canvas 画的**白色轮廓**（默认 `:focus-visible` 样式）。
-    state.canvas.set_attribute("style", "outline: none;");
+    // **不再写整条 `style`**：那会把页面 CSS 里的 `width/height` 一并抹掉。
+    // `outline: none` 现在写在 `www/index.html` 的 `<style>` 里。
 
     // wasm-bindgen 的外部类型本身就是 `JsValue` 的包装；clippy 提示这里无需 `.into()`。
     let canvas_js: JsValue = state.canvas.clone();
@@ -663,7 +650,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
 
         // ---- compositionend：**提交唯一一次** ----
         //
-        // 实测（[DBG-IME]）：`compositionend.data` 就是完整的提交串（“你好”、“设置”），
+        // 实测：`compositionend.data` 就是完整的提交串（“你好”、“设置”），
         // 而 `input` 事件**根本不会触发**。所以这里就是文本的唯一出口，
         // 既不需要 `input` 监听，也不需要任何去重标志。
         {
@@ -706,7 +693,6 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         let target: bindings::EventTarget =
             <bindings::EventTarget as JsCast>::unchecked_from_js(JsValue::from(win));
         target.add_event_listener("resize", &handler);
-        bindings::console_log("[DBG-RESIZE] window resize listener registered");
         listeners.push(Listener {
             target,
             kind: "resize".to_string(),
