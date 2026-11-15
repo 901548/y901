@@ -66,7 +66,14 @@ impl WasmState {
         // ---- 鼠标光标形状（P4）----
         if let Some((x, y)) = self.pending_cursor.take() {
             if let Some(tree) = self.tree.as_ref() {
-                let css = match tree.cursor_at(y901_ui::Pos::new(x, y)) {
+                // [DBG-CURSOR] 临时：同时打命中 id 与光标结果，定位"只有端口生效"。
+                let hit = tree.cursor_at(y901_ui::Pos::new(x, y));
+                bindings::console_log(&format!(
+                    "[DBG-CURSOR] pos=({x:.0},{y:.0}) hit={:?} cursor={:?}",
+                    tree.hit_test(y901_ui::Pos::new(x, y)),
+                    hit
+                ));
+                let css = match hit {
                     y901_ui::Cursor::Pointer => "pointer",
                     y901_ui::Cursor::Text => "text",
                     y901_ui::Cursor::ResizeHorizontal => "ew-resize",
