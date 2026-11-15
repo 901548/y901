@@ -79,10 +79,18 @@ pub struct SoftBackend {
     dpi_scale: f32,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
     clear_color: Color,
-    /// **[DBG] `(origin.y, by, glyph_h, bearing_y, clip.y, clip.h)`** —— 定位缩放路径的 Y 坐标。
-    pub dbg_abs: Option<(f32, f32, f32, f32, f32, f32)>,
-    /// **[DBG]** `(base.bearing_y, base.height, slot.bearing_y, level)`。
-    pub dbg_bear: Option<(i32, u32, f32, usize)>,
+}
+
+/// **字形顶部的 y 坐标**（buffer 坐标，y 向下）。
+///
+/// 引擎的 `GlyphInfo::bearing_y` 是有符号的**位图底边**偏移（y 向上）：
+/// `'8'` = 0（底边贴基线）、`'设'` = -2（有 2px 下伸）。它不是"顶部偏移"。
+///
+/// 顶部 = 基线 − bearing_y − 字形高度，基线 = origin.y + ascent。
+/// 旧代码用 `origin.y + ascent + bearing_y`，把字形整体画低了一个字高；
+/// 底部溢出裁剪区后，因为画面在 present 层转置，表现为**顶部被切**。
+fn glyph_top(origin_y: f32, ascent: f32, bearing_y: f32, height: f32) -> f32 {
+    origin_y + ascent - bearing_y - height
 }
 
 impl SoftBackend {
@@ -131,8 +139,6 @@ impl SoftBackend {
             cell,
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
-            dbg_abs: None,
-            dbg_bear: None,
             dpi_scale: 1.0,
         })
     }
@@ -157,8 +163,6 @@ impl SoftBackend {
             text: font,
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
-            dbg_abs: None,
-            dbg_bear: None,
             dpi_scale: 1.0,
         })
     }
@@ -409,10 +413,11 @@ impl SoftBackend {
                         // （"8080" → "ouou"）。这里只补"溢出那部分"，不多补。
                         // **不限制裁剪区**：只要碰到 '8' 就记一次（每帧首个）。
                         // `clip` 无时仍记 -1，这样能分辨"压根没压裁剪"这种情况。
-                        let glyph_top = ascent + g.bearing_y as f32;
-                        let top_pad = (-glyph_top).max(0.0);
-                        let by =
-                            (origin.y + ascent + top_pad + g.bearing_y as f32).floor() as i32;
+                        // **字形顶部**：引擎的 `bearing_y` 是**位图底边**相对基线的位置
+                        // （y 向上：'8' = 0 贴基线，'设' = -2 下伸），不是顶部偏移。
+                        // 顶部 = 基线 − bearing_y − 字形高度。
+                        let by = glyph_top(origin.y, ascent, g.bearing_y as f32, g.height as f32)
+                            .floor() as i32;
                         for gy in 0..g.height as i32 {
                             let dy = by + gy;
                             if dy < 0 || dy >= self.height as i32 {
@@ -806,41 +811,17 @@ impl RenderCtx for SoftBackend {
                         let atlas_size = self.text.atlas_size() as usize;
                         // 基线：布局始终用原字号的 bearing，屏幕位置再乘缩放因子
                         let bx = (pen_x + sg.slot.bearing_x * scale).floor() as i32;
-                        // **不信任 mip 槽的 bearing**：实测它为 0，而基字形是负值。
-                        // 直接从基字形取原始 bearing（按 scale 折算），保证字形顶部不越过 origin.y。
-                        let base_bearing = self
-                            .text
-                            .glyph(ch)
-                            .map(|g| g.bearing_y)
-                            .unwrap_or(sg.slot.bearing_y as i32);
-                        let eff_bearing = if sg.slot.bearing_y == 0.0 {
-                            base_bearing as f32 * scale
-                        } else {
-                            sg.slot.bearing_y * scale
-                        };
-                        let by = (origin.y + ascent * scale + eff_bearing).floor() as i32;
-                        // [DBG-MARK] 在字形起点画一根红线：看它落在数字的上/下/中哪里。
-                        if ch == '8' {
-                            self.fill_rect(
-                                Rect::new(origin.x, by as f32, 50.0, 1.0),
-                                Color::rgba(1.0, 0.0, 0.0, 1.0),
-                            );
-                        }
-                        if self.dbg_bear.is_none() && ch == '8' {
-                            let base = self.text.glyph(ch).map(|g| (g.bearing_y, g.height));
-                            if let Some((by_, bh)) = base {
-                                self.dbg_bear =
-                                    Some((by_, bh, sg.slot.bearing_y, sg.level));
-                            }
-                        }
-                        if self.dbg_abs.is_none() && ch == '8' {
-                            let (cy, chh) = match self.state.current_clip() {
-                                Some(c) => (c.y, c.h),
-                                None => (-1.0, -1.0),
-                            };
-                            self.dbg_abs =
-                                Some((origin.y, by as f32, sg.h as f32 * scale, eff_bearing, cy, chh));
-                        }
+                        // **字形顶部**（见 `glyph_top`）：布局始终用 L0 字号的 ascent，
+                        // 基线 = origin.y + ascent × scale；字形高度按 scale 缩放。
+                        // `bearing_y` 是底边偏移，不能当顶部用。
+                        let drawn_h = (sg.h as f32 * scale).round().max(1.0);
+                        let by = glyph_top(
+                            origin.y,
+                            ascent * scale,
+                            sg.slot.bearing_y * scale,
+                            drawn_h,
+                        )
+                        .floor() as i32;
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
                         let dh = (sg.h as f32 * scale).round().max(1.0) as i32;
@@ -1152,4 +1133,34 @@ fn box_levels_rgba(base: &[u8], w: u32, h: u32, levels: usize) -> Vec<(u32, u32,
         ch = nh;
     }
     out
+}
+
+#[cfg(test)]
+mod glyph_top_tests {
+    use super::glyph_top;
+
+    /// 数字底边贴基线（`'8'`: bearing_y = 0, height = 13, ascent = 13.75）。
+    /// 旧公式给出 113.75（整整低了一个字高）；正确值是 100.75。
+    #[test]
+    fn digits_sitting_on_the_baseline_are_lifted_by_their_height() {
+        let top = glyph_top(100.0, 13.75, 0.0, 13.0);
+        assert!((top - 100.75).abs() < 0.001, "top = {top}");
+    }
+
+    /// 有下伸的字形（`'设'`: bearing_y = -2, height = 16）：底边在基线下 2px，
+    /// 所以顶部比贴基线的字形要低一点点。
+    #[test]
+    fn descenders_are_pushed_down_by_a_negative_bearing() {
+        let top = glyph_top(100.0, 13.75, -2.0, 16.0);
+        assert!((top - 99.75).abs() < 0.001, "top = {top}");
+    }
+
+    /// 推导的不变量：底边 = 顶部 + 字高 = 基线 − bearing_y。
+    #[test]
+    fn bottom_edge_equals_baseline_minus_bearing() {
+        let (origin_y, ascent, bearing, height) = (40.0, 12.0, -3.0, 15.0);
+        let top = glyph_top(origin_y, ascent, bearing, height);
+        let bottom = top + height;
+        assert!((bottom - (origin_y + ascent - bearing)).abs() < 0.001);
+    }
 }

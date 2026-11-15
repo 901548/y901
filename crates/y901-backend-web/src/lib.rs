@@ -95,22 +95,6 @@ impl WindowBackend for WasmWindow<'_> {
         self.soft.clear();
         tree.render(self.soft);
 
-        // [DBG-BEAR] 基字形 vs mip 槽的 bearing。
-        if let Some((bb, bh, sb, lv)) = self.soft.dbg_bear.take() {
-            bindings::console_log(&format!(
-                "[DBG-BEAR] base.bearing_y={} base.height={} slot.bearing_y={:.2} level={}",
-                bb, bh, sb, lv
-            ));
-        }
-
-        // [DBG-ABS] 缩放路径的绝对坐标（红线已画在同一 by 上）。
-        if let Some((oy, by, gh, bear, cy, chh)) = self.soft.dbg_abs.take() {
-            bindings::console_log(&format!(
-                "[DBG-ABS] origin.y={:.2} by={:.2} glyph_h={:.2} bearing={:.2} clip.y={:.2} clip.h={:.2}",
-                oy, by, gh, bear, cy, chh
-            ));
-        }
-
         let (w, h) = self.viewport();
         let pixels = self.soft.pixels().to_vec();
         self.present.present(&pixels, w, h);
