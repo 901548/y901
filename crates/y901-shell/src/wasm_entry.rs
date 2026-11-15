@@ -131,6 +131,8 @@ pub fn y901_font_loaded(bytes: Vec<u8>) -> Result<(), JsValue> {
         soft.set_font(Box::new(engine), real_cell);
         // **必须重排**：布局仍按旧行高算的话，字形会上溢出父容器并被削顶。
         if let Some(tree) = tree.as_mut() {
+            // **关键**：字体度量变了但视口没变，`layout()` 不会失效缓存 → 必须手动清。
+            tree.clear_layout_cache();
             let (w, h) = (canvas.width(), canvas.height());
             tree.layout(Size::new(w as f32, h as f32), soft);
             tree.invalidate_all();

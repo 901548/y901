@@ -1555,6 +1555,16 @@ impl UiTree {
     ///
     /// 约束与所有节点的 `layout_version` 都没变时，这次调用是 O(1)：
     /// 直接返回，不进入任何 `measure`。
+    /// **清空布局缓存**（尺寸记忆化）。
+    ///
+    /// 何时需要：**度量来源变了但视口没变** —— 典型场景是热换字体（`SoftBackend::set_font` 之后
+    /// 行高/字宽全变）。`layout()` 只在视口变化时才 `mark_dirty`，于是换字体后重排会命中旧缓存，
+    /// 结果就是"布局按旧度量、绘制按新度量"→ 表头错位、标签与输入框重叠。
+    pub fn clear_layout_cache(&mut self) {
+        self.cache.clear();
+    }
+
+    /// 重新布局（视口/度量变化后调用）。
     pub fn layout(&mut self, viewport: Size, metrics: &dyn TextMetrics) {
         // **DPI 缩放源头**：事件分发时拿不到 `metrics`，所以在这里存下。
         self.scale = metrics.scale();
