@@ -594,7 +594,9 @@ name = "y901-shell"
 version = "0.1.20"
 dependencies = [
  "png",
+ "wasm-bindgen",
  "windows-sys",
+ "y901-backend-web",
  "y901-backend-win32",
  "y901-backend-x11",
  "y901-runtime",

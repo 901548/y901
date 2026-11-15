@@ -259,3 +259,15 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
         }
     }
 }
+
+impl y901_runtime::PlatformRuntime for WasmRuntime {
+    /// 装 host/tree 并启动 rAF 循环；**立即返回 `Ok(())`**（浏览器没有可以阻塞的主循环）。
+    fn run(
+        &mut self,
+        host: Box<dyn Host>,
+        build: Box<dyn FnOnce() -> UiTree>,
+        _options: y901_runtime::Options,
+    ) -> Result<(), String> {
+        WasmRuntime::run(self, host, build)
+    }
+}

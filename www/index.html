@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Y901 WASM</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; }
+    #y901-canvas { display: block; margin: 0 auto; background: #111; }
+  </style>
+</head>
+<body>
+  <!-- 页面约定：id 必须是 y901-canvas（见 docs/WASM.md §3.2） -->
+  <canvas id="y901-canvas" width="800" height="600"></canvas>
+
+  <script type="module">
+    // pkg/ 由 wasm-bindgen 生成（见 package.json 的 build 脚本 / README）。
+    import init from './pkg/y901_backend_web.js';
+
+    init()
+      .then(() => {
+        // 胶水加载完成后，调用示例入口（若存在）。
+        // 约定：wasm 侧导出 `start()` 用来创建运行时并出第一帧。
+        if (typeof window.y901_start === 'function') {
+          window.y901_start();
+        }
+      })
+      .catch((err) => console.error('[y901] wasm 初始化失败：', err));
+  </script>
+</body>
+</html>
