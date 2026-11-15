@@ -79,6 +79,9 @@ pub struct SoftBackend {
     dpi_scale: f32,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
     clear_color: Color,
+    /// **[DBG] 本帧最靠上的一次文字绘制**（origin.y, line_height, ascent, text）。
+    /// 仅为定位"文字被削顶"用，确认后删除。
+    pub dbg_top_text: Option<(f32, f32, f32, String)>,
 }
 
 impl SoftBackend {
@@ -127,6 +130,7 @@ impl SoftBackend {
             cell,
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
+            dbg_top_text: None,
             dpi_scale: 1.0,
         })
     }
@@ -151,6 +155,7 @@ impl SoftBackend {
             text: font,
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
+            dbg_top_text: None,
             dpi_scale: 1.0,
         })
     }
@@ -369,6 +374,19 @@ impl SoftBackend {
     /// 基线：`ascent` 按**基准字号的 ascent/cell_h 比例**换算到新字号
     /// （该比例是字体属性，不随字号变化）——**不是拍脑袋的 0.8**。
     fn draw_text_sized(&mut self, origin: Pos, text: &str, style: &TextStyle, px: f32) -> f32 {
+        // [DBG] 记录本帧 y 最小（最靠上）的那次文字绘制
+        {
+            // style.size 是 Option<f32>：None 时用当前字号作为行高估值
+            let line_h = style.size.unwrap_or(px);
+            let ascent = self.text.ascent();
+            let replace = match &self.dbg_top_text {
+                Some((y, _, _, _)) => origin.y < *y,
+                None => true,
+            };
+            if replace {
+                self.dbg_top_text = Some((origin.y, line_h, ascent, text.to_string()));
+            }
+        }
         let mapped = self.map_point(origin);
         let origin = Pos::new(mapped.x, mapped.y);
         let scale = self.map_scale();
