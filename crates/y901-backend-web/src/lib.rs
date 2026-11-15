@@ -17,14 +17,6 @@ use y901_runtime::window::{RenderOutcome, WindowBackend};
 use y901_runtime::{Host, RawEvent};
 use y901_ui::{Size, UiTree};
 
-thread_local! {
-    /// **[DBG] 已打印过几次事件日志**。仅 P1 验收用，下一轮删除。
-    ///
-    /// 为何用 `thread_local` 而不放 `WasmState`：`wait_events` 的 `self` 是 `WasmWindow`
-    /// （只借了 `soft`/`present`/`canvas`/事件缓冲），拿不到整个 state。
-    static DBG_EVENTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-}
-
 pub mod bindings;
 pub mod font;
 pub mod font_engine;
@@ -119,18 +111,6 @@ impl WindowBackend for WasmWindow<'_> {
         // 有就全取，没有就空 —— 与桌面 `wait_events` 的"可阻塞"语义不同，
         // 这一差异已写进 `docs/WASM.md`。
         let drained: Vec<RawEvent> = self.events.borrow_mut().drain(..).collect();
-        // [DBG-EVENTS] 临时：验证事件确实进了队列（验收后删除）。用 thread_local 计数限前 20 条，避免刷屏。
-        if !drained.is_empty() {
-            let n = DBG_EVENTS.with(|c| c.get());
-            if n < 20 {
-                DBG_EVENTS.with(|c| c.set(n + 1));
-                bindings::console_log(&format!(
-                    "[DBG-EVENTS] {} 个事件（第 {} 次）",
-                    drained.len(),
-                    n + 1
-                ));
-            }
-        }
         Some(drained)
     }
 
@@ -147,7 +127,16 @@ impl WindowBackend for WasmWindow<'_> {
         if tree.dirty().is_empty() {
             return Ok(RenderOutcome::Skipped);
         }
-        self.soft.clear();
+        // **只有全量脏时才清屏**。
+        //
+        // 为何：`SoftBackend` 是**持久缓冲**（上一帧的像素还在），而
+        // `UiTree::render` 会**跳过干净子树**（它内部按 `dirty` 剪裁）。
+        // 若每帧先 `clear()` 再只画脏区，未被重画的部分就会变成清屏色（黑）
+        // —— 这就是鼠标悬停时整屏变黑的原因。
+        // 桌面端不存在这个问题：D3D11 后端每帧重建画面清单、不依赖持久缓冲。
+        if tree.dirty().is_full() {
+            self.soft.clear();
+        }
         tree.render(self.soft);
 
         let (w, h) = self.viewport();
