@@ -200,27 +200,43 @@ impl WindowBackend for WasmWindow<'_> {
             return Ok(RenderOutcome::Skipped);
         }
 
-        // **wasm 上一律全量重绘**。
+        // **局部重绘 + 局部上屏（方案 D + step 3a/3b）**。
         //
-        // 为何：`UiTree::render` 不接受脏区参数，它读自己的 `self.dirty` 并
-        // **跳过干净子树**。在**持久缓冲**型后端上，局部重绘已属证实有缺陷：
-        // 悬停时被标脏的那一小块会覆盖上一帧，但父容器背景与裁剪
-        // 并不会重画，于是出现"哪个组件被悬停、哪个就消失/留白边"。
-        // 桌面端每帧重建图元列表，本来就是全量，因此从未暴露。
-        //
-        // `invalidate_all()` 把脏区置为 `full`，让 `render` 走全树；然后清屏。
-        // 性能代价是每帧重画整树——在 wasm 上这是可接受的，因为
-        // 上屏本来就是**整帧 `putImageData`**，省下的只是 CPU 重绘量。
-        //
-        // 底层缺陷（局部脏区在持久缓冲上不完整）仍在，这里是**绕开**而非修复；
-        // 它需要单独一轮去定位 `UiTree` 的脏区重绘与父容器背景的配合。
-        tree.invalidate_all();
-        self.soft.clear();
+        // 三条不可丢的约束：
+        // 1. **只有 `dirty.is_full()` 才 `clear()`**：清屏后只画脏区，其余像素就会留成清屏色
+        //    （历史上的黑屏就是这么来的）。
+        // 2. **帧布局快照必须在 `render` 之前取**：`UiTree::render` 结束时会 `dirty.clear()`。
+        // 3. **上屏只传脏矩形**：整帧 `putImageData` 每帧要搬 ~1.9 MB，那才是卡顿的主因。
+        let full = tree.dirty().is_full();
+        let (vw, vh) = self.viewport();
+        // 快照（仅局部帧需要；全量帧传 `None` = 整帧上屏）。
+        let dirty_rects: Vec<(u32, u32, u32, u32)> = if full {
+            Vec::new()
+        } else {
+            tree.dirty()
+                .rects()
+                .iter()
+                .filter_map(|r| {
+                    let x0 = r.x.max(0.0) as u32;
+                    let y0 = r.y.max(0.0) as u32;
+                    let x1 = (r.x + r.w).clamp(0.0, vw as f32) as u32;
+                    let y1 = (r.y + r.h).clamp(0.0, vh as f32) as u32;
+                    let w = x1.saturating_sub(x0);
+                    let h = y1.saturating_sub(y0);
+                    (w > 0 && h > 0 && x0 < vw && y0 < vh).then_some((x0, y0, w, h))
+                })
+                .collect()
+        };
+
+        if full {
+            self.soft.clear();
+        }
         tree.render(self.soft);
 
-        let (w, h) = self.viewport();
-        let pixels = self.soft.pixels().to_vec();
-        self.present.present(&pixels, w, h);
+        // 分开借用：`pixels` 只读借 `soft`，`present` 需要 `&mut self`。
+        let WasmWindow { soft, present, .. } = self;
+        let partial = (!full && !dirty_rects.is_empty()).then_some(dirty_rects.as_slice());
+        present.present(soft.pixels(), vw, vh, partial);
         Ok(RenderOutcome::Presented)
     }
 

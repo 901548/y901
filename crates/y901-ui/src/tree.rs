@@ -623,6 +623,12 @@ impl UiTree {
     /// 返回：`false` = 同 id 的浮层已存在（本次忽略）。
     /// 副作用：立刻重新布局（下一次 `layout` 会把它摆好）并标脏。
     pub fn open_popup(&mut self, widget: Box<dyn Widget>, anchor: Rect) -> bool {
+        // **打开弹层 ⇒ 强制整窗重绘**。
+        //
+        // 为何：局部重绘模式下每次绘制都被剪到脏区，而弹层覆盖的区域
+        // （含遮罩层）往往不在任何已标脏矩形内 → 弹层会只画出一部分。
+        // 这是方案 D 下的已知边界，用一次全量重绘兵底。
+        self.invalidate_all();
         self.push_popup(widget, anchor, false)
     }
 
@@ -3345,5 +3351,23 @@ mod dirty_clip_tests {
         for op in &ctx.ops {
             assert!(op.clip.is_none(), "降级后应走无剪裁全量路径");
         }
+    }
+
+    // ---- T6：打开弹层必须整窗重绘 ----
+
+    #[test]
+    fn t6_opening_popup_forces_full_repaint() {
+        let mut tree = laid_out_tree();
+        // 先把脏区清成"局部"状态
+        tree.invalidate("child");
+        assert!(!tree.dirty().is_full(), "前提：应先处于局部脏区");
+
+        let popup = PaintBox::new("popup", Color::rgba(0.9, 0.9, 0.2, 1.0), Vec::new());
+        tree.open_popup(Box::new(popup), Rect::new(10.0, 10.0, 80.0, 40.0));
+
+        assert!(
+            tree.dirty().is_full(),
+            "弹层打开后必须整窗重绘：局部剪裁下弹层会只画出一部分"
+        );
     }
 }
