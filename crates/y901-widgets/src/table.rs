@@ -316,7 +316,15 @@ impl Widget for Table {
         ctx.push_clip(self.rect);
 
         // 表头
-        let header = Rect::new(self.rect.x, self.rect.y, self.rect.w, HEADER_H * self.scale);
+        // **表头画在 `rect` 底部**：帧在 `present` 层做了 Y 转置，
+        // 若这里仍从 `rect.y` 向下画，上屏后会变成"表头在下、数据在上"。
+        // 改为从底部起算，经转置后就回到"表头最上、数据逐行向下"。
+        let header = Rect::new(
+            self.rect.x,
+            self.rect.y + self.rect.h - HEADER_H * self.scale,
+            self.rect.w,
+            HEADER_H * self.scale,
+        );
         let header_bg = self.style.and_then(|s| s.bg).unwrap_or(header_bg);
         ctx.fill_rect(header, header_bg);
         let cols = self.column_layout();
@@ -332,8 +340,8 @@ impl Widget for Table {
         // 行
         let mut visible = 0usize;
         for (r, cells) in self.rows.iter().enumerate() {
-            let y = self.rect.y + HEADER_H * self.scale + r as f32 * ROW_H * self.scale;
-            if y >= self.rect.bottom() {
+            let y = header.y - (r + 1) as f32 * ROW_H * self.scale;
+            if y + ROW_H * self.scale <= self.rect.y {
                 break;
             }
             let bg = if self.selected == Some(r) {
