@@ -13,7 +13,7 @@ pub struct Present {
 impl Present {
     /// 用 canvas 构造；上下文在这里取一次，后续每帧复用。
     pub fn new(canvas: HtmlCanvasElement) -> Self {
-        let ctx = canvas.get_context_2d();
+        let ctx = canvas.get_context("2d");
         Self { canvas, ctx }
     }
 

@@ -42,9 +42,12 @@ extern "C" {
     #[wasm_bindgen(method, setter)]
     pub fn set_height(this: &HtmlCanvasElement, v: u32);
 
-    /// `getContext("2d")`；非 2d 上下文返回 `None`。
+    /// `getContext("2d")`。
+    ///
+    /// **`kind` 必须传**：`getContext` 在 JS 侧要 1 个参数，漏了就报
+    /// `TypeError: 1 argument required, but only 0 present`。
     #[wasm_bindgen(method, js_name = "getContext")]
-    pub fn get_context_2d(this: &HtmlCanvasElement) -> Option<CanvasRenderingContext2d>;
+    pub fn get_context(this: &HtmlCanvasElement, kind: &str) -> Option<CanvasRenderingContext2d>;
 }
 
 /// 2D 绘图上下文。
