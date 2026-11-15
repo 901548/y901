@@ -798,8 +798,19 @@ impl RenderCtx for SoftBackend {
                         let atlas_size = self.text.atlas_size() as usize;
                         // 基线：布局始终用原字号的 bearing，屏幕位置再乘缩放因子
                         let bx = (pen_x + sg.slot.bearing_x * scale).floor() as i32;
-                        let by =
-                            (origin.y + ascent * scale + sg.slot.bearing_y * scale).floor() as i32;
+                        // **不信任 mip 槽的 bearing**：实测它为 0，而基字形是负值。
+                        // 直接从基字形取原始 bearing（按 scale 折算），保证字形顶部不越过 origin.y。
+                        let base_bearing = self
+                            .text
+                            .glyph(ch)
+                            .map(|g| g.bearing_y)
+                            .unwrap_or(sg.slot.bearing_y as i32);
+                        let eff_bearing = if sg.slot.bearing_y == 0.0 {
+                            base_bearing as f32 * scale
+                        } else {
+                            sg.slot.bearing_y * scale
+                        };
+                        let by = (origin.y + ascent * scale + eff_bearing).floor() as i32;
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
                         let dh = (sg.h as f32 * scale).round().max(1.0) as i32;
