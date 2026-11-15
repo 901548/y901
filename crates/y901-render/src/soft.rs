@@ -79,14 +79,6 @@ pub struct SoftBackend {
     dpi_scale: f32,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
     clear_color: Color,
-    /// **[DBG] 本帧最靠上的一次文字绘制**（origin.y, line_height, ascent, text）。
-    /// 仅为定位"文字被削顶"用，确认后删除。
-    pub dbg_top_text: Option<(f32, f32, f32, String)>,
-    /// **[DBG]** 上一次文字绘制的度量细节：
-    /// `(self.cell.h, engine.ascent(), cell_h_for_px, computed_ascent)`。
-    pub dbg_metrics: Option<(f32, f32, f32, f32)>,
-    /// **[DBG]** 首个非空字形的 `(bearing_y, height, width)`。
-    pub dbg_glyph: Option<(i32, u32, u32)>,
 }
 
 impl SoftBackend {
@@ -135,9 +127,6 @@ impl SoftBackend {
             cell,
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
-            dbg_top_text: None,
-            dbg_metrics: None,
-            dbg_glyph: None,
             dpi_scale: 1.0,
         })
     }
@@ -162,9 +151,6 @@ impl SoftBackend {
             text: font,
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
-            dbg_top_text: None,
-            dbg_metrics: None,
-            dbg_glyph: None,
             dpi_scale: 1.0,
         })
     }
@@ -383,19 +369,6 @@ impl SoftBackend {
     /// 基线：`ascent` 按**基准字号的 ascent/cell_h 比例**换算到新字号
     /// （该比例是字体属性，不随字号变化）——**不是拍脑袋的 0.8**。
     fn draw_text_sized(&mut self, origin: Pos, text: &str, style: &TextStyle, px: f32) -> f32 {
-        // [DBG] 记录本帧 y 最小（最靠上）的那次文字绘制
-        {
-            // style.size 是 Option<f32>：None 时用当前字号作为行高估值
-            let line_h = style.size.unwrap_or(px);
-            let ascent = self.text.ascent();
-            let replace = match &self.dbg_top_text {
-                Some((y, _, _, _)) => origin.y < *y,
-                None => true,
-            };
-            if replace {
-                self.dbg_top_text = Some((origin.y, line_h, ascent, text.to_string()));
-            }
-        }
         let mapped = self.map_point(origin);
         let origin = Pos::new(mapped.x, mapped.y);
         let scale = self.map_scale();
@@ -403,14 +376,10 @@ impl SoftBackend {
         let px_final = (px * self.dpi_scale * scale).max(1.0);
         let (cell_w, cell_h) = crate::font::cell_metrics_for(px_final);
         // 与旧路径同式：基线 = 顶部 + ascent
-        let ascent_ratio = if self.cell.h > 0.0 {
-            self.text.ascent() / self.cell.h
-        } else {
-            0.8
-        };
-        let ascent = cell_h * ascent_ratio;
-        // [DBG] 记录度量（仅探针用）
-        self.dbg_metrics = Some((self.cell.h, self.text.ascent(), cell_h, ascent));
+        // **引擎返回的就是像素级 ascent**：不能再乘 `cell_h / self.cell.h`。
+        // 曾经按比例缩放（cell_h=12, cell.h=16 时 ascent 12.8 → 9.6），
+        // 基线上移 → 字形顶部超出 clip 界 → **削顶**。
+        let ascent = self.text.ascent();
         let atlas_size = self.text.atlas_size() as usize;
         let mut pen_x = origin.x;
         let start = pen_x;
@@ -425,9 +394,6 @@ impl SoftBackend {
                 let glyph = self.text.glyph_at_size(ch, px_final).cloned();
                 if let Some(g) = glyph {
                     if g.width > 0 && g.height > 0 {
-                        if self.dbg_glyph.is_none() {
-                            self.dbg_glyph = Some((g.bearing_y, g.height, g.width));
-                        }
                         let bx = (pen_x + g.bearing_x as f32).floor() as i32;
                         let by = (origin.y + ascent + g.bearing_y as f32).floor() as i32;
                         for gy in 0..g.height as i32 {

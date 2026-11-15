@@ -95,26 +95,6 @@ impl WindowBackend for WasmWindow<'_> {
         self.soft.clear();
         tree.render(self.soft);
 
-        // [DBG-TXT] 打印本帧最靠上的文字帧信息（确认后删）。
-        if let Some((y, lh, asc, txt)) = self.soft.dbg_top_text.take() {
-            bindings::console_log(&format!(
-                "[DBG-TXT] origin.y={:.1} line={:.1} ascent={:.1} text='{}'",
-                y, lh, asc, txt
-            ));
-            if let Some((cell_h, eng_asc, cell_h_px, computed)) = self.soft.dbg_metrics {
-                bindings::console_log(&format!(
-                    "[DBG-TXT2] self.cell.h={:.2} engine.ascent()={:.2} cell_h_for_px={:.2} computed_ascent={:.2}",
-                    cell_h, eng_asc, cell_h_px, computed
-                ));
-            }
-            if let Some((by, gh, gw)) = self.soft.dbg_glyph.take() {
-                bindings::console_log(&format!(
-                    "[DBG-GLYPH] bearing_y={} height={} width={}",
-                    by, gh, gw
-                ));
-            }
-        }
-
         let (w, h) = self.viewport();
         let pixels = self.soft.pixels().to_vec();
         self.present.present(&pixels, w, h);
