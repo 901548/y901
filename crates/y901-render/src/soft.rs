@@ -95,6 +95,31 @@ pub struct SoftBackend {
 /// 可见底边就与公式一致。仅在比例字体模式启用（桌面逐像素不变）。
 const FAINT_ROW_THRESH: u8 = 12;
 
+/// **基本汉字范围**（CJK Unified Ideographs）。
+fn is_cjk(ch: char) -> bool {
+    (0x4E00..=0x9FFF).contains(&(ch as u32))
+}
+
+/// **中文字形的“共同底边”归一**。
+///
+/// 实测微软雅黑 16px：汉字的 `bearing_y` 在 **-2 与 -3** 之间分布
+///（修/改/后/击/保/效/接/历/史 = -3，点/存/生/连 = -2）。
+/// 这是字体为了视觉均衡做的微调，但在 16px 的像素网格上就变成
+/// **同一行汉字底边差 1px**（“修改后”与“点存生”不平）。
+///
+/// 策略：对 `-3..=-1` 的汉字，统一按 **-2** 定位——底边归一，且整体只比拉丁
+/// 字母低 1px（保留汉字“填满字号”的视觉印象）。
+/// **真正的下伸笔画（轮边旁 达到 -4 及以下）不参与归一**，否则会被裁掉。
+fn cjk_bearing(bearing_y: i32) -> f32 {
+    if (-3..=-1).contains(&bearing_y) {
+        -2.0
+    } else {
+        bearing_y as f32
+    }
+}
+
+
+
 fn trailing_faint_rows(atlas: &[u8], atlas_size: u32, ax: u32, ay: u32, w: u32, h: u32) -> i32 {
     if w == 0 || h == 0 {
         return 0;
@@ -507,12 +532,13 @@ impl SoftBackend {
                         // （y 向上：'8' = 0 贴基线，'设' = -2 下伸），不是顶部偏移。
                         // 顶部 = 基线 − bearing_y − 字形高度。
                         // **行级 baseline 取整 + 字形原始偏移**（见 `glyph_top`）
-                        let mut by = glyph_top(
-                            origin.y,
-                            ascent,
-                            g.bearing_y as f32,
-                            g.height as f32,
-                        ) as i32;
+                        // 汉字底边归一（bearing -2/-3 → 统一 -2）；拉丁与下伸字原样
+                        let bearing = if self.proportional_text && is_cjk(ch) {
+                            cjk_bearing(g.bearing_y)
+                        } else {
+                            g.bearing_y as f32
+                        };
+                        let mut by = glyph_top(origin.y, ascent, bearing, g.height as f32) as i32;
                         // **底部虚行下移**（仅比例模式）：使可见底边与公式一致
                         if self.proportional_text {
                             let atlas_sz = self.text.atlas_size();
@@ -929,12 +955,13 @@ impl RenderCtx for SoftBackend {
                         // 基线 = origin.y + ascent × scale；字形高度按 scale 缩放。
                         // `bearing_y` 是底边偏移，不能当顶部用。
                         let drawn_h = (sg.h as f32 * scale).round().max(1.0);
-                        let mut by = glyph_top(
-                            origin.y,
-                            ascent * scale,
-                            sg.slot.bearing_y * scale,
-                            drawn_h,
-                        ) as i32;
+                        let bearing = if self.proportional_text && is_cjk(ch) {
+                            cjk_bearing(sg.slot.bearing_y.round() as i32)
+                        } else {
+                            sg.slot.bearing_y
+                        };
+                        let mut by =
+                            glyph_top(origin.y, ascent * scale, bearing * scale, drawn_h) as i32;
                         if self.proportional_text {
                             let atlas_sz = self.text.atlas_size();
                             by += trailing_faint_rows(
@@ -1363,4 +1390,19 @@ mod glyph_top_tests {
         assert!(g > a, "descender must sit lower than baseline-sitting glyphs");
     }
         // 同一行内，所有“|bearing|≤1”的字底边必须**完全相等**
+
+    // ---- 汉字底边归一（消除“修改后”底边 1px 起伏）----
+
+    #[test]
+    fn cjk_bearing_is_unified() {
+        use super::cjk_bearing;
+        // 雅黑实测：修/改/-3，点/存/-2 → 都归一到 -2
+        assert_eq!(cjk_bearing(-3), -2.0);
+        assert_eq!(cjk_bearing(-2), -2.0);
+        assert_eq!(cjk_bearing(-1), -2.0);
+        // 真下伸笔画与非零位置不参与归一
+        assert_eq!(cjk_bearing(-5), -5.0);
+        assert_eq!(cjk_bearing(-4), -4.0);
+        assert_eq!(cjk_bearing(0), 0.0);
+    }
 }
