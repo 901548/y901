@@ -140,13 +140,10 @@ impl WasmState {
 /// **P0 阶段只定义不安装**：\u8fd9个结构会在 P1 里被真正填满\u3002
 pub struct Listener {
     /// 挂在谁上（`window` 或 canvas）。
-    #[allow(dead_code)] // P1 注册时使用
     pub target: bindings::EventTarget,
     /// 事件名（`"mousemove"` / `"keydown"` …）。
-    #[allow(dead_code)] // P1 注册时使用
     pub kind: String,
     /// 回调本体（**持有它就是保存它**）。
-    #[allow(dead_code)] // P1 注册时使用
     pub handler: Closure<dyn FnMut(wasm_bindgen::JsValue)>,
 }
 
