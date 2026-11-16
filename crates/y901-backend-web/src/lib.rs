@@ -251,6 +251,13 @@ impl WindowBackend for WasmWindow<'_> {
         // release 下 800×600 全帧渲染+上屏约 15ms，完全能稳定 60fps。
         let (vw, vh) = self.viewport();
         self.soft.clear();
+        // **必须整树重绘**：上一行已把整张缓冲洗成清屏色，
+        // 而 `UiTree::render` 在脏区不是 `full` 时**只画脏区**。
+        // 两者相乘的结果就是那个著名的故障：
+        // **"整屏变黑，只剩下刚点击的那个输入框"**——
+        // 因为那一帧的脏区恰好就是输入框的矩形。
+        // 这不是 clip 泄漏（裁剪区已在渲染末尾恢复），而是"清了却没画"。
+        tree.invalidate_all();
         tree.render(self.soft);
         self.present.present(self.soft.pixels(), vw, vh);
         Ok(RenderOutcome::Presented)

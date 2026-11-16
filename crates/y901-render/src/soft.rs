@@ -200,9 +200,15 @@ impl SoftBackend {
     }
 
     /// 清屏（整张缓冲）。
+    ///
+    /// **同时清空裁剪栈与变换栈**：清屏是"新一帧的起点"，
+    /// 上一帧遗留的裁剪区不应跨帧生效（否则一次泄漏会让
+    /// **之后每一帧**都只剩一个小矩形可见，就是那个全黑现象）。
     pub fn clear(&mut self) {
         let px = pack(self.clear_color, 1.0, 1.0);
         self.buf.fill(px);
+        // 防御式：任何组件的 push_clip 不配对都不会污染到下一帧。
+        self.state.clear_clips();
     }
 
     /// 当前帧缓冲尺寸。
@@ -1167,5 +1173,44 @@ mod glyph_top_tests {
         let top = glyph_top(origin_y, ascent, bearing, height);
         let bottom = top + height;
         assert!((bottom - (origin_y + ascent - bearing)).abs() < 0.001);
+    }
+
+    // ---- clear() 必须清空裁剪栈（防"一次泄漏 ⇒ 永久全黑"）----
+
+    #[test]
+    fn clear_resets_clip_stack() {
+        use y901_ui::{Color, Rect};
+        let (cw, ch) = crate::cell_metrics_for(15.0);
+        let engine = crate::MyFontEngine::new(
+            crate::load_font(&crate::default_test_font_path()).expect("font"),
+            15.0,
+            y901_ui::Size::new(cw, ch),
+        )
+        .expect("engine");
+        let mut soft = crate::soft::SoftBackend::new_headless(
+            64,
+            64,
+            Box::new(engine),
+            y901_ui::Size::new(cw, ch),
+        )
+        .expect("soft");
+        // 故意压一层小裁剪区（模拟某个组件忘记 pop）
+        <crate::soft::SoftBackend as y901_ui::RenderCtx>::push_clip(
+            &mut soft,
+            Rect::new(4.0, 4.0, 8.0, 8.0),
+        );
+        // 清屏后裁剪栈必须回到空
+        soft.clear();
+        <crate::soft::SoftBackend as y901_ui::RenderCtx>::fill_rect(
+            &mut soft,
+            Rect::new(0.0, 0.0, 64.0, 64.0),
+            Color::rgba(1.0, 0.0, 1.0, 1.0),
+        );
+        let px = soft.pixel(0, 0).expect("px");
+        assert_eq!(
+            px & 0x00FF_FFFF,
+            0x00FF_00FF,
+            "清屏后仍受旧裁剪区限制：(0,0) 没被全屏矩形覆盖"
+        );
     }
 }
