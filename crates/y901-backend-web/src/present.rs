@@ -1,6 +1,7 @@
 //! 呈现：软后端产出的 BGRA 像素 → `putImageData`（见 `docs/WASM.md` §3.2）。
 
-use crate::bindings::{CanvasRenderingContext2d, HtmlCanvasElement};
+use crate::bindings::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
+use wasm_bindgen::{JsCast, JsValue};
 
 /// 脏矩形（屏幕坐标，像素）：`(x, y, w, h)`。
 pub type RectPx = (u32, u32, u32, u32);
@@ -11,6 +12,12 @@ pub struct Present {
     pub canvas: HtmlCanvasElement,
     /// 2D 上下文（`getContext("2d")`）。
     pub ctx: Option<CanvasRenderingContext2d>,
+    /// **复用的 `ImageData`**：`(宽, 高, 对象)`。
+    ///
+    /// 为何要复用：打字时脏区几乎每次都是**同一个矩形**（如 616×32），
+    /// 而 `createImageData` 每次都要分配一张新的像素数组（~79KB）。
+    /// 尺寸相同就直接重用，把每次按键的分配与 GC 压力降到 0。
+    cached: Option<(u32, u32, JsValue)>,
 }
 
 impl Present {
@@ -18,7 +25,7 @@ impl Present {
     pub fn new(canvas: HtmlCanvasElement) -> Self {
         let ctx = canvas.get_context("2d");
 
-        Self { canvas, ctx }
+        Self { canvas, ctx, cached: None }
     }
 
     /// 上屏。`pixels` 是**软后端产出的 BGRA**，浏览器要 RGBA。
@@ -41,7 +48,15 @@ impl Present {
                     if rgba.is_empty() {
                         continue;
                     }
-                    let image_data = ctx.create_image_data(rw, rh);
+                    // **尺寸相同就复用**（打字时脏区几乎每次一样）。
+                    let image_data: ImageData = match self.cached.as_ref() {
+                        Some((cw, ch, js)) if *cw == rw && *ch == rh => js.clone().unchecked_into(),
+                        _ => {
+                            let data = ctx.create_image_data(rw, rh);
+                            self.cached = Some((rw, rh, data.clone()));
+                            data
+                        }
+                    };
                     // **批量拷贝**：`TypedArray.prototype.set` 一次性把 wasm 内存里的字节搬进
                     // ImageData 的 data 视图。以前是逐字节 `data[i] = v`（`set_index`），
                     // 800×600 就是 **192 万次跨 wasm/JS 边界调用** —— 那正是"每次操作卡 1 秒"的根源。
