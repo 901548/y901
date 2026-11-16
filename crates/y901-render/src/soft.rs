@@ -79,6 +79,12 @@ pub struct SoftBackend {
     dpi_scale: f32,
     /// 本帧清屏用的背景色（与 GPU 清屏色一致：0.02,0.02,0.03）。
     clear_color: Color,
+
+    /// **是否按字体的真实字宽推进**（比例字体用）。
+    ///
+    /// 默认 `false` = **格宽布局**（所有 ASCII 占 1 格）——桌面与 GPU 路径因此逐像素不变。
+    /// web 端启用后字符按字体自身的 `hmtx` 推进，比例字体才不会挤在一起。
+    proportional_text: bool,
 }
 
 /// **字形顶部的 y 坐标**（buffer 坐标，y 向下）。
@@ -89,14 +95,87 @@ pub struct SoftBackend {
 /// 顶部 = 基线 − bearing_y − 字形高度，基线 = origin.y + ascent。
 /// 旧代码用 `origin.y + ascent + bearing_y`，把字形整体画低了一个字高；
 /// 底部溢出裁剪区后，因为画面在 present 层转置，表现为**顶部被切**。
-fn glyph_top(origin_y: f32, ascent: f32, bearing_y: f32, height: f32) -> f32 {
-    origin_y + ascent - bearing_y - height
+/// **基本汉字范围**（CJK Unified Ideographs）。
+///
+/// 用于“中文的过冲容差比拉丁字母大”这一事实：雅黑 16px 下
+/// 拉丁圆形字母是 -1（如 a/c/e），而汉字是 -2~-3（如 盖/覆）。
+fn is_cjk(ch: char) -> bool {
+    let c = ch as u32;
+    (0x4E00..=0x9FFF).contains(&c)
+}
+
+/// **归零容差**（仅比例字体模式）。
+///
+/// - 非比例模式：`0.0`（不归零，桌面/终端逐像素不变）
+/// - 汉字：`3.0`（盖=-2、覆=-3 都归零）
+/// - 拉丁字母：`1.0`（a/c/e=-1 归零；下伸 g/j=-5、p/q=-4 保留）
+fn bearing_clamp_limit(ch: char, proportional: bool) -> f32 {
+    if !proportional {
+        return 0.0;
+    }
+    if is_cjk(ch) {
+        3.0
+    } else {
+        1.0
+    }
+}
+
+fn glyph_top(origin_y: f32, ascent: f32, bearing_y: f32, height: f32, clamp_limit: f32) -> f32 {
+    // **小幅度 bearing 归零**（防“字在跳舞”）。
+    //
+    // 实测微软雅黑 16px：a/c/e/o/s/t/u 的 `bearing_y = -1`（圆形字母的 overshoot，
+    // 墨迹底部比基线低 1px），而 b/d/h/i/m/n 是 0。于是同一行里底边
+    // 会在 27/28 两个像素上来回跳——在 16px 这个尺寸下肉眼很明显。
+    //
+    // 归则：**|bearing_y| ≤ 1 视为 0**（忽略 1px 的设计过冲），
+    // 但保留真正的下伸字（g/j/p/q/y 的 -4~-5）与上标字符（正 bearing），
+    // 否则下伸部分会被抬到基线上方，字形变形。
+    // **仅比例字体模式下归零**：桌面 / 终端路径保持原行为（逐像素不变）。
+    let bearing_y = if clamp_limit > 0.0 && bearing_y.abs() <= clamp_limit {
+        0.0
+    } else {
+        bearing_y
+    };
+    // **基线先取整，再减字形自身的偏移**。
+    //
+    // 为何要这样：`ascent` 带小数（微软雅黑 16px = 16.93），
+    // 若对"基线 − bearing − 字高"整体取整，小数部分会被每个字各自截断，
+    // 于是底边对齐的字之间仍可能差 1px（看起来像上下跳舞）。
+    // 现在把**基线**作为唯一取整点：所有字形的底边 = 基线 − bearing，
+    // 按定义就是同一条线；字高与 bearing 都是整数像素。
+    (origin_y + ascent).round() - bearing_y - height
 }
 
 impl SoftBackend {
     /// 设置 **DPI 缩放比**（物理 / 逻辑）。
     ///
     /// 由平台层在窗口创建后调用；`y901-render` 本身不知道 DPI。
+    /// **开关：是否按字体真实字宽推进**。
+    ///
+    /// 开：比例字体（微软雅黑等）按 `hmtx` 推进，字距自然；
+    /// 关（默认）：格宽布局，桌面/帧哈希不受影响。
+    pub fn set_proportional_text(&mut self, on: bool) {
+        self.proportional_text = on;
+    }
+
+    /// 当前一个字符的推进宽度（像素）。
+    ///
+    /// `proportional_text=false` 时一律返回 `格数 × 格宽`（与旧行为一致）。
+    fn advance_of(&self, ch: char, px: f32, cell_w: f32) -> f32 {
+        let grid = self.text.cell_span(ch) as f32 * cell_w;
+        if !self.proportional_text {
+            return grid;
+        }
+        let adv = self.text.advance(ch, px);
+        // **保底**：算出 0 / 负数 / 非法值时回退到格宽。
+        // 不然一旦 advance 出错，所有字就叠在同一个 X 上（看起来像乱码）。
+        if !(adv.is_finite() && adv > 0.5) {
+            return grid;
+        }
+        adv
+    }
+
+    /// 设置 **DPI 缩放比**（物理 / 逻辑），由平台层在窗口创建后调用。
     pub fn set_dpi_scale(&mut self, scale: f32) {
         self.dpi_scale = if scale.is_finite() && scale > 0.0 {
             scale
@@ -140,6 +219,7 @@ impl SoftBackend {
             state: crate::render_state::RenderState::new(theme.unwrap_or(Theme::DARK)),
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
             dpi_scale: 1.0,
+            proportional_text: false,
         })
     }
 
@@ -164,6 +244,7 @@ impl SoftBackend {
             cell,
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
             dpi_scale: 1.0,
+            proportional_text: false,
         })
     }
 
@@ -360,6 +441,17 @@ impl TextMetrics for SoftBackend {
         };
         // 格数的**唯一来源**是 `y901_core::Grid::width_of_char`（经 `cell_span`），
         // 此处**不做二次加工**：零宽/组合字符就是 0 格（控制字符由 core 的 `unwrap_or(1)` 兵底为 1）。
+        if self.proportional_text {
+            // **无显式字号时用引擎基准字号**：
+            // 光栅化用的就是它，用 `cell.w`(8) 会算出半宽的 advance，
+            // 而字形仍按 16px 画 ⇒ **所有字重叠在一起**。
+            let px = match style.size {
+                Some(px) if px > 0.0 => px * self.dpi_scale,
+                _ => self.text.size_px() * self.dpi_scale,
+            };
+            let w: f32 = text.chars().map(|c| self.text.advance(c, px)).sum();
+            return Size::new(w, cell.h);
+        }
         let cells: f32 = text.chars().map(|c| self.text.cell_span(c) as f32).sum();
         Size::new(cells * cell.w, cell.h)
     }
@@ -404,8 +496,10 @@ impl SoftBackend {
         for ch in text.chars() {
             // 同上：格数只有一个来源，不做二次加工。
             let span = self.text.cell_span(ch) as f32;
+            // **推进宽度**：比例字体用真实字宽，否则按格宽。
+            let adv = self.advance_of(ch, px_final, cell_w);
             if style.bg.a > 0.0 {
-                self.fill_rect(Rect::new(pen_x, origin.y, span * cell_w, cell_h), style.bg);
+                self.fill_rect(Rect::new(pen_x, origin.y, adv, cell_h), style.bg);
             }
             if ch != ' ' {
                 // 先 clone 再画：避开 `&mut self.text` 与 `self.text.atlas()` 的借用冲突
@@ -422,8 +516,13 @@ impl SoftBackend {
                         // **字形顶部**：引擎的 `bearing_y` 是**位图底边**相对基线的位置
                         // （y 向上：'8' = 0 贴基线，'设' = -2 下伸），不是顶部偏移。
                         // 顶部 = 基线 − bearing_y − 字形高度。
-                        let by = glyph_top(origin.y, ascent, g.bearing_y as f32, g.height as f32)
-                            .floor() as i32;
+                        let by = glyph_top(
+                            origin.y,
+                            ascent,
+                            g.bearing_y as f32,
+                            g.height as f32,
+                            bearing_clamp_limit(ch, self.proportional_text),
+                        ) as i32;
                         for gy in 0..g.height as i32 {
                             let dy = by + gy;
                             if dy < 0 || dy >= self.height as i32 {
@@ -469,11 +568,12 @@ impl SoftBackend {
             }
             if style.underline {
                 self.fill_rect(
-                    Rect::new(pen_x, origin.y + cell_h - 2.0, span * cell_w, 1.0),
+                    Rect::new(pen_x, origin.y + cell_h - 2.0, adv, 1.0),
                     style.fg,
                 );
             }
-            pen_x += span * cell_w;
+            let _ = span;
+            pen_x += adv;
         }
         pen_x - start
     }
@@ -809,11 +909,12 @@ impl RenderCtx for SoftBackend {
             // 格数只有一个来源（`width_of_char`）。**span = 0 时仍绘制字形、pen 不推进** ——
             // 组合字符（如 U+0301）必须画在前一个字上面才能显示重音。
             let span = self.text.cell_span(ch) as f32;
+            // **推进宽度**：比例字体用真实字宽（否则按格宽）。
+            // 旧路径的字形按**基准字号 × 变换缩放**绘制，advance 必须同比例。
+            let base_px = self.text.size_px();
+            let adv = self.advance_of(ch, base_px, cell_w) * scale;
             if style.bg.a > 0.0 {
-                self.fill_rect(
-                    Rect::new(pen_x, origin.y, span * cell_w, self.cell.h),
-                    style.bg,
-                );
+                self.fill_rect(Rect::new(pen_x, origin.y, adv, self.cell.h), style.bg);
             }
             if ch != ' ' {
                 // 按当前缩放选一级字形（level 0 = L0，与不缩放时逐像素相同）
@@ -831,8 +932,8 @@ impl RenderCtx for SoftBackend {
                             ascent * scale,
                             sg.slot.bearing_y * scale,
                             drawn_h,
-                        )
-                        .floor() as i32;
+                            bearing_clamp_limit(ch, self.proportional_text),
+                        ) as i32;
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
                         let dh = (sg.h as f32 * scale).round().max(1.0) as i32;
@@ -904,11 +1005,12 @@ impl RenderCtx for SoftBackend {
             }
             if style.underline {
                 self.fill_rect(
-                    Rect::new(pen_x, origin.y + self.cell.h - 2.0, span * cell_w, 1.0),
+                    Rect::new(pen_x, origin.y + self.cell.h - 2.0, adv, 1.0),
                     style.fg,
                 );
             }
-            pen_x += span * cell_w;
+            let _ = span;
+            pen_x += adv;
         }
         pen_x - start
     }
@@ -1154,25 +1256,28 @@ mod glyph_top_tests {
     /// 旧公式给出 113.75（整整低了一个字高）；正确值是 100.75。
     #[test]
     fn digits_sitting_on_the_baseline_are_lifted_by_their_height() {
-        let top = glyph_top(100.0, 13.75, 0.0, 13.0);
-        assert!((top - 100.75).abs() < 0.001, "top = {top}");
+        // 新语义：基线 = round(100 + 13.75) = 114；顶部 = 114 - 0 - 13 = 101
+        let top = glyph_top(100.0, 13.75, 0.0, 13.0, 0.0);
+        assert!((top - 101.0).abs() < 0.001, "top = {top}");
     }
 
     /// 有下伸的字形（`'设'`: bearing_y = -2, height = 16）：底边在基线下 2px，
     /// 所以顶部比贴基线的字形要低一点点。
     #[test]
     fn descenders_are_pushed_down_by_a_negative_bearing() {
-        let top = glyph_top(100.0, 13.75, -2.0, 16.0);
-        assert!((top - 99.75).abs() < 0.001, "top = {top}");
+        // 基线 114；top = 114 + 2 - 16 = 100
+        let top = glyph_top(100.0, 13.75, -2.0, 16.0, 0.0);
+        assert!((top - 100.0).abs() < 0.001, "top = {top}");
     }
 
     /// 推导的不变量：底边 = 顶部 + 字高 = 基线 − bearing_y。
     #[test]
     fn bottom_edge_equals_baseline_minus_bearing() {
         let (origin_y, ascent, bearing, height) = (40.0, 12.0, -3.0, 15.0);
-        let top = glyph_top(origin_y, ascent, bearing, height);
+        let top = glyph_top(origin_y, ascent, bearing, height, 0.0);
         let bottom = top + height;
-        assert!((bottom - (origin_y + ascent - bearing)).abs() < 0.001);
+        // 底边 = round(基线) − bearing（基线被取整，所有字都落在同一整数线）
+        assert!((bottom - ((origin_y + ascent).round() - bearing)).abs() < 0.001);
     }
 
     // ---- clear() 必须清空裁剪栈（防"一次泄漏 ⇒ 永久全黑"）----
@@ -1212,5 +1317,29 @@ mod glyph_top_tests {
             0x00FF_00FF,
             "清屏后仍受旧裁剪区限制：(0,0) 没被全屏矩形覆盖"
         );
+    }
+
+    // ---- 基线对齐（"字在跳舞"的回归）----
+
+    #[test]
+    fn all_glyph_bottoms_land_on_one_integer_baseline() {
+        let (origin_y, ascent) = (40.0f32, 16.93f32);
+        let baseline = (origin_y + ascent).round();
+        // (字, bearing_y, height)
+        let glyphs = [("a", -1i32, 11i32), ("b", -1, 15), ("g", -5, 15), ("h", 0, 14)];
+        for (name, bearing_y, height) in glyphs {
+            let top = glyph_top(origin_y, ascent, bearing_y as f32, height as f32, 1.0);
+            let bottom = top + height as f32;
+            // |bearing|<=1 归零；下伸保留。底边 = round(baseline) - clamped_bearing
+            let clamped = if (bearing_y as f32).abs() <= 1.0 { 0.0 } else { bearing_y as f32 };
+            assert_eq!(bottom, baseline - clamped, "{name}: bottom off baseline");
+            assert_eq!(bottom.fract(), 0.0, "{name}: bottom must be integer pixel");
+        }
+        // 同一行内，所有“|bearing|≤1”的字底边必须**完全相等**
+        let a = glyph_top(origin_y, ascent, -1.0, 11.0, 1.0) + 11.0;
+        let b = glyph_top(origin_y, ascent, -1.0, 15.0, 1.0) + 15.0;
+        let h = glyph_top(origin_y, ascent, 0.0, 14.0, 1.0) + 14.0;
+        assert_eq!(a, b);
+        assert_eq!(b, h);
     }
 }

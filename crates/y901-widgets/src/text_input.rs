@@ -831,28 +831,37 @@ impl Widget for TextInput {
             }
         }
 
-        // 4) 逐字符绘制（视口外跳过）
-        let mut text = TextStyle::fg(self.style.fg);
-        text.bold = self.style.bold;
-        for g in &self.layout {
-            let x = origin_x + g.x;
-            if x + g.w < inner.x {
-                continue;
-            }
-            if x > inner.right() {
-                break;
-            }
-            if let Some(ch) = self.buffer.text()[g.byte..].chars().next() {
-                // 密码模式：每个字符都画 `*`（**空格也要画**，否则长度不可见）
-                if self.password {
-                    ctx.draw_text(Pos::new(x, text_y), "*", &text);
-                    continue;
-                }
-                if ch == ' ' {
-                    continue;
-                }
-                let mut buf = [0u8; 4];
-                ctx.draw_text(Pos::new(x, text_y), ch.encode_utf8(&mut buf), &text);
+        // 4) **整串交给渲染层排版**。
+        //
+        // 为什么不再逐字符画：组件层一旦自己算 x，就与渲染层的
+        // `advance` 形成“两份布局”——比例字体下一旦不一致，就会出现
+        // "有的字空隙大、有的字挤在一起"。现在 pen 推进只有一个来源：
+        // `SoftBackend::draw_text`。`self.layout` 仅用于光标 / 选区 / 点击命中，
+        // 它们与渲染层用**同一个** `measure_text`。
+        //
+        // 注意：字形样式必须用 `self.style`（**包含 `size`**）。
+        // 旧代码用 `TextStyle::fg(fg)` 重建了一个样式，把 `size` 丢了 →
+        // 排版按 A 字号、绘制按 B 字号。
+        {
+            let mut text = self.style;
+            text.bg = Color::TRANSPARENT;
+            text.underline = false;
+            let display: String;
+            let draw_str: &str = if self.password {
+                display = "*".repeat(self.buffer.text().chars().count());
+                &display
+            } else {
+                self.buffer.text()
+            };
+            if !draw_str.is_empty() {
+                ctx.push_clip(Rect::new(
+                    inner.x,
+                    inner.y - 4.0,
+                    inner.w,
+                    inner.h + 4.0,
+                ));
+                ctx.draw_text(Pos::new(origin_x, text_y), draw_str, &text);
+                ctx.pop_clip();
             }
         }
 
@@ -1401,8 +1410,20 @@ mod tests {
             rec.fills.iter().any(|r| r.x == 8.0 && r.w == 8.0),
             "应有 8px 宽的选区高亮"
         );
-        assert!(rec.texts.iter().any(|(_, t)| t == "a"));
-        assert!(rec.texts.iter().any(|(_, t)| t == "b"));
+        // **新行为：整串一次绘制**（不再逐字符），
+        // 因此断言"画了整串"，而不是"画了单个 'a'"。
+        // 逐字符绘制会让组件层与渲染层各自算一套字宽，
+        // 比例字体下就会出现"有的字空隙大、有的字挤在一起"。
+        assert!(
+            rec.texts.iter().any(|(_, t)| t == "ab"),
+            "应整串绘制文本，实际: {:?}",
+            rec.texts
+        );
+        // 整串绘制：内容已在上一条断言里覆盖，这里只需确认没有逐字拆开。
+        assert!(
+            !rec.texts.iter().any(|(_, t)| t == "b"),
+            "不应再逐字符绘制（否则字宽会被计两次）"
+        );
         // 光标线（1.5px 宽）
         assert!(rec.fills.iter().any(|r| (r.w - 1.5).abs() < 0.01));
     }

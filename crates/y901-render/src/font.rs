@@ -146,6 +146,32 @@ pub trait FontEngine {
     /// 取字形（可能会现场光栅化并写图集）。
     fn glyph(&mut self, ch: char) -> Option<&GlyphInfo>;
     /// 字符占用的格数。
+    /// **字符推进宽度**（像素）。
+    ///
+    /// 默认实现 = **格宽 × 格数**，即框架一贯的字库布局行为；
+    /// 桌面与 GPU 路径因此逐像素不变。
+    /// 比例字体需要真实 advance 时，由实现者覆盖（参见 `MyFontEngine`）。
+    /// **引擎创建时的基准字号**（像素）。
+    ///
+    /// 用于"文本带有显式字号时用那个，否则用基准字号"
+    /// 的场合拿到与光栅化一致的 px。
+    fn size_px(&self) -> f32 {
+        16.0
+    }
+
+    /// **字符推进宽度**（像素）。
+    ///
+    /// 默认实现 = **格宽 × 格数**，即框架一贯的格子布局行为；
+    /// 桌面与 GPU 路径因此逐像素不变。比例字体需要真实
+    /// advance 时，由实现者覆盖（参见 `MyFontEngine`）。
+    fn advance(&self, ch: char, px: f32) -> f32 {
+        let cell_w = crate::font::cell_metrics_for(px.max(1.0)).0;
+        self.cell_span(ch) as f32 * cell_w
+    }
+
+    /// 字符占用的**格数**（CJK = 2，ASCII = 1）。
+    ///
+    /// 格宽布局的根源；比例字体的真实字宽请用 `advance()`。
     fn cell_span(&self, ch: char) -> u32;
     /// 图集像素（RGBA）。
     fn atlas(&self) -> &[u8];

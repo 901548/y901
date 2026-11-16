@@ -589,6 +589,28 @@ impl FontEngine for MyFontEngine {
     fn glyph(&mut self, ch: char) -> Option<&GlyphInfo> {
         MyFontEngine::glyph(self, ch)
     }
+    /// **真实字宽**（hmtx）：比例字体下 `'i'` 与 `'m'` 宽度不同。
+    ///
+    /// 只有在字体有该字形时才用真实值，否则回退到格宽；
+    /// 不同字号按 `px / units_per_em` 线性换算（与光栅化同一比例）。
+    /// 本引擎构造时的字号（与光栅化基准一致）。
+    fn size_px(&self) -> f32 {
+        self.size
+    }
+
+    /// **真实字宽**（hmtx）：比例字体下 `'i'` 与 `'m'` 宽度不同。
+    ///
+    /// 只有在字体有该字形时才用真实值，否则回退到格宽。
+    fn advance(&self, ch: char, px: f32) -> f32 {
+        match crate::font_engine::glyph_advance_px(&self.data, ch, px.max(1.0)) {
+            Some(w) if w > 0.0 => w,
+            _ => {
+                let cell_w = crate::font::cell_metrics_for(px.max(1.0)).0;
+                self.cell_span(ch) as f32 * cell_w
+            }
+        }
+    }
+
     fn cell_span(&self, ch: char) -> u32 {
         MyFontEngine::cell_span(self, ch)
     }

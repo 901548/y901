@@ -112,7 +112,27 @@ pub fn rasterize_glyph(font_data: &[u8], ch: char, size_px: f32) -> Option<Glyph
 pub const MAX_GLYPH_DIM: u32 = 4096;
 
 
-/// 中文尤其明显。平移后重新光栅化，边缘覆盖度才会真正随亚像素变化。
+/// **字形的推进宽度**（像素）——直接用字体的 `hmtx`。
+///
+/// 为何需要它：框架的格子布局把**所有 ASCII** 算作 1 格（固定 `cell_w`），
+/// 对等宽字体正确；但**比例字体**（微软雅黑、宋体等）里 i 的推进宽度只有 m 的一半，
+/// 按固定格宽画就会密密匐匐地挤在一起（看起来像字在跳舞）。
+///
+/// 返回：`None` = 字体没有该字形（调用方应回退到格宽）。
+pub fn glyph_advance_px(font_data: &[u8], ch: char, size_px: f32) -> Option<f32> {
+    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
+    let gid = face.glyph_index(ch)?;
+    let units = face.units_per_em() as f32;
+    if units <= 0.0 || size_px <= 0.0 || !size_px.is_finite() {
+        return None;
+    }
+    let adv = face.glyph_hor_advance(gid)? as f32;
+    Some(adv * size_px / units)
+}
+
+/// **光栅化一个字形**（带亚像素相位），返回覆盖度位图。
+///
+/// 返回：`None` = 字体里没有该字形（且替身字符也没有），或尺寸超安全上限。
 pub fn rasterize_glyph_phased(
     font_data: &[u8],
     ch: char,
