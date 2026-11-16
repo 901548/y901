@@ -706,10 +706,15 @@ impl RenderCtx for SoftBackend {
         let y1 = r.bottom().ceil() as i32;
         for y in y0..y1 {
             let row = (y as u32 * self.width) as usize;
-            for x in x0..x1 {
-                let i = row + x as usize;
-                if let Some(dst) = self.buf.get_mut(i) {
-                    *dst = blend(*dst, px);
+            let start = row + x0 as usize;
+            let end = row + x1 as usize;
+            if px >> 24 == 0xff {
+                if let Some(dst) = self.buf.get_mut(start..end) {
+                    dst.fill(px);
+                }
+            } else if let Some(dst) = self.buf.get_mut(start..end) {
+                for pixel in dst {
+                    *pixel = blend(*pixel, px);
                 }
             }
         }
