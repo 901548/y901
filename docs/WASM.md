@@ -21,7 +21,7 @@
 | **D3** | 呈现用 `putImageData` | ✅ 已实现，**并已做局部重绘 + 局部上传**（见 §3.2） |
 | **D4** | DPI 强制 1.0 | ✅ 已实现（`SoftBackend` 以 `dpi_scale = 1.0` 构造） |
 | **D5** | IME 走隐藏 `<input>`，不做候选窗钉位 | ✅ 已实现；候选窗由浏览器绘制，我们不钉位 |
-| **D6** | 只依赖 `wasm-bindgen`，绑定手写 | ✅ 已实现（`bindings.rs` 约 400 行）；**绑定 golden test 尚未实现**（见 §5） |
+| **D6** | 只依赖 `wasm-bindgen`，绑定手写 | ✅ 已实现（`bindings.rs` 约 400 行）；绑定 golden test 已实现（见 §5） |
 
 ## 3. 关键数据通路
 
@@ -59,7 +59,9 @@
 #### 焦点
 
 `mousedown` 时**先 `preventDefault()`**（阻止 canvas 抢回焦点）再把焦点给隐藏 `input`；
-canvas 上设了 `tabindex="0"` 与 `outline: none`。`window` 的 `focus`/`blur` **未接线**（已知债务，见 §4）。
+canvas 上设了 `tabindex="0"` 与 `outline: none`。`window` 的 `focus`/`blur` 已接线：`blur` 记下焦点是否还在隐藏 input 上，
+`focus` 仅当 `keys::should_refocus(interacted, had_focus)` 为真时才 `input.focus()`。
+**不能无条件抢**：页面刚打开或用户正在地址栏时都不应抢焦点。
 
 #### 光标形状
 
@@ -137,10 +139,10 @@ canvas 上设了 `tabindex="0"` 与 `outline: none`。`window` 的 `focus`/`blur
 | `FileDrop` | **不支持**（不接 DOM `drop`） |
 | 剪贴板 | 仅框架内的 `TextInput` 剪贴板抽象，未接 `navigator.clipboard` |
 | 多窗口 | 不支持（一个页面一个 canvas / 一个 runtime） |
-| `Focus` 事件 | `EventCtx` 的焦点路径生效；**`window` 的 `focus`/`blur` 未接线**，切走标签页再回来不会自动恢复焦点 |
+| `Focus` 事件 | `EventCtx` 的焦点路径生效；`window` 的 `focus`/`blur` 已接线（`should_refocus` 两条件闸门） |
 | `keyup` | **无** `RawEvent::KeyUp`，无法表达"按住/释放" |
-| 字体格式 | 只支持**单 face TTF/OTF**；**TTC 容器未验证** |
-| 绑定 golden test | **未实现**：`#[wasm_bindgen]` 名字写错仍会静默失败，只能靠运行时暴露 |
+| 字体格式 | 支持 TTF/OTF；**TTC 容器走 `ttf_parser` 的 face 0**（能读则正常使用），解析失败时会显式提示"导出单个 TTF/OTF" |
+| 绑定 golden test | ✅ 已实现（`tests/bindings_golden.rs`，5 条断言锁住 js_name 集合与属性计数） |
 | js_sys | 离线环境解析不到，因此 `Object` / `Reflect` 等均未使用，相关能力用手写绑定替代 |
 
 **热重启**：单页单 runtime。要重启必须先调用 `y901_dispose()`（取消 rAF、摘监听器、移除隐藏
@@ -151,7 +153,8 @@ input。
 
 页面用的字体是**运行时 `fetch` 的静态资源**，不编进 wasm，因此换字体不需要 `wasm-pack build`：
 
-1. 把字体放到 `www/fonts/default.ttf`（文件名固定；**目前只支持单 face，TTC 未验证**）；
+1. 把字体放到 `www/fonts/default.ttf`（文件名固定）；TTC 容器会取 **face 0**，
+   若解析失败会打印 `（检测到 ttcf 文件头：这是 TTC 字体集容器）请导出单个 TTF/OTF 字重`；
 2. 同步修改 `www/index.html` 里字体 URL 的版本参数：`fetch('./fonts/default.ttf?v=...')`
    —— **不改就会一直读浏览器缓存的旧字体**（这个坑已踩过）；
 3. 刷新页面，Console 打印 `[y901] font swapped in`；失败会打印
@@ -164,6 +167,26 @@ input。
 `font_engine::MAX_GLYPH_DIM`）。超限时拒绝光栅化并打印一行提示——包围盒来自字体文件里的坐标，
 损坏或恶意字体可以写出巨大值，不拦会直接 OOM。
 
+## 4.6 web 端未消费的宿主钩子
+
+`WindowBackend` 的默认实现让得无需实现的钩子不会报错，web 端因此**只实现了
+`wait_events` / `viewport` / `relayout` / `render` / `set_theme`**。以下钩子在桌面上有真实现，
+在浏览器上**不生效**（已知差异，不是漏写）：
+
+| 钩子 | 桌面行为 | web 现状 | 为何 |
+|---|---|---|---|
+| `set_fullscreen` | 切换真正全屏 | 默认 `Ok(())`（**占位**，不做事） | 浏览器全屏需用户手势 + Fullscreen API，尚未接 |
+| `after_frame` 中的 `host.ime_position` | 把 IME 候选窗钉到光标 | **不消费** | 候选窗由浏览器自己绘制，不可钉位（设计决策 D5） |
+| `after_frame` 中的 `host.take_font_request` | 动态换字体 | **不消费** | web 的字体路径是 `y901_font_loaded(bytes)`，由页面 fetch 驱动 |
+| `after_frame` 中的 `host.take_snapshot_request` / `after_present` | 帧快照回读（验收用） | **不消费** | 浏览器侧直接截屏即可，无需框架中转 |
+
+注意：`host.idle` 与 `host.command` 在 web 端**是消费的**（`MinimalHost` 就在
+`wasm_entry.rs` 里处理 `save` / `cancel`），上表只列未消费的部分。
+
+若未来需要在浏览器上支持全屏或动态换字体，正确做法是：在 web 端覆盖
+`set_fullscreen` 调 Fullscreen API，并把 `take_font_request` 的请求转成一次页面侧
+`fetch` → `y901_font_loaded`，而不是在 Rust 里直接读字体文件。
+
 ## 5. 测试与验证策略
 
 1. **`hash-gate`**：桌面软后端的帧哈希必须等于基线 `0x39AE41C1697CBFD0`（`Y901_TEST_DPI_SCALE=1.0`）。
@@ -174,7 +197,10 @@ input。
    （`present.rs`，含"整帧与局部逐字节一致"T8）、脏区裁剪重绘（`tree.rs`，T1-T7 用记录型
    `RenderCtx`，不需要 GPU）。
 4. **native 不受影响**：`cargo check --workspace --all-targets` 与 `cargo test --workspace` 必须绿。
-5. **绑定 golden test**：**尚未实现**（见 §4）。
+5. **绑定 golden test**：已实现（`crates/y901-backend-web/tests/bindings_golden.rs`）。
+   native 下把 `bindings.rs` 当**源码快照**断言：50 个 `js_name` 值（含大小写）、
+   `Date.now` 命名空间形态、各属性计数（getter/setter/constructor/indexing_setter/structural）、
+   `GLOBAL_WINDOW` 必须是 `thread_local_v2` 静态。改名/删除会直接红。
 
 ## 6. 阶段回顾（已完成的实现）
 
@@ -188,7 +214,7 @@ input。
 
 | 风险 | 对策 |
 |---|---|
-| 手写绑定写错 JS 名字 → 运行时才炸 | 逐个用真机验证过；**golden test 仍缺** |
+| 手写绑定写错 JS 名字 → 运行时才炸 | 已有 native golden test（源码快照断言）+ 真机逐项验证 |
 | `putImageData` 的跨界成本 | 已改为批量 `set()` + 局部上传 + 阈值回退 |
 | 浏览器 IME 候选窗位置不可控 | 接受浏览器默认行为（D5），不钉位 |
 | `dpr` 非 1.0 破坏对拍 | 强制 1.0（D4） |
