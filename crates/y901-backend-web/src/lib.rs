@@ -243,45 +243,16 @@ impl WindowBackend for WasmWindow<'_> {
             return Ok(RenderOutcome::Skipped);
         }
 
-        // **局部重绘 + 局部上屏（方案 D + step 3a/3b）**。
+        // **极简重写：只有一条路——清屏 → 整树重绘 → 整帧上屏**。
         //
-        // 三条不可丢的约束：
-        // 1. **只有 `dirty.is_full()` 才 `clear()`**：清屏后只画脏区，其余像素就会留成清屏色
-        //    （历史上的黑屏就是这么来的）。
-        // 2. **帧布局快照必须在 `render` 之前取**：`UiTree::render` 结束时会 `dirty.clear()`。
-        // 3. 上屏策略按脏区面积和块数选择局部/整帧，避免高碎片时多次 JS 调用反而更慢。
-        let full = tree.dirty().is_full();
+        // 为何废弃局部重绘 + 局部上传：为每帧省下大约 10ms，
+        // 却引入了脏区截取/边界取整/阈值回退/ImageData 复用/
+        // 两条路径坐标一致性……整套只会出 bug 的代码。
+        // release 下 800×600 全帧渲染+上屏约 15ms，完全能稳定 60fps。
         let (vw, vh) = self.viewport();
-        // 快照（仅局部帧需要；全量帧传 `None` = 整帧上屏）。
-        let dirty_rects: Vec<crate::present::RectPx> = if full {
-            Vec::new()
-        } else {
-            tree.dirty()
-                .rects()
-                .iter()
-                // **向外取整**（左上 floor、右下 ceil）：只 floor 会漏掉右/下边界那一列像素，
-                // 留下半个像素宽的残影。逻辑与单测在 `present::clamp_dirty_rect`。
-                .filter_map(|r| crate::present::clamp_dirty_rect(r.x, r.y, r.w, r.h, vw, vh))
-                .collect()
-        };
-
-        // **性能探针**：只在帧耗时超过 100ms 时打一条，平时完全不噪。
-        // 用法：真机上如果又出现卡顿，这行会直接告诉我们耗在哪一段。
-
-        if full {
-            self.soft.clear();
-        }
+        self.soft.clear();
         tree.render(self.soft);
-
-
-        // 分开借用：`pixels` 只读借 `soft`，`present` 需要 `&mut self`。
-        let WasmWindow { soft, present, .. } = self;
-        // **何时才值得局部上传**：小脏区（悬停/打字）走局部；碎块多或面积过半走整帧
-        // （每块 `putImageData` 都有固定开销）。判据与单测在 `present::should_upload_partial`。
-        let partial = (!full && crate::present::should_upload_partial(&dirty_rects, vw, vh))
-            .then_some(dirty_rects.as_slice());
-        present.present(soft.pixels(), vw, vh, partial);
-
+        self.present.present(self.soft.pixels(), vw, vh);
         Ok(RenderOutcome::Presented)
     }
 
@@ -450,12 +421,9 @@ impl WasmRuntime {
 fn keydown_handler(events: Rc<RefCell<VecDeque<RawEvent>>>) -> Closure<dyn FnMut(JsValue)> {
     Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
         let ke: &bindings::KeyboardEvent = val.unchecked_ref();
-        // **简化的焦点规则**：只要焦点在本页面内，就接管键盘。
-        // 唯一例外：焦点在**页面里其他输入框**（`<input>`/`<textarea>` 且不是我们的），
-        // 那时抢过来会让用户在别人的输入框里无法打字。
-        if !focus_in_page_is_ours_or_non_text() {
-            return;
-        }
+        // **极简接线**：不看焦点在哪个元素上，只看两件事——
+        // ① 这次事件是不是输入法组字产生的（`isComposing`）；
+        // ② 它是不是可打印字符（那些由 `input` 事件提交）。
         let code = ke.code();
         let key = ke.key();
         // **只看事实**：这次事件是不是组字产生的。不看任何自己维护的标志。
@@ -506,31 +474,6 @@ fn active_element_id() -> Option<String> {
     let document = window.document()?;
     let el = document.active_element()?;
     Some(el.id())
-}
-
-/// **焦点是否允许我们接管键盘**。
-///
-/// 规则只有一条例外：焦点在页面里**其他**的 `<input>` / `<textarea>` 上时不抢。
-/// 其余情况（canvas、我们的隐藏 input、`body`、任意 div）都接管——
-/// 因为那些地方本来就不会消费按键，接管不会抢用户的输入。
-fn focus_in_page_is_ours_or_non_text() -> bool {
-    let Some(window) = bindings::global_window() else {
-        return false;
-    };
-    let Some(document) = window.document() else {
-        return false;
-    };
-    let Some(el) = document.active_element() else {
-        // 没有任何焦点元素（焦点在地址栏 / devtools）→ 不接
-        return false;
-    };
-    let tag = el.tag_name().to_uppercase();
-    let is_text_field = tag == "INPUT" || tag == "TEXTAREA" || tag == "SELECT";
-    if !is_text_field {
-        return true; // body / div / canvas：接管
-    }
-    // 是输入类元素：只有我们自己的隐藏 input 才接
-    el.id() == IME_ID
 }
 
 /// **P1/P2：挂鼠标、滚轮与键盘监听器**。
@@ -822,21 +765,18 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             });
         }
 
-        // ---- input\uff1a**ASCII \u5b57\u7b26\u7684\u552f\u4e00\u901a\u8def** ----
+        // ---- input：**ASCII 字符的唯一通路** ----
         //
-        // \u4e24\u9053\u95f8\u95e8\uff1a\u7126\u70b9\u5fc5\u987b\u5728\u9690\u85cf input \u4e0a\uff1b\u4e14\u4e8b\u4ef6\u81ea\u5df1\u4e0d\u80fd\u662f
-        // \u7ec4\u5b57\u4e2d\u7684\u9884\u7f16\u8f91\uff08`InputEvent.isComposing === true`\uff09\u2014\u2014\u5426\u5219\u62fc\u97f3\u4f1a\u88ab\u5f53\u6210\u6b63\u6587\u63d2\u5165\u3002
+        // 极简接线：只看事件自己的 `isComposing`。
+        // 组字中的 `input` 是预编辑（不能当正文插入），组字结束由
+        // `compositionend` 提交；非组字的 `input` 就是真实输入。
         {
             let evs = Rc::clone(&events);
-            let last_for = Rc::clone(&last_committed);
             let input_for_read = input_js.clone();
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
-                if !active_is(IME_ID) {
-                    return;
-                }
                 let ev: &bindings::Event = val.unchecked_ref();
                 if ev.is_composing() {
-                    return; // \u7ec4\u5b57\u4e2d\u7684 input \u4e8b\u4ef6\u4e0d\u662f\u63d0\u4ea4
+                    return;
                 }
                 let el: &bindings::HtmlInputElement = input_for_read.unchecked_ref();
                 let text = el.value();
@@ -844,18 +784,12 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                     return;
                 }
                 el.set_value("");
-                if !keys::should_accept_input(&text, false, &last_for.borrow()) {
-                    last_for.borrow_mut().clear();
-                    return;
-                }
-                last_for.borrow_mut().clear();
                 evs.borrow_mut().push_back(RawEvent::Ime {
                     text,
                     composition: false,
                 });
             });
-            let target: bindings::EventTarget =
-                global_window_target();
+            let target: bindings::EventTarget = global_window_target();
             target.add_event_listener("input", &handler);
             listeners.push(Listener {
                 target,
@@ -863,6 +797,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 handler,
             });
         }
+
 
         // ---- blur\uff1a\u9690\u85cf input \u79bb\u7126\u2192\u6e05\u6389\u53bb\u91cd\u6807\u8bb0 ----
         {

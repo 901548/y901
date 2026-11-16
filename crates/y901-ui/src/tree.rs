@@ -503,28 +503,6 @@ impl UiTree {
     /// 当前鼠标悬停的节点 id（最近一次 `MouseMove` 命中且未被移除的结果）。
     ///
     /// 无副作用；返回 `None` 表示没有悬停节点（指针在窗口外或整棵树都不命中）。
-    /// **悬停变化时，这个节点是否真的需要重绘**。
-    ///
-    /// 为何需要它：`MouseMove` 的悬停转移会把"旧节点 + 新节点"标脏。
-    /// 当指针落在**容器**上时（`root` / `card` / `history-card`），那个矩形就是
-    /// 30%~100% 的屏幕——而容器根本不画悬停态（它们的 `role` 是
-    /// `Role::PANEL`，也从不调 `ctx.is_hovered`）。
-    ///
-    /// 判据：`role == Role::PANEL` **且有子节点** → 视为纯容器，不标脏。
-    /// 为什么要带"有子节点"：自定义的**叶子**控件可能沿用默认 `role`，
-    /// 它们可能真的画悬停态，不能误伤。
-    fn hover_needs_repaint(&self, id: &str) -> bool {
-        let Some(path) = self.find_path(id) else {
-            return true; // 已经不存在：让调用方按"旧节点可能有残影"处理
-        };
-        let Some(node) = self.node_at_ref(&path) else {
-            return true;
-        };
-        let is_container = node.role() == crate::Role::PANEL && !node.children().is_empty();
-        !is_container
-    }
-
-    /// 当前被悬停的节点 id（`None` = 没有）。
     pub fn hovered(&self) -> Option<&str> {
         self.hovered.as_deref()
     }
@@ -2314,15 +2292,14 @@ impl UiTree {
                     // **只标脏真正会改变外观的节点**。
                     // 容器的矩形就是屏幕的一大块（root 滚 100%），而容器
                     // 不画悬停态 → 直接跳过，否则鼠标一动就是整屏重绘。
+                    // **极简：悬停变了就标脏**（旧节点 + 新节点）。
+                    // 不再做"容器不画悬停态所以跳过"的判定——那类优化
+                    // 正是引入难查 bug 的地方；web 端已经回到整帧重绘，多标几十像素无所谓。
                     if let Some(ref old_id) = old {
-                        if self.hover_needs_repaint(old_id) {
-                            self.invalidate(old_id);
-                        }
+                        self.invalidate(old_id);
                     }
                     if let Some(ref next) = new {
-                        if self.hover_needs_repaint(next) {
-                            self.invalidate(next);
-                        }
+                        self.invalidate(next);
                     }
                     self.hovered = new.clone();
 
@@ -3523,35 +3500,4 @@ mod dirty_clip_tests {
 
     // ---- T12：悬停在容器上不标脏容器的整块矩形 ----
 
-    #[test]
-    fn t12_hovering_a_container_does_not_dirty_the_container() {
-        // 大容器（占满视口的 PaintBox）里放一个小子节点。
-        // 当指针从子节点移到容器本体（空白处）时，
-        // 旧行为会把"容器矩形"标脏——那就是 100% 屏幕。
-        let mut tree = tree_with_box();
-        tree.layout(Size::new(200.0, 100.0), &RecordingCtx::new(200.0, 100.0));
-        tree.render(&mut RecordingCtx::new(200.0, 100.0));
-
-        // 先悬停在子节点上
-        let child = tree.rect_of("child").expect("child rect");
-        tree.dispatch(&UiEvent::MouseMove {
-            pos: Pos::new(child.x + 1.0, child.y + 1.0),
-        });
-        assert_eq!(tree.hovered(), Some("child"));
-        tree.render(&mut RecordingCtx::new(200.0, 100.0));
-
-        // 再移到容器的空白处（命中 root）
-        tree.dispatch(&UiEvent::MouseMove {
-            pos: Pos::new(150.0, 80.0),
-        });
-        assert_eq!(tree.hovered(), Some("root"), "预期命中容器本身");
-
-        let root_rect = tree.rect_of("root").expect("root rect");
-        for r in tree.dirty().rects() {
-            assert!(
-                r.w * r.h < root_rect.w * root_rect.h * 0.5,
-                "容器的整块矩形不应被标脏（实际 {r:?}）"
-            );
-        }
-    }
 }
