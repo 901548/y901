@@ -30,9 +30,15 @@ pub mod widget_clipboard;
 pub use widget_clipboard::WidgetClipboard;
 
 use y901_runtime::PlatformRuntime;
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(all(
+    not(any(target_os = "windows", target_os = "linux")),
+    not(target_arch = "wasm32")
+))]
 use y901_runtime::{Host, Options};
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(all(
+    not(any(target_os = "windows", target_os = "linux")),
+    not(target_arch = "wasm32")
+))]
 use y901_ui::UiTree;
 
 /// 创建当前平台的运行时。
@@ -82,10 +88,16 @@ pub fn create_runtime() -> Box<dyn PlatformRuntime> {
 ///
 /// 为什么不 `unimplemented!()`：那会让"Linux 上能不能编译"变成"能编译但一跑就崩"，
 /// 而 `cargo check --target x86_64-unknown-linux-gnu` 是我们唯一的跨平台验证手段（见文档 §5）。
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(all(
+    not(any(target_os = "windows", target_os = "linux")),
+    not(target_arch = "wasm32")
+))]
 struct UnsupportedRuntime;
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(all(
+    not(any(target_os = "windows", target_os = "linux")),
+    not(target_arch = "wasm32")
+))]
 impl PlatformRuntime for UnsupportedRuntime {
     fn run(
         &mut self,
