@@ -458,8 +458,18 @@ fn keydown_handler(
     Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
         let ke: &bindings::KeyboardEvent = val.unchecked_ref();
         // 组字期间不当按键：拼音字母不能影响控制键路径。
+        // 组字期间不处理输入法的拼音字母，但不影响键盘路径。
+        //
+        // **"偶尔删不掉"的修复**：浏览器在一些情况下不发
+        // `compositionend`（切标签页 / 点击别处 / Esc），我们的标志会永久卡在
+        // `true`，然后**所有按键都被这里 `return` 掉**。
+        // 若事件自己说"未组字"且是控制键，就相信事件、把标志清掉。
         if composing.get() || ke.is_composing() {
-            return;
+            if keys::should_heal_composing(ke.is_composing(), &ke.code()) {
+                composing.set(false);
+            } else {
+                return;
+            }
         }
         let code = ke.code();
         let key = ke.key();
@@ -789,6 +799,27 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
 
     }
 
+    // ---- 隐藏 input 的 blur：**离焦时强制重置组字标志** ----
+    //
+    // 为何：切标签页、点击页面别处都会让隐藏 input 失去焦点，
+    // 而浏览器并不保证此时发 `compositionend`。标志不复位就会卡死，
+    // 表现为"键盘忽然全失灵"。这里是一道保险：一旦离焦，必定不在组字。
+    if let Some(input_js) = ime_input.as_ref() {
+        let composing_for = Rc::clone(&composing);
+        let last_for = Rc::clone(&last_committed);
+        let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
+            composing_for.set(false);
+            last_for.borrow_mut().clear();
+        });
+        let target: bindings::EventTarget = input_js.clone().unchecked_into();
+        target.add_event_listener("blur", &handler);
+        listeners.push(Listener {
+            target,
+            kind: "blur(ime)".to_string(),
+            handler,
+        });
+    }
+
     // ---- input：**ASCII 字符的唯一通路**（修复 f5f133b 回归）----
     //
     // 历史：`f5f133b` 因为"中文的 `input` 从不触发"而删掉了这个监听器，
@@ -816,7 +847,11 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             }
             el.set_value("");
             if !keys::should_accept_input(&text, false, &last_for.borrow()) {
-                return; // 刚在 compositionend 提交过的同一串 → 丢弃
+                // 刚在 `compositionend` 提交过的同一串（浏览器回写）→ 丢弃，
+                // **但必须把标记清掉**：回写只会来一次，不清就会把
+                // "用户真的又输入了同一串"也一并吞掉（表现为偶尔少字）。
+                last_for.borrow_mut().clear();
+                return;
             }
             last_for.borrow_mut().clear();
             evs.borrow_mut().push_back(RawEvent::Ime {

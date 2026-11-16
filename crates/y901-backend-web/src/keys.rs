@@ -110,6 +110,41 @@ pub fn to_ui_y(height: f32, y_dom: f32) -> f32 {
     (height - 1.0 - y_dom).max(0.0)
 }
 
+/// **组字标志卡死时的自愈判定**。
+///
+/// 现象：中文输入之后，**偶尔按 Backspace 没反应**（"就是删不掉"）。
+///
+/// 原因：我们用一个 `Cell<bool> composing` 做闸门，它只在
+/// `compositionstart` 置真、`compositionend` 置假。但浏览器在一些情况下
+/// （切标签页、点击别处、Esc 取消组字【不发】`compositionend`）
+/// **不会发** compositionend，于是标志永久为 `true`，
+/// `keydown` 回调开头就 `return`，**所有按键都被静默丢弃**。
+///
+/// 判据：事件自己说"我不在组字"（`is_composing == false`），
+/// 且这是一个**组字中绝不会出现的控制键**（Backspace/Delete/方向键/
+/// Home/End/Enter/Escape/Tab）—— 此时应该相信事件、把卡死的标志清掉。
+///
+/// 为何不直接"总是相信 `ke.is_composing()`" 而丢掉自己的标志：
+/// 部分浏览器在组字期间对某些键的 `isComposing` 也不可靠，
+/// 两个信号取或更安全；这里只在"信号明确矛盾 + 控制键"时才自愈。
+pub fn should_heal_composing(is_composing: bool, code: &str) -> bool {
+    !is_composing
+        && matches!(
+            code,
+            "Backspace"
+                | "Delete"
+                | "ArrowLeft"
+                | "ArrowRight"
+                | "ArrowUp"
+                | "ArrowDown"
+                | "Home"
+                | "End"
+                | "Enter"
+                | "Escape"
+                | "Tab"
+        )
+}
+
 /// **判定一次 `input` 事件是否应当被当作文本提交**。
 ///
 /// 三个条件，任一不满足就丢弃：
@@ -422,5 +457,29 @@ mod tests {
     fn do_not_refocus_when_focus_had_already_moved_elsewhere() {
         // 用户点了地址栏 / 其他元素
         assert!(!should_refocus(true, false));
+    }
+
+    // ---- should_heal_composing（"删不掉"的修复）----
+
+    #[test]
+    fn heal_when_browser_says_not_composing_but_flag_is_stuck() {
+        // 事件说"未组字" + 控制键 ⇒ 应该清掉卡死的标志并处理该键
+        for code in ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "Home", "End", "Enter", "Escape", "Tab"] {
+            assert!(should_heal_composing(false, code), "{code} 应触发自愈");
+        }
+    }
+
+    #[test]
+    fn never_heal_while_browser_reports_composing() {
+        // 真正组字中：一律不自愈（否则会把拼音阶段的 Backspace 当成删字）
+        assert!(!should_heal_composing(true, "Backspace"));
+        assert!(!should_heal_composing(true, "ArrowLeft"));
+    }
+
+    #[test]
+    fn never_heal_for_printable_keys() {
+        // 可打印键不走自愈（它们本来就不会被当成 KeyDown 处理）
+        assert!(!should_heal_composing(false, "KeyA"));
+        assert!(!should_heal_composing(false, "Space"));
     }
 }
