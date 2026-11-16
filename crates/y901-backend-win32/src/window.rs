@@ -257,9 +257,25 @@ fn vk_to_key(vk: u32) -> Key {
         0x23 => Key::End,
         0x21 => Key::PageUp,
         0x22 => Key::PageDown,
+        // **小键盘（NumPad）**：0x60..=0x69 = Num0..Num9，对应字符 '0'..'9'。
+        // 之前这些键全部落到 `Key::Unknown`，小键盘数字根本输不进输入框。
+        0x60..=0x69 => char::from_u32(0x30 + (vk - 0x60))
+            .map(Key::Char)
+            .unwrap_or(Key::Unknown),
+        // 0x6A..=0x6F = * + , - . / 。
+        0x6A => Key::Char('*'),
+        0x6B => Key::Char('+'),
+        0x6C => Key::Char(','),
+        0x6D => Key::Char('-'),
+        0x6E => Key::Char('.'),
+        0x6F => Key::Char('/'),
         0x70..=0x87 => Key::Function((vk - 0x70 + 1) as u8),
         // SAFETY：同上（`GetKeyState` 无指针参数）；这里额外用它判断 CapsLock 是否开启，
         // 只有在 GUI 线程才有意义。违反后果：大写锁定判断恒错 —— 字母大小写翻转。
+        // **Ctrl+字母 ⇒ 小写 `Char`**（0x11 = VK_CONTROL）。
+        // 为何需要：普通字母的字符由 `WM_CHAR` 提供，但 Ctrl 组合不会产生 `WM_CHAR`，
+        // 而 `TextInput` 的 Ctrl+A / Ctrl+C / Ctrl+V 走 `handle_key(Key::Char('a'), ctrl)`。
+        // **注意**：原注释写成"CapsLock(0x14)"是错的 —— 改成 0x14 会弄坏所有 Ctrl 快捷键。
         0x41..=0x5A if unsafe { GetKeyState(0x11) < 0 } => char::from_u32(vk + 0x20)
             .map(Key::Char)
             .unwrap_or(Key::Unknown),
