@@ -419,6 +419,15 @@ impl TextInput {
             }
         }
 
+        // **组字中不碰正文**：预编辑串非空时，删字归输入法管。
+        //
+        // 正常链路里 DOM 层已经把组字中的按键过滤掉（`event.isComposing`），
+        // 但那是"不抛给我们"而不是"我们不能被误伤"。一旦下游直接投递
+        // `UiEvent::Key`（测试、RPC、将来的其他后端），这里不设防就会删掉已提交的正文。
+        if !self.preedit.is_empty() && matches!(key, Key::Backspace | Key::Delete) {
+            return EventResult::Handled;
+        }
+
         match key {
             Key::Backspace => {
                 if self.buffer.backspace() {

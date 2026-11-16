@@ -148,13 +148,13 @@ fn binding_attribute_counts_are_stable() {
             .filter(|l| l.contains(pat))
             .count()
     }
-    assert_eq!(count("method, getter"), 31, "getter 数量变了");
+    assert_eq!(count("method, getter"), 32, "getter 数量变了");
     assert_eq!(count("method, setter"), 3, "setter 数量变了");
     assert_eq!(count("constructor"), 2, "constructor 数量变了");
     // 注意：`JsObject::set_prop` 与 `Uint8ClampedArray::set_index` 已删除，
     // 所以 indexing_setter 现在为 0（若未来重新引入，这里会提醒你更新）。
     assert_eq!(count("indexing_setter"), 0, "indexing_setter 数量变了");
-    assert_eq!(count("structural"), 3, "structural 数量变了");
+    assert_eq!(count("structural"), 4, "structural 数量变了");
     // setProperty 有两个重载（带 priority / 不带），都要保留。
     assert_eq!(count("js_name = \"setProperty\""), 2, "setProperty 重载少了");
 }

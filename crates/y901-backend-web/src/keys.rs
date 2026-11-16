@@ -110,39 +110,41 @@ pub fn to_ui_y(height: f32, y_dom: f32) -> f32 {
     (height - 1.0 - y_dom).max(0.0)
 }
 
-/// **组字标志卡死时的自愈判定**。
+/// **统一键盘闸门**：一个 `keydown` 事件到底该不该变成 `RawEvent::KeyDown`。
 ///
-/// 现象：中文输入之后，**偶尔按 Backspace 没反应**（"就是删不掉"）。
+/// 设计变更（重构的核心）：旧实现把 `keydown` 同时挂在 canvas 与隐藏 input 上，
+/// 并用自己的 `Cell<bool> composing` 挡住组字期的按键。问题是：
+/// ① 焦点在两个元素之间流转时，事件只到其中一个；
+/// ② 浏览器不保证发 `compositionend`，标志卡死 ⇒ **所有按键永久丢失**。
 ///
-/// 原因：我们用一个 `Cell<bool> composing` 做闸门，它只在
-/// `compositionstart` 置真、`compositionend` 置假。但浏览器在一些情况下
-/// （切标签页、点击别处、Esc 取消组字【不发】`compositionend`）
-/// **不会发** compositionend，于是标志永久为 `true`，
-/// `keydown` 回调开头就 `return`，**所有按键都被静默丢弃**。
+/// 新判据只看两件事，且都是事实而非记忆：
+/// 1. **焦点是不是在我们自己的元素上**（`document.activeElement` 是 canvas 或隐藏 input）；
+/// 2. **这次事件本身是不是组字产生的**（`event.isComposing`）。
 ///
-/// 判据：事件自己说"我不在组字"（`is_composing == false`），
-/// 且这是一个**组字中绝不会出现的控制键**（Backspace/Delete/方向键/
-/// Home/End/Enter/Escape/Tab）—— 此时应该相信事件、把卡死的标志清掉。
+/// 归则：
+/// - 焦点不在我们这里（地址栏 / devtools / 页面其他输入框）→ **不接**；
+/// - 组字中（`isComposing`）→ **不接**（键归输入法，否则拼音会被当成删字）；
+/// - 可打印字符且无 Ctrl/Alt → **不接**（它们由 `input` 事件提交，避免双字）；
+/// - 其余（Backspace / Delete / 方向键 / Home / End / Tab / Enter / Ctrl+字母 等）→ **接**。
 ///
-/// 为何不直接"总是相信 `ke.is_composing()`" 而丢掉自己的标志：
-/// 部分浏览器在组字期间对某些键的 `isComposing` 也不可靠，
-/// 两个信号取或更安全；这里只在"信号明确矛盾 + 控制键"时才自愈。
-pub fn should_heal_composing(is_composing: bool, code: &str) -> bool {
-    !is_composing
-        && matches!(
-            code,
-            "Backspace"
-                | "Delete"
-                | "ArrowLeft"
-                | "ArrowRight"
-                | "ArrowUp"
-                | "ArrowDown"
-                | "Home"
-                | "End"
-                | "Enter"
-                | "Escape"
-                | "Tab"
-        )
+/// 注意最后一条：**不看自己的任何标志**，所以"组字状态卡死"这类间歇性问题在结构上不可能发生。
+pub fn should_send_keydown(
+    focus_is_player: bool,
+    is_composing: bool,
+    code: &str,
+    printable: bool,
+    ctrl: bool,
+    alt: bool,
+) -> bool {
+    if !focus_is_player || is_composing {
+        return false;
+    }
+    // 可打印键：字符由 `input` 事件提交；但 **Ctrl/Alt+字母必须接**（Ctrl+A/C/V 靠这条）
+    if printable && !ctrl && !alt {
+        return false;
+    }
+    let _ = code;
+    true
 }
 
 /// **判定一次 `input` 事件是否应当被当作文本提交**。
@@ -458,28 +460,43 @@ mod tests {
         // 用户点了地址栏 / 其他元素
         assert!(!should_refocus(true, false));
     }
-
-    // ---- should_heal_composing（"删不掉"的修复）----
+    
+    // ---- should_send_keydown（统一闸门）----
 
     #[test]
-    fn heal_when_browser_says_not_composing_but_flag_is_stuck() {
-        // 事件说"未组字" + 控制键 ⇒ 应该清掉卡死的标志并处理该键
-        for code in ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "Home", "End", "Enter", "Escape", "Tab"] {
-            assert!(should_heal_composing(false, code), "{code} 应触发自愈");
-        }
+    fn control_keys_pass_when_focus_is_ours() {
+        assert!(should_send_keydown(true, false, "Backspace", false, false, false));
+        assert!(should_send_keydown(true, false, "Delete", false, false, false));
+        assert!(should_send_keydown(true, false, "ArrowLeft", false, false, false));
+        assert!(should_send_keydown(true, false, "Tab", false, false, false));
     }
 
     #[test]
-    fn never_heal_while_browser_reports_composing() {
-        // 真正组字中：一律不自愈（否则会把拼音阶段的 Backspace 当成删字）
-        assert!(!should_heal_composing(true, "Backspace"));
-        assert!(!should_heal_composing(true, "ArrowLeft"));
+    fn printable_keys_are_left_to_the_input_event() {
+        assert!(!should_send_keydown(true, false, "KeyA", true, false, false));
+        // 但 Ctrl+字母要接（Ctrl+A / Ctrl+C / Ctrl+V）
+        assert!(should_send_keydown(true, false, "KeyA", true, true, false));
+        assert!(should_send_keydown(true, false, "KeyV", true, true, false));
     }
 
     #[test]
-    fn never_heal_for_printable_keys() {
-        // 可打印键不走自愈（它们本来就不会被当成 KeyDown 处理）
-        assert!(!should_heal_composing(false, "KeyA"));
-        assert!(!should_heal_composing(false, "Space"));
+    fn nothing_passes_when_focus_is_elsewhere() {
+        // 地址栏 / devtools / 页面其他输入框：一律不接（不抢用户的键）
+        assert!(!should_send_keydown(false, false, "Backspace", false, false, false));
+        assert!(!should_send_keydown(false, false, "ArrowLeft", false, false, false));
+    }
+
+    #[test]
+    fn nothing_passes_while_composing() {
+        // 真正组字中：Backspace 归输入法（删拼音），不能变成删正文
+        assert!(!should_send_keydown(true, true, "Backspace", false, false, false));
+        assert!(!should_send_keydown(true, true, "ArrowLeft", false, false, false));
+    }
+
+    #[test]
+    fn backspace_works_again_as_soon_as_the_event_says_composition_ended() {
+        // 这条是"删不掉"回归的直接守卫：同一顺序里，
+        // compositionend 之后的 Backspace 事件 isComposing=false ⇒ 必须接。
+        assert!(should_send_keydown(true, false, "Backspace", false, false, false));
     }
 }

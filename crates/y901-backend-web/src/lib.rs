@@ -451,30 +451,39 @@ impl WasmRuntime {
 /// `input` 事件由浏览器在"文本真正进入元素"时统一触发，天然不会重复。
 ///
 /// 这里只剩两件事：把**非打印键**翻译成 `RawEvent::KeyDown`，以及阻止浏览器默认行为。
+/// **window 级统一 keydown 处理器**（重构核心）。
+///
+/// 旧实现把 `keydown` 同时挂在 canvas 与隐藏 input 上，并用自己的
+/// `Cell<bool> composing` 挡住组字期按键：
+/// - 焦点在两个元素之间流转时，事件只会到其中一个；
+/// - 浏览器不保证发 `compositionend`，标志一卡死就把**所有按键永久吞掉**。
+///
+/// 现在只有**一个**监听器，挂在 `window` 上（事件必然经过），靠两件事实判断：
+/// ① `document.activeElement` 是不是我们自己的元素（canvas 或隐藏 input）；
+/// ② 这次事件本身是不是组字产生的（`event.isComposing`）。
+/// 判断逻辑在纯函数 `keys::should_send_keydown` 里（带单测），这里只做取值与投递。
 fn keydown_handler(
     events: Rc<RefCell<VecDeque<RawEvent>>>,
-    composing: Rc<std::cell::Cell<bool>>,
+    canvas_id: String,
+    ime_id: String,
 ) -> Closure<dyn FnMut(JsValue)> {
     Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
         let ke: &bindings::KeyboardEvent = val.unchecked_ref();
-        // 组字期间不当按键：拼音字母不能影响控制键路径。
-        // 组字期间不处理输入法的拼音字母，但不影响键盘路径。
-        //
-        // **"偶尔删不掉"的修复**：浏览器在一些情况下不发
-        // `compositionend`（切标签页 / 点击别处 / Esc），我们的标志会永久卡在
-        // `true`，然后**所有按键都被这里 `return` 掉**。
-        // 若事件自己说"未组字"且是控制键，就相信事件、把标志清掉。
-        if composing.get() || ke.is_composing() {
-            if keys::should_heal_composing(ke.is_composing(), &ke.code()) {
-                composing.set(false);
-            } else {
-                return;
-            }
-        }
+        let focus_id = active_element_id();
+        let focus_is_player = focus_id
+            .as_deref()
+            .is_some_and(|id| id == canvas_id || id == ime_id);
         let code = ke.code();
         let key = ke.key();
-        // 可打印字符**不在这里处理**：`input` 事件会负责它。
-        if keys::char_from_dom(&key).is_some() && !ke.ctrl_key() && !ke.alt_key() {
+        // **只看事实**：焦点在哪、事件是否组字。不看任何自己维护的标志。
+        if !keys::should_send_keydown(
+            focus_is_player,
+            ke.is_composing(),
+            &code,
+            keys::char_from_dom(&key).is_some(),
+            ke.ctrl_key(),
+            ke.alt_key(),
+        ) {
             return;
         }
         let mods =
@@ -482,7 +491,8 @@ fn keydown_handler(
         if let Some(k) = keys::key_from_dom(&code, &key) {
             events.borrow_mut().push_back(RawEvent::KeyDown { key: k, mods });
         }
-        // 阻止浏览器默认：Tab 跳焦点、空格/方向键/翻页键滚页、Backspace 后退导航。
+        // 阻止浏览器默认：Tab 跳焦点、空格滚动、Backspace 返回上一页、
+        // 方向键/翻页键滚动页面。**Backspace 尤其重要**：不阻止就会跳转。
         if matches!(
             code.as_str(),
             "Tab" | "Space" | "Backspace" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight"
@@ -492,6 +502,28 @@ fn keydown_handler(
             ev.prevent_default();
         }
     })
+}
+
+/// 隐藏 IME `<input>` 的固定 id（统一监听靠它判断焦点）。
+pub const IME_ID: &str = "y901-ime";
+
+/// 焦点是否在指定 id 的元素上。
+fn active_is(id: &str) -> bool {
+    active_element_id().as_deref() == Some(id)
+}
+
+/// `window` 的 `EventTarget` 视图（回调里首选它挂监听）。
+fn global_window_target() -> bindings::EventTarget {
+    let win_js: JsValue = bindings::global_window().map(JsValue::from).unwrap_or(JsValue::NULL);
+    win_js.unchecked_into()
+}
+
+/// 当前焦点元素的 `id`（`None` = 焦点在 body / 地址栏 / devtools / 别的页面元素上）。
+fn active_element_id() -> Option<String> {
+    let window = bindings::global_window()?;
+    let document = window.document()?;
+    let el = document.active_element()?;
+    Some(el.id())
 }
 
 /// **P1/P2：挂鼠标、滚轮与键盘监听器**。
@@ -517,6 +549,8 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
 
     // wasm-bindgen 的外部类型本身就是 `JsValue` 的包装；clippy 提示这里无需 `.into()`。
     let canvas_js: JsValue = state.canvas.clone();
+    // **焦点判定用的 id**：只有焦点在这两个元素上时，我们才接键盘事件。
+    let canvas_id: String = state.canvas.get_attribute("id").unwrap_or_default();
     let events = Rc::clone(&state.events);
     // **IME 共享状态**（三处共用：keydown、input、composition）：
     //
@@ -525,7 +559,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     let interacted_cell = Rc::new(std::cell::Cell::new(false));
     // **blur 时焦点是否在我们的隐藏 input 上**。
     let input_had_focus_cell = Rc::new(std::cell::Cell::new(false));
-    let composing = Rc::new(std::cell::Cell::new(false));
+    // **组字标志已彻底删除**：改用 `event.isComposing`（事实），不再自己记状态。
     // **上一次 `compositionend` 提交的串**（ASCII 与中文的交叉去重用）。
     let last_committed: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     // **坐标换算所需：UI 树的 y 是"从底部往上"，DOM 的 `offsetY` 是"从顶部往下"。**
@@ -547,6 +581,8 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             "style",
             "position:fixed;opacity:0;width:1px;height:1px;left:0;top:0;z-index:-1;border:0;padding:0;",
         );
+        // **一个固定 id**：统一监听时用 `document.activeElement.id` 判断焦点在谁身上。
+        element.set_attribute("id", IME_ID);
         element.set_attribute("type", "text");
         element.set_attribute("autocomplete", "off");
         element.set_attribute("autocapitalize", "off");
@@ -686,47 +722,35 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         });
     }
 
-    // ---- keydown（P2）----
+    // ---- window \u7ea7\u952e\u76d8\u4e0e\u6587\u672c\u76d1\u542c\uff08**\u91cd\u6784**\uff09----
     //
-    // 框架的 `RawEvent` **没有 `KeyUp` 变体**（只有 `KeyDown` / `SystemKeyDown` / `Char` / `Ime`，
-    // 见 `y901-runtime` 的 `RawEvent` 与 `translate()`），因此这里只挂 `keydown`。
-    //
-    // **两个目标都要挂**：焦点在 canvas 上时事件到 canvas，焦点在隐藏 input 上
-    // （IME 模式）时到 input。两者不会同时收到，因此不会双发。
-    {
-        let mk = || keydown_handler(Rc::clone(&events), Rc::clone(&composing));
-        let on_canvas = mk();
-        let canvas_target: bindings::EventTarget = canvas_js.clone().unchecked_into();
-        canvas_target.add_event_listener("keydown", &on_canvas);
+    // \u5168\u90e8\u6302\u5728 **window** \u4e0a\uff1a\u65e0\u8bba\u7126\u70b9\u5728 canvas \u8fd8\u662f\u9690\u85cf input\uff0c\u4e8b\u4ef6\u90fd\u4f1a\u7ecf\u8fc7 window\u3002
+    // \u5904\u7406\u5668\u53ea\u770b\u4e24\u4ef6\u4e8b\uff1a`document.activeElement` \u662f\u4e0d\u662f\u6211\u4eec\u81ea\u5df1\u7684\u5143\u7d20\uff0c
+    // \u4ee5\u53ca\u4e8b\u4ef6\u81ea\u5df1\u7684 `isComposing`\u3002**\u4e0d\u518d\u7ef4\u62a4\u7ec4\u5b57\u6807\u5fd7**\u2014\u2014
+    // \u90a3\u4e2a\u6807\u5fd7\u4e00\u65e6\u56e0\u4e3a\u6d4f\u89c8\u5668\u4e0d\u53d1 `compositionend` \u800c\u5361\u6b7b\uff0c\u5c31\u4f1a\u628a\u6240\u6709\u6309\u952e\u6c38\u4e45\u541e\u6389\u3002
+
+    // ---- keydown\uff1a\u53ea\u53d1\u63a7\u5236\u952e\uff08\u5b57\u7b26\u7531 `input` \u63d0\u4ea4\uff09----
+    if bindings::global_window().is_some() {
+        let handler = keydown_handler(Rc::clone(&events), canvas_id.clone(), IME_ID.to_string());
+        let target: bindings::EventTarget = global_window_target();
+        target.add_event_listener("keydown", &handler);
         listeners.push(Listener {
-            target: canvas_target,
-            kind: "keydown".to_string(),
-            handler: on_canvas,
+            target,
+            kind: "keydown(window)".to_string(),
+            handler,
         });
-        if let Some(input_js) = ime_input.as_ref() {
-            let on_input = mk();
-            let input_target: bindings::EventTarget = input_js.clone().unchecked_into();
-            input_target.add_event_listener("keydown", &on_input);
-            listeners.push(Listener {
-                target: input_target,
-                kind: "keydown(ime)".to_string(),
-                handler: on_input,
-            });
-        }
     }
 
-    // ---- IME（P3）----
-    //
-    // `compositionstart/update/end` 全部来自那个隐藏 input：拼音组字只会发给
-    // **可编辑元素**，canvas 永远收不到。
+    // ---- composition\uff08\u4e0e keydown \u4e00\u6837\u6302 window\uff09----
     if let Some(input_js) = ime_input.as_ref() {
-        // ---- compositionstart：进入组字态，清空旧值 ----
+        // compositionstart\uff1a\u8fdb\u5165\u7ec4\u5b57\uff0c\u6e05\u7a7a\u65e7\u503c\uff0c\u7ed9\u754c\u9762\u4e00\u4e2a\u7a7a\u7684\u9884\u7f16\u8f91\u4e32
         {
             let evs = Rc::clone(&events);
-            let composing_for = Rc::clone(&composing);
             let input_for_clear = input_js.clone();
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
-                composing_for.set(true);
+                if !active_is(IME_ID) {
+                    return; // \u7ec4\u5b57\u53d1\u5728\u522b\u7684\u8f93\u5165\u6846\u4e0a\uff1a\u4e0d\u5f52\u6211\u4eec
+                }
                 let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
                 el.set_value("");
                 evs.borrow_mut().push_back(RawEvent::Ime {
@@ -734,53 +758,48 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                     composition: true,
                 });
             });
-            let target: bindings::EventTarget = input_js.clone().unchecked_into();
+            let target: bindings::EventTarget =
+                global_window_target();
             target.add_event_listener("compositionstart", &handler);
             listeners.push(Listener {
                 target,
-                kind: "compositionstart".to_string(),
+                kind: "compositionstart(window)".to_string(),
                 handler,
             });
         }
-
-        // ---- compositionupdate：预编辑串（只画不提交）----
+        // compositionupdate\uff1a\u53ea\u753b\u4e0d\u63d0\u4ea4
         {
             let evs = Rc::clone(&events);
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
+                if !active_is(IME_ID) {
+                    return;
+                }
                 let ce: &bindings::CompositionEvent = val.unchecked_ref();
                 evs.borrow_mut().push_back(RawEvent::Ime {
                     text: ce.data(),
                     composition: true,
                 });
             });
-            let target: bindings::EventTarget = input_js.clone().unchecked_into();
+            let target: bindings::EventTarget =
+                global_window_target();
             target.add_event_listener("compositionupdate", &handler);
             listeners.push(Listener {
                 target,
-                kind: "compositionupdate".to_string(),
+                kind: "compositionupdate(window)".to_string(),
                 handler,
             });
         }
-
-        // ---- compositionend：**提交唯一一次** ----
-        //
-        // 实测：`compositionend.data` 就是完整的提交串（“你好”、“设置”），
-        // 而 `input` 事件**根本不会触发**。所以这里就是文本的唯一出口，
-        // 既不需要 `input` 监听，也不需要任何去重标志。
+        // compositionend\uff1a**\u552f\u4e00\u63d0\u4ea4\u70b9**\uff0c\u8bb0\u4e0b\u5df2\u63d0\u4ea4\u4e32\u4f9b input \u53bb\u91cd
         {
             let evs = Rc::clone(&events);
-            let composing_for = Rc::clone(&composing);
             let last_for = Rc::clone(&last_committed);
             let input_for_clear = input_js.clone();
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
                 let ce: &bindings::CompositionEvent = val.unchecked_ref();
                 let text = ce.data();
-                composing_for.set(false);
                 let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
                 el.set_value("");
                 if !text.is_empty() {
-                    // 记下已提交串：若浏览器随后把它回写到 `input.value`
-                    // 并发 `input`，那次就会被 `should_accept_input` 丢弃。
                     *last_for.borrow_mut() = text.clone();
                     evs.borrow_mut().push_back(RawEvent::Ime {
                         text,
@@ -788,85 +807,74 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                     });
                 }
             });
-            let target: bindings::EventTarget = input_js.clone().unchecked_into();
+            let target: bindings::EventTarget =
+                global_window_target();
             target.add_event_listener("compositionend", &handler);
             listeners.push(Listener {
                 target,
-                kind: "compositionend".to_string(),
+                kind: "compositionend(window)".to_string(),
                 handler,
             });
         }
 
-    }
-
-    // ---- 隐藏 input 的 blur：**离焦时强制重置组字标志** ----
-    //
-    // 为何：切标签页、点击页面别处都会让隐藏 input 失去焦点，
-    // 而浏览器并不保证此时发 `compositionend`。标志不复位就会卡死，
-    // 表现为"键盘忽然全失灵"。这里是一道保险：一旦离焦，必定不在组字。
-    if let Some(input_js) = ime_input.as_ref() {
-        let composing_for = Rc::clone(&composing);
-        let last_for = Rc::clone(&last_committed);
-        let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
-            composing_for.set(false);
-            last_for.borrow_mut().clear();
-        });
-        let target: bindings::EventTarget = input_js.clone().unchecked_into();
-        target.add_event_listener("blur", &handler);
-        listeners.push(Listener {
-            target,
-            kind: "blur(ime)".to_string(),
-            handler,
-        });
-    }
-
-    // ---- input：**ASCII 字符的唯一通路**（修复 f5f133b 回归）----
-    //
-    // 历史：`f5f133b` 因为"中文的 `input` 从不触发"而删掉了这个监听器，
-    // 但它同时是 **ASCII 的唯一通路** —— `keydown` 对可打印键已提前 `return`，
-    // `RawEvent::Char` 在 wasm 侧没有任何生产点。于是"中文能输入、英文不能"。
-    //
-    // 如今两条通路分工明确：
-    // - **ASCII**：浏览器把字符写入隐藏 input → 这里提交；
-    // - **中文**：`compositionend` 提交（上面）。
-    // 交叉只有一种：某些浏览器在 `compositionend` 后回写同一串 → 用 `last_committed` 去重。
-    if let Some(input_js) = ime_input.as_ref() {
-        let evs = Rc::clone(&events);
-        let composing_for = Rc::clone(&composing);
-        let last_for = Rc::clone(&last_committed);
-        let input_for_read = input_js.clone();
-        let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
-            let el: &bindings::HtmlInputElement = input_for_read.unchecked_ref();
-            let text = el.value();
-            // **组字中不读也不清**：清了会丢掉正在组的字。
-            if composing_for.get() {
-                return;
-            }
-            if text.is_empty() {
-                return;
-            }
-            el.set_value("");
-            if !keys::should_accept_input(&text, false, &last_for.borrow()) {
-                // 刚在 `compositionend` 提交过的同一串（浏览器回写）→ 丢弃，
-                // **但必须把标记清掉**：回写只会来一次，不清就会把
-                // "用户真的又输入了同一串"也一并吞掉（表现为偶尔少字）。
+        // ---- input\uff1a**ASCII \u5b57\u7b26\u7684\u552f\u4e00\u901a\u8def** ----
+        //
+        // \u4e24\u9053\u95f8\u95e8\uff1a\u7126\u70b9\u5fc5\u987b\u5728\u9690\u85cf input \u4e0a\uff1b\u4e14\u4e8b\u4ef6\u81ea\u5df1\u4e0d\u80fd\u662f
+        // \u7ec4\u5b57\u4e2d\u7684\u9884\u7f16\u8f91\uff08`InputEvent.isComposing === true`\uff09\u2014\u2014\u5426\u5219\u62fc\u97f3\u4f1a\u88ab\u5f53\u6210\u6b63\u6587\u63d2\u5165\u3002
+        {
+            let evs = Rc::clone(&events);
+            let last_for = Rc::clone(&last_committed);
+            let input_for_read = input_js.clone();
+            let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
+                if !active_is(IME_ID) {
+                    return;
+                }
+                let ev: &bindings::Event = val.unchecked_ref();
+                if ev.is_composing() {
+                    return; // \u7ec4\u5b57\u4e2d\u7684 input \u4e8b\u4ef6\u4e0d\u662f\u63d0\u4ea4
+                }
+                let el: &bindings::HtmlInputElement = input_for_read.unchecked_ref();
+                let text = el.value();
+                if text.is_empty() {
+                    return;
+                }
+                el.set_value("");
+                if !keys::should_accept_input(&text, false, &last_for.borrow()) {
+                    last_for.borrow_mut().clear();
+                    return;
+                }
                 last_for.borrow_mut().clear();
-                return;
-            }
-            last_for.borrow_mut().clear();
-            evs.borrow_mut().push_back(RawEvent::Ime {
-                text,
-                composition: false,
+                evs.borrow_mut().push_back(RawEvent::Ime {
+                    text,
+                    composition: false,
+                });
             });
-        });
-        let target: bindings::EventTarget = input_js.clone().unchecked_into();
-        target.add_event_listener("input", &handler);
-        listeners.push(Listener {
-            target,
-            kind: "input".to_string(),
-            handler,
-        });
+            let target: bindings::EventTarget =
+                global_window_target();
+            target.add_event_listener("input", &handler);
+            listeners.push(Listener {
+                target,
+                kind: "input(window)".to_string(),
+                handler,
+            });
+        }
+
+        // ---- blur\uff1a\u9690\u85cf input \u79bb\u7126\u2192\u6e05\u6389\u53bb\u91cd\u6807\u8bb0 ----
+        {
+            let last_for = Rc::clone(&last_committed);
+            let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
+                last_for.borrow_mut().clear();
+            });
+            let target: bindings::EventTarget = input_js.clone().unchecked_into();
+            target.add_event_listener("blur", &handler);
+            listeners.push(Listener {
+                target,
+                kind: "blur(ime)".to_string(),
+                handler,
+            });
+        }
     }
+
 
     // ---- window resize（P4）----
     //

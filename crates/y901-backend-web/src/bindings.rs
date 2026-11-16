@@ -269,6 +269,14 @@ extern "C" {
     pub type Event;
 
     /// \u963b\u6b62\u6d4f\u89c8\u5668\u9ed8\u8ba4\u884c\u4e3a\uff08\u9875\u9762\u6eda\u52a8\u3001Tab \u8df3\u7126\u7b49\uff09\u3002
+    /// **`event.isComposing`**（`InputEvent` / `KeyboardEvent` 都有）。
+    ///
+    /// 用途：统一监听时判断「这次事件是不是输入法组字产生的」。
+    /// **相信事件而不是我们自己的标志**：旧实现用 `Cell<bool>` 记录组字态，
+    /// 但浏览器并不保证一定发 `compositionend`，标志一卡死就会把所有按键永久吞掉（"删不掉"）。
+    #[wasm_bindgen(method, getter, structural, js_name = "isComposing")]
+    pub fn is_composing(this: &Event) -> bool;
+
     #[wasm_bindgen(method, js_name = "preventDefault")]
     pub fn prevent_default(this: &Event);
 }
