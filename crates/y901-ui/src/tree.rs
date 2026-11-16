@@ -396,13 +396,22 @@ impl UiTree {
         for n in dirty_nodes {
             self.invalidate(&n);
         }
+        // **popup 动画的尾帧**：`node == None` 的动画属于浮层，它们不在普通节点索引里，
+        // 所以上面的 `invalidate(n)` 永远命中不到它们。完成时不标脏的话，最后一帧的
+        // 淡入/缩放值（alpha = 1 - progress）会停在屏幕上，形成"半透明残影"。
+        let mut popup_finished = false;
         for mut a in completed {
-            if let Some(n) = a.node.as_deref() {
-                self.invalidate(n);
+            match a.node.as_deref() {
+                Some(n) => self.invalidate(n),
+                None => popup_finished = true,
             }
             if let Some(cb) = a.on_complete.take() {
                 cb();
             }
+        }
+        if popup_finished {
+            // 弹层完成帧必须**整窗重绘**：遮罩层与弹层覆盖的区域可能不在任何局部脏区内。
+            self.invalidate_all();
         }
         still_running
     }
@@ -3370,6 +3379,40 @@ mod dirty_clip_tests {
         assert!(
             tree.dirty().is_full(),
             "弹层打开后必须整窗重绘：局部剪裁下弹层会只画出一部分"
+        );
+    }
+
+    // ---- T7：popup 动画完成帧必须整窗重绘 ----
+
+    #[test]
+    fn t7_popup_animation_completion_forces_full_repaint() {
+        let mut tree = laid_out_tree();
+        // 先把脏区清成"局部"状态
+        tree.invalidate("child");
+        assert!(!tree.dirty().is_full(), "前提：局部脏区");
+
+        // 模拟一个 popup 开启动画：node = None，持续极短时间
+        let key = crate::animation::key_of("popup-test");
+        tree.animate(
+            key,
+            crate::animation::Animate::new(
+                0.0,
+                1.0,
+                std::time::Duration::from_millis(1),
+                crate::animation::Easing::Linear,
+            ),
+            None,
+        );
+        // 推进到完成
+        let mut guard = 0;
+        while tree.active_animation_count() > 0 && guard < 10 {
+            tree.tick_animations(std::time::Duration::from_millis(10));
+            guard += 1;
+        }
+        assert_eq!(tree.active_animation_count(), 0, "动画应已完成");
+        assert!(
+            tree.dirty().is_full(),
+            "popup 动画完成帧必须整窗重绘，否则留下半透明残影"
         );
     }
 }
