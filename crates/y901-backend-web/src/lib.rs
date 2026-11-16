@@ -222,10 +222,16 @@ impl WindowBackend for WasmWindow<'_> {
                 .collect()
         };
 
+        // **性能探针**：只在帧耗时超过 100ms 时打一条，平时完全不噪。
+        // 用法：真机上如果又出现卡顿，这行会直接告诉我们耗在哪一段。
+        let t0 = bindings::date_now();
+
         if full {
             self.soft.clear();
         }
         tree.render(self.soft);
+
+        let t1 = bindings::date_now();
 
         // 分开借用：`pixels` 只读借 `soft`，`present` 需要 `&mut self`。
         let WasmWindow { soft, present, .. } = self;
@@ -234,6 +240,20 @@ impl WindowBackend for WasmWindow<'_> {
         let partial = (!full && crate::present::should_upload_partial(&dirty_rects, vw, vh))
             .then_some(dirty_rects.as_slice());
         present.present(soft.pixels(), vw, vh, partial);
+
+        // [DBG-PERF] 仅超阈值时输出：render = 布局+光栅化，present = 跨界上屏。
+        let t2 = bindings::date_now();
+        let total = t2 - t0;
+        if total > 100.0 {
+            bindings::console_log(&format!(
+                "[DBG-PERF] render={:.1}ms present={:.1}ms size={}x{} mode={}",
+                t1 - t0,
+                t2 - t1,
+                vw,
+                vh,
+                if partial.is_some() { "partial" } else { "full" }
+            ));
+        }
         Ok(RenderOutcome::Presented)
     }
 

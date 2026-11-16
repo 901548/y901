@@ -42,20 +42,18 @@ impl Present {
                         continue;
                     }
                     let image_data = ctx.create_image_data(rw, rh);
-                    let data = image_data.data();
-                    for (i, &byte) in rgba.iter().enumerate() {
-                        data.set_index(i as u32, byte);
-                    }
+                    // **批量拷贝**：`TypedArray.prototype.set` 一次性把 wasm 内存里的字节搬进
+                    // ImageData 的 data 视图。以前是逐字节 `data[i] = v`（`set_index`），
+                    // 800×600 就是 **192 万次跨 wasm/JS 边界调用** —— 那正是"每次操作卡 1 秒"的根源。
+                    image_data.data().set_from(&rgba, 0);
                     ctx.put_image_data(&image_data, x as f64, y as f64);
                 }
             }
             _ => {
                 let rgba = bgra_to_rgba(pixels, w, h);
                 let image_data = ctx.create_image_data(w, h);
-                let data = image_data.data();
-                for (i, &byte) in rgba.iter().enumerate() {
-                    data.set_index(i as u32, byte);
-                }
+                // 同上：整帧也只做**一次**批量拷贝。
+                image_data.data().set_from(&rgba, 0);
                 ctx.put_image_data(&image_data, 0.0, 0.0);
             }
         }
