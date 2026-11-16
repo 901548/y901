@@ -448,6 +448,8 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     //
     // - `composing`：正在拼音组字。组字期间的 `keydown` 与 `input` 都**不能**当成用户输入。
     let composing = Rc::new(std::cell::Cell::new(false));
+    // **上一次 `compositionend` 提交的串**（ASCII 与中文的交叉去重用）。
+    let last_committed: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     // **坐标换算所需：UI 树的 y 是"从底部往上"，DOM 的 `offsetY` 是"从顶部往下"。**
     // 公式在 `keys::to_ui_y`（带单测），这里只把画布高度抓一份。
     // **实时高度**：回调读它做 Y 翻转，resize 后由 `apply_pending` 更新。
@@ -686,6 +688,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         {
             let evs = Rc::clone(&events);
             let composing_for = Rc::clone(&composing);
+            let last_for = Rc::clone(&last_committed);
             let input_for_clear = input_js.clone();
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
                 let ce: &bindings::CompositionEvent = val.unchecked_ref();
@@ -694,6 +697,9 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
                 el.set_value("");
                 if !text.is_empty() {
+                    // 记下已提交串：若浏览器随后把它回写到 `input.value`
+                    // 并发 `input`，那次就会被 `should_accept_input` 丢弃。
+                    *last_for.borrow_mut() = text.clone();
                     evs.borrow_mut().push_back(RawEvent::Ime {
                         text,
                         composition: false,
@@ -709,6 +715,50 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             });
         }
 
+    }
+
+    // ---- input：**ASCII 字符的唯一通路**（修复 f5f133b 回归）----
+    //
+    // 历史：`f5f133b` 因为"中文的 `input` 从不触发"而删掉了这个监听器，
+    // 但它同时是 **ASCII 的唯一通路** —— `keydown` 对可打印键已提前 `return`，
+    // `RawEvent::Char` 在 wasm 侧没有任何生产点。于是"中文能输入、英文不能"。
+    //
+    // 如今两条通路分工明确：
+    // - **ASCII**：浏览器把字符写入隐藏 input → 这里提交；
+    // - **中文**：`compositionend` 提交（上面）。
+    // 交叉只有一种：某些浏览器在 `compositionend` 后回写同一串 → 用 `last_committed` 去重。
+    if let Some(input_js) = ime_input.as_ref() {
+        let evs = Rc::clone(&events);
+        let composing_for = Rc::clone(&composing);
+        let last_for = Rc::clone(&last_committed);
+        let input_for_read = input_js.clone();
+        let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
+            let el: &bindings::HtmlInputElement = input_for_read.unchecked_ref();
+            let text = el.value();
+            // **组字中不读也不清**：清了会丢掉正在组的字。
+            if composing_for.get() {
+                return;
+            }
+            if text.is_empty() {
+                return;
+            }
+            el.set_value("");
+            if !keys::should_accept_input(&text, false, &last_for.borrow()) {
+                return; // 刚在 compositionend 提交过的同一串 → 丢弃
+            }
+            last_for.borrow_mut().clear();
+            evs.borrow_mut().push_back(RawEvent::Ime {
+                text,
+                composition: false,
+            });
+        });
+        let target: bindings::EventTarget = input_js.clone().unchecked_into();
+        target.add_event_listener("input", &handler);
+        listeners.push(Listener {
+            target,
+            kind: "input".to_string(),
+            handler,
+        });
     }
 
     // ---- window resize（P4）----

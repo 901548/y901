@@ -110,6 +110,21 @@ pub fn to_ui_y(height: f32, y_dom: f32) -> f32 {
     (height - 1.0 - y_dom).max(0.0)
 }
 
+/// **判定一次 `input` 事件是否应当被当作文本提交**。
+///
+/// 三个条件，任一不满足就丢弃：
+/// 1. **不在组字中**（拼音阶段的中间串不能插进输入框）；
+/// 2. **非空**；
+/// 3. **不等于上一次 `compositionend` 提交的串** —— 部分浏览器会在
+///    `compositionend` 之后把同一串再写回 `input.value` 并发一次 `input`，
+///    不比对就会插两次（"你好你好"）。
+///
+/// 为何抽成纯函数：DOM 回调只能在 wasm 里跑，而这条判定是真正容易出错的地方，
+/// 放在这里就能用本机 `cargo test` 钉住。
+pub fn should_accept_input(value: &str, composing: bool, last_committed: &str) -> bool {
+    !composing && !value.is_empty() && value != last_committed
+}
+
 /// 特殊键表：`(code, Key)`。
 fn special_key(code: &str) -> Option<Key> {
     let k = match code {
@@ -344,5 +359,34 @@ mod tests {
         assert_eq!(to_ui_y(600.0, 900.0), 0.0);
         assert_eq!(to_ui_y(f32::NAN, 10.0), 0.0);
         assert_eq!(to_ui_y(600.0, f32::NAN), 0.0);
+    }
+
+    // ---- should_accept_input（ASCII 与中文的交叉判定）----
+
+    #[test]
+    fn accepts_plain_ascii_typing() {
+        // 键盘直接输入 "a" → input.value = "a"，应提交
+        assert!(should_accept_input("a", false, ""));
+        assert!(should_accept_input("admin", false, ""));
+    }
+
+    #[test]
+    fn rejects_while_composing() {
+        // 拼音阶段的中间串不能被当成正文
+        assert!(!should_accept_input("nihao", true, ""));
+        assert!(!should_accept_input("你好", true, ""));
+    }
+
+    #[test]
+    fn rejects_empty_value() {
+        assert!(!should_accept_input("", false, ""));
+    }
+
+    #[test]
+    fn rejects_the_string_just_committed_by_compositionend() {
+        // Chrome 在 compositionend 后会回写同一串 → 必须丢弃
+        assert!(!should_accept_input("你好", false, "你好"));
+        // 但下一次真实输入不受影响
+        assert!(should_accept_input("设置", false, "你好"));
     }
 }
