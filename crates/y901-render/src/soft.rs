@@ -87,6 +87,38 @@ pub struct SoftBackend {
     proportional_text: bool,
 }
 
+/// 字形位图**底部有几行几乎透明**（最大覆盖度 < `THRESH`）。
+///
+/// 为何需要它：光栅化会多留 1px 留边，最底一行往往只有 alpha≈5~10。
+/// 它在数学上使位图"满高"，但肉眼上就是空白 ⇒ 同一行里不同字的
+/// **可见底边**就会差 1px。把这几行数出来，绘制时把整个字形**向下移**同样行数，
+/// 可见底边就与公式一致。仅在比例字体模式启用（桌面逐像素不变）。
+const FAINT_ROW_THRESH: u8 = 12;
+
+fn trailing_faint_rows(atlas: &[u8], atlas_size: u32, ax: u32, ay: u32, w: u32, h: u32) -> i32 {
+    if w == 0 || h == 0 {
+        return 0;
+    }
+    let stride = atlas_size as usize;
+    let mut faint = 0i32;
+    let mut row = h; // 从最后一行往上扫
+    while row > 1 {
+        row -= 1;
+        let mut max_cov = 0u8;
+        for col in 0..w {
+            let idx = ((ay + row) as usize * stride + (ax + col) as usize) * 4;
+            if let Some(&c) = atlas.get(idx) {
+                max_cov = max_cov.max(c);
+            }
+        }
+        if max_cov >= FAINT_ROW_THRESH {
+            break;
+        }
+        faint += 1;
+    }
+    faint
+}
+
 /// **字形顶部的 y 坐标**（buffer 坐标，y 向下）。
 ///
 /// 引擎的 `GlyphInfo::bearing_y` 是有符号的**位图底边**偏移（y 向上）：
@@ -475,12 +507,24 @@ impl SoftBackend {
                         // （y 向上：'8' = 0 贴基线，'设' = -2 下伸），不是顶部偏移。
                         // 顶部 = 基线 − bearing_y − 字形高度。
                         // **行级 baseline 取整 + 字形原始偏移**（见 `glyph_top`）
-                        let by = glyph_top(
+                        let mut by = glyph_top(
                             origin.y,
                             ascent,
                             g.bearing_y as f32,
                             g.height as f32,
                         ) as i32;
+                        // **底部虚行下移**（仅比例模式）：使可见底边与公式一致
+                        if self.proportional_text {
+                            let atlas_sz = self.text.atlas_size();
+                            by += trailing_faint_rows(
+                                self.text.atlas(),
+                                atlas_sz,
+                                g.atlas_x,
+                                g.atlas_y,
+                                g.width,
+                                g.height,
+                            );
+                        }
                         for gy in 0..g.height as i32 {
                             let dy = by + gy;
                             if dy < 0 || dy >= self.height as i32 {
@@ -885,12 +929,23 @@ impl RenderCtx for SoftBackend {
                         // 基线 = origin.y + ascent × scale；字形高度按 scale 缩放。
                         // `bearing_y` 是底边偏移，不能当顶部用。
                         let drawn_h = (sg.h as f32 * scale).round().max(1.0);
-                        let by = glyph_top(
+                        let mut by = glyph_top(
                             origin.y,
                             ascent * scale,
                             sg.slot.bearing_y * scale,
                             drawn_h,
                         ) as i32;
+                        if self.proportional_text {
+                            let atlas_sz = self.text.atlas_size();
+                            by += trailing_faint_rows(
+                                self.text.atlas(),
+                                atlas_sz,
+                                sg.slot.atlas_x,
+                                sg.slot.atlas_y,
+                                sg.w,
+                                sg.h,
+                            );
+                        }
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
                         let dh = (sg.h as f32 * scale).round().max(1.0) as i32;
