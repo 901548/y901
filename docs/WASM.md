@@ -1,127 +1,211 @@
-# Y901 WASM 后端设计方案
+# Y901 WASM 后端实现说明
 
-> 版本：2026-11-14 · 状态：设计稿（已批准） · 工作量：13-16 人日
+> **本文件描述当前实现状态（截至 HEAD `2b1a0cd`）。** 未来计划见 issue tracker，不在本文档里写。
 
 ## 1. 方案概述
 
-新增 `y901-backend-web` crate，把现有的 `WindowBackend` 契约实现在浏览器 canvas 上，
-让同一套 `UiTree` / 组件 / 运行时在 wasm32 上跑起来。渲染沿用**软后端产出的 RGBA 像素**，
-经 `putImageData` 上屏；帧循环由 `requestAnimationFrame` 驱动，而不是阻塞等待消息。
+`y901-backend-web` crate 把 `WindowBackend` 契约实现在浏览器 canvas 上，让同一套 `UiTree` / 组件 /
+运行时在 wasm32 上跑起来。
 
-## 2. 核心决策
+- **渲染**：`SoftBackend` 产出 **BGRA** 像素，`Present` 负责换通道 **并翻行**，再 `putImageData` 上屏。
+- **帧循环**：`requestAnimationFrame` 驱动，`run()` 立即返回。
+- **输入**：鼠标 / 滚轮 / 键盘 / 中文输入法全部接线完成（见 §3.1）。
+- **依赖**：只用 `wasm-bindgen`，**不用 `web-sys` / `js-sys`**；所有 DOM 类型手写在 `src/bindings.rs`。
 
-| # | 决策 | 理由 |
+## 2. 核心决策与实际状态
+
+| # | 决策 | 现状 |
 |---|---|---|
-| **D1** | 复用 `y901-runtime` 的帧步逻辑，**不另写一套循环** | 事件→命令→动画→重排→渲染的顺序已经在桌面验证过 |
-| **D2** | `run()` 在 wasm 上立即返回，帧由 rAF 逐次推进 | 三个示例的 `main` 都是单表达式，`run` 之后没有逻辑，立即返回不丢任何东西 |
-| **D3** | 呈现用 `putImageData`，不做增量 dirty 区上屏 | 浏览器侧拿不到可靠的脏区合成；S1 先求正确，性能留 S2 |
-| **D4** | DPI 在 wasm 侧**强制 1.0** | 帧哈希要跨后端对拍，`devicePixelRatio` 必须可预测 |
-| **D5** | IME 走**隐藏 `<input>` 覆盖层 + 浏览器默认行为**，不做候选窗钉位 | 框架只有 `ime_candidate: Option<Pos>` 提示，候选窗由浏览器绘制，canvas 上不可控 |
-| **D6** | **只依赖 `wasm-bindgen`，不依赖 `web-sys`**；canvas / event / rAF 绑定手写在 `src/bindings.rs` | `web-sys` 会让编译时间显著膨胀（见 §7），而我们需要的外部符号不到 20 个；手写绑定约 100-150 行，且有 golden test 兜底 |
+| **D1** | 复用 `y901-runtime` 的 `frame_step`，不另写循环 | ✅ 已实现（含 `dt`，见 §8.1） |
+| **D2** | `run()` 立即返回，帧由 rAF 推进 | ✅ 已实现 |
+| **D3** | 呈现用 `putImageData` | ✅ 已实现，**并已做局部重绘 + 局部上传**（见 §3.2） |
+| **D4** | DPI 强制 1.0 | ✅ 已实现（`SoftBackend` 以 `dpi_scale = 1.0` 构造） |
+| **D5** | IME 走隐藏 `<input>`，不做候选窗钉位 | ✅ 已实现；候选窗由浏览器绘制，我们不钉位 |
+| **D6** | 只依赖 `wasm-bindgen`，绑定手写 | ✅ 已实现（`bindings.rs` 约 400 行）；**绑定 golden test 尚未实现**（见 §5） |
 
 ## 3. 关键数据通路
 
 ### 3.1 事件
 
-canvas 上绑定 `keydown` / `keyup` / `mousedown` / `mouseup` / `mousemove` / `wheel` / `resize`，
-转成 `RawEvent` 后交给 `frame_step`。
+**canvas 上**绑定：`mousemove` / `mousedown` / `mouseup` / `wheel` / `keydown`。
+**window 上**绑定：`resize`。
+**隐藏 `<input>` 上**绑定：`keydown` / `compositionstart` / `compositionupdate` / `compositionend` / `input`。
 
-IME：canvas 无法承载输入法。做法是在 canvas 上叠一个**透明的 `<input>`**，让它接收合成事件与
-候选窗，浏览器负责候选窗的定位与绘制；我们只从 `compositionstart/update/end` 与 `input` 事件里取文本。
-**不做候选窗钉位** —— 这是浏览器行为，`ime_candidate` 只作为语义提示保留。
+**没有 `keyup`**：框架的 `RawEvent` **没有 `KeyUp` 变体**（只有 `KeyDown` / `SystemKeyDown` /
+`Char` / `Ime`），`translate()` 也没有对应分支。要支持按键抬起必须先给 runtime 加变体并同步三个后端。
+
+#### 文本输入：两条通路，互不重叠
+
+| 输入 | 通路 | 说明 |
+|---|---|---|
+| **ASCII / 直接字符** | 浏览器写入隐藏 input → **`input` 事件** → `RawEvent::Ime { composition: false }` → `UiEvent::Text` | `keydown` 对可打印键**直接 return**，不产生 `Char` |
+| **中文（IME 组字）** | `compositionstart/update/end` | `update` → `Compose`（画拼音）；`end` → `Text`（提交） |
+
+**唯一的交叉点**：部分浏览器在 `compositionend` 之后会把同一串回写进 `input.value` 并再发一次
+`input`。用 `last_committed` 记录已提交串，`input` 回调遇到相同串就丢弃（`keys::should_accept_input`
+是其中的纯判定，带单测）。
+
+#### 坐标
+
+`present` 对整帧做行翻转，因此 **UI 树的 y 与 DOM 的 `offsetY` 方向相反**：
+
+```rust
+// keys::to_ui_y(height, y_dom) = height - 1 - y_dom
+```
+
+**高度必须实时**（`WasmState.canvas_h: Rc<Cell<f32>>`，resize 时更新）；用安装时快照会导致
+拉窗后点击命中错行。
+
+#### 焦点
+
+`mousedown` 时**先 `preventDefault()`**（阻止 canvas 抢回焦点）再把焦点给隐藏 `input`；
+canvas 上设了 `tabindex="0"` 与 `outline: none`。`window` 的 `focus`/`blur` **未接线**（已知债务，见 §4）。
+
+#### 光标形状
+
+`mousemove` 记录 UI 坐标 → 每帧 `apply_pending` 里 `tree.cursor_at(pos)` → 映射到 CSS
+（`pointer` / `text` / `ew-resize` / `ns-resize` / `grab` / `default`），用
+`style.setProperty("cursor", css, "important")` 写入。**不能用 `setAttribute("style", …)`**：
+那会整条覆盖内联样式，把页面 CSS 的 `width/height` 一并抹掉，resize 就此失效（踩过）。
 
 ### 3.2 呈现
 
-**页面约定**：页面必须提供 `<canvas id="y901-canvas">`。wasm 分支内部通过
-`document.get_element_by_id("y901-canvas")` 获取它，**`create_runtime()` 的签名保持不变**
-（桌面调用方不受影响）。
+**页面约定**：页面必须提供 `<canvas id="y901-canvas">`。wasm 分支通过
+`document.get_element_by_id("y901-canvas")` 取它，**`create_runtime()` 签名不变**。
+页面 CSS 负责尺寸（`width:100vw; height:100vh`），Rust 只写背存储尺寸与 `cursor`。
 
-软后端渲染到 `Vec<u8>`（RGBA），包成 `ImageData` 后 `putImageData` 到 2D context。
-尺寸变化时重建 `ImageData`；每帧一次整幅拷贝，S1 不做局部更新。
+**像素通路**：
+
+1. `SoftBackend` 的缓冲是 **BGRA、自上而下**；但**屏幕方向相反**，所以
+   **输出第 `Y` 行取缓冲第 `h-1-Y` 行**（只翻 Y，X 不翻）。
+2. **整帧路径**：`bgra_to_rgba(全帧)` → `createImageData(w,h)` → `data.set(bytes)`（一次批量拷贝）
+   → `putImageData(0,0)`。
+3. **局部路径**：对每个脏矩形 `bgra_rect_to_rgba(rect)` → 建该尺寸的 `ImageData` →
+   `data.set(bytes)` → `putImageData(x,y)`。
+
+**性能要点**：像素拷贝改用 `TypedArray.prototype.set`（**一次跨界调用**）。
+旧实现是逐字节 `data[i] = v`，800×600×4 = **192 万次跨界调用**，每次交互卡约 1 秒。
+
+**重绘策略（方案 D：按脏区裁剪的整树重绘）**：
+
+- `dirty.is_full()` → 一次整树绘制，**不加裁剪**，先 `soft.clear()`。
+- 否则 → **对每块脏矩形各画一遍整树**，`push_clip(rect)` 限制像素范围；**不清屏**
+  （保留缓冲，脏区外像素不动）。脏区内的绘制仍按完整顺序（父背景 → 子 → 文字），
+  所以"父背景没重画"的黑块不会出现。
+- 局部模式下仍保留**脏区剪枝**（与脏区不相交的子树不遍历）：脏区必被祖先 rect 包含，
+  祖先会命中 `needs_paint` 并在裁剪区内重画背景，因此正确性不受影响。
+
+**上传阈值**（`present::should_upload_partial`）：**块数 > 8** 或 **总面积 > 视口 50%** 时
+回退整帧——每块 `putImageData` 都有固定跨界成本，碎块多或面积大时一次传更划算。
+
+**已知边界**：打开弹层时强制 `invalidate_all()`（`push_popup` 内），因为弹层与模态遮罩覆盖的
+区域不保证落在任何局部脏区里。弹层**动画结束帧**同样强制整窗重绘，否则留下半透明残影。
 
 ### 3.3 DPI
 
-**`devicePixelRatio` 一律按 1.0 处理，不读真实值。** 画布尺寸 = CSS 尺寸 × 1.0。
-这样 `Y901_TEST_DPI_SCALE=1.0` 的桌面截图与 wasm 首帧可以逐字节对拍。
+**`devicePixelRatio` 一律按 1.0 处理，不读真实值。** 画布尺寸 = CSS 尺寸 × 1.0，
+这样 `Y901_TEST_DPI_SCALE=1.0` 的桌面帧与 wasm 帧可逐字节对拍（`hash-gate`）。
 
 ### 3.4 节拍
 
-`requestAnimationFrame` 回调里调用一次 `frame_step`，并复用 `run_loop` 里的 Tick 节拍判断
-（`tick_period` / `tick_subscribers`）—— 时钟源换成 `performance.now()`。
+`requestAnimationFrame` 回调里推进一帧，**`dt` 来自 rAF 回调的时间戳差值**（钳到 1..100 ms），
+不使用 `performance.now()`、也不使用 `Instant::now()`。桌面端用 `Instant` 差值，两条路径都通过
+`frame_step(..., dt)` 显式传入。
+
+唯一用到时钟的地方是一行**自限性能探针**：某一帧耗时 > 100 ms 时打印
+`[DBG-PERF] render=… present=… size=… mode=…`，平时不输出。
 
 ### 3.5 字体
 
-`fetch` 加载字体文件 → `FontFace` 注册 → 就绪前先出一帧**占位**（用等宽回退字体），
-就绪后全量失效重绘。不阻塞首帧。
+**不使用 `FontFace`**。流程是：
 
-## 4. 已知限制
+1. 页面 `fetch('./fonts/default.ttf?v=…')` 拿字节；
+2. `y901_font_loaded(bytes)` → `MyFontEngine::new(bytes, 16.0, cell)`；
+3. 用**引擎自己的度量**（`cell_width()` / `cell_height()`）算格子 → `soft.set_font(...)`；
+4. **`tree.clear_layout_cache()`** → `tree.layout(...)` → `tree.invalidate_all()`。
+
+第 4 步不能省：`UiTree::layout` 只在视口变化时失效布局缓存，换字体不改变视口，不手动清缓存就会
+"布局按旧度量、绘制按新度量"（表现为表头错位、标签与输入框重叠）。
+
+就绪前先出一帧**零字形占位**（`WasmFontEngine`），不阻塞首帧。解析失败会打印
+`[y901] 字体解析失败（N 字节）：<reason>`，而不是静默失败。
+
+## 4. 已知限制与债务
 
 | 能力 | 状态 |
 |---|---|
-| `FileDrop` | **不支持**（浏览器拖放走 DOM `drop` 事件，S1 不接） |
-| 剪贴板 | 仅 `navigator.clipboard` 的文本读写，且需用户手势 |
-| 多窗口 | **不支持**（一个页面一个 canvas） |
-| `Focus` | 单 canvas，焦点由 DOM 元素决定；`EventCtx` 的 focus 路径仍生效，但页面级失焦只上报一次 `Focus(false)` |
-| 光标形状 | 仅 `canvas.style.cursor` 的有限映射 |
+| `FileDrop` | **不支持**（不接 DOM `drop`） |
+| 剪贴板 | 仅框架内的 `TextInput` 剪贴板抽象，未接 `navigator.clipboard` |
+| 多窗口 | 不支持（一个页面一个 canvas / 一个 runtime） |
+| `Focus` 事件 | `EventCtx` 的焦点路径生效；**`window` 的 `focus`/`blur` 未接线**，切走标签页再回来不会自动恢复焦点 |
+| `keyup` | **无** `RawEvent::KeyUp`，无法表达"按住/释放" |
+| 字体格式 | 只支持**单 face TTF/OTF**；**TTC 容器未验证** |
+| 绑定 golden test | **未实现**：`#[wasm_bindgen]` 名字写错仍会静默失败，只能靠运行时暴露 |
+| js_sys | 离线环境解析不到，因此 `Object` / `Reflect` 等均未使用，相关能力用手写绑定替代 |
+
+**热重启**：单页单 runtime。要重启必须先调用 `y901_dispose()`（取消 rAF、摘监听器、移除隐藏
+input、清全局 `STATE`），否则旧帧循环会与新实例同时向同一 canvas 推像素，并且每次重启多一个隐藏
+input。
 
 ## 4.5 换字体（页面侧，不需重建）
 
 页面用的字体是**运行时 `fetch` 的静态资源**，不编进 wasm，因此换字体不需要 `wasm-pack build`：
 
-1. 把任意 **TTF / OTF / TTC** 放到 `www/fonts/default.ttf`（文件名固定）；
-2. 同步修改 `www/index.html` 里字体 URL 的版本参数：
-   `fetch('./fonts/default.ttf?v=...')` —— **不改就会一直读浏览器缓存的旧字体**（这个坑已踩过）；
-3. 刷新页面，Console 会打印 `[y901] font swapped in`；解析失败时会打印
-   `[y901] 字体解析失败（N 字节）：<reason>`，而不是静默失败。
+1. 把字体放到 `www/fonts/default.ttf`（文件名固定；**目前只支持单 face，TTC 未验证**）；
+2. 同步修改 `www/index.html` 里字体 URL 的版本参数：`fetch('./fonts/default.ttf?v=...')`
+   —— **不改就会一直读浏览器缓存的旧字体**（这个坑已踩过）；
+3. 刷新页面，Console 打印 `[y901] font swapped in`；失败会打印
+   `[y901] 字体解析失败（N 字节）：<reason>`。
 
-选字建议：`SimHei`（黑体）字形粗糙、字重单一，只适合验证渲染链路；
-看效果建议换成 **微软雅黑 `msyh.ttc`**、**思源黑体 `SourceHanSans`** 或 **Noto Sans CJK**。
-注意：`TTC` 是字体集（容器），能否被 `MyFontEngine` 直接解析尚未验证；
-若报解析失败，取其中单个字体导出为 TTF 再用。
+选字建议：`SimHei`（黑体）字形粗糙、字重单一，只适合验证渲染链路；看效果建议换
+**微软雅黑 `msyh.ttc`**（TTC，需先导出单 face）、**思源黑体** 或 **Noto Sans CJK**。
+
+**安全上限**：单个字形位图 **≤ 4096×4096 像素 / ≤ 16M 像素**（`raster::area_is_safe` 与
+`font_engine::MAX_GLYPH_DIM`）。超限时拒绝光栅化并打印一行提示——包围盒来自字体文件里的坐标，
+损坏或恶意字体可以写出巨大值，不拦会直接 OOM。
 
 ## 5. 测试与验证策略
 
-1. **golden test**：给定固定 `UiTree`，wasm 与桌面软后端产出的 `frame_hash` 必须相等（dpr=1.0）；
-2. **wasm32 check**：`cargo check -p y901-backend-web --target wasm32-unknown-unknown` 必须 exit 0；
-3. **绑定 golden test**：`bindings.rs` 的每个 `extern "C"` 声明都要有对应的 JS 侧名字断言
-   （防止 `wasm-bindgen` 的 `module` / `js_name` 写错却静默链接失败）；
-4. **native 不受影响**：`cargo check --workspace --all-targets` 必须保持 exit 0。
+1. **`hash-gate`**：桌面软后端的帧哈希必须等于基线 `0x39AE41C1697CBFD0`（`Y901_TEST_DPI_SCALE=1.0`）。
+   它是"桌面零回归"的硬判据。
+2. **wasm32 check**：`cargo check -p y901-shell --target wasm32-unknown-unknown` 必须 exit 0。
+   （`--workspace` + wasm32 **不能**通过：`y901-backend-win32` 没有 cfg 守卫，这是既有情况。）
+3. **纯函数单测**：事件映射（`keys.rs`）、坐标翻转（`to_ui_y`）、抠图与通道交换
+   （`present.rs`，含"整帧与局部逐字节一致"T8）、脏区裁剪重绘（`tree.rs`，T1-T7 用记录型
+   `RenderCtx`，不需要 GPU）。
+4. **native 不受影响**：`cargo check --workspace --all-targets` 与 `cargo test --workspace` 必须绿。
+5. **绑定 golden test**：**尚未实现**（见 §4）。
 
-## 6. 任务拆解
+## 6. 阶段回顾（已完成的实现）
 
-| 阶段 | 内容 | 人日 |
+| 阶段 | 内容 | 状态 |
 |---|---|---|
-| **S1** | 骨架 + `present` 管线 + rAF 帧步 + resize/DPI + **手写 JS 绑定（canvas/event/rAF）** | **4-5** |
-| **S2** | `input` / `keys` 映射 + DOM 接线 + IME 覆盖层 | **3** |
-| **S3** | 字体加载 + Tick 接入 + 帧哈希对拍 | **2-3** |
-| **兼容性缓冲** | Safari/Firefox 的 canvas 合成差异、`dpr` 抖动、事件时序、字体加载竞态 | **3-5** |
-| | **合计** | **13-16** |
+| **S1** | 骨架 + `present` 管线 + rAF 帧步 + 首次 layout + 字体换装 + 方向/度量修正 | ✅ |
+| **S2** | 事件接线：鼠标 / 滚轮 / 键盘 / IME / 命令 / 光标 / resize | ✅ |
+| **性能** | 按脏区裁剪重绘 + 局部上传 + 批量拷贝 + 上传阈值 | ✅（实机手感待复测） |
 
-## 7. 风险与对策
+## 7. 风险与对策（仍在生效的部分）
 
-| 风险 | 影响 | 对策 |
+| 风险 | 对策 |
+|---|---|
+| 手写绑定写错 JS 名字 → 运行时才炸 | 逐个用真机验证过；**golden test 仍缺** |
+| `putImageData` 的跨界成本 | 已改为批量 `set()` + 局部上传 + 阈值回退 |
+| 浏览器 IME 候选窗位置不可控 | 接受浏览器默认行为（D5），不钉位 |
+| `dpr` 非 1.0 破坏对拍 | 强制 1.0（D4） |
+| rAF 在后台标签页暂停 | 接受（动画停住），不做补偿 |
+| 缓存导致测的不是最新产物 | 页面 JS/字体 URL 都带 `?v=`；每次重建必须换值 |
+
+## 8. 接口事实摘要
+
+| 项 | 事实 | 出处 |
 |---|---|---|
-| `web-sys` 编译时间膨胀 | 每次全量构建多出数十秒 | **D6：不用 `web-sys`**，手写 100-150 行绑定 |
-| 手写绑定写错 JS 名字 | 静默失败，运行时才炸 | §5 的绑定 golden test |
-| 整幅 `putImageData` 低端设备掉帧 | 1080p 下每帧数毫秒拷贝 | S1 先保正确；S2 视测量结果再做脏区 / `createImageBitmap` |
-| 浏览器 IME 候选窗位置不符合预期 | 输入体验差 | 接受浏览器默认行为（D5），不做钉位 |
-| `dpr` 非 1.0 | 帧哈希对拍失败 | **强制 1.0**（D4） |
-| `rAF` 在后台标签页暂停 | 动画停住（可接受） | 文档记录；不做补偿 |
+| host 参数类型 | `&mut dyn Host`（trait object） | `crates/y901-runtime/src/runtime.rs` |
+| `Host` trait | `pub trait Host` | `crates/y901-runtime/src/lib.rs` |
+| `RawEvent` 键盘变体 | `KeyDown` / `SystemKeyDown` / `Char` / `Ime`（**无 `KeyUp`**） | `crates/y901-runtime/src/lib.rs` |
+| `translate()` | `KeyDown`,`SystemKeyDown` → `UiEvent::Key`；`Char` → `Text`；`Ime{composition}` → `Compose`/`Text` | 同上 |
+| 桌面专属段 | `wait_events` 阻塞、profile 计时、Tick 节拍 | `runtime.rs` |
 
-## 8. 调查结论摘要（本设计的依据）
-
-| 项 | 结论 | 出处 |
-|---|---|---|
-| host 参数类型 | **`&mut dyn Host`**（trait object，非泛型） | `crates/y901-runtime/src/runtime.rs:43-47` |
-| `Host` trait | `pub trait Host` | `crates/y901-runtime/src/lib.rs:38` |
-| `run()` 之后 | **三个示例的 `main` 都是单表达式，`run` 之后无逻辑** | `examples/counter.rs:106`、`switch.rs:60`、`spinner.rs:33` |
-| 帧步可复用段 | 事件消化 → 命令/idle → 动画 → 重排 → 主题 → `after_frame` → `render` → `after_present` | `runtime.rs:114-179` |
-| 桌面专属段 | `wait_events` 阻塞、profile 计时、Tick 节拍 | `runtime.rs:96`、`181-194`、`196-213` |
-| 现有 wasm 代码 | **0 处**（`putImageData`/`web_sys`/`wasm32` 全仓无命中） | grep |
-| `frame_hash` 测试 | `soft_backend.rs:134 fn frame_hash_is_deterministic()`，**未固定 DPI** | `soft_backend.rs` |
-| `hash-gate` | 显式 `Y901_TEST_DPI_SCALE=1.0` | `scripts/hash-gate.ps1` |
-
-### 8.1 `frame_step` 签名（已实现，含 `dt` 与 `close_requested`）
+### 8.1 `frame_step` 签名（已实现）
 
 ```rust
 pub fn frame_step<W: WindowBackend>(
@@ -140,8 +224,12 @@ pub struct FrameStats {
 }
 ```
 
-- `dt` 是**上一帧到本帧的时间步**，由调用方提供（桌面用 `Instant` 差值，wasm 用 rAF 时间戳差值）。
-  为什么必须显式传：动画推进依赖真实 dt，若在 `frame_step` 内部取 `Instant::now()` 则每帧 dt≈0，**动画静止**。
-- `close_requested` 承接 `RawEvent::Close`（桌面关窗）。以前它直接 `return`，现在改成标记，
-  由调用方决定是否停止；**wasm 侧忽略该标记**。
-- 首帧日志（`first_frame_done` / `started`）与 profile 统计**留在调用方**，不进 `frame_step`。
+- `dt` 是上一帧到本帧的时间步，由调用方提供（桌面 `Instant` 差值，wasm rAF 时间戳差值）。
+  必须显式传：动画推进依赖真实 dt，若内部取 `Instant::now()` 则每帧 dt≈0、动画静止。
+- `close_requested` 承接 `RawEvent::Close`；**wasm 侧忽略**该标记。
+- 首帧日志与 profile 统计留在调用方，不进 `frame_step`。
+
+### 8.2 `wait_events` 语义差异
+
+wasm 侧**永不阻塞**：`wait_ms` 被忽略，返回当前队列（可能为空），节奏完全由 rAF 决定；
+桌面侧可以阻塞等待消息。两者都返回 `Option<Vec<RawEvent>>`，`None` 在桌面上表示退出。
