@@ -105,6 +105,13 @@ pub fn rasterize_glyph(font_data: &[u8], ch: char, size_px: f32) -> Option<Glyph
 ///
 /// 输入：`phase` ∈ 0..=3（对应 0 / 0.25 / 0.5 / 0.75 px）。
 /// 为什么是"真平移"而非"取整"：取整会让一行里每个字的左右间距跳 0.5px，
+/// **单个字形的最大边长**（像素）。
+///
+/// 4096 是常见 GPU 纹理上限，也足够覆盖任何真实字体（字号 < 3000px）。
+/// 超过它基本只能是字体文件损坏。
+pub const MAX_GLYPH_DIM: u32 = 4096;
+
+
 /// 中文尤其明显。平移后重新光栅化，边缘覆盖度才会真正随亚像素变化。
 pub fn rasterize_glyph_phased(
     font_data: &[u8],
@@ -152,6 +159,18 @@ pub fn rasterize_glyph_phased(
     let bearing_y = min_y.floor() as i32;
     let width = (max_x.ceil() as i32 - bearing_x).max(1) as u32 + 1;
     let height = (max_y.ceil() as i32 - bearing_y).max(1) as u32 + 1;
+
+    // **字形尺寸安全限制**：包围盒来自**字体文件里的坐标**，
+    // 损坏/恶意的 TTF 可以把顶点写成巨大值，使导出图像达到数万像素。
+    // 不拦就会在 `rasterize` 里 `vec![0f32; w*h]` 直接 OOM。
+    // 此处拦在**分配之前**，并明确告知（而不是静默失败）。
+    if width > MAX_GLYPH_DIM || height > MAX_GLYPH_DIM || !raster::area_is_safe(width, height) {
+        eprintln!(
+            "[y901] 字形尺寸异常，已拒绝光栅化: {}x{} (字体坐标可能损坏)",
+            width, height
+        );
+        return None;
+    }
 
     // 亚像素平移：phase/4 像素 = phase*16，单位仍是 26.6（1/64 px）
     let subpixel = (phase as i32 & 3) * 16;

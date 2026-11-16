@@ -23,8 +23,34 @@ const SS: u32 = 8;
 ///
 /// 为什么要半开区间 `[ymin, ymax)`：扫描线恰好穿过两条边的共用顶点时，
 /// 若两边都算，环绕数会被加两次 → 出现 1px 竖线或洞。
+/// **单个字形允许的最大像素数**（16M＝4096×4096）。
+///
+/// 为何要上限：字形包围盒由**字体文件里的坐标**算出来。
+/// 一个恶意或损坏的 TTF 只要把某个顶点写成巨大值，
+/// 这里就会 `vec![0f32; w*h]` 直接 OOM/panic。宁可拒绝渲染该字形。
+pub const MAX_GLYPH_PIXELS: usize = 4096 * 4096;
+
+/// **`w * h` 是否在安全范围内**（用此判定，避免溢出与 OOM）。
+///
+/// 单独抽出来为了能在本机单测：真正的分配在 `rasterize` 里，
+/// 而这里只做纯算术判定。
+pub fn area_is_safe(width: u32, height: u32) -> bool {
+    match (width as usize).checked_mul(height as usize) {
+        Some(area) => area > 0 && area <= MAX_GLYPH_PIXELS,
+        // 乘溢出（usize 可能 32 位）⇒ 肯定超限
+        None => false,
+    }
+}
+
+/// 把洗线光栅化为**覆盖度图**（行主序，0..=255）。
+///
+/// 返回：`None` = 尺寸为 0 或**面积超限**（见 `area_is_safe`）。
 pub fn rasterize(lines: &[Line], width: u32, height: u32) -> Option<Coverage> {
     if width == 0 || height == 0 {
+        return None;
+    }
+    // **面积安全性检查**：超限就拒绝，不去分配那么大的 Vec。
+    if !area_is_safe(width, height) {
         return None;
     }
     let (w, h) = (width as usize, height as usize);
@@ -115,4 +141,36 @@ fn add_span(acc: &mut [f32], row: usize, w: usize, x0: f32, x1: f32) {
             acc[row_base + col] += overlap.min(1.0);
         }
     }
+
+}
+#[cfg(test)]
+mod glyph_area_tests {
+    use super::*;
+
+        // ---- 面积上限（防 OOM）----
+
+        #[test]
+        fn area_limit_accepts_normal_glyphs() {
+            assert!(area_is_safe(16, 16));
+            assert!(area_is_safe(4096, 4096));
+        }
+
+        #[test]
+        fn area_limit_rejects_oversized_or_overflowing() {
+            // 4097x4097 超过 16M
+            assert!(!area_is_safe(4097, 4097));
+            // 巨大尺寸下乘法可能溢出 ⇒ 也必须拒绝
+            assert!(!area_is_safe(u32::MAX, u32::MAX));
+            // 零面积无意义
+            assert!(!area_is_safe(0, 100));
+        }
+
+        #[test]
+        fn rasterize_refuses_oversized_bitmap_instead_of_allocating() {
+            // 这里传一条空多边形：如果不是因为面积被拒，它将尝试分配 25M 个 f32。
+            assert!(rasterize(&[], 5000, 5000).is_none(), "超限字形必须返回 None");
+            // 正常尺寸仍然可用
+            assert!(rasterize(&[], 8, 8).is_some());
+        }
+
 }
