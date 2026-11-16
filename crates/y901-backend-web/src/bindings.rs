@@ -273,24 +273,6 @@ extern "C" {
     pub fn prevent_default(this: &Event);
 }
 
-/// \u6784\u9020 JS \u666e\u901a\u5bf9\u8c61\uff0c\u7528\u6765\u4f20 `addEventListener` \u7684 options\u3002
-///
-/// **\u4e3a\u4ec0\u4e48\u8981\u81ea\u5df1\u9020\u5bf9\u8c61**\uff1a\u672c crate \u4e0d\u4f9d\u8d56 `js_sys`\uff08\u79bb\u7ebf\u73af\u5883\u4e0b\u7d22\u5f15\u4e0d\u53ef\u7528\uff09\uff0c
-/// \u800c `{ passive: false }` \u65e0\u6cd5\u7528\u5355\u4e2a\u5e03\u5c14\u53c2\u6570\u8868\u8fbe\u3002\u7528 `indexing_setter`
-/// \u5199\u5165\u5c5e\u6027\uff0c\u751f\u6210\u7684 JS \u5c31\u662f `opts["passive"] = false`\u3002
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_name = "Object")]
-    pub type JsObject;
-
-    /// `new Object()`\u3002
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> JsObject;
-
-    /// `obj[key] = value`\u3002
-    #[wasm_bindgen(method, structural, indexing_setter)]
-    pub fn set_prop(this: &JsObject, key: &str, value: &JsValue);
-}
 /// `Uint8ClampedArray`——`ImageData` 的像素入参。
 ///
 /// **手写而不用 `js_sys`**：`js-sys` 在离线环境解析不到，而我们只需要"建一个长度 + 整块写入"两个操作（见 `docs/WASM.md` D6）。
@@ -304,10 +286,6 @@ extern "C" {
 
     #[wasm_bindgen(method, js_name = "set")]
     pub fn set_from(this: &Uint8ClampedArray, src: &[u8], offset: u32);
-
-    /// `data[i] = v`。**用 `indexing_setter`**（JS 没有 `setIndex` 方法，那会静默失败）。
-    #[wasm_bindgen(method, structural, indexing_setter)]
-    pub fn set_index(this: &Uint8ClampedArray, index: u32, value: u8);
 
 }
 /// `Document`——用来按 id 取 canvas（页面约定见 `docs/WASM.md` §3.2）。
