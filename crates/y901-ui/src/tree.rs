@@ -2837,7 +2837,10 @@ fn render_pass(
     if !node.is_open() {
         return;
     }
-    if paint_all || node.needs_paint(dirty) {
+    // **零尺寸节点不画**：`paint_all`（全量帧）会无条件调用 `render`，而零矩形节点画不出任何
+    // 有效像素——却可能触发除零或产生空裁剪下的异常绘制。组件侧只有一半实现了 `rect.w <= 0` 早退，
+    // 在这里统一兜住，比逐个组件补防御更可靠（不改 Widget trait）。
+    if (paint_all || node.needs_paint(dirty)) && !node.rect().is_empty() {
         // 诊断开关：按**真实绘制顺序**打印每个节点的 id/矩形/裁切，
         // 用于定位"文字被后画的背景盖掉"这类问题。
         if std::env::var_os("Y901_PAINT_TRACE").is_some() {
@@ -3085,6 +3088,7 @@ mod dirty_clip_tests {
     use crate::layout::LayoutCache;
     use crate::widget::{EventCtx, RenderCtx, Semantics, Widget};
     use crate::{Color, Constraints, Pos, Rect, Size};
+    use std::rc::Rc;
 
     /// 记录一次绘制：`(类型, 矩形, 当时的剪裁区)`。
     #[derive(Debug, Clone)]
@@ -3235,6 +3239,41 @@ mod dirty_clip_tests {
         }
         fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
             Some(&mut self.kids)
+        }
+    }
+
+    /// 一个**永远得到零矩形**的节点：用来验证 render_pass 的零尺寸早退。
+    struct ZeroBox {
+        id: String,
+        rendered: Rc<std::cell::Cell<usize>>,
+    }
+
+    impl Widget for ZeroBox {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn crate::widget::TextMetrics,
+            c: Constraints,
+            _cache: &mut LayoutCache,
+        ) -> Size {
+            c.constrain(Size::ZERO)
+        }
+        fn arrange(&mut self, _rect: Rect, _m: &dyn crate::widget::TextMetrics, _c: &mut LayoutCache) {
+            // 强制零矩形，不管布局给什么
+        }
+        fn rect(&self) -> Rect {
+            Rect::ZERO
+        }
+        fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult {
+            EventResult::Ignored
+        }
+        fn render(&mut self, _ctx: &mut dyn RenderCtx) {
+            self.rendered.set(self.rendered.get() + 1);
+        }
+        fn semantics(&self) -> Semantics {
+            Semantics::default()
         }
     }
 
@@ -3413,6 +3452,36 @@ mod dirty_clip_tests {
         assert!(
             tree.dirty().is_full(),
             "popup 动画完成帧必须整窗重绘，否则留下半透明残影"
+        );
+    }
+
+    // ---- T11：零尺寸节点不画（全量帧也不画）----
+
+    #[test]
+    fn t11_empty_rect_node_never_renders_even_in_full_paint() {
+        let rendered = Rc::new(std::cell::Cell::new(0usize));
+        let child = ZeroBox {
+            id: "zero".to_string(),
+            rendered: Rc::clone(&rendered),
+        };
+        let root = PaintBox::new(
+            "root",
+            Color::rgba(0.1, 0.1, 0.1, 1.0),
+            vec![Box::new(child)],
+        );
+        let mut tree = UiTree::new(Box::new(root));
+        let metrics = RecordingCtx::new(200.0, 100.0);
+        tree.layout(Size::new(200.0, 100.0), &metrics);
+
+        // **全量帧**：paint_all = true，这是零矩形最容易被调到 render 的路径
+        tree.invalidate_all();
+        let mut ctx = RecordingCtx::new(200.0, 100.0);
+        tree.render(&mut ctx);
+
+        assert_eq!(
+            rendered.get(),
+            0,
+            "零尺寸节点不应该被绘制（否则依赖后端剪裁兜底）"
         );
     }
 }
