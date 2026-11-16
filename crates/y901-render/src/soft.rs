@@ -87,47 +87,6 @@ pub struct SoftBackend {
     proportional_text: bool,
 }
 
-/// 字形位图**底部有几行几乎透明**（最大覆盖度 < `THRESH`）。
-///
-/// 为何需要它：光栅化会多留 1px 留边，最底一行往往只有 alpha≈5~10。
-/// 它在数学上使位图"满高"，但肉眼上就是空白 ⇒ 同一行里不同字的
-/// **可见底边**就会差 1px。把这几行数出来，绘制时把整个字形**向下移**同样行数，
-/// 可见底边就与公式一致。仅在比例字体模式启用（桌面逐像素不变）。
-/// **墨迹阈值**：覆盖度低于它的像素视为“没有墨迹”（15/255 ≈ 6%）。
-const INK_THRESH: u8 = 15;
-
-/// 字形位图里**最底一行确实有墨迹的行号**（0 = 顶部行）。
-///
-/// 包围盒（`bearing_y/height`）是**数学**边界，它的最底行可能只有极淡的
-/// 抗锯齿像素 ⇒ 不同字形的“可见底边”会相差 1px。直接扫位图取真墨迹，
-/// 才能把所有字形强制对齐到同一条可见底边上。
-fn ink_bottom_row(atlas: &[u8], atlas_size: u32, ax: u32, ay: u32, w: u32, h: u32) -> Option<u32> {
-    if w == 0 || h == 0 {
-        return None;
-    }
-    let stride = atlas_size as usize;
-    for row in (0..h).rev() {
-        for col in 0..w {
-            let idx = ((ay + row) as usize * stride + (ax + col) as usize) * 4;
-            if atlas.get(idx).copied().unwrap_or(0) >= INK_THRESH {
-                return Some(row);
-            }
-        }
-    }
-    None
-}
-
-/// **是否为下伸孢形**（不参与墨迹强吸附）。
-///
-/// 1. 拉丁下伸字母 `g j p q y`；
-/// 2. 包围盒底边低于基线 **4px 以上**（含带转边旁的汉字、逗号尾巴）。
-///
-/// 这两类一旦被吸附到基线，尾巴就会被裁掉。
-fn is_descender(ch: char, bearing_y: i32) -> bool {
-    matches!(ch, 'g' | 'j' | 'p' | 'q' | 'y') || bearing_y <= -4
-}
-
-
 /// **字形顶部的 y 坐标**（buffer 坐标，y 向下）。
 ///
 /// 引擎的 `GlyphInfo::bearing_y` 是有符号的**位图底边**偏移（y 向上）：
@@ -516,34 +475,12 @@ impl SoftBackend {
                         // （y 向上：'8' = 0 贴基线，'设' = -2 下伸），不是顶部偏移。
                         // 顶部 = 基线 − bearing_y − 字形高度。
                         // **行级 baseline 取整 + 字形原始偏移**（见 `glyph_top`）
-                        // ===== **墨迹强吸附**（Ink Snapping）=====
-                        //
-                        // 不再依赖字体的 `bearing_y` 微调：直接把**可见墨迹的最底行**
-                        // 强制对齐到目标基线行上。下伸孢形（g/j/p/q/y、包围盒低于
-                        // 基线 4px 以上）保留自己的偏移，否则尾巴会被裁掉。
-                        let by_base = glyph_top(
+                        let by = glyph_top(
                             origin.y,
                             ascent,
                             g.bearing_y as f32,
                             g.height as f32,
                         ) as i32;
-                        let mut by = by_base;
-                        if self.proportional_text {
-                            if let Some(ink_rel) = ink_bottom_row(
-                                self.text.atlas(),
-                                self.text.atlas_size(),
-                                g.atlas_x,
-                                g.atlas_y,
-                                g.width,
-                                g.height,
-                            ) {
-                                if !is_descender(ch, g.bearing_y) {
-                                    // 目标：可见底行 == round(基线)
-                                    let target = (origin.y + ascent).round() as i32;
-                                    by += target - (by_base + ink_rel as i32);
-                                }
-                            }
-                        }
                         for gy in 0..g.height as i32 {
                             let dy = by + gy;
                             if dy < 0 || dy >= self.height as i32 {
@@ -948,29 +885,12 @@ impl RenderCtx for SoftBackend {
                         // 基线 = origin.y + ascent × scale；字形高度按 scale 缩放。
                         // `bearing_y` 是底边偏移，不能当顶部用。
                         let drawn_h = (sg.h as f32 * scale).round().max(1.0);
-                        // ===== **墨迹强吸附**（同 sized 路径）=====
-                        let by_base = glyph_top(
+                        let by = glyph_top(
                             origin.y,
                             ascent * scale,
                             sg.slot.bearing_y * scale,
                             drawn_h,
                         ) as i32;
-                        let mut by = by_base;
-                        if self.proportional_text {
-                            if let Some(ink_rel) = ink_bottom_row(
-                                self.text.atlas(),
-                                self.text.atlas_size(),
-                                sg.slot.atlas_x,
-                                sg.slot.atlas_y,
-                                sg.slot.width,
-                                sg.slot.height,
-                            ) {
-                                if !is_descender(ch, sg.slot.bearing_y.round() as i32) {
-                                    let target = (origin.y + ascent * scale).round() as i32;
-                                    by += target - (by_base + ink_rel as i32);
-                                }
-                            }
-                        }
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
                         let dh = (sg.h as f32 * scale).round().max(1.0) as i32;
@@ -1388,40 +1308,4 @@ mod glyph_top_tests {
         assert!(g > a, "descender must sit lower than baseline-sitting glyphs");
     }
         // 同一行内，所有“|bearing|≤1”的字底边必须**完全相等**
-
-    // ---- 墨迹强吸附的两个基础判定 ----
-
-    #[test]
-    fn ink_bottom_row_ignores_faint_rows() {
-        use super::ink_bottom_row;
-        // 4x4 atlas，每像素 4 字节，第 0 字节是覆盖度
-        let mut atlas = vec![0u8; 4 * 4 * 4];
-        let set = |atlas: &mut Vec<u8>, x: u32, y: u32, cov: u8| {
-            atlas[((y * 4 + x) * 4) as usize] = cov;
-        };
-        // 行 0/1 有墨；行 2 有极淡的边（低于阈值）；行 3 空
-        set(&mut atlas, 0, 0, 200);
-        set(&mut atlas, 1, 1, 180);
-        set(&mut atlas, 0, 2, 5); // faint
-        assert_eq!(ink_bottom_row(&atlas, 4, 0, 0, 4, 4), Some(1), "应忽略极淡的行");
-        // 全空：None
-        let empty = vec![0u8; 4 * 4 * 4];
-        assert_eq!(ink_bottom_row(&empty, 4, 0, 0, 4, 4), None);
-    }
-
-    #[test]
-    fn descenders_are_excluded_from_snapping() {
-        use super::is_descender;
-        // 拉丁下伸字母
-        assert!(is_descender('g', -5));
-        assert!(is_descender('y', -4));
-        assert!(is_descender('p', -4));
-        // 拉丁普通字母 / 数字
-        assert!(!is_descender('a', -1));
-        assert!(!is_descender('8', -1));
-        // 汉字：小过冲归一，真下伸（转边旁）不参与
-        assert!(!is_descender('\u{4fee}', -3));
-        assert!(!is_descender('\u{70b9}', -2));
-        assert!(is_descender('\u{8fc7}', -5));
-    }
 }
