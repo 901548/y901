@@ -12,8 +12,17 @@ extern "C" {
     #[wasm_bindgen(js_name = "window")]
     pub type Window;
 
+    /// `requestAnimationFrame(cb)`。
+    ///
+    /// **返回句柄必须保存**：想取消已排队的帧就靠它（`cancelAnimationFrame`）。
+    /// 否则 runtime 销毁后，那个回调仍会被调用一次，
+    /// 而它持有的 `Closure` 已被 drop → 抛 `closure invoked after dropped`。
     #[wasm_bindgen(method, js_name = "requestAnimationFrame")]
-    pub fn request_animation_frame(this: &Window, cb: &Closure<dyn FnMut(f64)>);
+    pub fn request_animation_frame(this: &Window, cb: &Closure<dyn FnMut(f64)>) -> i32;
+
+    /// `cancelAnimationFrame(handle)`。
+    #[wasm_bindgen(method, js_name = "cancelAnimationFrame")]
+    pub fn cancel_animation_frame(this: &Window, handle: i32);
 
     /// 全局 `window` 对象。
     ///
@@ -98,6 +107,14 @@ extern "C" {
         value: &str,
         priority: &str,
     );
+
+    /// `style.getPropertyValue(name)`。
+    #[wasm_bindgen(method, js_name = "getPropertyValue")]
+    pub fn get_property_value(this: &CssStyleDeclaration, name: &str) -> String;
+
+    /// `style.getPropertyPriority(name)`。
+    #[wasm_bindgen(method, js_name = "getPropertyPriority")]
+    pub fn get_property_priority(this: &CssStyleDeclaration, name: &str) -> String;
 
     /// `canvas.focus()`\uff1a\u70b9\u51fb\u540e\u628a\u952e\u76d8\u7126\u70b9\u62a2\u5230 canvas \u4e0a\u3002
     #[wasm_bindgen(method)]
@@ -331,6 +348,13 @@ extern "C" {
     /// 不加 `structural` 的话 wasm-bindgen 会在 JS 侧做 `instanceof Element` 检查。
     #[wasm_bindgen(method, structural, js_name = "appendChild")]
     pub fn append_child(this: &Element, child: &Element) -> Element;
+
+    /// `element.remove()`——从它的父节点上摘掉。
+    ///
+    /// 用作 `dispose()`：隐藏 `input` 是我们机动插进 `body` 的，
+    /// 不清理就会在页面上积累（热重启多次就堆多个）。
+    #[wasm_bindgen(method, structural, js_name = "remove")]
+    pub fn remove(this: &Element);
 
     /// `element.tagName`（大写，如 `"CANVAS"` / `"INPUT"`）。
     #[wasm_bindgen(method, getter, js_name = "tagName")]

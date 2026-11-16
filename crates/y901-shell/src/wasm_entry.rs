@@ -113,7 +113,25 @@ pub fn y901_start() -> Result<(), JsValue> {
 /// 为何这么分工：`fetch` 是 Promise，而 `wasm-bindgen-futures` 与本仓 `wasm-bindgen`
 /// 版本不配对（`JsFuture::from(JsValue)` 不满足 trait bound）。把异步留在
 /// JS（浏览器最擅长的地方），Rust 只同步接字节，**零异步依赖**。
+/// **拆除当前页面的 runtime**（热重启 / 测试重载前调用）。
+///
+/// 做三件事：取消排队的 rAF、卸掉所有 DOM 监听器与隐藏 input、
+/// 把全局 `STATE` 置回 `None`。之后可以安全地再调一次 `y901_start()`。
+///
+/// **不调它会怎样**：旧 runtime 的帧循环仍在跑，监听器也还挂着，
+/// 两把帧循环会同时向同一个 canvas 推像素（并且每次重启都多一个隐藏 input）。
 #[wasm_bindgen]
+pub fn y901_dispose() {
+    let state = STATE.with(|s| s.borrow_mut().take());
+    if let Some(rc) = state {
+        if let Ok(mut st) = rc.try_borrow_mut() {
+            st.dispose();
+        }
+    }
+}
+
+#[wasm_bindgen]
+/// 真字体就绪回调（由页面的 `fetch` 完成后调用）。
 pub fn y901_font_loaded(bytes: Vec<u8>) -> Result<(), JsValue> {
     // 与 `WasmFontEngine` 的格子保持一致：字号 16，cell 8x16。
     let cell = Size::new(8.0, 16.0);

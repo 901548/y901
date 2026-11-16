@@ -32,7 +32,49 @@ pub use input::{KeyInput, MouseInput, WheelInput};
 pub use keys::{button_from_dom, char_from_dom, key_from_dom, mods_from_event, wheel_delta_from_dom};
 pub use present::Present;
 
+/// 光标 CSS 是否需要重写：值相同、且优先级已经是 `important` 时跳过。
+///
+/// **为什么重要**：鼠标在同一个控件上移动时，`cursor_at` 的结果逐帧不变；
+/// 每次移动都 `setProperty` 会让浏览器样式系统反复失效（实测 60 帧内有 25 次重复写）。
+/// 这里只做判断，真正的读取/写入留在调用点（纯函数便于单测）。
+fn cursor_needs_write(current: &str, priority: &str, target: &str) -> bool {
+    current != target || priority != "important"
+}
+
 impl WasmState {
+    /// **彻底拆除这个 runtime**：取消帧、卸监听器、移除隐藏 input、释放树。
+    ///
+    /// 为何需要：单页里热重启 / 测试重载时，若不拆，
+    /// ① 已排队的 rAF 会在 `Closure` 被 drop 后跑一次 → `closure invoked after dropped`；
+    /// ② 监听器 Closure 不释放，旧 runtime 的回调继续往旧队列推事件；
+    /// ③ 隐藏 `input` 每次都往 `body` 里多塞一个。
+    ///
+    /// 调用时机：由页面 / JS 侧显式调 `y901_dispose()`；也可在重新
+    /// `y901_start()` 之前调一次。
+    pub fn dispose(&mut self) {
+        // 1) 取消尚未执行的 rAF，并丢掉存储的 Closure。
+        if let Some(win) = bindings::global_window() {
+            let h = self.raf_handle.replace(0);
+            if h != 0 {
+                win.cancel_animation_frame(h);
+            }
+        }
+        if let Ok(mut slot) = self.raf.try_borrow_mut() {
+            *slot = None;
+        }
+        // 2) 卸掉所有 DOM 监听器（Closure 被 drop 时 wasm-bindgen 会摘除 JS 监听）。
+        self.listeners.clear();
+        // 3) 把隐藏 input 从 DOM 移除，避免页面上积累。
+        if let Some(input_js) = self.ime_input.take() {
+            let el: &bindings::Element = input_js.unchecked_ref();
+            el.remove();
+        }
+        // 4) 释放树与 host（业务层资源随之释放），清空事件队列。
+        self.tree = None;
+        self.host = None;
+        self.events.borrow_mut().clear();
+    }
+
     /// **处理回调里只能标记、不能直接做的两件事**：窗口尺寸变化、鼠标光标形状。
     ///
     /// 两者都需要 `tree`（命中测试 / 重排），而 DOM 回调拿不到 `WasmState`。
@@ -79,9 +121,12 @@ impl WasmState {
                 // **只改单个属性**：`setAttribute("style", ...)` 会整条覆盖，
                 // 把页面 CSS 的 `width/height` 也抹掉（resize 就此失效）。
                 // **`important`**：防止页面里任何 `canvas { cursor: … }` 规则把它盖掉。
-                self.canvas
-                    .style()
-                    .set_property_with_priority("cursor", css, "important");
+                let style = self.canvas.style();
+                let current = style.get_property_value("cursor");
+                let priority = style.get_property_priority("cursor");
+                if cursor_needs_write(&current, &priority, css) {
+                    style.set_property_with_priority("cursor", css, "important");
+                }
             }
         }
     }
@@ -160,6 +205,8 @@ pub struct WasmState {
     /// 放在 `Rc<RefCell<Option<..>>>` 里：每帧先 `take` 出旧的并 drop，再存入新的。
     #[allow(clippy::type_complexity)] // 层数是"holder + 可选回调" 的必然结果，展开只会更难读
     pub raf: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>,
+    /// **已排队的 rAF 句柄**（0 = 没有），`dispose()` 靠它取消尚未执行的帧。
+    pub raf_handle: Rc<std::cell::Cell<i32>>,
 }
 
 /// `WindowBackend` 的**薄包装**：只借 `soft` / `present` / `canvas`。
@@ -206,7 +253,7 @@ impl WindowBackend for WasmWindow<'_> {
         // 1. **只有 `dirty.is_full()` 才 `clear()`**：清屏后只画脏区，其余像素就会留成清屏色
         //    （历史上的黑屏就是这么来的）。
         // 2. **帧布局快照必须在 `render` 之前取**：`UiTree::render` 结束时会 `dirty.clear()`。
-        // 3. **上屏只传脏矩形**：整帧 `putImageData` 每帧要搬 ~1.9 MB，那才是卡顿的主因。
+        // 3. 上屏策略按脏区面积和块数选择局部/整帧，避免高碎片时多次 JS 调用反而更慢。
         let full = tree.dirty().is_full();
         let (vw, vh) = self.viewport();
         // 快照（仅局部帧需要；全量帧传 `None` = 整帧上屏）。
@@ -289,6 +336,7 @@ impl WasmState {
             listeners: Vec::new(),
             last_frame_ms: 0.0,
             raf: Rc::new(RefCell::new(None::<Closure<dyn FnMut(f64)>>)),
+            raf_handle: Rc::new(std::cell::Cell::new(0)),
         })
     }
 }
@@ -821,19 +869,27 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
         let Ok(s) = state.try_borrow() else {
             return; // 重入：本帧就不调度了，不 panic
         };
-        Rc::clone(&s.raf)
+        (Rc::clone(&s.raf), Rc::clone(&s.raf_handle))
     };
+    let (holder, state_raf_handle) = holder;
     // 先 drop 旧闭包（否则旧回调还持着一个 handler）
     if let Ok(mut slot) = holder.try_borrow_mut() {
         *slot = None;
     }
 
-    let for_frame = Rc::clone(&state);
-    let for_next = Rc::clone(&state);
+    // **弱引用破环**：state → raf holder → closure；若 closure 再强引用 state 就是一个环，
+    // runtime 永远无法释放。Weak 后，外部所有 Rc drop 时 state 立即释放，
+    // 下一次 upgrade() 返回 None，循环自然停下。
+    let for_frame = Rc::downgrade(&state);
+    let for_next = Rc::downgrade(&state);
+    let raf_handle = Rc::clone(&state_raf_handle);
     let cb = Closure::new(move |ts: f64| {
         // ---- 一帧 ----
         {
-            let Ok(mut s) = for_frame.try_borrow_mut() else {
+            let Some(frame_state) = for_frame.upgrade() else {
+                return; // runtime 已销毁：不再跑任何帧
+            };
+            let Ok(mut s) = frame_state.try_borrow_mut() else {
                 return; // 重入保护：不 panic，丢掉这一帧
             };
             // 先处理"回调里只能标记"的两件事：窗口尺寸变化与鼠标光标形状。
@@ -874,11 +930,14 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
             }
         }
         // ---- 排下一帧（必须在上面的借用结束之后）----
-        schedule_frame(Rc::clone(&for_next));
+        if let Some(next_state) = for_next.upgrade() {
+            schedule_frame(next_state);
+        }
     });
 
     if let Some(win) = bindings::global_window() {
-        win.request_animation_frame(&cb);
+        let h = win.request_animation_frame(&cb);
+        raf_handle.set(h);
         if let Ok(mut slot) = holder.try_borrow_mut() {
             *slot = Some(cb);
         }
@@ -894,5 +953,32 @@ impl y901_runtime::PlatformRuntime for WasmRuntime {
         _options: y901_runtime::Options,
     ) -> Result<(), String> {
         WasmRuntime::run(self, host, build)
+    }
+}
+
+#[cfg(test)]
+mod cursor_write_tests {
+    use super::cursor_needs_write;
+
+    /// 值没变、优先级已是 `important`：**不写**（这就是冗余写入的消除点）。
+    #[test]
+    fn same_value_and_priority_is_skipped() {
+        assert!(!cursor_needs_write("text", "important", "text"));
+        assert!(!cursor_needs_write("pointer", "important", "pointer"));
+    }
+
+    /// 值变了必须写。
+    #[test]
+    fn changed_value_is_written() {
+        assert!(cursor_needs_write("default", "important", "text"));
+        assert!(cursor_needs_write("", "", "pointer"));
+    }
+
+    /// 值相同但优先级被别的规则清成普通级时仍要补 `important`，
+    /// 否则页面里 `canvas { cursor: … }` 会盖掉控件的形状。
+    #[test]
+    fn missing_important_priority_is_restored() {
+        assert!(cursor_needs_write("text", "", "text"));
+        assert!(cursor_needs_write("text", "user", "text"));
     }
 }
