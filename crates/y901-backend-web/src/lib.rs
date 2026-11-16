@@ -515,6 +515,10 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // **IME 共享状态**（三处共用：keydown、input、composition）：
     //
     // - `composing`：正在拼音组字。组字期间的 `keydown` 与 `input` 都**不能**当成用户输入。
+    // **用户是否交互过**（点过 canvas）。用于避免"页面刚打开就抢焦点"。
+    let interacted_cell = Rc::new(std::cell::Cell::new(false));
+    // **blur 时焦点是否在我们的隐藏 input 上**。
+    let input_had_focus_cell = Rc::new(std::cell::Cell::new(false));
     let composing = Rc::new(std::cell::Cell::new(false));
     // **上一次 `compositionend` 提交的串**（ASCII 与中文的交叉去重用）。
     let last_committed: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
@@ -575,6 +579,8 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         let evs = Rc::clone(&events);
         let canvas_h = Rc::clone(&canvas_h);
         let ime_input_for_focus = ime_input.clone();
+        let interacted_for = Rc::clone(&interacted_cell);
+        let input_focus_for = Rc::clone(&input_had_focus_cell);
         let canvas_for_focus =
             Some(canvas_js.clone().unchecked_into::<bindings::HtmlCanvasElement>());
         let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
@@ -596,9 +602,11 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             }
             // **把焦点给隐藏 input**（而不是 canvas），输入法才会启动；
             // 没有 input（极罕见：页面没有 body）时退回 canvas，至少保证英文可用。
+            interacted_for.set(true);
             if let Some(input_js) = ime_input_for_focus.as_ref() {
                 let input: &bindings::HtmlInputElement = input_js.unchecked_ref();
                 input.focus();
+                input_focus_for.set(true);
             } else if let Some(canvas) = canvas_for_focus.as_ref() {
                 canvas.focus();
             }
@@ -838,13 +846,55 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
             pending.set(true);
         });
-        let target: bindings::EventTarget =
-            <bindings::EventTarget as JsCast>::unchecked_from_js(JsValue::from(win));
+        let win_js: JsValue = win.into();
+        let target: bindings::EventTarget = win_js.unchecked_into();
         target.add_event_listener("resize", &handler);
         listeners.push(Listener {
             target,
             kind: "resize".to_string(),
             handler,
+        });
+    }
+
+    // ---- window focus / blur：回来时把焦点还给隐藏 input ----
+    //
+    // 场景：用户切到别的标签页再回来，焦点丢了 → 键盘不响应。
+    // 但**不能无条件抢**：若用户正在地址栏打字，抢焦点会打断他。
+    // 判定用纯函数 `keys::should_refocus`（带单测）。
+    if let Some(win) = bindings::global_window() {
+        let input_js = ime_input.clone();
+        let interacted_for = Rc::clone(&interacted_cell);
+        let had_focus_for = Rc::clone(&input_had_focus_cell);
+        let on_blur = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
+            // blur 时记下"刚刚焦点还在我们这里吗"，供随后的 focus 判定用。
+            had_focus_for.set(interacted_for.get());
+        });
+        let win_js: JsValue = win.clone();
+        let win_target: bindings::EventTarget = win_js.unchecked_into();
+        win_target.add_event_listener("blur", &on_blur);
+        listeners.push(Listener {
+            target: win_target,
+            kind: "blur".to_string(),
+            handler: on_blur,
+        });
+
+        let interacted_for = Rc::clone(&interacted_cell);
+        let had_focus_for = Rc::clone(&input_had_focus_cell);
+        let on_focus = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
+            if keys::should_refocus(interacted_for.get(), had_focus_for.get()) {
+                if let Some(input_js) = input_js.as_ref() {
+                    let input: &bindings::HtmlInputElement = input_js.unchecked_ref();
+                    input.focus();
+                }
+            }
+        });
+        let win_js: JsValue = win.into();
+        let win_target: bindings::EventTarget = win_js.unchecked_into();
+        win_target.add_event_listener("focus", &on_focus);
+        listeners.push(Listener {
+            target: win_target,
+            kind: "focus".to_string(),
+            handler: on_focus,
         });
     }
 

@@ -125,6 +125,20 @@ pub fn should_accept_input(value: &str, composing: bool, last_committed: &str) -
     !composing && !value.is_empty() && value != last_committed
 }
 
+/// **窗口重新获得焦点时，是否要把焦点还给隐藏 input**。
+///
+/// 两个条件同时满足才抢焦点，否则会在用户正在地址栏打字时被抢回来：
+///
+/// 1. **用户至少交互过一次**（点过 canvas）—— 否则页面刚打开就抢焦点，
+///    会阻止用户使用地址栏 / 搜索框；
+/// 2. **blur 发生时焦点本来在我们的 input 上** —— 若用户主动点了别的元素，
+///    就不该把焦点抢回来。
+///
+/// 抽成纯函数的理由：这两个条件的组合就是容易写错的地方，而 DOM 回调在 native 下跑不了。
+pub fn should_refocus(interacted: bool, input_had_focus_on_blur: bool) -> bool {
+    interacted && input_had_focus_on_blur
+}
+
 /// 特殊键表：`(code, Key)`。
 fn special_key(code: &str) -> Option<Key> {
     let k = match code {
@@ -388,5 +402,25 @@ mod tests {
         assert!(!should_accept_input("你好", false, "你好"));
         // 但下一次真实输入不受影响
         assert!(should_accept_input("设置", false, "你好"));
+    }
+
+    // ---- should_refocus（window focus/blur）----
+
+    #[test]
+    fn refocus_when_user_was_typing_in_our_input() {
+        assert!(should_refocus(true, true));
+    }
+
+    #[test]
+    fn never_refocus_before_the_user_touched_the_canvas() {
+        // 页面刚打开：不能抢焦点
+        assert!(!should_refocus(false, false));
+        assert!(!should_refocus(false, true));
+    }
+
+    #[test]
+    fn do_not_refocus_when_focus_had_already_moved_elsewhere() {
+        // 用户点了地址栏 / 其他元素
+        assert!(!should_refocus(true, false));
     }
 }
