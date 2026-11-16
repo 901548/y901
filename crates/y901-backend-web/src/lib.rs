@@ -18,7 +18,6 @@ use y901_runtime::{Host, RawEvent};
 use y901_ui::{Size, UiTree};
 
 pub mod bindings;
-pub mod font;
 pub mod font_engine;
 pub mod frame;
 pub mod input;
