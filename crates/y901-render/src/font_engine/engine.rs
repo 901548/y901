@@ -70,13 +70,36 @@ pub struct MyFontEngine {
     evicted_last_frame: usize,
 }
 
+/// **字体集（TTC）相关的提示文本**（单一来源，便于测试断言）。
+///
+/// 为何只在「解析已经失败」时用它：`ttf_parser` **能**直接读 TTC 的第 0 个 face，
+/// 所以不能预先拒绝 `ttcf`（实测：hash-gate 使用的字体就能崩开）。
+/// 但一旦它真失败，原始报错像“文件损坏”，而实际原因往往是多 face 容器。
+pub const TTC_HINT: &str =
+    "（检测到 ttcf 文件头：这是 TTC 字体集容器）请导出单个 TTF/OTF 字重后重试。";
+
+/// **是否为字体集（TTC）**：看前 4 字节是否为 `ttcf`。
+pub fn is_ttc(data: &[u8]) -> bool {
+    data.len() >= 4 && &data[..4] == b"ttcf"
+}
+
+
 impl MyFontEngine {
     /// 创建引擎。
     ///
     /// 输入：`data`（TTF/OTF 字节，必须常驻）、`size_px`、`cell`。
     /// 返回：`Err` = 字体解析失败。副作用：无。
     pub fn new(data: Vec<u8>, size_px: f32, cell: Size) -> Result<Self, String> {
-        let face = ttf_parser::Face::parse(&data, 0).map_err(|e| format!("字体解析失败: {e}"))?;
+        // **TTC 提示（不预拒）**：`ttf_parser` 本身支持 TTC（取 face 0），
+        // 预先拒绝会把可用的集合字体一起打死（实测：层哈希会因此变掉）。
+        // 只有解析**已经失败**时才补上可执行提示。
+        let face = ttf_parser::Face::parse(&data, 0).map_err(|e| {
+            if is_ttc(&data) {
+                format!("字体解析失败（{e}）{TTC_HINT}")
+            } else {
+                format!("字体解析失败：{e}")
+            }
+        })?;
         let units = face.units_per_em() as f32;
         let ascent = face.ascender() as f32 * size_px / units.max(1.0);
         Ok(Self {
@@ -747,5 +770,48 @@ mod mip_guard_tests {
         let g = e.glyph('B').expect("B").clone();
         assert!(g.mips[0].is_some(), "L1 应生成");
         assert!(g.mips[1].is_some(), "占用率 0.5 时 L2 也应生成");
+    }
+}
+
+#[cfg(test)]
+mod ttc_hint_tests {
+    use super::*;
+
+    /// ttcf 头能被认出；真 TTF/OTF 不会被误判；不足 4 字节不越界。
+    #[test]
+    fn ttcf_magic_is_recognised_without_false_positives() {
+        assert!(is_ttc(b"ttcf"));
+        assert!(is_ttc(b"ttcf\x00\x01\x00\x00"));
+        assert!(!is_ttc(&[0x00, 0x01, 0x00, 0x00]));
+        assert!(!is_ttc(b"OTTO"));
+        assert!(!is_ttc(b"ttc"));
+        assert!(!is_ttc(&[]));
+    }
+
+    /// **关键回归：真字体仍然能构造**。
+    ///
+    /// 曾经在 `new()` 里预先拒绝 `ttcf`，结果把能用的字体也挡在外面，
+    /// `hash-gate` 的帧哈希因此变掉。这条用**真字体**钉住"不得预拒。
+    #[test]
+    fn real_font_still_constructs() {
+        let data = crate::font_engine::load_font(&crate::font_engine::default_test_font_path()).expect("font");
+        let cell = crate::cell_metrics_for(15.0);
+        let engine = MyFontEngine::new(data, 15.0, Size::new(cell.0, cell.1));
+        assert!(engine.is_ok(), "真字体必须能构造：{:?}", engine.err());
+    }
+
+    /// 伪造 ttcf + 垃圾体：解析失败时错误必须带 TTC 提示与可执行建议。
+    #[test]
+    fn ttc_parse_failure_carries_actionable_hint() {
+        let mut data = b"ttcf".to_vec();
+        data.extend_from_slice(&[0u8; 64]); // 不是合法字体 ⇒ 解析必失败
+        let err = MyFontEngine::new(data, 16.0, Size::new(8.0, 16.0))
+            .err()
+            .expect("应当失败");
+        assert!(err.contains("TTC"), "错误应提到 TTC，实际: {err}");
+        assert!(
+            err.contains("TTF") && err.contains("OTF"),
+            "错误应告知导出单个 TTF/OTF，实际: {err}"
+        );
     }
 }
