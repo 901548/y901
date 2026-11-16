@@ -129,17 +129,17 @@ pub fn to_ui_y(height: f32, y_dom: f32) -> f32 {
 ///
 /// 注意最后一条：**不看自己的任何标志**，所以"组字状态卡死"这类间歇性问题在结构上不可能发生。
 pub fn should_send_keydown(
-    focus_is_player: bool,
     is_composing: bool,
     code: &str,
     printable: bool,
     ctrl: bool,
     alt: bool,
 ) -> bool {
-    if !focus_is_player || is_composing {
+    // 组字中：键归输入法（否则拼音会被当成删字）
+    if is_composing {
         return false;
     }
-    // 可打印键：字符由 `input` 事件提交；但 **Ctrl/Alt+字母必须接**（Ctrl+A/C/V 靠这条）
+    // 可打印字符：由 `input` 事件提交（避免双字）；Ctrl/Alt 组合除外
     if printable && !ctrl && !alt {
         return false;
     }
@@ -464,39 +464,31 @@ mod tests {
     // ---- should_send_keydown（统一闸门）----
 
     #[test]
-    fn control_keys_pass_when_focus_is_ours() {
-        assert!(should_send_keydown(true, false, "Backspace", false, false, false));
-        assert!(should_send_keydown(true, false, "Delete", false, false, false));
-        assert!(should_send_keydown(true, false, "ArrowLeft", false, false, false));
-        assert!(should_send_keydown(true, false, "Tab", false, false, false));
+    fn control_keys_pass() {
+        assert!(should_send_keydown(false, "Backspace", false, false, false));
+        assert!(should_send_keydown(false, "Delete", false, false, false));
+        assert!(should_send_keydown(false, "ArrowLeft", false, false, false));
+        assert!(should_send_keydown(false, "Tab", false, false, false));
     }
 
     #[test]
     fn printable_keys_are_left_to_the_input_event() {
-        assert!(!should_send_keydown(true, false, "KeyA", true, false, false));
+        assert!(!should_send_keydown(false, "KeyA", true, false, false));
         // 但 Ctrl+字母要接（Ctrl+A / Ctrl+C / Ctrl+V）
-        assert!(should_send_keydown(true, false, "KeyA", true, true, false));
-        assert!(should_send_keydown(true, false, "KeyV", true, true, false));
-    }
-
-    #[test]
-    fn nothing_passes_when_focus_is_elsewhere() {
-        // 地址栏 / devtools / 页面其他输入框：一律不接（不抢用户的键）
-        assert!(!should_send_keydown(false, false, "Backspace", false, false, false));
-        assert!(!should_send_keydown(false, false, "ArrowLeft", false, false, false));
+        assert!(should_send_keydown(false, "KeyA", true, true, false));
+        assert!(should_send_keydown(false, "KeyV", true, true, false));
     }
 
     #[test]
     fn nothing_passes_while_composing() {
         // 真正组字中：Backspace 归输入法（删拼音），不能变成删正文
-        assert!(!should_send_keydown(true, true, "Backspace", false, false, false));
-        assert!(!should_send_keydown(true, true, "ArrowLeft", false, false, false));
+        assert!(!should_send_keydown(true, "Backspace", false, false, false));
+        assert!(!should_send_keydown(true, "ArrowLeft", false, false, false));
     }
 
     #[test]
     fn backspace_works_again_as_soon_as_the_event_says_composition_ended() {
-        // 这条是"删不掉"回归的直接守卫：同一顺序里，
-        // compositionend 之后的 Backspace 事件 isComposing=false ⇒ 必须接。
-        assert!(should_send_keydown(true, false, "Backspace", false, false, false));
+        // "删不掉"回归的直接守卫：compositionend 之后的事件 isComposing=false
+        assert!(should_send_keydown(false, "Backspace", false, false, false));
     }
 }

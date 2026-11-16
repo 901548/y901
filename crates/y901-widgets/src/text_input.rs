@@ -411,7 +411,7 @@ impl TextInput {
                     if let Some(text) = self.clipboard.get() {
                         self.buffer.insert_str(&text);
                         self.touch();
-                        return EventResult::Relayout;
+                        return EventResult::Redraw;
                     }
                     return EventResult::Handled;
                 }
@@ -432,7 +432,7 @@ impl TextInput {
             Key::Backspace => {
                 if self.buffer.backspace() {
                     self.touch();
-                    EventResult::Relayout
+                    EventResult::Redraw
                 } else {
                     EventResult::Handled
                 }
@@ -440,7 +440,7 @@ impl TextInput {
             Key::Delete => {
                 if self.buffer.delete_forward() {
                     self.touch();
-                    EventResult::Relayout
+                    EventResult::Redraw
                 } else {
                     EventResult::Handled
                 }
@@ -474,7 +474,7 @@ impl TextInput {
             Key::Char(c) if !c.is_control() => {
                 self.buffer.insert_char(c);
                 self.touch();
-                EventResult::Relayout
+                EventResult::Redraw
             }
             _ => EventResult::Ignored,
         }
@@ -654,7 +654,9 @@ impl Widget for TextInput {
                 self.preedit.clear();
                 self.buffer.insert_str(text);
                 self.touch();
-                EventResult::Relayout
+                // **布局不变**：宽度已由父级锁死（见 `measure`），
+                // 文字变长只影响内部滚动，那在 `render` 里完成。
+                EventResult::Redraw
             }
 
             UiEvent::Key { key, modifiers } => {
@@ -703,7 +705,7 @@ impl Widget for TextInput {
                         .to_string();
                     self.buffer = TextBuffer::from_text(text);
                     self.touch();
-                    EventResult::Relayout
+                    EventResult::Redraw
                 }
                 "focus" => {
                     // 同上：只请求，等框架的 Focus(true) 回来再置位
@@ -722,7 +724,7 @@ impl Widget for TextInput {
                         .to_string();
                     self.buffer.insert_str(&text);
                     self.touch();
-                    EventResult::Relayout
+                    EventResult::Redraw
                 }
                 _ => EventResult::Ignored,
             },
@@ -736,6 +738,15 @@ impl Widget for TextInput {
         let inner = rect.inset(self.padding);
         if inner.is_empty() {
             return;
+        }
+
+        // **0) 光标跟随内部滚动**。
+        //
+        // 为什么放在渲染而不是 `arrange`：新状态机里编辑只返回
+        // `Redraw`（宽度已锁死，布局不会变），因此 `arrange` 不会被再次调用。
+        // 把 `ensure_caret_visible` 放在这里，"Redraw 也能让光标跑进可视区"。
+        if self.focused && !self.inner_w.is_nan() {
+            self.ensure_caret_visible();
         }
 
         // 1) 排版表（借用 ctx 的度量能力，用完立即释放）
@@ -1073,7 +1084,11 @@ mod tests {
 
         // 3) 输入替换选区
         let r = w.event(&mut c, &UiEvent::Text("X".to_string()));
-        assert!(r.needs_relayout());
+        // **新状态机：编辑只需 `Redraw`**。
+        // 宽度已由父级锁死（`measure` 不再跟内容走），所以文字变化
+        // 不会改变布局；旧期望 `Relayout` 是"宽度跟内容走"那个时代的产物，
+        // 而那正是打字引发整窗重绘的根因，已被废弃。
+        assert!(r.needs_redraw() && !r.needs_relayout());
         assert_eq!(w.text(), "abcX");
         assert_eq!(w.cursor(), 4);
         assert_eq!(w.anchor(), 4);

@@ -462,22 +462,19 @@ impl WasmRuntime {
 /// ① `document.activeElement` 是不是我们自己的元素（canvas 或隐藏 input）；
 /// ② 这次事件本身是不是组字产生的（`event.isComposing`）。
 /// 判断逻辑在纯函数 `keys::should_send_keydown` 里（带单测），这里只做取值与投递。
-fn keydown_handler(
-    events: Rc<RefCell<VecDeque<RawEvent>>>,
-    canvas_id: String,
-    ime_id: String,
-) -> Closure<dyn FnMut(JsValue)> {
+fn keydown_handler(events: Rc<RefCell<VecDeque<RawEvent>>>) -> Closure<dyn FnMut(JsValue)> {
     Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
         let ke: &bindings::KeyboardEvent = val.unchecked_ref();
-        let focus_id = active_element_id();
-        let focus_is_player = focus_id
-            .as_deref()
-            .is_some_and(|id| id == canvas_id || id == ime_id);
+        // **简化的焦点规则**：只要焦点在本页面内，就接管键盘。
+        // 唯一例外：焦点在**页面里其他输入框**（`<input>`/`<textarea>` 且不是我们的），
+        // 那时抢过来会让用户在别人的输入框里无法打字。
+        if !focus_in_page_is_ours_or_non_text() {
+            return;
+        }
         let code = ke.code();
         let key = ke.key();
-        // **只看事实**：焦点在哪、事件是否组字。不看任何自己维护的标志。
+        // **只看事实**：这次事件是不是组字产生的。不看任何自己维护的标志。
         if !keys::should_send_keydown(
-            focus_is_player,
             ke.is_composing(),
             &code,
             keys::char_from_dom(&key).is_some(),
@@ -518,12 +515,37 @@ fn global_window_target() -> bindings::EventTarget {
     win_js.unchecked_into()
 }
 
-/// 当前焦点元素的 `id`（`None` = 焦点在 body / 地址栏 / devtools / 别的页面元素上）。
+/// 当前焦点元素的 `id`（`None` = 无焦点）。
 fn active_element_id() -> Option<String> {
     let window = bindings::global_window()?;
     let document = window.document()?;
     let el = document.active_element()?;
     Some(el.id())
+}
+
+/// **焦点是否允许我们接管键盘**。
+///
+/// 规则只有一条例外：焦点在页面里**其他**的 `<input>` / `<textarea>` 上时不抢。
+/// 其余情况（canvas、我们的隐藏 input、`body`、任意 div）都接管——
+/// 因为那些地方本来就不会消费按键，接管不会抢用户的输入。
+fn focus_in_page_is_ours_or_non_text() -> bool {
+    let Some(window) = bindings::global_window() else {
+        return false;
+    };
+    let Some(document) = window.document() else {
+        return false;
+    };
+    let Some(el) = document.active_element() else {
+        // 没有任何焦点元素（焦点在地址栏 / devtools）→ 不接
+        return false;
+    };
+    let tag = el.tag_name().to_uppercase();
+    let is_text_field = tag == "INPUT" || tag == "TEXTAREA" || tag == "SELECT";
+    if !is_text_field {
+        return true; // body / div / canvas：接管
+    }
+    // 是输入类元素：只有我们自己的隐藏 input 才接
+    el.id() == IME_ID
 }
 
 /// **P1/P2：挂鼠标、滚轮与键盘监听器**。
@@ -549,8 +571,6 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
 
     // wasm-bindgen 的外部类型本身就是 `JsValue` 的包装；clippy 提示这里无需 `.into()`。
     let canvas_js: JsValue = state.canvas.clone();
-    // **焦点判定用的 id**：只有焦点在这两个元素上时，我们才接键盘事件。
-    let canvas_id: String = state.canvas.get_attribute("id").unwrap_or_default();
     let events = Rc::clone(&state.events);
     // **IME 共享状态**（三处共用：keydown、input、composition）：
     //
@@ -731,7 +751,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
 
     // ---- keydown\uff1a\u53ea\u53d1\u63a7\u5236\u952e\uff08\u5b57\u7b26\u7531 `input` \u63d0\u4ea4\uff09----
     if bindings::global_window().is_some() {
-        let handler = keydown_handler(Rc::clone(&events), canvas_id.clone(), IME_ID.to_string());
+        let handler = keydown_handler(Rc::clone(&events));
         let target: bindings::EventTarget = global_window_target();
         target.add_event_listener("keydown", &handler);
         listeners.push(Listener {

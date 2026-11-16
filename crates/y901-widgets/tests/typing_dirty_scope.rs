@@ -105,10 +105,12 @@ fn typing_marks_only_the_input_locally() {
     assert!(input.w > 0.0 && input.h > 0.0, "前置：输入框已布局");
 
     let result = tree.dispatch(&UiEvent::Text("a".to_string()));
-    assert!(
-        result.needs_relayout(),
-        "文本编辑必须要求重排（内容宽度可能变）"
-    );
+    // **新状态机：编辑不再要求重排**。
+    //
+    // 旧期望（Relayout）是"输入框宽度跟内容走"那个时代的产物：
+    // 宽度一变，父 Flex 就要重算，于是整卡片甚至全屏被标脏。
+    // 宽度锁死后编辑只影响自身像素，`Redraw` 就够了（也更快）。
+    assert!(result.needs_redraw() && !result.needs_relayout());
     assert!(
         !tree.dirty().is_full(),
         "打字不应把整窗标脏（症状：整屏重绘）"
@@ -137,7 +139,10 @@ fn consecutive_keystrokes_stay_local() {
 
     for (i, ch) in ["a", "b", "c", "d", "e"].iter().enumerate() {
         let result = tree.dispatch(&UiEvent::Text((*ch).to_string()));
-        assert!(result.needs_relayout(), "第 {i} 次输入应要求重排");
+        assert!(
+            result.needs_redraw() && !result.needs_relayout(),
+            "第 {i} 次输入只需 Redraw（宽度已锁死，不应触发重排）"
+        );
         assert!(
             !tree.dirty().is_full(),
             "第 {i} 次输入把整窗标脏了（碎片累积降级？）"

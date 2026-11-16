@@ -183,3 +183,41 @@ fn ascii_works_immediately_after_composition() {
     type_text(&mut tree, "ab");
     assert_eq!(text_of(&mut tree), "你ab", "中文提交后立刻打英文不能丢");
 }
+
+// ---- 5. 压测：20 轮"输入 5 个 + 连按 5 次 Backspace" ----
+
+#[test]
+fn stress_twenty_rounds_type_and_delete() {
+    let mut tree = focused_input();
+    for round in 0..20 {
+        type_text(&mut tree, "abcde");
+        assert_eq!(text_of(&mut tree), "abcde", "第 {round} 轮输入后应为 abcde");
+        for i in 0..5 {
+            press(&mut tree, y901_ui::Key::Backspace);
+            let expect = &"abcde"[..4 - i];
+            assert_eq!(
+                text_of(&mut tree),
+                expect,
+                "第 {round} 轮第 {} 次 Backspace 后应为 {expect:?}",
+                i + 1
+            );
+        }
+        assert_eq!(text_of(&mut tree), "", "第 {round} 轮应删得干净");
+    }
+}
+
+/// 20 轮"先中文提交、再英文、再全删"的混合压测。
+#[test]
+fn stress_twenty_rounds_mixed_composition_and_ascii() {
+    let mut tree = focused_input();
+    for round in 0..20 {
+        tree.dispatch(&UiEvent::Compose("ni".to_string()));
+        tree.dispatch(&UiEvent::Text("你".to_string()));
+        type_text(&mut tree, "ab");
+        assert_eq!(text_of(&mut tree), "你ab", "第 {round} 轮混合输入");
+        press(&mut tree, y901_ui::Key::Backspace);
+        press(&mut tree, y901_ui::Key::Backspace);
+        press(&mut tree, y901_ui::Key::Backspace);
+        assert_eq!(text_of(&mut tree), "", "第 {round} 轮应删得干净");
+    }
+}
