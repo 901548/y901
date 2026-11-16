@@ -537,8 +537,21 @@ impl Widget for TextInput {
         let padding_h = self.padding.horizontal();
         let padding_v = self.padding.vertical();
 
+        // **宽度不能跟着内容走**。
+        //
+        // 旧实现：非定宽时返回 `layout_width + padding_h`，于是每敲一个字，
+        // measure 就变宽 → 父 Flex 重算分配 → 整棵子树的 rect 变化 →
+        // `layout()` 的"旧 ∪ 新"把卡片（昪 26%）甚至全屏标脏。
+        // web 上表现就是"打字卡一下"。
+        //
+        // 现在：**单行输入框的宽度由父级分配决定**。
+        // - 定宽（`Dimension::Px`）→ 用那个宽度；
+        // - 有效上界（Flex 分配的剩余空间）→ **直接填满它**；
+        // - 上界无限（例如被 loose 测量）→ 才回退到内容宽度。
+        // 内容变长只影响内部滚动（`ensure_caret_visible`），不再影响布局。
         let content_w = match self.item.width {
             Dimension::Px(v) => v,
+            _ if constraints.max.w.is_finite() => constraints.max.w,
             _ => self.layout_width + padding_h,
         };
         constraints.constrain(Size::new(

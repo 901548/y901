@@ -1589,7 +1589,14 @@ impl UiTree {
         self.drain_invalidation();
         // Signal 与 dispatch 触及的节点在此统一比对语义面（方案 1'，一帧一次）
         self.refresh_semantics();
-        let viewport_changed = self.viewport != viewport;
+        // **容差比较**：视口尺寸只要没真正变化就不算变化。
+        //
+        // 浏览器侧的 `clientWidth/Height` 会返回带小数的值，而 canvas 的背存储尺寸取整后可能
+        // 在两个相邻整数之间来回跳（比如 599.6/600.4 → 599/600）；一旦被当成"视口变化"，
+        // 就会 `DirtyRegion::full()` → 整窗重绘 + 整帧上传，而画面其实几乎没变。
+        // 容差 0.5px：小于半个物理像素的变化在任何显示器上都不可见。
+        let viewport_changed = (self.viewport.w - viewport.w).abs() > 0.5
+            || (self.viewport.h - viewport.h).abs() > 0.5;
         if viewport_changed {
             self.cache.mark_dirty(self.root.id());
             self.dirty = DirtyRegion::full();
