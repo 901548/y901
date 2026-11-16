@@ -272,13 +272,16 @@ impl WasmState {
     /// 从一个 canvas 构造：软后端按 canvas 尺寸分配像素缓冲，`Present` 取一次 2D 上下文。
     pub fn new(canvas: HtmlCanvasElement) -> Result<Self, String> {
         let (w, h) = (canvas.width(), canvas.height());
-        let soft = SoftBackend::new(
+        let mut soft = SoftBackend::new(
             w,
             h,
             Box::new(crate::font_engine::WasmFontEngine::new()),
             Size::new(8.0, 16.0),
             None,
         )?;
+        // **比例字体（微软雅黑等）按真实字宽推进**：
+        // 桌面与 GPU 路径不受影响（默认仍为格宽布局）。
+        soft.set_proportional_text(true);
         let cloned: HtmlCanvasElement = canvas.clone().into();
         let present = Present::new(cloned);
         Ok(Self {

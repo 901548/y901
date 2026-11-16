@@ -14,17 +14,22 @@
 
   <script type="module">
     // `?v=` 参数用于破浏览器缓存：每次重建都换一个值。
-import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=fix-clip-leak';
+import init, { y901_start, y901_font_loaded } from './pkg/y901_shell.js?v=final-perfect';
 
     async function run() {
-      await init();
+        // **wasm 也要破缓存**：不传参数时胶水拼出的是
+        // `./pkg/y901_shell_bg.wasm`（**带不上 ?v**）⇒ 浏览器一直用旧 wasm。
+        // **新版 wasm-bindgen 要求对象形式**：直接传字符串会被当作已废弃的旧参数，
+        // 并且它会自己拼一个**不带 ?v 的** wasm URL → 浏览器继续用缓存。
+        // 正确写法：`init({ module_or_path })`，这样我们传的 URL（含版本号）才真正生效。
+        await init({ module_or_path: './pkg/y901_shell_bg.wasm?v=final-perfect' });
 
       // 先出占位帧（零字形），再异步取真字体；字体就绪后换装并全量重绘。
       y901_start();
 
       try {
         // **字体也要破缓存**：否则浏览器会一直用旧的 Consolas（这就是 SimHei “没生效”的原因）。
-        const resp = await fetch('./fonts/default.ttf?v=simhei-2');
+        const resp = await fetch('./fonts/default.ttf?v=msyh-test');
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const buf = await resp.arrayBuffer();
         y901_font_loaded(new Uint8Array(buf));
