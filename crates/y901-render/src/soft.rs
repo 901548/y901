@@ -95,54 +95,12 @@ pub struct SoftBackend {
 /// 顶部 = 基线 − bearing_y − 字形高度，基线 = origin.y + ascent。
 /// 旧代码用 `origin.y + ascent + bearing_y`，把字形整体画低了一个字高；
 /// 底部溢出裁剪区后，因为画面在 present 层转置，表现为**顶部被切**。
-/// **基本汉字范围**（CJK Unified Ideographs）。
-///
-/// 用于“中文的过冲容差比拉丁字母大”这一事实：雅黑 16px 下
-/// 拉丁圆形字母是 -1（如 a/c/e），而汉字是 -2~-3（如 盖/覆）。
-fn is_cjk(ch: char) -> bool {
-    let c = ch as u32;
-    (0x4E00..=0x9FFF).contains(&c)
-}
-
-/// **归零容差**（仅比例字体模式）。
-///
-/// - 非比例模式：`0.0`（不归零，桌面/终端逐像素不变）
-/// - 汉字：`3.0`（盖=-2、覆=-3 都归零）
-/// - 拉丁字母：`1.0`（a/c/e=-1 归零；下伸 g/j=-5、p/q=-4 保留）
-fn bearing_clamp_limit(ch: char, proportional: bool) -> f32 {
-    if !proportional {
-        return 0.0;
-    }
-    if is_cjk(ch) {
-        3.0
-    } else {
-        1.0
-    }
-}
-
-fn glyph_top(origin_y: f32, ascent: f32, bearing_y: f32, height: f32, clamp_limit: f32) -> f32 {
-    // **小幅度 bearing 归零**（防“字在跳舞”）。
+fn glyph_top(origin_y: f32, ascent: f32, bearing_y: f32, height: f32) -> f32 {
+    // **行级 baseline 只取整一次**：之后全是整数运算。
     //
-    // 实测微软雅黑 16px：a/c/e/o/s/t/u 的 `bearing_y = -1`（圆形字母的 overshoot，
-    // 墨迹底部比基线低 1px），而 b/d/h/i/m/n 是 0。于是同一行里底边
-    // 会在 27/28 两个像素上来回跳——在 16px 这个尺寸下肉眼很明显。
-    //
-    // 归则：**|bearing_y| ≤ 1 视为 0**（忽略 1px 的设计过冲），
-    // 但保留真正的下伸字（g/j/p/q/y 的 -4~-5）与上标字符（正 bearing），
-    // 否则下伸部分会被抬到基线上方，字形变形。
-    // **仅比例字体模式下归零**：桌面 / 终端路径保持原行为（逐像素不变）。
-    let bearing_y = if clamp_limit > 0.0 && bearing_y.abs() <= clamp_limit {
-        0.0
-    } else {
-        bearing_y
-    };
-    // **基线先取整，再减字形自身的偏移**。
-    //
-    // 为何要这样：`ascent` 带小数（微软雅黑 16px = 16.93），
-    // 若对"基线 − bearing − 字高"整体取整，小数部分会被每个字各自截断，
-    // 于是底边对齐的字之间仍可能差 1px（看起来像上下跳舞）。
-    // 现在把**基线**作为唯一取整点：所有字形的底边 = 基线 − bearing，
-    // 按定义就是同一条线；字高与 bearing 都是整数像素。
+    // `bearing_y` **原样使用**：它是字形底边相对基线的位置
+    // （向下为负），包含圆形字母的 1px overshoot、下伸字的 -4~-5、
+    // 标点的自身偏移。**归零它会让冒号浮空、中英错位**（上一轮的错误）。
     (origin_y + ascent).round() - bearing_y - height
 }
 
@@ -516,12 +474,12 @@ impl SoftBackend {
                         // **字形顶部**：引擎的 `bearing_y` 是**位图底边**相对基线的位置
                         // （y 向上：'8' = 0 贴基线，'设' = -2 下伸），不是顶部偏移。
                         // 顶部 = 基线 − bearing_y − 字形高度。
+                        // **行级 baseline 取整 + 字形原始偏移**（见 `glyph_top`）
                         let by = glyph_top(
                             origin.y,
                             ascent,
                             g.bearing_y as f32,
                             g.height as f32,
-                            bearing_clamp_limit(ch, self.proportional_text),
                         ) as i32;
                         for gy in 0..g.height as i32 {
                             let dy = by + gy;
@@ -932,7 +890,6 @@ impl RenderCtx for SoftBackend {
                             ascent * scale,
                             sg.slot.bearing_y * scale,
                             drawn_h,
-                            bearing_clamp_limit(ch, self.proportional_text),
                         ) as i32;
                         // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
                         let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
@@ -1257,7 +1214,7 @@ mod glyph_top_tests {
     #[test]
     fn digits_sitting_on_the_baseline_are_lifted_by_their_height() {
         // 新语义：基线 = round(100 + 13.75) = 114；顶部 = 114 - 0 - 13 = 101
-        let top = glyph_top(100.0, 13.75, 0.0, 13.0, 0.0);
+        let top = glyph_top(100.0, 13.75, 0.0, 13.0);
         assert!((top - 101.0).abs() < 0.001, "top = {top}");
     }
 
@@ -1266,7 +1223,7 @@ mod glyph_top_tests {
     #[test]
     fn descenders_are_pushed_down_by_a_negative_bearing() {
         // 基线 114；top = 114 + 2 - 16 = 100
-        let top = glyph_top(100.0, 13.75, -2.0, 16.0, 0.0);
+        let top = glyph_top(100.0, 13.75, -2.0, 16.0);
         assert!((top - 100.0).abs() < 0.001, "top = {top}");
     }
 
@@ -1274,7 +1231,7 @@ mod glyph_top_tests {
     #[test]
     fn bottom_edge_equals_baseline_minus_bearing() {
         let (origin_y, ascent, bearing, height) = (40.0, 12.0, -3.0, 15.0);
-        let top = glyph_top(origin_y, ascent, bearing, height, 0.0);
+        let top = glyph_top(origin_y, ascent, bearing, height);
         let bottom = top + height;
         // 底边 = round(基线) − bearing（基线被取整，所有字都落在同一整数线）
         assert!((bottom - ((origin_y + ascent).round() - bearing)).abs() < 0.001);
@@ -1323,23 +1280,32 @@ mod glyph_top_tests {
 
     #[test]
     fn all_glyph_bottoms_land_on_one_integer_baseline() {
+        // Baseline formula: one integer baseline per line, bearing_y used as-is.
         let (origin_y, ascent) = (40.0f32, 16.93f32);
         let baseline = (origin_y + ascent).round();
-        // (字, bearing_y, height)
-        let glyphs = [("a", -1i32, 11i32), ("b", -1, 15), ("g", -5, 15), ("h", 0, 14)];
+        // (char, bearing_y, height): round latin, ascender, descender, colon, CJK
+        let glyphs = [
+            ("a", -1i32, 11i32),
+            ("b", -1, 15),
+            ("h", 0, 14),
+            ("g", -5, 15),
+            (":", -2, 8),
+            ("\u{4f60}", -3, 18),
+        ];
         for (name, bearing_y, height) in glyphs {
-            let top = glyph_top(origin_y, ascent, bearing_y as f32, height as f32, 1.0);
+            let top = glyph_top(origin_y, ascent, bearing_y as f32, height as f32);
             let bottom = top + height as f32;
-            // |bearing|<=1 归零；下伸保留。底边 = round(baseline) - clamped_bearing
-            let clamped = if (bearing_y as f32).abs() <= 1.0 { 0.0 } else { bearing_y as f32 };
-            assert_eq!(bottom, baseline - clamped, "{name}: bottom off baseline");
+            // bottom = round(baseline) - bearing_y  (authentic bearing, no clamping)
+            assert_eq!(bottom, baseline - bearing_y as f32, "{name}: bottom must be baseline - bearing");
             assert_eq!(bottom.fract(), 0.0, "{name}: bottom must be integer pixel");
         }
-        // 同一行内，所有“|bearing|≤1”的字底边必须**完全相等**
-        let a = glyph_top(origin_y, ascent, -1.0, 11.0, 1.0) + 11.0;
-        let b = glyph_top(origin_y, ascent, -1.0, 15.0, 1.0) + 15.0;
-        let h = glyph_top(origin_y, ascent, 0.0, 14.0, 1.0) + 14.0;
-        assert_eq!(a, b);
-        assert_eq!(b, h);
+        // Same bearing_y => identical bottom (no per-glyph rounding jitter)
+        let a = glyph_top(origin_y, ascent, -1.0, 11.0) + 11.0;
+        let b = glyph_top(origin_y, ascent, -1.0, 15.0) + 15.0;
+        assert_eq!(a, b, "a and b share bearing -1, so their bottoms must match");
+        // Descenders keep their own lower bottom
+        let g = glyph_top(origin_y, ascent, -5.0, 15.0) + 15.0;
+        assert!(g > a, "descender must sit lower than baseline-sitting glyphs");
     }
+        // 同一行内，所有“|bearing|≤1”的字底边必须**完全相等**
 }
