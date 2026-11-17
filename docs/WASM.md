@@ -7,7 +7,7 @@
 `y901-backend-web` crate 把 `WindowBackend` 契约实现在浏览器 canvas 上，让同一套 `UiTree` / 组件 /
 运行时在 wasm32 上跑起来。
 
-- **渲染**：`SoftBackend` 产出 **BGRA** 像素，`Present` 负责换通道 **并翻行**，再 `putImageData` 上屏。
+- **渲染**：`SoftBackend` 产出 **BGRA、自上而下**的像素，`Present` **只换通道（BGRA→RGBA）**，再 `putImageData` 上屏。行序不变。
 - **帧循环**：`requestAnimationFrame` 驱动，`run()` 立即返回。
 - **输入**：鼠标 / 滚轮 / 键盘 / 中文输入法全部接线完成（见 §3.1）。
 - **依赖**：只用 `wasm-bindgen`，**不用 `web-sys` / `js-sys`**；所有 DOM 类型手写在 `src/bindings.rs`。
@@ -47,11 +47,15 @@
 
 #### 坐标
 
-`present` 对整帧做行翻转，因此 **UI 树的 y 与 DOM 的 `offsetY` 方向相反**：
+**画面与 DOM 同向**：软缓冲自上而下、`ImageData` 自上而下、UI 树的 y 也自上而下，
+所以 `offsetY` 直接就是 UI 的 y（`keys::to_ui_y` 只做越界钳制）：
 
 ```rust
-// keys::to_ui_y(height, y_dom) = height - 1 - y_dom
+// keys::to_ui_y(height, y_dom) = y_dom.clamp(0.0, height - 1.0)
 ```
+
+> 历史坑：曾经 `present` 对整帧按行翻转（画面上下镜像），输入坐标只能跟着反向映射
+> `height - 1 - y_dom` 才能点中。两层错误互相掩盖，页面其实是倒的。现已统一为自上而下。
 
 **高度必须实时**（`WasmState.canvas_h: Rc<Cell<f32>>`，resize 时更新）；用安装时快照会导致
 拉窗后点击命中错行。
@@ -78,8 +82,8 @@ canvas 上设了 `tabindex="0"` 与 `outline: none`。`window` 的 `focus`/`blur
 
 **像素通路**：
 
-1. `SoftBackend` 的缓冲是 **BGRA、自上而下**；但**屏幕方向相反**，所以
-   **输出第 `Y` 行取缓冲第 `h-1-Y` 行**（只翻 Y，X 不翻）。
+1. `SoftBackend` 的缓冲是 **BGRA、自上而下**，与 `ImageData` 的行序一致，
+   **不翻行**（只换通道 BGRA→RGBA）。
 2. **整帧路径**：`bgra_to_rgba(全帧)` → `createImageData(w,h)` → `data.set(bytes)`（一次批量拷贝）
    → `putImageData(0,0)`。
 3. **局部路径**：对每个脏矩形 `bgra_rect_to_rgba(rect)` → 建该尺寸的 `ImageData` →

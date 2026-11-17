@@ -879,21 +879,36 @@ impl RenderCtx for SoftBackend {
                 if let Some(sg) = self.text.glyph_at_scale(ch, scale) {
                     if sg.w > 0 && sg.h > 0 {
                         let atlas_size = self.text.atlas_size() as usize;
+                        // **目标尺寸与 bearing 的来源必须和实际用的级一致**：
+                        //
+                        // - `level > 0`：slot **就是**按目标尺寸重新光栅化的位图
+                        //   （L1=半尺寸、L2=四分之一），所以 1:1 贴过去最准，
+                        //   它的 `bearing` 也已经在目标像素坐标里。
+                        //   曾经无论哪一级都按 `L0 尺寸 × scale` 重采样：当目标 6 行、
+                        //   源 7 行时 `gy * sh / height` 取不到最后一行，'A' 的
+                        //   底边整行丢失（字形被削平），且 `bearing_y` 被二次缩放。
+                        // - `level == 0`：slot 是 L0，必须按 `scale` 缩放采样。
+                        let (dw, dh, bear_x, bear_y) = if sg.level > 0 {
+                            (
+                                sg.slot.width as i32,
+                                sg.slot.height as i32,
+                                sg.slot.bearing_x,
+                                sg.slot.bearing_y,
+                            )
+                        } else {
+                            (
+                                (sg.w as f32 * scale).round().max(1.0) as i32,
+                                (sg.h as f32 * scale).round().max(1.0) as i32,
+                                sg.slot.bearing_x * scale,
+                                sg.slot.bearing_y * scale,
+                            )
+                        };
                         // 基线：布局始终用原字号的 bearing，屏幕位置再乘缩放因子
-                        let bx = (pen_x + sg.slot.bearing_x * scale).floor() as i32;
+                        let bx = (pen_x + bear_x).floor() as i32;
                         // **字形顶部**（见 `glyph_top`）：布局始终用 L0 字号的 ascent，
                         // 基线 = origin.y + ascent × scale；字形高度按 scale 缩放。
                         // `bearing_y` 是底边偏移，不能当顶部用。
-                        let drawn_h = (sg.h as f32 * scale).round().max(1.0);
-                        let by = glyph_top(
-                            origin.y,
-                            ascent * scale,
-                            sg.slot.bearing_y * scale,
-                            drawn_h,
-                        ) as i32;
-                        // 目标尺寸 = **L0 尺寸 × scale**；采样来自 slot（可能是缩小的级）
-                        let dw = (sg.w as f32 * scale).round().max(1.0) as i32;
-                        let dh = (sg.h as f32 * scale).round().max(1.0) as i32;
+                        let by = glyph_top(origin.y, ascent * scale, bear_y, dh as f32) as i32;
                         let g = crate::GlyphInfo {
                             width: dw as u32,
                             height: dh as u32,

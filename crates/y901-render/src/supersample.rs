@@ -118,7 +118,11 @@ fn supersample_lines(raw: &[Line]) -> Option<Supersampled> {
                     }
                 }
             }
-            coverage[(y * width + x) as usize] = ((inside as f32 / total) * 255.0).round() as u8;
+            // **与生产光栅器同一行序**（自上而下）：超采样在轮廓坐标系里逐行采样，
+            // 所以这里也要把行序翻过来，否则“真值”和被测位图会上下颠倒，
+            // 逐像素比较全部失效（见 `GlyphBitmap::coverage` 的约定）。
+            coverage[((height - 1 - y) * width + x) as usize] =
+                ((inside as f32 / total) * 255.0).round() as u8;
         }
     }
 
@@ -178,9 +182,12 @@ mod tests {
         assert_eq!((s.width, s.height), (9, 9), "1px 留边后应为 9×9");
 
         // 内部 8×8 全 255（误差 ≤ 1/16 = 16/255）
+        //
+        // **行序**：轮廓坐标里矩形位于 y∈[0,8]，翻转成“自上而下”后
+        // 第 0 行是**留边**（原来的顶边），内部是第 1..=8 行。
         let mut worst_in = 0i32;
-        for y in 0..8 {
-            for x in 0..8 {
+        for y in 1..=8u32 {
+            for x in 0..8u32 {
                 worst_in =
                     worst_in.max((255 - s.coverage[(y * s.width + x) as usize] as i32).abs());
             }
@@ -196,9 +203,14 @@ mod tests {
             assert_eq!(v, 0, "第 8 列应是留边，实测 {v}");
         }
         for x in 0..9 {
-            let v = s.coverage[(8 * s.width + x) as usize];
-            assert_eq!(v, 0, "第 8 行应是留边，实测 {v}");
+            let v = s.coverage[x as usize];
+            assert_eq!(v, 0, "第 0 行应是留边（自上而下的行序），实测 {v}");
         }
+        // 第 8 行是矩形的底边那一行，必须有墨（防“翻错了方向”蒙混过关）
+        let bottom: u32 = (1..=8)
+            .map(|x| s.coverage[(8 * s.width + x) as usize] as u32)
+            .sum();
+        assert!(bottom > 0, "第 8 行应有墨迹（矩形底边）");
     }
 
     fn engine(px: f32, atlas: u32) -> MyFontEngine {

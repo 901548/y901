@@ -95,19 +95,19 @@ pub fn wheel_delta_from_dom(delta_y: f64) -> f32 {
 
 /// **DOM 像素坐标 → UI 树坐标**的 Y 转换（仅 Y）。
 ///
-/// 为何要转：`SoftBackend` 交出的缓冲是**自下而上**存的，`present` 又把整帧按行翻转一次，
-/// 两次叠加后**画面正向**，但 UI 树的 y 坐标仍然是"从屏幕底部往上"计的。
-/// 而 DOM 的 `offsetY` 是"从屏幕顶部往下"。两者方向相反，不转换就会点上去下错位
-/// （典型现象：点上面的输入框，焦点落在下面那个）。
+/// 现在**不需要镜像**：软后端缓冲、`present` 的行序、`ImageData` 都是**自上而下**，
+/// UI 树的 y 与 DOM 的 `offsetY` 本来就是同一个方向，直接取用即可。
 ///
-/// 公式：`y_ui = height - 1 - y_dom`。`-1` 是为了让**最上一行像素**落在 `height - 1`，
-/// 而非越界到 `height`。
+/// 历史坑：曾经 `present` 按行翻转整帧（画面上下镜像），为了点击不出错，
+/// 这里就得跟着做 `height - 1 - y` 的反向映射。两层错误互相掩盖：
+/// 页面是倒的、但点击位置"看起来对"，于是谁都没发现，文字的高低不齐却一直存在。
+/// 现在两端统一为自上而下，这条转换只剩"越界钳制"。
 pub fn to_ui_y(height: f32, y_dom: f32) -> f32 {
-    // 非有限值不要污染命中测试：取 0（屏幕底部）作为安全值。
+    // 非有限值不要污染命中测试：取 0（画布顶部）作为安全值。
     if !height.is_finite() || !y_dom.is_finite() {
         return 0.0;
     }
-    (height - 1.0 - y_dom).max(0.0)
+    y_dom.clamp(0.0, (height - 1.0).max(0.0))
 }
 
 /// **统一键盘闸门**：一个 `keydown` 事件到底该不该变成 `RawEvent::KeyDown`。
@@ -146,7 +146,6 @@ pub fn should_send_keydown(
     let _ = code;
     true
 }
-
 
 /// **窗口重新获得焦点时，是否要把焦点还给隐藏 input**。
 ///
@@ -370,34 +369,35 @@ mod tests {
     // ---- to_ui_y ----
 
     #[test]
-    fn top_of_canvas_maps_to_last_ui_row() {
-        // 屏幕最上一行（offsetY = 0）对应 UI 坐标的最大 y。
-        assert!((to_ui_y(600.0, 0.0) - 599.0).abs() < f32::EPSILON);
+    fn top_of_canvas_maps_to_top_of_ui() {
+        // 画面与 DOM 同向：offsetY = 0 就是 UI 的第 0 行。
+        assert!((to_ui_y(600.0, 0.0) - 0.0).abs() < f32::EPSILON);
     }
 
     #[test]
-    fn bottom_of_canvas_maps_to_zero() {
-        assert!((to_ui_y(600.0, 599.0) - 0.0).abs() < f32::EPSILON);
+    fn bottom_of_canvas_maps_to_last_ui_row() {
+        assert!((to_ui_y(600.0, 599.0) - 599.0).abs() < f32::EPSILON);
     }
 
     #[test]
-    fn mapping_is_symmetric_around_the_middle() {
+    fn mapping_is_identity_inside_the_canvas() {
         let h = 600.0;
         for y in [0.0_f32, 1.0, 100.0, 299.0, 300.0, 599.0] {
-            let mirrored = to_ui_y(h, y);
-            let back = to_ui_y(h, mirrored);
-            assert!((back - y).abs() < f32::EPSILON, "y={y} back={back}");
+            assert!(
+                (to_ui_y(h, y) - y).abs() < f32::EPSILON,
+                "y={y} 应原样映射（不镜像）"
+            );
         }
     }
 
     #[test]
     fn out_of_range_values_are_clamped_or_safe() {
-        // 鼠标拖出画布时 offsetY 可能超出范围：不能产生负数坐标。
-        assert_eq!(to_ui_y(600.0, 900.0), 0.0);
+        // 鼠标拖出画布时 offsetY 可能超出范围：钳制到 [0, height-1]。
+        assert_eq!(to_ui_y(600.0, 900.0), 599.0);
+        assert_eq!(to_ui_y(600.0, -20.0), 0.0);
         assert_eq!(to_ui_y(f32::NAN, 10.0), 0.0);
         assert_eq!(to_ui_y(600.0, f32::NAN), 0.0);
     }
-
 
     // ---- should_refocus（window focus/blur）----
 

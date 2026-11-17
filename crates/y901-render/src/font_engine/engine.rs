@@ -83,7 +83,6 @@ pub fn is_ttc(data: &[u8]) -> bool {
     data.len() >= 4 && &data[..4] == b"ttcf"
 }
 
-
 impl MyFontEngine {
     /// 创建引擎。
     ///
@@ -615,6 +614,16 @@ impl FontEngine for MyFontEngine {
         MyFontEngine::cell_span(self, ch)
     }
 
+    /// **按字号取字形**（per-text 字号）：必须转发到本引擎的同名方法。
+    ///
+    /// 不转发会静默采用 trait 的默认实现 `self.glyph(ch)`——那**永远返回基准字号**的
+    /// 位图。于是 `TextStyle::size = 12` 的标签按 12px 排版却画 16px 字形
+    /// （字挤在一起），`size = 24` 的标题按 24px 排版却画 16px 字形
+    /// （一行里字高低大小不一）。这正是“文字发紧、高低不齐”的直接原因之一。
+    fn glyph_at_size(&mut self, ch: char, px: f32) -> Option<&GlyphInfo> {
+        MyFontEngine::glyph_at_size(self, ch, px)
+    }
+
     fn glyph_at_scale(&mut self, ch: char, scale: f32) -> Option<crate::font::ScaledGlyph> {
         let sel = MyFontEngine::glyph_at_scale(self, ch, scale)?;
         Some(crate::font::ScaledGlyph {
@@ -816,7 +825,8 @@ mod ttc_hint_tests {
     /// `hash-gate` 的帧哈希因此变掉。这条用**真字体**钉住"不得预拒。
     #[test]
     fn real_font_still_constructs() {
-        let data = crate::font_engine::load_font(&crate::font_engine::default_test_font_path()).expect("font");
+        let data = crate::font_engine::load_font(&crate::font_engine::default_test_font_path())
+            .expect("font");
         let cell = crate::cell_metrics_for(15.0);
         let engine = MyFontEngine::new(data, 15.0, Size::new(cell.0, cell.1));
         assert!(engine.is_ok(), "真字体必须能构造：{:?}", engine.err());

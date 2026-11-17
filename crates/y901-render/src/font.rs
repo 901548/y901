@@ -84,7 +84,9 @@ pub struct GlyphInfo {
     pub height: u32,
     /// 相对基线原点（pen position）的墨迹偏移。
     pub bearing_x: i32,
-    /// 墨迹相对基线的垂直偏移（向上为正）。
+    /// 位图底边相对基线的 y 偏移，使用字体轮廓坐标（TTF y-up；通常为负或 0）。
+    /// Soft 后端把它作为带符号底边偏移用于 `baseline - bearing_y - height`；
+    /// 其他后端须遵守各自明确记录的坐标约定。
     pub bearing_y: i32,
     /// 前进量（像素）；等宽网格里用于居中补偿。
     pub advance: f32,

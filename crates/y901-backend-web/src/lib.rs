@@ -98,7 +98,7 @@ impl WasmState {
                         tree.invalidate_all();
                     }
                 }
-                // **同步 Y 翻转所用的高度**（否则拉伸后鼠标全错）。
+                // **同步坐标钳制用的画布高度**（拉伸后必须更新，否则边缘处会钳错）。
                 self.canvas_h.set(h as f32);
                 self.events
                     .borrow_mut()
@@ -176,11 +176,11 @@ pub struct WasmState {
     /// 为何不在 `resize` 回调里直接改：回调拿不到 `WasmState`（只捕获共享句柄），
     /// 而改尺寸要同时动 `canvas` / `soft` / `tree`，只能在帧循环里做。
     pub pending_resize: Rc<std::cell::Cell<bool>>,
-    /// **当前画布高度**（用于 DOM 坐标→UI 坐标的 Y 翻转）。
+    /// **当前画布高度**（用于 DOM 坐标→UI 坐标的越界钳制）。
     ///
     /// **为何不在回调里直接读 `canvas.height()`**：回调拿不到 `WasmState`；
     /// 而这个值**必须随 resize 变化** —— 旧代码用安装时的快照，
-    /// 窗口拉伸后 Y 翻转就彻底错位（"只有端口偶尔生效"就是这个原因）。
+    /// 窗口拉伸后坐标钳制的上界就过期了（"只有端口偶尔生效"就是这个原因）。
     pub canvas_h: Rc<std::cell::Cell<f32>>,
     /// **待处理的光标位置**（UI 坐标），同理：命中测试需要 `tree`。
     pub pending_cursor: Rc<std::cell::Cell<Option<(f32, f32)>>>,
@@ -520,9 +520,9 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
     // **组字标志已彻底删除**：改用 `event.isComposing`（事实），不再自己记状态。
     // **上一次 `compositionend` 提交的串**（ASCII 与中文的交叉去重用）。
     let last_committed: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
-    // **坐标换算所需：UI 树的 y 是"从底部往上"，DOM 的 `offsetY` 是"从顶部往下"。**
+    // **坐标换算所需：UI 树的 y 与 DOM 的 `offsetY` 同为"从顶部往下"。**
     // 公式在 `keys::to_ui_y`（带单测），这里只把画布高度抓一份。
-    // **实时高度**：回调读它做 Y 翻转，resize 后由 `apply_pending` 更新。
+    // **实时高度**：回调读它做坐标钳制，resize 后由 `apply_pending` 更新。
     let canvas_h = Rc::clone(&state.canvas_h);
     canvas_h.set(state.canvas.height() as f32);
 

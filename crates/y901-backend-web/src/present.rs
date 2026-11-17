@@ -27,7 +27,13 @@ impl Present {
 
     /// **整帧上屏**。`pixels` 是软后端产出的 BGRA，浏览器要 RGBA。
     ///
-    /// 三步：换通道+翻行 → 写进 `ImageData`（**一次** `TypedArray.set`）→ `putImageData(0,0)`。
+    /// 两步：换通道 → 写进 `ImageData`（**一次** `TypedArray.set`）→ `putImageData(0,0)`。
+    /// **没有行翻转**：软后端缓冲与 `ImageData` 一样是**自上而下**的行序
+    /// （`SoftBackend` 直接按 `y * width + x` 写入，与 Win32 `biHeight < 0`
+    /// 的 DIB 和 X11 ZPixmap 完全一致）。曾经在这里按行翻转，
+    /// 结果把**整个页面上下镜像**（"标题跑到最底下"），却因为字形位图当时是
+    /// 自下而上的行序，文字看起来还是正的——两个错误互相掩盖。
+    /// 现在光栅器的行序已在源头统一为自上而下，这里只做通道交换。
     pub fn present(&mut self, pixels: &[u8], w: u32, h: u32) {
         let Some(ctx) = self.ctx.as_ref() else {
             return; // 没取到 2D 上下文：静默跳过上屏（不崩）
@@ -41,24 +47,16 @@ impl Present {
     }
 }
 
-/// **纯函数**：BGRA → RGBA，逐像素换 R/B 通道，alpha 不变。
+/// **纯函数**：BGRA → RGBA，逐像素换 R/B 通道，alpha 与**行序**都不变。
 ///
-/// **行映射**：软后端缓冲的存储方向与屏幕相反，因此输出第 `Y` 行取缓冲第 `h-1-Y` 行。
 /// 为什么不就地改：调用方给的是软后端的复用缓冲；这里返回新 `Vec` 更安全，也便于单测。
-pub fn bgra_to_rgba(src: &[u8], w: u32, h: u32) -> Vec<u8> {
-    let w = w as usize;
-    let h = h as usize;
-    let stride = w * 4;
+pub fn bgra_to_rgba(src: &[u8], _w: u32, _h: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(src.len());
-    for y in (0..h).rev() {
-        let row_start = y * stride;
-        let row_end = (row_start + stride).min(src.len());
-        for px in src[row_start..row_end].chunks_exact(4) {
-            out.push(px[2]); // R ← B
-            out.push(px[1]); // G
-            out.push(px[0]); // B ← R
-            out.push(px[3]); // A
-        }
+    for px in src.chunks_exact(4) {
+        out.push(px[2]); // R ← B
+        out.push(px[1]); // G
+        out.push(px[0]); // B ← R
+        out.push(px[3]); // A
     }
     out
 }
@@ -67,9 +65,9 @@ pub fn bgra_to_rgba(src: &[u8], w: u32, h: u32) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    /// **Y 轴按行翻转**：末行先出、行内顺序不变。
+    /// **只换通道，不重排行**：第 0 行仍是第 0 行。
     #[test]
-    fn flips_rows_not_columns() {
+    fn swaps_channels_without_reordering_rows() {
         // 2x2：第 0 行 = [红, 绿]，第 1 行 = [蓝, 白]（BGRA）。
         let src = [
             0, 0, 255, 255, 0, 255, 0, 255, 255, 0, 0, 255, 255, 255, 255, 255,
@@ -77,12 +75,16 @@ mod tests {
         let out = bgra_to_rgba(&src, 2, 2);
         assert_eq!(
             out,
-            vec![0, 0, 255, 255, 255, 255, 255, 255, 255, 0, 0, 255, 0, 255, 0, 255]
+            vec![
+                255, 0, 0, 255, 0, 255, 0, 255, // 红, 绿
+                0, 0, 255, 255, 255, 255, 255, 255, // 蓝, 白
+            ],
+            "行序必须原样保留：整帧镜像会让页面上下颠倒"
         );
     }
 
     #[test]
-    fn preserves_length_and_alpha_under_row_flip() {
+    fn preserves_length_alpha_and_row_order() {
         let src: Vec<u8> = (0..24u8).collect();
         let out = bgra_to_rgba(&src, 2, 3);
         assert_eq!(out.len(), src.len());
@@ -91,8 +93,8 @@ mod tests {
             for x in 0..2usize {
                 assert_eq!(
                     out[y * stride + x * 4 + 3],
-                    src[(2 - y) * stride + x * 4 + 3],
-                    "alpha 必须随着行翻转"
+                    src[y * stride + x * 4 + 3],
+                    "alpha 必须留在同一行同一列"
                 );
             }
         }

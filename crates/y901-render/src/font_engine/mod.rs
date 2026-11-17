@@ -24,11 +24,22 @@ pub struct GlyphBitmap {
     pub height: u32,
     /// 墨迹相对 pen 原点的 x 偏移（像素）。
     pub bearing_x: i32,
-    /// 墨迹相对基线的 y 偏移（像素，向下为正）。
+    /// 墨迹位图**底边**相对基线的 y 偏移，沿用字体轮廓坐标（y 向上：
+    /// 底边在基线上方时为负，例如 `'j'` 的下伸为 -4）。
+    ///
+    /// 因此 `baseline - bearing_y` 就是位图底边在屏幕坐标（y 向下）里的行。
     pub bearing_y: i32,
     /// 前进宽度（像素）。
     pub advance: f32,
-    /// 覆盖度（每像素一字节，0..=255），行主序。
+    /// 覆盖度（每像素一字节，0..=255），**行主序、自上而下**：
+    /// 第 0 行是字形的**顶部**，最后一行是底部。
+    ///
+    /// 这条约定必须与 `bearing_y` 一起使用：
+    /// `屏幕 y = round(基线) - bearing_y - height + 行号`。
+    /// 早期光栅化直接输出轮廓坐标系（自下而上）的行序，而各绘制方都按
+    /// “第 0 行 = 顶部”拼接，于是每个字形按自己的高度整体下移（不同高度的字
+    /// 就高低不齐），文本还压到下一行。`rasterize_glyph_phased` 现在会在返回前
+    /// 翻转行序，这条约定由 `tests/soft_glyphs.rs` 逐像素固定。
     pub coverage: Vec<u8>,
 }
 
@@ -38,7 +49,7 @@ impl GlyphBitmap {
         self.coverage.iter().map(|c| *c as f64 / 255.0).sum()
     }
 
-    /// 位图中某像素的覆盖度（越界返回 0）。
+    /// 位图中某像素的覆盖度（越界返回 0）。坐标原点在左上角，y 向下递增。
     pub fn at(&self, x: u32, y: u32) -> u8 {
         if x >= self.width || y >= self.height {
             return 0;
@@ -110,7 +121,6 @@ pub fn rasterize_glyph(font_data: &[u8], ch: char, size_px: f32) -> Option<Glyph
 /// 4096 是常见 GPU 纹理上限，也足够覆盖任何真实字体（字号 < 3000px）。
 /// 超过它基本只能是字体文件损坏。
 pub const MAX_GLYPH_DIM: u32 = 4096;
-
 
 /// **字形的推进宽度**（像素）——直接用字体的 `hmtx`。
 ///
@@ -215,8 +225,23 @@ pub fn rasterize_glyph_phased(
         bearing_x,
         bearing_y,
         advance: advance * scale,
-        coverage: cov.0,
+        coverage: flip_rows(&cov.0, width as usize, height as usize),
     })
+}
+
+/// 把扫描线光栅化的覆盖率**翻转成自上而下的行序**。
+///
+/// 为什么必须翻：`raster::rasterize` 的扫描线沿轮廓坐标系（字体 Y 向上）递增，
+/// 所以它的第 0 行是字形**底部**；而所有绘制方（软后端、图集、mip）都按
+/// “第 0 行 = 顶部 + 行号向下”拼接。不翻的话每个字形会以**自身高度**为偏移
+/// 整体错位——正是“一行里字高低不齐、行距发紧”的成因。
+fn flip_rows(src: &[u8], w: usize, h: usize) -> Vec<u8> {
+    let mut out = vec![0u8; w * h];
+    for y in 0..h {
+        let from = (h - 1 - y) * w;
+        out[y * w..(y + 1) * w].copy_from_slice(&src[from..from + w]);
+    }
+    out
 }
 
 /// 对扁平化后的多边形计算**带符号面积**（shoelace，单位：像素²）。
