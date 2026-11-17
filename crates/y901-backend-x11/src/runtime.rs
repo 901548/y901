@@ -65,6 +65,21 @@ impl PlatformRuntime for X11Runtime {
             options.width, options.height
         );
 
+        // **IBus 输入法（M1）**：连接失败就降级为 `NoIme`——
+        // 按键一律放行，与“没有 IME”完全一致（不崩、不吞键）。
+        match crate::ime::ibus::IbusIme::connect("libpinyin") {
+            Ok(ibus_ime) => {
+                eprintln!(
+                    "[y901] IBus 输入法已连接：context={} engine=libpinyin",
+                    ibus_ime.context_path()
+                );
+                window.set_ime(Box::new(ibus_ime));
+            }
+            Err(e) => {
+                eprintln!("[y901] IBus 不可用（{e}），IME 已关闭：英文输入行为不变");
+            }
+        }
+
         host.attach_waker(window.waker());
 
         // 建树：按光栅器的真实尺寸排版（字体 cell 决定行列数）

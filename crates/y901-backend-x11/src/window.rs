@@ -47,6 +47,11 @@ pub struct X11Window {
     frame: Vec<u8>,
     /// 当前是否处于 fullscreen（状态机，避免重复发 EWMH）。
     fullscreen: bool,
+    /// **输入法客户端**（IBus 或降级的 `NoIme`）。
+    ///
+    /// M1 阶段只持有连接（保证上下文不会随 D-Bus 连接销毁），
+    /// 按键转发在 M2 接入 `wait_events`。
+    ime: Box<dyn crate::ime::ImeClient>,
     /// 全屏下按 Esc：`translate`（`&self`）置位，`wait_events`（`&mut self`）消费。
     ///
     /// **为何不用进程级 `static`**：`static` 它会让两个窗口共享同一个标志 ——
@@ -277,10 +282,24 @@ impl X11Window {
             frame: Vec::new(),
             fullscreen,
             want_exit_fs: std::cell::Cell::new(false),
+            ime: Box::new(crate::ime::NoIme),
         })
     }
 
     /// 光栅器尺寸与窗口客户区对齐（启动后由 [`WindowBackend::relayout`] 调用）。
+    /// **装上输入法客户端**（IBus 连接成功时由 runtime 调用）。
+    ///
+    /// 传 `NoIme` 即关闭 IME，与没有 IME 的行为完全一致。
+    pub fn set_ime(&mut self, ime: Box<dyn crate::ime::ImeClient>) {
+        self.ime = ime;
+    }
+
+    /// 当前输入法客户端是否真的可用。
+    pub fn ime_available(&self) -> bool {
+        self.ime.available()
+    }
+
+    /// 只读光栅器（命令行工具 / 测试用）。
     pub fn soft(&self) -> &SoftBackend {
         &self.soft
     }

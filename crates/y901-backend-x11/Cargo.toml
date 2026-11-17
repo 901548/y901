@@ -14,4 +14,7 @@ y901-ui = { path = "../y901-ui", version = "0.1.20" }
 # 事件要汇成 `RawEvent`，`Presenter` 要实现 runtime 的 trait
 y901-runtime = { path = "../y901-runtime", version = "0.1.20" }
 y901-render = { path = "../y901-render", version = "0.1.20" }
+
+[target."cfg(unix)".dependencies]
+zbus = { version = "5", features = ["blocking"] }
 # 事件循环骨架与窗口抽象（与 Win32 共用的部分）
