@@ -109,6 +109,27 @@ pub fn keysym_to_char(keysym: u32) -> Option<char> {
 /// X11 修饰键位掩码 → `y901_ui::Modifiers`。
 ///
 /// 位定义（X11 规范 §5.2）：Shift=1<<0, Lock=1<<1, Control=1<<2, Mod1(Alt)=1<<3。
+/// **X11 keysym → IBus keyval**。
+///
+/// 为何是恒等映射：IBus 的 `keyval` 直接用 X11 keysym
+/// （`IBUS_KEY_a = 0x61`、`IBUS_KEY_Left = 0xFF51`……两者取值完全一致），
+/// 所以不需要另写一张表，复用 `Keymap` 查出来的 keysym 即可。
+pub fn ibus_keyval(keysym: u32) -> u32 {
+    keysym
+}
+
+/// **X11 `state` 位 → IBus modifier 位**。
+///
+/// 两者对于前几位的定义恰好相同：
+/// `Shift=1<<0`、`Lock=1<<1`、`Control=1<<2`、`Mod1=1<<3`、`Mod4=1<<6`。
+/// 需要做的只是**按位清掉鼠标键状态**（X11 把按住的按键也放在
+/// `state` 的高位），否则 IBus 会看到奇怪的按键状态。
+pub fn ibus_state(state: u16) -> u32 {
+    // 鼠标按键位：Button1..5 = 1<<8 .. 1<<12；只保留真正的修饰键
+    (state as u32) & 0x00FF
+}
+
+/// 从 X11 `state` 位提取平台无关的 `Modifiers`（Shift / Ctrl / Alt）。
 pub fn modifiers_from_state(state: u16) -> y901_ui::Modifiers {
     y901_ui::Modifiers {
         shift: state & 0x01 != 0,

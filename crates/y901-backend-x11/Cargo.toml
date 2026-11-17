@@ -16,5 +16,6 @@ y901-runtime = { path = "../y901-runtime", version = "0.1.20" }
 y901-render = { path = "../y901-render", version = "0.1.20" }
 
 [target."cfg(unix)".dependencies]
-zbus = { version = "5", features = ["blocking"] }
+# 纯 Rust D-Bus 实现（容忍 IBus 不合规的 sender 字段；zbus 会直接 panic）
+rustbus = "0.19"
 # 事件循环骨架与窗口抽象（与 Win32 共用的部分）

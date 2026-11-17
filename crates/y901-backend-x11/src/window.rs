@@ -52,6 +52,8 @@ pub struct X11Window {
     /// M1 阶段只持有连接（保证上下文不会随 D-Bus 连接销毁），
     /// 按键转发在 M2 接入 `wait_events`。
     ime: Box<dyn crate::ime::ImeClient>,
+    /// 是否已经向 IME 声明过焦点（避免每个按键都发 `FocusIn`）。
+    ime_focused: bool,
     /// 全屏下按 Esc：`translate`（`&self`）置位，`wait_events`（`&mut self`）消费。
     ///
     /// **为何不用进程级 `static`**：`static` 它会让两个窗口共享同一个标志 ——
@@ -283,6 +285,7 @@ impl X11Window {
             fullscreen,
             want_exit_fs: std::cell::Cell::new(false),
             ime: Box::new(crate::ime::NoIme),
+            ime_focused: false,
         })
     }
 
@@ -292,6 +295,7 @@ impl X11Window {
     /// 传 `NoIme` 即关闭 IME，与没有 IME 的行为完全一致。
     pub fn set_ime(&mut self, ime: Box<dyn crate::ime::ImeClient>) {
         self.ime = ime;
+        self.ime_focused = false;
     }
 
     /// 当前输入法客户端是否真的可用。
@@ -493,14 +497,45 @@ impl EventSource for X11Window {
             match self.conn.poll_events(slice) {
                 Ok((events, _errors)) => {
                     for e in &events {
+                        // **输入法优先**：组字中的字母、空格选词都应被 IBus 吃掉，
+                        // 不能变成 `KeyDown` 去触发快捷键或插入英文。
+                        if let X11Event::Key {
+                            pressed: true,
+                            keycode,
+                            state,
+                            ..
+                        } = e
+                        {
+                            // 取 keysym：与 map_event 同一套（Shift 时用第 1 列）
+                            let (plain, shifted) = self.keymap.plain_and_shift(*keycode);
+                            let shift = state & 1 != 0;
+                            if let Some(ks) = if shift { shifted.or(plain) } else { plain } {
+                                // 首次收到按键时告知 IME “我们有焦点”（只发一次）
+                                if !self.ime_focused {
+                                    self.ime.focus_in();
+                                    self.ime_focused = true;
+                                }
+                                let outcome = self.ime.filter_key(
+                                    crate::keys::ibus_keyval(ks),
+                                    *keycode as u32,
+                                    crate::keys::ibus_state(*state),
+                                );
+                                if outcome == crate::ime::KeyOutcome::Consumed {
+                                    continue;
+                                }
+                            }
+                        }
                         if let Some(raw) = self.map_event(e) {
                             out.push(raw);
                         }
                     }
+                    // 把 IME 侧已到达的事件（非阻塞 try_recv）并入本轮事件流
+                    push_ime_events(&mut self.ime, &mut out);
                     if !out.is_empty() || timeout_ms == 0 || std::time::Instant::now() >= deadline {
                         return out;
                     }
                     if self.woken.swap(false, Ordering::SeqCst) {
+                        push_ime_events(&mut self.ime, &mut out);
                         return out;
                     }
                 }
@@ -537,6 +572,23 @@ impl EventSource for X11Window {
             }
         }
         Arc::new(W(self.woken.clone()))
+    }
+}
+
+/// 把 IME 客户端里已到达的事件转成 `RawEvent`（**非阻塞**）。
+///
+/// - `Preedit` → `RawEvent::Ime { composition: true }`（只画不插入）
+/// - `Commit`  → `RawEvent::Ime { composition: false }`（正式插入）
+///
+/// 为何放在这里而不在 `map_event`：IME 事件不来自 X11 事件序列，
+/// 而来自 IBus 信号线程，它们只能在“每轮轮询结尾”统一并入。
+fn push_ime_events(ime: &mut Box<dyn crate::ime::ImeClient>, out: &mut Vec<RawEvent>) {
+    for ev in ime.take_events() {
+        let (text, composition) = match ev {
+            crate::ime::ImeEvent::Preedit(t) => (t, true),
+            crate::ime::ImeEvent::Commit(t) => (t, false),
+        };
+        out.push(RawEvent::Ime { text, composition });
     }
 }
 

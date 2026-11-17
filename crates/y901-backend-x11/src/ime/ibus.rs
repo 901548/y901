@@ -1,126 +1,109 @@
-//! **IBus 客户端**（纯 Rust：`zbus` + `zvariant`，无 C 依赖）。
+//! **IBus 客户端**（纯 Rust：`rustbus`，无 C 依赖）。
 //!
-//! ## 为什么连"IBus 自己的总线"而不是会话总线
+//! ## 为什么不用 zbus（实测记录）
 //!
-//! 实测（WSL2 Ubuntu 22.04，IBus 1.5.26）：`org.freedesktop.IBus` 这个名字**不在会话总线**上，
-//! 而是在 IBus 私有的 D-Bus 服务器里。地址写在
-//! `~/.config/ibus/bus/<machine-id>-<display>` 的 `IBUS_ADDRESS=` 一行（或 `IBUS_ADDRESS` 环境变量），
-//! 形如 `unix:abstract=/home/xxx/.cache/ibus/dbus-xxxx`。
-//! `zbus` 的 `blocking::connection::Builder::ibus()` 正是为此设计：它会调用 `ibus address` 拿到地址。
+//! IBus 发出的信号**违反 D-Bus 规范**：`sender` 字段填的是**知名名** `org.freedesktop.IBus`，
+//! 而规范要求必须是唯一名（`:1.x`）。libdbus（Python）宽容，zbus 严格：
+//! zbus 5.19 与 4.4 都在 `message/fields.rs` 里 `expect("Invalid field reconstruction")`
+//! **直接 panic**，把连接执行器线程打死 ⇒ 一条信号也收不到。
+//! `rustbus` 不校验该字段，实测能完整解出 `CommitText` / `UpdatePreeditText`（含 55 万字符的候选表）。
 //!
-//! 另有一个**必须遵守的约束**：`CreateInputContext` 创建的上下文**绑定创建者的 D-Bus 连接**，
-//! 连接一断，上下文立即失效（实测：每次 `gdbus call` 都是新连接，第二次调用就报
-//! "Object does not exist at path"）。所以本实现把连接**持有到 `IbusIme` 生命周期结束**。
+//! ## 线程模型（`RpcConn` 不能跨线程共享）
 //!
-//! ## 信号载荷是 IBus 的 GVariant 对象
+//! ```text
+//! 主线程                       连接线程
+//!   filter_key   ── Cmd::Key ──►   ProcessKeyEvent → 回 SyncSender<bool>
+//!   set_cursor   ── Cmd::Cursor ─► SetCursorLocation
+//!   take_events  ◄─ ImeEvent ────  CommitText / UpdatePreeditText（mpsc）
+//! ```
+//! 所有对主线程的接口都**非阻塞**：`filter_key` 用 `recv_timeout`（超时按 `Forward` 处理，
+//! 宁可英文可用也不吞键），`take_events` 用 `try_recv`。
 //!
-//! `CommitText` / `UpdatePreeditText` 的文本参数是 `v`（variant），里面是 IBus 序列化对象：
-//! `(class_name, properties, text, attrs)` —— 例如
-//! `('IBusText', {}, '你好', ('IBusAttrList', {}, []))`。
-//! 我们只关心其中的 `text`：用递归扫描取**第一个非空 `Value::Str`**，对当前需求足够稳。
+//! ## 载荷格式
+//!
+//! 信号里的文本是 IBus 序列化对象：
+//! `Variant(Struct(['IBusText', {}, '你好', Variant(Struct(['IBusAttrList', {}, []]))]))`
+//! ⇒ 取其中**第三个字段**（`Base::String`），并跳过 `IBus*` 类名与空串。
 
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::mpsc::{channel, Receiver, Sender, SyncSender};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
-use zbus::blocking::{Connection, MessageIterator, Proxy};
-use zbus::message::Type as MessageType;
-use zbus::MatchRule;
-use zbus::zvariant::{OwnedObjectPath, Value};
+use rustbus::connection::rpc_conn::RpcConn;
+use rustbus::connection::Timeout;
+use rustbus::message_builder::{MarshalledMessage, MessageBuilder};
+use rustbus::params::{Base, Container, Param};
 
 use super::{drain, ImeClient, ImeEvent, KeyOutcome};
 
-/// IBus 输入上下文接口名。
-const IFACE: &str = "org.freedesktop.IBus.InputContext";
-/// IBus 守护进程的服务名与对象路径。
+/// IBus 服务名 / 根对象 / 上下文接口。
 const SERVICE: &str = "org.freedesktop.IBus";
 const ROOT: &str = "/org/freedesktop/IBus";
+const IFACE: &str = "org.freedesktop.IBus.InputContext";
+/// 能力位：`PREEDIT_TEXT = 1<<0`、`FOCUS = 1<<1`。必须先设，否则 `FocusIn` 报 not support focus。
+const CAPS: u32 = 1 | 2;
 
-/// IBus 能力位：`PREEDIT_TEXT = 1<<0`、`FOCUS = 1<<1`。
-///
-/// 必须在上 `FocusIn` 之前设置，否则 IBus 会回
-/// `The input context does not support focus.`（实测）。
-const CAP_PREEDIT: u32 = 1;
-const CAP_FOCUS: u32 = 2;
+/// 一次 IBus 连接调用的超时（信号轮询也用这个粒度，保证主循环不被卡住）。
+const POLL_MS: u64 = 10;
+
+/// 主线程 → 连接线程的命令。
+enum Cmd {
+    /// 把按键交给 IBus；`reply` 回 `true` = 输入法已处理（调用方不得再发 `KeyDown`）。
+    Key {
+        keyval: u32,
+        keycode: u32,
+        state: u32,
+        reply: SyncSender<bool>,
+    },
+    /// 候选窗位置（输入框光标所在的屏幕坐标）。
+    Cursor { x: i32, y: i32, w: i32, h: i32 },
+    /// 输入框获得焦点。
+    FocusIn,
+    /// 输入框失去焦点。
+    FocusOut,
+}
 
 /// IBus 输入法客户端。
 pub struct IbusIme {
-    /// D-Bus 连接：**必须持有**，否则输入上下文会随连接销毁（见模块文档）。
-    conn: Arc<Connection>,
-    /// 上下文对象路径（打印日志与匹配信号用）。
-    ctx_path: OwnedObjectPath,
-    /// 信号线程 → 主循环的事件通道。
+    tx: Sender<Cmd>,
     rx: Receiver<ImeEvent>,
-    /// 信号线程句柄（`Drop` 时不 join，只让通道关闭；线程随连接断开自然退出）。
+    ctx_path: String,
     _thread: JoinHandle<()>,
 }
 
 impl IbusIme {
     /// 连接 IBus 并创建输入上下文。
     ///
-    /// 输入：`engine` = 期望的输入法引擎名（例如 `"libpinyin"`；空串表示用 IBus 当前默认引擎）。
-    /// 返回：`Err` = IBus 不可用（未运行 / 没有 `ibus` 命令 / D-Bus 出错），调用方应降级为 `NoIme`。
+    /// `engine` 为空串表示沿用 IBus 当前默认引擎；建议传 `"libpinyin"`。
+    /// 返回 `Err` 表示 IBus 不可用（未运行 / 无 `ibus` 命令 / 报文异常），调用方应降级为 `NoIme`。
     pub fn connect(engine: &str) -> Result<Self, String> {
-        // `Builder::ibus()` 会执行 `ibus address` 取地址；失败说明 IBus 没在跑。
-        let conn = zbus::blocking::connection::Builder::ibus()
-            .map_err(|e| format!("IBus 地址获取失败：{e}"))?
-            .build()
-            .map_err(|e| format!("IBus 连接失败：{e}"))?;
-        let conn = Arc::new(conn);
-
-        // 创建输入上下文（上下文绑定本连接）。
-        let root = Proxy::new(conn.as_ref(), SERVICE, ROOT, "org.freedesktop.IBus")
-            .map_err(|e| format!("IBus 根对象代理失败：{e}"))?;
-        let ctx_path: OwnedObjectPath = root
-            .call("CreateInputContext", &("y901",))
-            .map_err(|e| format!("CreateInputContext 失败：{e}"))?;
-
-        // 代理会借用路径字符串：用一份**独立的 String**，
-        // 否则 `ctx_path` 在函数末尾要 move 进 `Self` 时会被认为仍被借用。
-        let ctx_dest: String = ctx_path.as_str().to_string();
-        let ctx = Proxy::new(conn.as_ref(), SERVICE, ctx_dest.as_str(), IFACE)
-            .map_err(|e| format!("IBus 上下文代理失败：{e}"))?;
-
-        // 能力位必须先设，否则 FocusIn 会报 "does not support focus"。
-        // `SetCapabilities`/`SetEngine`/`FocusIn` 失败都**不致命**：
-        // 上下文仍能处理按键（实测 ProcessKeyEvent 可用），最多是没有候选窗/焦点语义。
-        let _ = ctx.call::<_, _, ()>("SetCapabilities", &(CAP_PREEDIT | CAP_FOCUS));
-        if !engine.is_empty() {
-            let _ = ctx.call::<_, _, ()>("SetEngine", &(engine,));
-        }
-        let _ = ctx.call::<_, _, ()>("FocusIn", &());
-
-        // 信号线程：IBus 的 CommitText / UpdatePreeditText → mpsc。
-        let (tx, rx) = channel::<ImeEvent>();
-        let thread_conn = Arc::clone(&conn);
-        let ctx_str: String = ctx_path.as_str().to_string();
-        let rule = MatchRule::builder()
-            .msg_type(MessageType::Signal)
-            .interface(IFACE)
-            .map_err(|e| format!("匹配规则构造失败：{e}"))?
-            .path(ctx_str.clone())
-            .map_err(|e| format!("匹配规则路径失败：{e}"))?
-            .build();
+        let addr = ibus_address()?;
+        // **连接与上下文都建立成功后才起线程**：失败路径一律不产生半死不活的状态。
+        let mut conn = connect_ibus_bus(&addr)?;
+        let ctx_path = create_context(&mut conn, engine)?;
+        let ctx_for_thread = ctx_path.clone();
+        let (tx, cmd_rx) = channel::<Cmd>();
+        let (evt_tx, rx) = channel::<ImeEvent>();
         let thread = std::thread::Builder::new()
             .name("y901-ibus".to_string())
-            .spawn(move || signal_loop(thread_conn, rule, tx))
-            .map_err(|e| format!("IBus 信号线程启动失败：{e}"))?;
-
+            .spawn(move || conn_loop(conn, ctx_for_thread, cmd_rx, evt_tx))
+            .map_err(|e| format!("IBus 线程启动失败：{e}"))?;
         Ok(Self {
-            conn,
-            ctx_path,
+            tx,
             rx,
+            ctx_path,
             _thread: thread,
         })
     }
 
     /// 上下文对象路径（日志用）。
     pub fn context_path(&self) -> &str {
-        self.ctx_path.as_str()
+        &self.ctx_path
     }
 
-    fn proxy(&self) -> Option<Proxy<'_>> {
-        Proxy::new(self.conn.as_ref(), SERVICE, self.ctx_path.as_str(), IFACE).ok()
+    fn send(&self, cmd: Cmd) {
+        // 线程已退出时静默丢弃：主循环绝不能因此 panic。
+        let _ = self.tx.send(cmd);
     }
 }
 
@@ -130,34 +113,30 @@ impl ImeClient for IbusIme {
     }
 
     fn filter_key(&mut self, keyval: u32, keycode: u32, state: u32) -> KeyOutcome {
-        let Some(ctx) = self.proxy() else {
-            return KeyOutcome::Forward;
-        };
-        // IBus 返回 true = "已处理，不要再发给应用"。
-        match ctx.call::<_, _, bool>("ProcessKeyEvent", &(keyval, keycode, state)) {
+        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel::<bool>(1);
+        self.send(Cmd::Key {
+            keyval,
+            keycode,
+            state,
+            reply: reply_tx,
+        });
+        // 20ms 足够本地 D-Bus 往返；超时按 Forward 处理（不吞键、不卡主循环）。
+        match reply_rx.recv_timeout(Duration::from_millis(20)) {
             Ok(true) => KeyOutcome::Consumed,
-            // false 或出错都放行：宁可英文照常输入，也不要吞键。
             _ => KeyOutcome::Forward,
         }
     }
 
     fn set_cursor_location(&mut self, x: i32, y: i32, w: i32, h: i32) {
-        if let Some(ctx) = self.proxy() {
-            let _ = ctx.call::<_, _, ()>("SetCursorLocation", &(x, y, w, h));
-        }
+        self.send(Cmd::Cursor { x, y, w, h });
     }
 
     fn focus_in(&mut self) {
-        if let Some(ctx) = self.proxy() {
-            // 部分 IBus 版本会回 "does not support focus"，忽略即可。
-            let _ = ctx.call::<_, _, ()>("FocusIn", &());
-        }
+        self.send(Cmd::FocusIn);
     }
 
     fn focus_out(&mut self) {
-        if let Some(ctx) = self.proxy() {
-            let _ = ctx.call::<_, _, ()>("FocusOut", &());
-        }
+        self.send(Cmd::FocusOut);
     }
 
     fn take_events(&mut self) -> Vec<ImeEvent> {
@@ -165,112 +144,311 @@ impl ImeClient for IbusIme {
     }
 }
 
-/// 信号线程：把 IBus 的 `CommitText` / `UpdatePreeditText` 转成 [`ImeEvent`]。
+// ---------------------------------------------------------------------------
+// 连接与线程
+// ---------------------------------------------------------------------------
+
+/// 连接 IBus 的私有总线（地址形如 `unix:abstract=/home/x/.cache/ibus/dbus-xxx`）。
 ///
-/// 用 `MessageIterator` 逐条读（阻塞等待），连接断开时返回 `Err` 自然退出。
-fn signal_loop(conn: Arc<Connection>, rule: MatchRule<'static>, tx: Sender<ImeEvent>) {
-    let Ok(iter) = MessageIterator::for_match_rule(rule, conn.as_ref(), None) else {
-        return;
-    };
-    for msg in iter {
-        let Ok(msg) = msg else { break };
-        let header = msg.header();
-        let Some(member) = header.member() else { continue };
-        match member.as_str() {
-            "CommitText" => {
-                if let Some(text) = extract_signal_text(&msg) {
-                    if !text.is_empty() && tx.send(ImeEvent::Commit(text)).is_err() {
-                        break;
+/// 注意：`get_session_bus_path()` 只读 `DBUS_SESSION_BUS_ADDRESS`，因此先临时设环境变量再还原。
+/// 这一步是 rustbus 的公开入口里唯一能解析 `unix:abstract=` 的办法（其内部函数未导出）。
+fn connect_ibus_bus(addr: &str) -> Result<RpcConn, String> {
+    let saved = std::env::var("DBUS_SESSION_BUS_ADDRESS").ok();
+    unsafe { std::env::set_var("DBUS_SESSION_BUS_ADDRESS", addr) };
+    let unix = rustbus::connection::get_session_bus_path();
+    match saved {
+        Some(v) => unsafe { std::env::set_var("DBUS_SESSION_BUS_ADDRESS", v) },
+        None => unsafe { std::env::remove_var("DBUS_SESSION_BUS_ADDRESS") },
+    }
+    let unix = unix.map_err(|e| format!("IBus 地址解析失败（{addr}）：{e}"))?;
+    let mut conn = RpcConn::connect_to_path(unix, Timeout::Duration(Duration::from_secs(2)))
+        .map_err(|e| format!("IBus 连接失败：{e}"))?;
+    // 私有总线同样需要 Hello 握手，否则 IBus 不认我们的唯一名。
+    call_simple(&mut conn, "Hello", "/org/freedesktop/DBus", "org.freedesktop.DBus", "org.freedesktop.DBus", |_| {})
+        .map_err(|e| format!("IBus Hello 失败：{e}"))?;
+    // 让连接线程的 refill 不阻塞太久。
+    Ok(conn)
+}
+
+/// 取 IBus 私有总线地址：`IBUS_ADDRESS` → bus 目录文件 → `ibus address` 命令。
+fn ibus_address() -> Result<String, String> {
+    if let Ok(a) = std::env::var("IBUS_ADDRESS") {
+        let a = a.trim();
+        if !a.is_empty() {
+            return Ok(a.to_string());
+        }
+    }
+    if let Some(dir) = home_config_ibus_dir() {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for e in entries.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.ends_with("-unix-0") {
+                    if let Ok(text) = std::fs::read_to_string(e.path()) {
+                        if let Some(line) = text
+                            .lines()
+                            .find_map(|l| l.strip_prefix("IBUS_ADDRESS="))
+                        {
+                            let line = line.trim();
+                            if !line.is_empty() {
+                                return Ok(line.to_string());
+                            }
+                        }
                     }
                 }
             }
-            "UpdatePreeditText" => {
-                if let Some(text) = extract_signal_text(&msg) {
-                    if tx.send(ImeEvent::Preedit(text)).is_err() {
-                        break;
+        }
+    }
+    let out = std::process::Command::new("ibus")
+        .arg("address")
+        .output()
+        .map_err(|e| format!("无法执行 `ibus address`：{e}"))?;
+    if !out.status.success() {
+        return Err(format!("`ibus address` 失败（{}）", out.status));
+    }
+    let addr = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if addr.is_empty() {
+        return Err("`ibus address` 输出为空".into());
+    }
+    Ok(addr)
+}
+
+fn home_config_ibus_dir() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(std::path::Path::new(&home).join(".config/ibus/bus"))
+}
+
+/// 发一个"无参数/可带参数"的方法调用并等回复（错误转字符串）。
+fn call_simple(
+    conn: &mut RpcConn,
+    member: &str,
+    path: &str,
+    iface: &str,
+    dest: &str,
+    build: impl FnOnce(&mut MarshalledMessage),
+) -> Result<Vec<Param<'static, 'static>>, String> {
+    let mut msg = MessageBuilder::new()
+        .call(member)
+        .on(path)
+        .with_interface(iface)
+        .at(dest)
+        .build();
+    build(&mut msg);
+    let serial = conn
+        .send_message(&mut msg)
+        .map_err(|e| format!("{member} 发送失败：{e}"))?
+        .write_all()
+        .map_err(|(_, e)| format!("{member} 写入失败（无法 Display 已丢弃 context）：{e}"))?;
+    let reply = conn
+        .wait_response(serial, Timeout::Duration(Duration::from_secs(2)))
+        .map_err(|e| format!("{member} 无回复：{e}"))?;
+    let parsed = reply
+        .unmarshall_all()
+        .map_err(|e| format!("{member} 回复解析失败：{e}"))?;
+    Ok(parsed.params)
+}
+
+/// 创建输入上下文并完成能力/引擎/焦点初始化，返回上下文路径。
+fn create_context(conn: &mut RpcConn, engine: &str) -> Result<String, String> {
+    let params = call_simple(conn, "CreateInputContext", ROOT, "org.freedesktop.IBus", SERVICE, |m| {
+        m.body.push_param("y901").ok();
+    })?;
+    let ctx = params
+        .iter()
+        .find_map(|p| match p {
+            Param::Base(Base::ObjectPath(s)) => Some(s.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "CreateInputContext 未返回对象路径".to_string())?;
+
+    let _ = call_simple(conn, "SetCapabilities", &ctx, IFACE, SERVICE, |m| {
+        m.body.push_param(CAPS).ok();
+    });
+    if !engine.is_empty() {
+        let _ = call_simple(conn, "SetEngine", &ctx, IFACE, SERVICE, |m| {
+            m.body.push_param(engine).ok();
+        });
+    }
+    // 部分 IBus 版本会回 "does not support focus"；不致命，ProcessKeyEvent 仍可用。
+    let _ = call_simple(conn, "FocusIn", &ctx, IFACE, SERVICE, |_| {});
+    Ok(ctx)
+}
+
+/// 连接线程主循环：处理命令（按键/焦点/候选位置）并把信号转成事件。
+fn conn_loop(
+    mut conn: RpcConn,
+    ctx_path: String,
+    cmd_rx: Receiver<Cmd>,
+    evt_tx: Sender<ImeEvent>,
+) {
+    loop {
+        // 1) 先处理主线程命令（非阻塞）
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            match cmd {
+                Cmd::Key {
+                    keyval,
+                    keycode,
+                    state,
+                    reply,
+                } => {
+                    let handled = call_simple(&mut conn, "ProcessKeyEvent", &ctx_path, IFACE, SERVICE, |m| {
+                        m.body.push_param(keyval).ok();
+                        m.body.push_param(keycode).ok();
+                        m.body.push_param(state).ok();
+                    })
+                    .ok()
+                    .and_then(|params| {
+                        params.iter().find_map(|p| match p {
+                            Param::Base(Base::Boolean(b)) => Some(*b),
+                            _ => None,
+                        })
+                    })
+                    .unwrap_or(false);
+                    let _ = reply.send(handled);
+                }
+                Cmd::Cursor { x, y, w, h } => {
+                    let _ = call_simple(&mut conn, "SetCursorLocation", &ctx_path, IFACE, SERVICE, |m| {
+                        m.body.push_param(x).ok();
+                        m.body.push_param(y).ok();
+                        m.body.push_param(w).ok();
+                        m.body.push_param(h).ok();
+                    });
+                }
+                Cmd::FocusIn => {
+                    let _ = call_simple(&mut conn, "FocusIn", &ctx_path, IFACE, SERVICE, |_| {});
+                }
+                Cmd::FocusOut => {
+                    let _ = call_simple(&mut conn, "FocusOut", &ctx_path, IFACE, SERVICE, |_| {});
+                }
+            }
+        }
+
+        // 2) 收信号：短超时轮询，保证主循环节奏（refill 会阻塞最多 timeout）
+        let deadline = Instant::now() + Duration::from_millis(POLL_MS);
+        let mut got_any = false;
+        while let Ok(msg) = conn.refill_once(Timeout::Duration(Duration::from_millis(2))) {
+            let _ = msg;
+            got_any = true;
+            break;
+        }
+        let _ = got_any;
+
+        // 3) 取出已到达的信号（refill_once 内部已入队，这里逐条消费）
+        while let Some(sig) = conn.try_get_signal() {
+            let member = sig.dynheader.member.clone().unwrap_or_default();
+            let parsed = match sig.unmarshall_all() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            match member.as_str() {
+                "CommitText" => {
+                    if let Some(text) = text_of(&parsed.params) {
+                        if !text.is_empty() && evt_tx.send(ImeEvent::Commit(text)).is_err() {
+                            return;
+                        }
                     }
                 }
-            }
-            "HidePreeditText" => {
-                if tx.send(ImeEvent::Preedit(String::new())).is_err() {
-                    break;
+                "UpdatePreeditText" => {
+                    if let Some(text) = text_of(&parsed.params) {
+                        if evt_tx.send(ImeEvent::Preedit(text)).is_err() {
+                            return;
+                        }
+                    }
                 }
+                "HidePreeditText" => {
+                    if evt_tx.send(ImeEvent::Preedit(String::new())).is_err() {
+                        return;
+                    }
+                }
+                _ => {}
             }
-            _ => {}
+        }
+
+        if Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
 }
 
-/// 从信号 body 里取出 IBus 文本对象中的字符串。
+// ---------------------------------------------------------------------------
+// 文本提取
+// ---------------------------------------------------------------------------
+
+/// 从信号参数里取 IBus 文本对象的正文。
 ///
-/// `CommitText(v)` / `UpdatePreeditText(v, u, b)` 的第一个参数是 variant 包裹的 IBus 对象；
-/// 我们递归找**第一个非空字符串**（即 `IBusText.text`）。
-fn extract_signal_text(msg: &zbus::Message) -> Option<String> {
-    let body = msg.body();
-    let value: Value<'_> = body.deserialize().ok()?;
-    find_first_string(&value)
+/// 结构：`Variant(Struct(['IBusText', {..}, '你好', Variant(Struct(['IBusAttrList', ..]))]))`。
+/// 规则与 M1 一致：**跳过 `IBus*` 类名与空串**，取第一个真正的字符串。
+fn text_of(params: &[Param<'_, '_>]) -> Option<String> {
+    params.iter().find_map(find_text)
 }
 
-/// 递归扫描 `Value`，返回第一个非空字符串。
-///
-/// 要跳过 IBus 的**类名**：序列化对象的第一个字段是 `"IBusText"` /
-/// `"IBusAttrList"` 这种类名，它不是要上屏的文本。实测信号形式：
-/// `('IBusText', {}, '你好', ('IBusAttrList', {}, []))` ⇒ 真正的文本是第 3 个字段。
-fn find_first_string(v: &Value<'_>) -> Option<String> {
-    match v {
-        Value::Str(s) => {
-            let s = s.as_str();
+fn find_text(p: &Param<'_, '_>) -> Option<String> {
+    match p {
+        Param::Base(Base::String(s)) => {
             if s.is_empty() || s.starts_with("IBus") {
                 None
             } else {
-                Some(s.to_string())
+                Some(s.clone())
             }
         }
-        Value::Value(inner) => find_first_string(inner),
-        Value::Structure(st) => st.fields().iter().find_map(find_first_string),
-        Value::Array(arr) => arr.iter().find_map(find_first_string),
-        Value::Dict(d) => d.iter().find_map(|(k, val)| {
-            find_first_string(k).or_else(|| find_first_string(val))
-        }),
-        _ => None,
+        Param::Base(_) => None,
+        Param::Container(c) => find_text_in_container(c),
+    }
+}
+
+fn find_text_in_container(c: &Container<'_, '_>) -> Option<String> {
+    match c {
+        Container::Variant(v) => find_text(&v.value),
+        Container::Struct(fields) => fields.iter().find_map(find_text),
+        Container::StructRef(fields) => fields.iter().find_map(find_text),
+        Container::Array(arr) => arr.values.iter().find_map(find_text),
+        Container::ArrayRef(arr) => arr.values.iter().find_map(find_text),
+        Container::Dict(d) => d.map.values().find_map(find_text),
+        Container::DictRef(d) => d.map.values().find_map(find_text),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::find_first_string;
-    use zbus::zvariant::{StructureBuilder, Value};
+    use super::find_text;
+    use rustbus::params::{Base, Container, Param, Variant};
+    use rustbus::signature::Type;
 
-    /// IBus 的文本对象形如 `('IBusText', {}, '你好', ('IBusAttrList', {}, []))`，
-    /// `find_first_string` 必须按结构顺序找到第一个非空串（跳过空 properties 字典）。
+    fn boxed_variant(value: Param<'static, 'static>) -> Param<'static, 'static> {
+        Param::Container(Container::Variant(Box::new(Variant {
+            sig: Type::parse_description("v")
+                .expect("sig")
+                .into_iter()
+                .next()
+                .expect("one type"),
+            value,
+        })))
+    }
+
+    /// IBus 文本对象：`('IBusText', {}, '你好', Variant(...))`
+    /// 提取规则：跳过 `IBus*` 类名与空串，取第一个真字符串。
     #[test]
-    fn finds_text_inside_ibus_object_variant() {
-        let attrs = StructureBuilder::new()
-            .add_field(Value::from("IBusAttrList"))
-            .build()
-            .unwrap();
-        let text_obj = StructureBuilder::new()
-            .add_field(Value::from("IBusText"))
-            .add_field(Value::from(""))
-            .add_field(Value::from("\u{4f60}\u{597d}"))
-            .add_field(Value::from(attrs))
-            .build()
-            .unwrap();
-        let wrapped = Value::from(text_obj);
+    fn extracts_text_from_ibus_object() {
+        let attrs = boxed_variant(Param::Base(Base::String("IBusAttrList".into())));
+        let text_obj = Param::Container(Container::Struct(vec![
+            Param::Base(Base::String("IBusText".into())),
+            Param::Base(Base::String(String::new())),
+            Param::Base(Base::String("NIHAO_PLACEHOLDER".into())),
+            attrs,
+        ]));
+        let params = vec![boxed_variant(text_obj)];
         assert_eq!(
-            find_first_string(&wrapped),
-            Some("\u{4f60}\u{597d}".to_string())
+            find_text(&params[0]),
+            Some("NIHAO_PLACEHOLDER".to_string())
         );
     }
 
-    /// 空文本（组字被取消 / `HidePreeditText`）应返回 None，而不是空串误提交。
+    /// 空文本（组字取消 / HidePreeditText）必须返回 None，否则会误提交空串。
     #[test]
-    fn empty_text_yields_none() {
-        let obj = StructureBuilder::new()
-            .add_field(Value::from("IBusText"))
-            .add_field(Value::from(""))
-            .build()
-            .unwrap();
-        assert_eq!(find_first_string(&Value::from(obj)), None);
+    fn empty_text_is_none() {
+        let obj = Param::Container(Container::Struct(vec![
+            Param::Base(Base::String("IBusText".into())),
+            Param::Base(Base::String(String::new())),
+        ]));
+        assert_eq!(find_text(&obj), None);
     }
 }
