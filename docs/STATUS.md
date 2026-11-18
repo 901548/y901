@@ -3,7 +3,7 @@
 - **HEAD**: 本轮 5 个提交（`fix(table)` → `fix(render)` ×2 → `style: cargo fmt` → `chore(gate)`），
   最新一条见 `git log -1`
 - **tags**: v0.1.0 ~ **v0.1.17**
-- **测试**: `passed=956` / `ignored=60` / `include_ignored=1016`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=960` / `ignored=60` / `include_ignored=1020`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -164,7 +164,7 @@
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **956**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **960**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 

@@ -164,6 +164,18 @@ fn stats_soft(soft: &y901_render::soft::SoftBackend, w: u32, h: u32) -> (u64, u6
     })
 }
 
+/// **把 DPI 固定为 1.0**。
+///
+/// 这些用例断言的是"像素数 / 墨量比 / 双后端 MAD"，全部依赖**客户区尺寸 == W×H**。
+/// `Options.width/height` 自 `docs/design/dpi-policy.md` 起是 **DIP**：
+/// 150% 缩放下 240×120 会变成 360×180 的客户区，而 CPU 对照用的 `SoftBackend`
+/// 是按 `W×H` 建的 —— 尺寸对不上，`soft.pixel(x, y)` 直接返回 `None`（曾经的报错就在这里）。
+///
+/// 文本缩放的**比例**与 DPI 无关，固定 1.0 既保持断言含义，又让结果可复现。
+fn force_dpi_one() {
+    std::env::set_var("Y901_TEST_DPI_SCALE", "1.0");
+}
+
 /// 串行化所有 D3D 探针测试。
 ///
 /// 为什么需要：每个测试都 `Window::create` 一个真实窗口；并行时会争抢 D3D 设备与前台窗口，
@@ -206,6 +218,7 @@ fn fnv(bytes: &[u8]) -> u64 {
 
 #[test]
 fn d3d_scale_one_is_pixel_identical_and_identity_is_observable() {
+    force_dpi_one();
     let _guard = D3D_LOCK
         .lock()
         .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
@@ -245,6 +258,7 @@ fn d3d_scale_one_is_pixel_identical_and_identity_is_observable() {
 
 #[test]
 fn d3d_half_scale_ink_ratios_are_sane() {
+    force_dpi_one();
     let _guard = D3D_LOCK
         .lock()
         .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
@@ -295,6 +309,7 @@ fn d3d_half_scale_ink_ratios_are_sane() {
 
 #[test]
 fn d3d_matches_soft_backend_within_tolerance() {
+    force_dpi_one();
     let _guard = D3D_LOCK
         .lock()
         .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());

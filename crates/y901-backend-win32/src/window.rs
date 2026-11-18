@@ -499,6 +499,26 @@ fn scale_from_dpi(dpi: u32) -> f32 {
     }
 }
 
+/// **创建窗口时用的缩放比**（决定客户区物理像素数）。
+///
+/// 优先级与后端初始化时一致：`Y901_TEST_DPI_SCALE` 覆盖一切（门禁要可复现），
+/// 否则用系统 DPI。
+///
+/// 为什么必须两处同源：`Options.width/height` 自 `docs/design/dpi-policy.md` 起是 DIP，
+/// 客户区 = `round(DIP × scale)`。若这里用系统 DPI 而字形/布局用被覆盖的 scale，
+/// 门禁在 150% 机器上会拿到 600×330 的客户区，哈希基线与所有按尺寸断言的用例一起失效。
+fn create_time_dpi_scale() -> f32 {
+    if let Some(s) = std::env::var("Y901_TEST_DPI_SCALE")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|s| s.is_finite() && *s > 0.0)
+    {
+        return s;
+    }
+    // SAFETY：`GetDpiForSystem` 是无参只读查询，无前置条件。
+    scale_from_dpi(unsafe { GetDpiForSystem() })
+}
+
 /// **构造软渲染用的字形引擎**（`Y901_FORCE_SOFT=1` 时走这个后端）。
 ///
 /// 与 `create_inner` 里的内联分支保持一致：`Y901_FONT=self` 用自研引擎，否则用 DirectWrite。
@@ -804,7 +824,11 @@ pub struct Window {
 }
 
 impl Window {
-    /// 创建窗口与渲染后端。`Options.width/height` 是**窗口尺寸**（含边框与标题栏），实际渲染用的是 `GetClientRect` 得到的客户区，后者会小一圈。
+    /// 创建窗口与渲染后端。
+    ///
+    /// **`Options.width/height` 是客户区尺寸，单位 DIP（逻辑像素）**：
+    /// 实际客户区 = `round(DIP × dpi_scale)`，见 `docs/design/dpi-policy.md`。
+    /// 渲染用 `GetClientRect` 得到的物理像素尺寸（高 DPI 下比 DIP 大）。
     pub fn create(options: &Options) -> Result<Self, String> {
         // SAFETY：`create_inner` 的唯一前置条件是“在 GUI 线程、且 `options` 在调用期间有效”，
         // 两者在这里都成立（本函数由调用方在准备窗口的线程上执行，`options` 是借用参数）。
@@ -823,19 +847,26 @@ impl Window {
     unsafe fn create_inner(options: &Options) -> Result<Self, String> {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-        // `Options.width/height` 是**客户区**尺寸，不是窗口尺寸。
+        // `Options.width/height` 是**客户区尺寸，单位 DIP**（逻辑像素）。
         //
-        // 为什么要反算：直接把它们传给 CreateWindowExW 时，它们是**窗口**尺寸，
+        // 为什么按 DIP：Windows 应用在 125% 缩放下，窗口与文字一起变大 ——
+        // 这正是 `docs/design/dpi-policy.md` 选定的策略（选项 A）。
+        // 客户区物理像素 = `round(DIP × dpi_scale)`。
+        //
+        // 为什么要反算外框：直接把它们传给 CreateWindowExW 时，那是**窗口**尺寸，
         // 客户区要减掉边框与标题栏，而那个差值随 DPI / 主题 / DWM 状态变化——
         // 实测在同一台机器上来回在 378x164 与 382x173 之间摆动，
         // 直接让像素哈希门禁在“重建基线”与“报回归”之间反复横跳。
-        // 现在用 AdjustWindowRectExForDpi 反算：**客户区恒为调用者说的大小**。
+        // 现在用 AdjustWindowRectExForDpi 反算：**客户区恒为调用者说的大小 × scale**。
         let dpi = GetDpiForSystem();
+        let scale = create_time_dpi_scale();
+        let client_w = ((options.width as f32) * scale).round().max(1.0) as i32;
+        let client_h = ((options.height as f32) * scale).round().max(1.0) as i32;
         let mut frame = RECT {
             left: 0,
             top: 0,
-            right: options.width as i32,
-            bottom: options.height as i32,
+            right: client_w,
+            bottom: client_h,
         };
         AdjustWindowRectExForDpi(&mut frame, WS_OVERLAPPEDWINDOW, 0, 0, dpi);
         let win_w = (frame.right - frame.left).max(1);

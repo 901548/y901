@@ -11,7 +11,7 @@
 |---|---|
 | `cargo test --workspace`（默认，跳过 `#[ignore]`） | **746 passed / 0 failed** |
 
-`include_ignored=1016`（唯一来源 `docs/evidence/numbers.txt`；不做二次计算，也不交由 `sync-doc-numbers.ps1` 推导）。
+`include_ignored=1020`（唯一来源 `docs/evidence/numbers.txt`；不做二次计算，也不交由 `sync-doc-numbers.ps1` 推导）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 

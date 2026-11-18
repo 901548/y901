@@ -10,4 +10,8 @@
 #   default `cargo test --workspace --no-fail-fast`   passed 956, failed 0, ignored 60
 #   (本轮新增：表格绘制/命中 5 条、字形几何与软硬一致性 4 条、DPI 基线 2 条，
 #    其余为 v0.1.17~v0.1.20 期间累积、旧基线 751 一直未刷新)
-956
+
+# Measured at 2026-11-18 (DPI 选项 A 实现后):
+#   default `cargo test --workspace --no-fail-fast`   passed 960, failed 0, ignored 60
+#   (新增 crates/y901-ui/tests/dpi_layout.rs 3 条 + gap 契约拆成 4 条)
+960

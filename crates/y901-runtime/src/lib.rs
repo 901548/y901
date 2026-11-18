@@ -231,9 +231,12 @@ pub trait Presenter {
 pub struct Options {
     /// 窗口标题。
     pub title: String,
-    /// **窗口**宽度（含边框），不是客户区宽度；客户区由平台减去边框与标题栏。
+    /// **客户区**宽度，单位 **DIP**（逻辑像素，96 DPI = 1:1）。
+    ///
+    /// 实际物理像素 = `round(DIP × dpi_scale)`：125% 缩放下 `640` 会得到 800 像素客户区，
+    /// 与 Windows 其它应用一致（见 `docs/design/dpi-policy.md`）。
     pub width: u32,
-    /// **窗口**高度（含标题栏）。
+    /// **客户区**高度，单位 **DIP**。缩放规则同 [`Options::width`]。
     pub height: u32,
     /// 主题（`None` = [`y901_ui::theme::DARK_THEME`]）。
     ///

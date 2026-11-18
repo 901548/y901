@@ -1,8 +1,9 @@
-//! Contract tests for `Flex::gap` / `Flex::gap_scaled` precedence.
+//! `Flex::gap` 家族的后设置者优先契约。
 //!
-//! Contract: the **later** call wins. `gap_scaled` and `gap` are mutually exclusive;
-//! `gap()` must clear `scaled_gap` (and vice versa), otherwise the documented
-//! "later setting wins" rule silently does not hold.
+//! 契约：**后设置的生效**。`gap()` / `gap_scaled()` / `gap_fixed()` 三者互斥。
+//!
+//! DPI 语义（`docs/design/dpi-policy.md`）：`gap()` 现在是 **DIP**，实际值 × `metrics.scale()`；
+//! `gap_scaled()` 与它等价（保留为兼容别名）；`gap_fixed()` 才是"不缩放的物理像素"。
 
 use y901_ui::layout::LayoutCache;
 use y901_ui::{
@@ -81,7 +82,7 @@ fn row() -> Flex {
         }))
 }
 
-/// `.gap_scaled(8).gap(4)` → 用 4（后设置者生效）。
+/// `.gap_scaled(8).gap(4)` → 用 4 × scale = 5（后设置者生效）。
 #[test]
 fn gap_scaled_then_gap_uses_gap() {
     let metrics = Metrics { scale: 1.25 };
@@ -89,8 +90,8 @@ fn gap_scaled_then_gap_uses_gap() {
     let (x0, x1) = child_xs(&mut flex, &metrics);
     let gap = x1 - (x0 + 10.0);
     assert!(
-        (gap - 4.0).abs() < 0.01,
-        "expected gap 4.0 (later .gap wins), got {gap}"
+        (gap - 5.0).abs() < 0.01,
+        "expected 4.0 * 1.25 = 5.0 (later .gap wins, DIP), got {gap}"
     );
 }
 
@@ -107,12 +108,25 @@ fn gap_then_gap_scaled_uses_scaled() {
     );
 }
 
-/// 对照：只用 `gap(4)` 时与 scale 无关（固定间距）。
+/// 对照 1：`gap(4)` 是 DIP —— 125% 下实际 5.0。
 #[test]
-fn plain_gap_is_scale_independent() {
+fn plain_gap_scales_with_dpi() {
     let metrics = Metrics { scale: 1.25 };
     let mut flex = row().gap(4.0);
     let (x0, x1) = child_xs(&mut flex, &metrics);
     let gap = x1 - (x0 + 10.0);
-    assert!((gap - 4.0).abs() < 0.01, "expected 4.0, got {gap}");
+    assert!(
+        (gap - 5.0).abs() < 0.01,
+        "expected 4.0 * 1.25 = 5.0 (DIP), got {gap}"
+    );
+}
+
+/// 对照 2：`gap_fixed(4)` 不随 DPI 变 —— 125% 下仍是 4.0。
+#[test]
+fn gap_fixed_is_scale_independent() {
+    let metrics = Metrics { scale: 1.25 };
+    let mut flex = row().gap_fixed(4.0);
+    let (x0, x1) = child_xs(&mut flex, &metrics);
+    let gap = x1 - (x0 + 10.0);
+    assert!((gap - 4.0).abs() < 0.01, "expected 4.0 (fixed), got {gap}");
 }

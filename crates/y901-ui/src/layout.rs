@@ -604,19 +604,20 @@ pub fn content_rect(viewport: Rect, content: Size, offset: f32) -> Rect {
 pub struct Flex {
     id: String,
     axis: Axis,
+    /// **内边距基准值（DIP）**：实际值 = `padding × metrics.scale()`，见 `docs/design/dpi-policy.md`。
     padding: Edges,
-    /// **按 DPI 缩放的内边距基准值**；`None` = 用固定 `padding`。
-    ///
-    /// 与 `scaled_gap` 同理：`measure`/`arrange` 时才能拿到 `scale`，
-    /// **`None` 时行为与加该字段前逐像素一致**。
+    /// **旧的显式缩放值**（`.padding_scaled()` 设置的）。保留是为了兼容既有调用点：
+    /// 现在 `padding()` 本身就缩放，所以这个字段只在被显式设置时覆盖 `padding`。
     scaled_padding: Option<Edges>,
+    /// **逃生舱**：`.padding_fixed()` 设的物理像素值，**不随 DPI 缩放**。
+    /// 典型用途：1px 描边内缩、命中阈值这类"必须恰好的像素"。
+    fixed_padding: Option<Edges>,
+    /// **间距基准值（DIP）**：实际值 = `gap × metrics.scale()`。
     gap: f32,
-    /// **按 DPI 缩放的间距基准值**；`None` = 用固定 `gap`。
-    ///
-    /// 由 `.gap_scaled(base)` 设置：实际间距 = `base × metrics.scale()`，
-    /// 在 `measure`/`arrange` 时求值（构造期拿不到 scale）。
-    /// **`None` 时行为与加该字段前逐像素一致**。
+    /// 旧的显式缩放间距（`.gap_scaled()`）；语义同 `scaled_padding`。
     scaled_gap: Option<f32>,
+    /// **逃生舱**：不缩放的物理像素间距。见 `fixed_padding`。
+    fixed_gap: Option<f32>,
     /// **是否开启 wrap（换行）**。默认 `false` = 加该能力前的行为（单行、可溢出）。
     ///
     /// `true` 时走**独立分支**（`wrap_measure` / `wrap_arrange`），原路径逐字不动。
@@ -663,8 +664,10 @@ impl Flex {
             axis,
             padding: Edges::ZERO,
             scaled_padding: None,
+            fixed_padding: None,
             gap: 0.0,
             scaled_gap: None,
+            fixed_gap: None,
             wrap: false,
             wrap_lines: Vec::new(),
             wrap_line_heights: Vec::new(),
@@ -692,27 +695,50 @@ impl Flex {
 
     /// 设置内边距；子控件可用空间相应减少。
     ///
-    /// 与 [`Flex::padding_scaled`] **互斥**：后设置者生效 —— 这里会清掉 `scaled_padding`，
-    /// 否则文档承诺的"后设置者生效"就不成立（旧实现只写 `padding`，`scaled_padding` 残留会继续优先）。
+    /// **量的单位是 DIP**：实际值 = `padding × metrics.scale()`
+    /// （DPI 策略见 `docs/design/dpi-policy.md`）。这正是 Windows 应用的行为——
+    /// 125% 缩放下留白和字号一起放大。若确实需要"不缩放的物理像素"
+    /// （1px 描边内缩、命中阈值），用 [`Flex::padding_fixed`]。
+    ///
+    /// 与 [`Flex::padding_scaled`] **互斥**：后设置者生效。
     pub fn padding(mut self, padding: Edges) -> Self {
         self.padding = padding;
         self.scaled_padding = None;
+        self.fixed_padding = None;
+        self
+    }
+
+    /// 设置**不随 DPI 缩放的**内边距（物理像素）。
+    ///
+    /// 用途：那些"必须恰好是 n 个物理像素"的场合——1px 描边内缩、命中区域阈值。
+    /// 普通留白**不要**用它，否则 125% 下会比周围控件明显偏窄。
+    pub fn padding_fixed(mut self, padding: Edges) -> Self {
+        self.fixed_padding = Some(padding);
         self
     }
 
     /// 设置子控件之间的间距。
     ///
-    /// 与 [`Flex::gap_scaled`] **互斥**：后设置者生效 —— 这里会清掉 `scaled_gap`。
+    /// **量的单位是 DIP**：实际值 = `gap × metrics.scale()`；
+    /// 需要不缩放的物理像素时用 [`Flex::gap_fixed`]。
+    ///
+    /// 与 [`Flex::gap_scaled`] **互斥**：后设置者生效。
     pub fn gap(mut self, gap: f32) -> Self {
         self.gap = gap;
         self.scaled_gap = None;
+        self.fixed_gap = None;
+        self
+    }
+
+    /// 设置**不随 DPI 缩放的**间距（物理像素）。见 [`Flex::padding_fixed`]。
+    pub fn gap_fixed(mut self, gap: f32) -> Self {
+        self.fixed_gap = Some(gap);
         self
     }
 
     /// 设置**按 DPI 缩放的间距**：实际值 = `base × metrics.scale()`。
     ///
-    /// 返回：自身。副作用：无。
-    /// 与 [`Flex::gap`] **互斥**：两者都设置时，**后设置者生效**（这里会清掉固定值）。
+    /// **已冗余**：`gap()` 现在默认就是按 DPI 缩放。保留是为了不让既有调用点失效。
     pub fn gap_scaled(mut self, base: f32) -> Self {
         self.scaled_gap = Some(base);
         self
@@ -720,22 +746,27 @@ impl Flex {
 
     /// 设置**按 DPI 缩放的内边距**：每一边实际值 = `base.边 × metrics.scale()`。
     ///
-    /// 与 [`Flex::padding`] **互斥**：后设置者生效。
+    /// **已冗余**：`padding()` 现在默认就是按 DPI 缩放。保留仅为兼容。
     pub fn padding_scaled(mut self, base: Edges) -> Self {
         self.scaled_padding = Some(base);
         self
     }
 
-    /// **实际内边距**：设过 `padding_scaled` 就逐边乘 scale，否则用固定 `padding`。
+    /// **实际内边距**。
+    ///
+    /// DPI 策略（见 `docs/design/dpi-policy.md`）：`padding()` 的量是 **DIP**，
+    /// 实际值 = `base × metrics.scale()`；需要"就是不缩放的物理像素"（1px 描边、
+    /// 命中阈值之类）时用 `padding_fixed()`。
     fn padding_for(&self, scale: f32) -> Edges {
-        match self.scaled_padding {
-            Some(base) => Edges {
-                left: base.left * scale,
-                top: base.top * scale,
-                right: base.right * scale,
-                bottom: base.bottom * scale,
-            },
-            None => self.padding,
+        if let Some(fixed) = self.fixed_padding {
+            return fixed;
+        }
+        let base = self.scaled_padding.unwrap_or(self.padding);
+        Edges {
+            left: base.left * scale,
+            top: base.top * scale,
+            right: base.right * scale,
+            bottom: base.bottom * scale,
         }
     }
 
@@ -748,12 +779,13 @@ impl Flex {
         self
     }
 
-    /// **实际间距**：设过 `gap_scaled` 就按 scale 求值，否则用固定 `gap`。
+    /// **实际间距**：`gap()` 是 DIP，实际值 = `base × scale`；
+    /// `gap_fixed()` 则不缩放。
     fn gap_for(&self, scale: f32) -> f32 {
-        match self.scaled_gap {
-            Some(base) => base * scale,
-            None => self.gap,
+        if let Some(fixed) = self.fixed_gap {
+            return fixed;
         }
+        self.scaled_gap.unwrap_or(self.gap) * scale
     }
 
     /// **按容器主轴可用宽度分行**（纯函数，不碰 `self`）。

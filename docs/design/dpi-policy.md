@@ -1,6 +1,6 @@
 # DPI 策略：现状、证据与三个选项
 
-> 状态：**待决策**（本文件只做事实与方案，不含代码改动）。
+> 状态：**已按选项 A 实现**（2026-11-18）。实现摘要见 §5，迁移注意见 §6。
 > 相关：[`text-sharpness.md`](text-sharpness.md)（字形落点）、
 > [`../design/grid-span.md`](../design/grid-span.md)（格宽/字宽契约）。
 
@@ -25,7 +25,7 @@
 | `crates/y901-backend-win32/src/window.rs` `physical_font_size()` | `size × dpi_scale`；`apply_dpi()` 在 `WM_DPICHANGED` 与首次显示后各校准一次 |
 | `crates/y901-widgets/src/table.rs:151,195,202` | `HEADER_H * self.scale`、`ROW_H * self.scale`、命中测试同式 |
 | `crates/y901-widgets/src/*.rs` | 85 处 `* self.scale`（alert/badge/table/…） |
-| `crates/y901-ui/src/layout.rs:712,721` | 存在 `dpi_gap()` / `dpi_padding()` API —— **全仓 0 处使用** |
+| `crates/y901-ui/src/layout.rs` | 存在 `gap_scaled()` / `padding_scaled()` API —— **全仓 0 处使用** |
 | `crates/y901-shell/examples/table.rs:44` | `Flex::padding(Edges::all(24.0))` —— 固定值 |
 
 ### 1.2 实测
@@ -46,7 +46,7 @@
 
 - 控件内部度量乘 `self.scale`：全仓 **85 处**（`table.rs:151,195,202` 等）；
 - 容器 `padding/gap` 固定：`y901-widgets/src` 与 `y901-shell/examples` 共 **54 处** `.padding()/.gap()`；
-- `dpi_padding()` / `dpi_gap()`（`layout.rs:712,721`）：**0 处使用** —— 半成品。
+- `padding_scaled()` / `gap_scaled()`（`layout.rs`）：**0 处使用** —— 当年留的显式缩放口子，没人用。
 
 即：**纵向被放大 1.25 倍，横向留白没有** —— 表格内容在 125% 下明显更挤。
 
@@ -69,7 +69,7 @@
 
 - `Options.width/height` 语义改为 **DIP**：客户区 = `round(DIP × dpi_scale)`；
 - `Flex` 的 `padding` / `gap` **默认乘 scale**，另加 `fixed_padding()` / `fixed_gap()` 逃生舱；
-- 既有 `dpi_padding/dpi_gap`（0 使用）合并为默认行为，避免两套 API；
+- 既有 `padding_scaled/gap_scaled`（0 使用）退化为**与默认等价的别名**，避免两套语义；
 - 根变换仍为 1.0：布局直接产出物理像素，后端不再乘一次。
 
 | 维度 | 评价 |
@@ -105,12 +105,49 @@
    "行高、留白、字号"三者比例与 100% 一致（截图像素测量，不是肉眼）。
 4. **门禁**：`scripts/gate.ps1` 仍 **GATE OK**（像素哈希在 `DPI=1.0` 下不变）。
 
+
+## 5. 实现摘要（选项 A）
+
+| 位置 | 改动 |
+|---|---|
+| `Options.width/height` | 语义改为 **DIP**：`y901-runtime` 文档更新，`describe` 里写明 `round(DIP × dpi_scale)` |
+| `window.rs::create_inner` | 客户区 = `round(DIP × scale)`，再 `AdjustWindowRectExForDpi` 反算外框 |
+| `window.rs::create_time_dpi_scale()` | 新增：创建期缩放比，**优先级与后端初始化同源**（`Y901_TEST_DPI_SCALE` 可覆盖，否则系统 DPI） |
+| `Flex::padding()` / `gap()` | 量的单位改为 **DIP**，实际值 × `metrics.scale()` |
+| `Flex::padding_fixed()` / `gap_fixed()` | 新增逃生舱：**不缩放**的物理像素（1px 描边内缩、命中阈值） |
+| `Flex::padding_scaled()` / `gap_scaled()` | 保留为**与默认等价的别名**（既有调用点零改动） |
+| 测试 | 新增 `crates/y901-ui/tests/dpi_layout.rs`（3 条：缩放 / 不缩放 / 后设置者优先）；`gap_scaled_precedence.rs` 改为新契约并补 `gap_fixed` 用例；`d3d_text_scaling.rs` 固定 `DPI=1.0`（它断言的是像素数与墨量比，与 DPI 无关） |
+
+**为什么 `create_time_dpi_scale` 必须尊重 `Y901_TEST_DPI_SCALE`**：门禁的像素哈希按
+`400×220` 巡检，若客户区按系统 DPI 放大，150% 机器上会变成 `600×330`，
+哈希基线立刻失效——那不是渲染回归，是环境差异。
+
+## 6. 迁移注意（破坏性变更）
+
+1. `Options.width/height` 从"物理像素"变成"DIP"：在 100% 缩放下**完全一致**，
+   在 150% 缩放下客户区会大 1.5 倍（这是本次要的行为）。
+   需要升 **minor**（`0.1.20 → 0.2.0`）并在 RELEASE_NOTES 写迁移说明。
+2. `Flex::padding()` / `gap()` 现在随 DPI 缩放：绝大多数调用点**不需要改**；
+   只有"必须恰好 n 物理像素"的地方要改成 `padding_fixed()` / `gap_fixed()`。
+   已全仓检查：`1px` 分隔线走的是 `FlexItem::height(1.0)`（本来就 ×scale），不受影响。
+3. 像素哈希门禁不受影响（`scripts/hash-gate.ps1` 固定 `Y901_TEST_DPI_SCALE=1.0`）。
+
 ## 4. 需要你拍板的问题
 
-1. 选 **A / B / C** 哪条？
+1. ~~选 **A / B / C** 哪条？~~ → **已选 A**（2026-11-18）。
 2. 若选 A：`Options.width/height` 改语义是**破坏性变更**（现有调用方以为传的是物理像素）。
    是否接受升 minor 版本（`0.1.20 → 0.2.0`）并写迁移说明？
 3. 若选 A：`Flex::padding` 默认缩放后，是否保留 `dpi_padding` 作为**无操作别名**（减少调用方改动），
    还是直接删除、统一用 `fixed_padding`？
 
 > 我的建议：**A + 升 0.2.0 + 保留 `dpi_padding` 别名**（过渡期零改动可用，文档标注"默认即缩放，此别名已冗余"）。
+
+## 7. 平台差异（当前）
+
+| 平台 | `Options` 语义 | 缩放来源 | 状态 |
+|---|---|---|---|
+| Windows（win32） | DIP，客户区 = `round(DIP × scale)` | `GetDpiForSystem` / `WM_DPICHANGED`；`Y901_TEST_DPI_SCALE` 可覆盖 | 已实现 |
+| Linux（x11） | **同样按 DIP 解释**，但当前 `scale` 恒为 1.0 | x11 后端尚未接 DPI（无 `dpi_scale` 字段、无 Xft 查询） | DIP 与物理像素相同，行为一致 |
+
+结论：契约跨平台一致（"Options 是 DIP"），只是 x11 侧 scale 暂时恒等于 1.0；
+将来接 HiDPI 时只需在 x11 的窗口创建处补一个 `scale` 乘法，不需要再改语义。
