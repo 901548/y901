@@ -35,6 +35,15 @@
 
 门禁现状：`scripts/gate.ps1`（含 audit）→ **GATE OK**（exit 0）。
 
+**文字清晰度收尾（B）**：见 [`docs/design/text-sharpness.md`](design/text-sharpness.md)。
+- gamma 校正 A/B 已量化：`pow(cov, 1/2.2)` 把整帧亮度抬 +5.8%、亮像素数抬 +26%，
+  **保持默认不动**（风格取舍，非正确性），只留 `Y901_GAMMA` 做对照；
+- 与 GDI 的差异定位为**渲染模式差异**：GDI 在 16px 用字体点阵位图（无抗锯齿），
+  我们走 DirectWrite 轮廓 + ClearType 抗锯齿，小字号必然有过渡像素；
+- 守卫用**单元测试**（`glyph_geometry_tests` 三条），已验证去掉 `.round()` 会立刻红；
+  曾写过一条像素比值用例，实测**抓不到回归**（开关两种实现输出逐像素相同），已撤，
+  理由写在设计文档里。
+
 ## 已知问题
 
 1. ~~`#15` ttf-parser 无轮廓点数上限~~ —— **已修**：`flatten.rs` 加 `MAX_LINES = 10_000` / `MAX_CONTOURS = 256`，
@@ -134,9 +143,9 @@
 
 门禁已恢复绿色，下一步按 ROI：
 
-1. **文字清晰度收尾**：用 `Y901_GAMMA_AB=1` 出 A/B 数据决定 `pow(cov, 1/2.2)` 的去留；
-   把"锐度"（文字像素中 ≥90% 文字色的占比、边缘梯度 p95）写成 `font_3c_pixels` 的断言，
-   防止以后又悄悄变糊。
+1. ~~**文字清晰度收尾**~~ —— 已完成（见上方 B 小节与 `docs/design/text-sharpness.md`）。
+   剩余可选项：若日后要 GDI 那种"硬边"，需切 `DWRITE_RENDERING_MODE_GDI_CLASSIC`
+   或改用点阵位图，属于独立提案。
 2. **DPI 策略统一**（需先决策）：现状是字号按 `dpi_scale` 放大、布局常量不放大。
    实测 125% 下表格行距 28→35（跟字号走）而列起点 53→57（几乎不动），
    且 20px 高的固定行装不下 25px 的字形（`invalidate_rect` 用例因此暴露过脏区外溢）。
