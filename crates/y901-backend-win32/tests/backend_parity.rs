@@ -68,6 +68,11 @@ impl Widget for MixedText {
             "Hamburgefonstiv 123",
             &TextStyle::fg(fg).size(13.0),
         );
+        // 第四行：**带 0.3 变换缩放** —— 这会选到 mip 级（L1/L2），
+        // 专门覆盖"mip slot 的 bearing 是级内像素、而四边形按 L0 尺寸绘制"的量纲问题。
+        ctx.push_transform(Pos::new(16.0, 132.0), 0.3);
+        ctx.draw_text(Pos::new(16.0, 132.0), "Hamburgefons 12", &base);
+        ctx.pop_transform();
     }
     fn semantics(&self) -> Semantics {
         Semantics::default()
@@ -178,6 +183,16 @@ fn mad<F: Fn(u32, u32) -> (u8, u8, u8), G: Fn(u32, u32) -> (u8, u8, u8)>(
 #[ignore = "需要真实 GPU：cargo test -p y901-backend-win32 --test backend_parity -- --ignored --nocapture"]
 fn d3d_and_soft_agree_on_ink_rows() {
     let Some((px, w, h)) = render_d3d() else {
+        // **不能静默绿灯**：没有 GPU 时这条用例一个断言都没跑，
+        // 必须在 gate 的 SKIP 口径里留下痕迹（`hw-smoke.ps1` 会单独计数）。
+        let path = std::env::temp_dir().join("y901-test-skips.txt");
+        use std::io::Write as _;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .expect("写 SKIP 日志失败");
+        writeln!(f, "SKIP: backend_parity 没有可用的 D3D11 设备").expect("写 SKIP 日志失败");
         eprintln!("SKIP: 没有可用的 D3D11 设备");
         return;
     };
@@ -232,8 +247,33 @@ fn d3d_and_soft_agree_on_ink_rows() {
         }
         v
     };
-    eprintln!("[parity] D3D 行带 = {:?}", bands(&d3d_rgb));
-    eprintln!("[parity] CPU 行带 = {:?}", bands(&soft_rgb));
+    let d3d_bands = bands(&d3d_rgb);
+    let soft_bands = bands(&soft_rgb);
+    eprintln!("[parity] D3D 行带 = {d3d_bands:?}");
+    eprintln!("[parity] CPU 行带 = {soft_bands:?}");
+    // **逐行墨迹带必须完全一致**：这是"整体错一行"的直接判据，
+    // 只打印不比较的话，统一错 1px 会照样绿灯（上一版报告点名的鉴别力缺口）。
+    //
+    // 例外：**最后一行是 0.3 缩放的 mip 行**，目标高度只有 4px；两侧 AA 与
+    // 取整路径不同（GPU 走 gamma 校正、CPU 走覆盖率直乘），墨迹可差 1 行。
+    // 对它只要求 ±1，前三行（L0，16/18/13px）要求完全相同。
+    assert_eq!(
+        d3d_bands.len(),
+        soft_bands.len(),
+        "行数不一致：D3D {d3d_bands:?} vs CPU {soft_bands:?}"
+    );
+    let l0_rows = d3d_bands.len().saturating_sub(1);
+    assert_eq!(
+        &d3d_bands[..l0_rows],
+        &soft_bands[..l0_rows],
+        "L0 行的逐行墨迹带不一致 —— bearing/基线语义再次分叉：D3D {d3d_bands:?} vs CPU {soft_bands:?}"
+    );
+    let (d3d_last, soft_last) = (d3d_bands[l0_rows], soft_bands[l0_rows]);
+    let near = |a: u32, b: u32| (a as i64 - b as i64).abs() <= 1;
+    assert!(
+        near(d3d_last.0, soft_last.0) && near(d3d_last.1, soft_last.1),
+        "缩放行的墨迹带差超过 1 行：D3D {d3d_last:?} vs CPU {soft_last:?}"
+    );
 
     let (ax0, ay0, ax1, ay1, amass) = ink_stats(w, h, d3d_rgb);
     let (bx0, by0, bx1, by1, bmass) = ink_stats(w, h, soft_rgb);

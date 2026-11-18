@@ -87,22 +87,7 @@ pub struct SoftBackend {
     proportional_text: bool,
 }
 
-/// **字形顶部的 y 坐标**（buffer 坐标，y 向下）。
-///
-/// 引擎的 `GlyphInfo::bearing_y` 是有符号的**位图底边**偏移（y 向上）：
-/// `'8'` = 0（底边贴基线）、`'设'` = -2（有 2px 下伸）。它不是"顶部偏移"。
-///
-/// 顶部 = 基线 − bearing_y − 字形高度，基线 = origin.y + ascent。
-/// 旧代码用 `origin.y + ascent + bearing_y`，把字形整体画低了一个字高；
-/// 底部溢出裁剪区后，因为画面在 present 层转置，表现为**顶部被切**。
-fn glyph_top(origin_y: f32, ascent: f32, bearing_y: f32, height: f32) -> f32 {
-    // **行级 baseline 只取整一次**：之后全是整数运算。
-    //
-    // `bearing_y` **原样使用**：它是字形底边相对基线的位置
-    // （向下为负），包含圆形字母的 1px overshoot、下伸字的 -4~-5、
-    // 标点的自身偏移。**归零它会让冒号浮空、中英错位**（上一轮的错误）。
-    (origin_y + ascent).round() - bearing_y - height
-}
+use crate::font::glyph_top;
 
 /// 采样 L0 位图到缩小后的目标像素，使用像素中心映射并夹紧边界。
 ///
@@ -895,28 +880,33 @@ impl RenderCtx for SoftBackend {
                 if let Some(sg) = self.text.glyph_at_scale(ch, scale) {
                     if sg.w > 0 && sg.h > 0 {
                         let atlas_size = self.text.atlas_size() as usize;
-                        // **目标尺寸与 bearing 的来源必须和实际用的级一致**：
+                        // **目标尺寸统一用 L0 × scale，bearing 统一换回 L0 量纲**。
                         //
-                        // - `level > 0`：slot **就是**按目标尺寸重新光栅化的位图
-                        //   （L1=半尺寸、L2=四分之一），所以 1:1 贴过去最准，
-                        //   它的 `bearing` 也已经在目标像素坐标里。
-                        //   曾经无论哪一级都按 `L0 尺寸 × scale` 重采样：当目标 6 行、
-                        //   源 7 行时 `gy * sh / height` 取不到最后一行，'A' 的
-                        //   底边整行丢失（字形被削平），且 `bearing_y` 被二次缩放。
-                        // - `level == 0`：slot 是 L0，必须按 `scale` 缩放采样。
-                        let (dw, dh, bear_x, bear_y) = if sg.level > 0 {
-                            (
-                                sg.slot.width as i32,
-                                sg.slot.height as i32,
-                                sg.slot.bearing_x,
-                                sg.slot.bearing_y,
-                            )
+                        // 曾经 `level > 0` 直接按 slot 尺寸（1:2 / 1:4）绘制，而 `advance`
+                        // 与 `ascent` 用的是连续的 `scale` —— `s ∈ (0.25, 0.5)` 时字形按 1/4
+                        // 画、字距按 0.4× 推进，字宽与推进脱钩，基线也对不齐。
+                        //
+                        // `slot.bearing_*` 是**该级自己**的像素量纲（每级独立重新光栅化），
+                        // 所以先乘 `h / slot.height`（≈ 2^level）换回 L0，再乘 `scale` 到屏幕。
+                        let (sw, sh) = (sg.slot.width.max(1), sg.slot.height.max(1));
+                        let k = sg.h as f32 / sh as f32;
+                        let target_w = (sg.w as f32 * scale).round().max(1.0) as i32;
+                        let target_h = (sg.h as f32 * scale).round().max(1.0) as i32;
+                        // **当目标尺寸与该级位图几乎相等时按 1:1 贴**：这时再"缩放到目标"
+                        // 只会白白多一次半像素重采样，把 MAD 从 0.03 抬到 0.08
+                        //（`supersample` 的形状 MAD 用例就是被这一步弄红的）。
+                        // 只有真正的"级与目标尺寸不符"（例如 s=0.3 却拿到 L1）才缩放。
+                        let one_to_one = sg.level > 0
+                            && (sw as i32 - target_w).abs() <= 1
+                            && (sh as i32 - target_h).abs() <= 1;
+                        let (dw, dh, bear_x, bear_y) = if one_to_one {
+                            (sw as i32, sh as i32, sg.slot.bearing_x, sg.slot.bearing_y)
                         } else {
                             (
-                                (sg.w as f32 * scale).round().max(1.0) as i32,
-                                (sg.h as f32 * scale).round().max(1.0) as i32,
-                                sg.slot.bearing_x * scale,
-                                sg.slot.bearing_y * scale,
+                                target_w,
+                                target_h,
+                                sg.slot.bearing_x * k * scale,
+                                sg.slot.bearing_y * k * scale,
                             )
                         };
                         // 基线：布局始终用原字号的 bearing，屏幕位置再乘缩放因子
@@ -937,8 +927,6 @@ impl RenderCtx for SoftBackend {
                             ink: 0.0,
                             mips: [None, None, None],
                         };
-                        // slot 实际像素尺寸（用于采样归一化）
-                        let (sw, sh) = (sg.slot.width.max(1), sg.slot.height.max(1));
                         for gy in 0..g.height as i32 {
                             let dy = by + gy;
                             if dy < 0 || dy >= self.height as i32 {

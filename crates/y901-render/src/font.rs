@@ -224,6 +224,20 @@ pub trait FontEngine {
     fn cell_height(&self) -> f32;
 }
 
+/// **字形位图顶部的屏幕 y**（唯一实现，软/硬后端都必须调用它）。
+///
+/// `bearing_y` 是**位图底边**相对基线的 y-up 偏移（基线处 0、上方为正、下伸为负），
+/// 因此 `top = 基线 − bearing_y − 高度`，其中基线 = `origin_y + ascent`。
+///
+/// **行级基线只取整一次**：位图是 1:1 贴图、采样器是线性过滤，四边形落在分数像素上
+/// 就会把相邻纹素混一次（"字体发糊"，见 `docs/design/text-sharpness.md`）。
+/// 取整后同一行的所有字形共用一条整数基线；不同后端也必须算出同一个值，
+/// 否则软渲染与 GPU 渲染会错行——所以这必须是**共享函数**，不能各写一份。
+#[inline]
+pub fn glyph_top(origin_y: f32, ascent: f32, bearing_y: f32, height: f32) -> f32 {
+    (origin_y + ascent).round() - bearing_y - height
+}
+
 /// 由字号推出等宽单元格尺寸 `(宽, 高)`。
 /// 为什么要独立函数：布局、字形引擎、后端必须用同一套格尺寸，否则文字与光标会错位。
 pub fn cell_metrics_for(font_size: f32) -> (f32, f32) {

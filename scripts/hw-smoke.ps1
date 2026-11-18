@@ -108,4 +108,10 @@ Write-Host "[hw-smoke] 证据已写入：$logPath"
 Write-Host ($summary -join "`n")
 
 if ($failed -gt 0) { exit 1 }
+# **NO-OP 不是通过**：一条用例都没跑到（或全被过滤掉）说明脚本没测到东西，
+# 不能给 0。这与脚本自己"没跑 ≠ 通过"的原则一致。
+if ($passed -eq 0) {
+    Write-Host '[hw-smoke] 失败：一条 #[ignore] 用例都没跑到（检查过滤条件/编译是否成功）'
+    exit 3
+}
 exit 0

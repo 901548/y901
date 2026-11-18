@@ -3,7 +3,7 @@
 - **HEAD**: 本轮 5 个提交（`fix(table)` → `fix(render)` ×2 → `style: cargo fmt` → `chore(gate)`），
   最新一条见 `git log -1`
 - **tags**: v0.1.0 ~ **v0.2.0**（本版含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`）
-- **测试**: `passed=960` / `ignored=61` / `include_ignored=1021`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=963` / `ignored=61` / `include_ignored=1024`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -62,8 +62,37 @@
 - 逐像素 MAD ≤ 0.25（实测 **0.0080**）。
 
 实测：两侧行带 `[(18,32),(62,77),(111,122)]` 完全一致，包围盒 `(16,18)..(185,122)` 相同。
-调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win32 默认族
+调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win**963** 默认族
 NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那是字体不同，不是后端错行。
+
+
+## 审查整改（2026-11-18 第二批：P1-1/2/3/4 + P2-7/8/9/10）
+
+针对代码审查报告逐条修复，每条都有回归用例或可验证的机制说明：
+
+| # | 问题 | 修法 |
+|---|---|---|
+| P1-1 | `Flex` 四个 setter 的"后设置者生效"不成立（`*_fixed`/`*_scaled` 互不清空，而 fixed 优先） | 四个 setter 两两互斥清空；新增 **6×2 条顺序用例**（padding 家族 + gap 家族各 6 种顺序） |
+| P1-2 | mip 路径把"该级 bearing"与"L0 几何"混用（下伸/overshoot 在 s<0.5 被缩小 2~4 倍） | bearing 先乘 `h / slot.height` 换回 L0；**几何改到映射后空间**计算（与 soft 同构）；有成对比例断言保证顶部与尺寸用同一取整高度 |
+| P1-3 | mip 路径假粗体第二实例用未裁剪的 `pos/size/uv` | 改用裁剪后的 `quad.*`，与 sized 路径一致 |
+| P1-4 | soft 的 `level>0` 按 slot 尺寸画、却按连续 `scale` 推进 | 统一"目标尺寸 = L0×scale"；**目标与位图尺寸差 ≤1px 时走 1:1**（否则会多一次半像素重采样，把形状 MAD 从 0.03 抬到 0.08） |
+| P2-7 | `backend_parity` 只打印行带不比较、无 GPU 时静默绿灯 | 行带**直接 `assert_eq!`**（L0 三行严格相等；0.3 缩放行容差 ±1 并注明原因）；无 GPU 写 `SKIP:` 记账 |
+| P2-8 | `hw-smoke.ps1` 的 `NO-OP` 退出码仍是 0 | 新增 `exit 3`：一条用例都没跑到 ≠ 通过 |
+| P2-9 | `glyph_top` 在 soft/win32 各一份 | 抽到 `y901_render::font::glyph_top`，两端共用；用例不再手抄公式 |
+| P2-10 | mip 路径尺寸仍是分数 | 四边形尺寸取整（位置与尺寸同时吸附） |
+
+**新发现的真问题**（比报告多出来的）：mip 路径的基线在"未缩放空间先相加再乘 k"与
+"先各自乘 k 再相加"之间差 `(k-1)·(ascent − height)`，缩小时会让 GPU 与 CPU 错 1 行——
+`backend_parity` 加了 0.3 缩放行后立刻抓到（D3D `(132,136)` vs CPU `(133,135)`），已改到映射后空间计算。
+
+验证：`cargo test --workspace` **963 passed / 0 failed**；
+`--include-ignored` **1024 passed / 0 failed**；硬件冒烟 **61 passed / 0 failed / 0 SKIP**；
+`scripts/gate.ps1`（含 audit）→ **GATE OK**。
+
+仍待处理（下一批）：**P1-5** `line_height` 契约（需在"改 1em→ascent+descent"与
+"新增 `baseline_offset()`"之间选）、**P1-6** 组件内部 padding 未随 DPI 缩放、
+**内容清理**（README/ACCEPTANCE/WASM/STATUS 过期数字与旧哈希、`FRAMEWORK.md` 控制字符、
+`clippy.txt`+`todo.tsv` 移出仓库）。
 
 ## 已知问题
 
@@ -184,7 +213,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **960**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **963**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 

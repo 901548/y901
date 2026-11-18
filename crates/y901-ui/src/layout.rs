@@ -714,6 +714,11 @@ impl Flex {
     /// 普通留白**不要**用它，否则 125% 下会比周围控件明显偏窄。
     pub fn padding_fixed(mut self, padding: Edges) -> Self {
         self.fixed_padding = Some(padding);
+        // **三个 setter 之间必须两两互斥**：`padding_for` 里 fixed 优先，
+        // 若这里不清 `scaled_padding`，`.padding_scaled(8).padding_fixed(6)`
+        // 之外的顺序（`.padding_fixed(6).padding_scaled(8)`）会让"后设置者生效"失效。
+        self.scaled_padding = None;
+        self.padding = Edges::ZERO;
         self
     }
 
@@ -733,6 +738,8 @@ impl Flex {
     /// 设置**不随 DPI 缩放的**间距（物理像素）。见 [`Flex::padding_fixed`]。
     pub fn gap_fixed(mut self, gap: f32) -> Self {
         self.fixed_gap = Some(gap);
+        self.scaled_gap = None;
+        self.gap = 0.0;
         self
     }
 
@@ -741,6 +748,7 @@ impl Flex {
     /// **已冗余**：`gap()` 现在默认就是按 DPI 缩放。保留是为了不让既有调用点失效。
     pub fn gap_scaled(mut self, base: f32) -> Self {
         self.scaled_gap = Some(base);
+        self.fixed_gap = None;
         self
     }
 
@@ -749,6 +757,7 @@ impl Flex {
     /// **已冗余**：`padding()` 现在默认就是按 DPI 缩放。保留仅为兼容。
     pub fn padding_scaled(mut self, base: Edges) -> Self {
         self.scaled_padding = Some(base);
+        self.fixed_padding = None;
         self
     }
 

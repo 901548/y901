@@ -15,6 +15,8 @@ pub mod font;
 use windows_sys::Win32::Foundation::HWND;
 
 use y901_ui::{Color, Pos, Rect, RenderCtx, Size, TextMetrics, TextStyle};
+// 字形顶部公式只有一份实现（软/硬后端共用，防止两边漂移）
+use y901_render::font::glyph_top;
 
 use d3d11::{Gfx, Instance};
 use font::TextEngine;
@@ -608,17 +610,45 @@ impl D3dBackend {
             return;
         }
 
-        // 在**未缩放的字形空间**里算出矩形，最后整体过一次变换：
-        // 这样变换语义只在一个地方实现，不会出现"半个量乘了缩放、另半个没乘"。
+        // **在"映射后的屏幕空间"里算出矩形**（与 `soft.rs` 同构）。
+        //
+        // 为什么不能像旧版那样"未缩放空间算完再整体映射一次"：
+        // 基线里既有 `ascent`（要 ×k）又有**字形高度**（也要 ×k），
+        // 两者在未缩放空间相加后再乘 k，与"先各自乘 k 再相加"差一个
+        // `(k-1) * (ascent - height)` —— 缩小时这会让基线整体偏上/偏下，
+        // 与 CPU 后端对不上（`backend_parity` 在 0.3 缩放下抓到的正是这个）。
+        //
+        // **mip 级的 bearing 是该级自己的像素量纲**（每级独立重新光栅化），
+        // 先乘 `h / slot.height`（≈ 2^level）换回 L0，再乘 k 到屏幕。
+        let k = scale.max(1e-6);
         let offset_x = glyph_offset(span, self.cell.w, sel.advance);
-        let top = glyph_top(y, ascent, sel.slot.bearing_y, sel.h as f32);
-        let raw_pos = Pos::new(x + offset_x + sel.slot.bearing_x, top);
-        // **整像素吸附**：即使这条路径会按 mip 级缩放四边形，左上角仍在整像素上，
-        // 避免"位置分数 + 尺寸分数"的双重模糊。
-        let mapped = snap_glyph_pos(self.map_pos(raw_pos));
-        let gsz = self.map_size(Size::new(sel.w as f32, sel.h as f32));
-        let pos = mapped;
-        let size = [gsz.w, gsz.h];
+        let slot_h = sel.slot.height.max(1) as f32;
+        let level_k = sel.h as f32 / slot_h;
+        let bear_x_l0 = sel.slot.bearing_x * level_k;
+        let bear_y_l0 = sel.slot.bearing_y * level_k;
+
+        let origin = self.map_pos(Pos::new(x, y));
+        // 目标尺寸取整；**若该级位图本身就等于目标尺寸，就按 1:1 贴**（避免多余的半像素重采样）。
+        let target = [
+            (sel.w as f32 * k).round().max(1.0),
+            (sel.h as f32 * k).round().max(1.0),
+        ];
+        let slot_size = [sel.slot.width as f32, sel.slot.height as f32];
+        let one_to_one = sel.level > 0
+            && (slot_size[0] - target[0]).abs() <= 1.0
+            && (slot_size[1] - target[1]).abs() <= 1.0;
+        let (size, bear_x_final, bear_y_final) = if one_to_one {
+            // 1:1：位置用该级自己的 bearing（级内像素），尺寸用位图尺寸
+            (slot_size, sel.slot.bearing_x, sel.slot.bearing_y)
+        } else {
+            (target, bear_x_l0 * k, bear_y_l0 * k)
+        };
+        // 四边形尺寸取整后，**顶部也要用同一个取整高度**：
+        // `glyph_top` 里是 `基线 − bearing − 高度`，若高度用未取整的 3.6
+        // 而四边形按 4 行画，就会整体下移半像素，与 CPU 后端差一行。
+        let top = glyph_top(origin.y, ascent * k, bear_y_final, size[1]);
+        // **整像素吸附**：位置与尺寸都吸到整数，避免线性采样在半像素上重采样。
+        let pos = snap_glyph_pos(Pos::new(origin.x + (offset_x + bear_x_final) * k, top));
         // UV 指向**所选级**在图集里的矩形
         let uv = [
             sel.slot.atlas_x as f32 / atlas_size,
@@ -645,12 +675,15 @@ impl D3dBackend {
             ..Default::default()
         });
 
-        // 假粗体：右移 1px 再画一遍（比加载粗体字形便宜，且等宽不变）
+        // 假粗体：右移 1px 再画一遍（比加载粗体字形便宜，且等宽不变）。
+        //
+        // **必须用裁剪后的 `quad`**：第一条实例已经被 clip 收窄，第二条若还用
+        // 原始的 `pos/size/uv`，粗体字就会画到 clip 之外（与 `push_glyph_sized` 不一致）。
         if bold {
             self.push_instance(Instance {
-                pos: [pos.x + 1.0, pos.y],
-                size,
-                uv_rect: uv,
+                pos: [quad.pos.x + 1.0, quad.pos.y],
+                size: quad.size,
+                uv_rect: quad.uv,
                 color: rgba,
                 ..Default::default()
             });
@@ -1201,29 +1234,6 @@ fn clip_quad(pos: Pos, size: [f32; 2], uv: [f32; 4], clip: Rect) -> Option<Clipp
             uv[1] + dv * (oy + sy),
         ],
     })
-}
-
-/// 从 y-up 的位图底边 bearing 得到屏幕坐标系字形顶部。
-/// `bearing_y` 是基线到位图底边的 y-up 距离，因此
-/// `top = baseline - bearing_y - height`。
-///
-/// **行级 baseline 只取整一次**（与 `y901_render::soft` 的同名函数逐字一致）。
-///
-/// 为什么必须取整：图集位图是 1:1 贴到屏幕上的（四边形尺寸就是位图的
-/// `width x height`），采样器却是线性过滤。只要四边形落在分数像素上，
-/// 每个像素中心就会落在纹素内部而不是纹素中心，线性采样把相邻纹素按权重
-/// 混一次 —— 表现为**整屏文字发糊、笔画峰值亮度掉到 6 成**。
-///
-/// 实测（本机 125% 缩放，字号 16 → 物理 20px）：
-/// `1` 的竖笔在 100% 缩放时是 `169 167`（两个像素等值，位图原样），
-/// 在 125% 缩放时是 `74 143 90`（摊成三个像素，峰值只有正文色的 57%）。
-/// 原因是 `map_pos` 把逻辑坐标乘了 1.25（`x=66.25`），而这里原先不做取整。
-///
-/// soft 后端早就是整数贴图（`(origin_y + ascent).round()` + `floor`），
-/// 两边在这里必须给出**同一条整数基线**，否则同一棵树在两个后端上会错行。
-#[inline]
-fn glyph_top(origin_y: f32, ascent: f32, bearing_y: f32, height: f32) -> f32 {
-    (origin_y + ascent).round() - bearing_y - height
 }
 
 /// 把已映射到屏幕坐标的字形四边形左上角**吸附到整像素**。

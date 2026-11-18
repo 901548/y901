@@ -159,3 +159,116 @@ fn last_call_wins_between_padding_and_fixed() {
     let a = r[0];
     assert_eq!(a.x, 10.0, "后设置的 padding_fixed() 应生效（不缩放）");
 }
+
+/// **三个 padding setter 两两互斥**：无论什么顺序，最后一个必须生效。
+///
+/// 这是上一轮审查抓到的 P1：`padding_fixed` 不清 `scaled_padding`，
+/// 而 `padding_for` 里 fixed 优先 → `.padding_fixed(6).padding_scaled(8)` 会得到 6
+/// （后设置者没生效）。这里把 6 种顺序**全测一遍**，不再靠"记得同步清空"。
+#[test]
+fn all_padding_setter_orders_respect_last_call() {
+    // (构造，期望在 scale=1.25 下的左边距)
+    let cases: Vec<(&str, Flex, f32)> = vec![
+        (
+            "padding(10) → padding_fixed(6)",
+            Flex::row("r")
+                .padding(Edges::all(10.0))
+                .padding_fixed(Edges::all(6.0)),
+            6.0,
+        ),
+        (
+            "padding_fixed(6) → padding(10)",
+            Flex::row("r")
+                .padding_fixed(Edges::all(6.0))
+                .padding(Edges::all(10.0)),
+            12.5,
+        ),
+        (
+            "padding(10) → padding_scaled(8)",
+            Flex::row("r")
+                .padding(Edges::all(10.0))
+                .padding_scaled(Edges::all(8.0)),
+            10.0,
+        ),
+        (
+            "padding_scaled(8) → padding(10)",
+            Flex::row("r")
+                .padding_scaled(Edges::all(8.0))
+                .padding(Edges::all(10.0)),
+            12.5,
+        ),
+        (
+            "padding_fixed(6) → padding_scaled(8)",
+            Flex::row("r")
+                .padding_fixed(Edges::all(6.0))
+                .padding_scaled(Edges::all(8.0)),
+            10.0,
+        ),
+        (
+            "padding_scaled(8) → padding_fixed(6)",
+            Flex::row("r")
+                .padding_scaled(Edges::all(8.0))
+                .padding_fixed(Edges::all(6.0)),
+            6.0,
+        ),
+    ];
+
+    for (name, flex, expect_x) in cases {
+        let flex = flex.push(Box::new(Fixed::new("a", 40.0, 20.0)));
+        let (r, _) = arrange_all(flex, 1.25);
+        assert!(
+            (r[0].x - expect_x).abs() < 0.01,
+            "{name}：期望 x={expect_x}，实际 {}",
+            r[0].x
+        );
+    }
+}
+
+/// 同上的 gap 版本（审查里指出 gap 的 fixed↔scaled 组合原本完全没测）。
+#[test]
+fn all_gap_setter_orders_respect_last_call() {
+    let cases: Vec<(&str, Flex, f32)> = vec![
+        (
+            "gap(8) → gap_fixed(6)",
+            Flex::row("r").gap(8.0).gap_fixed(6.0),
+            6.0,
+        ),
+        (
+            "gap_fixed(6) → gap(8)",
+            Flex::row("r").gap_fixed(6.0).gap(8.0),
+            10.0,
+        ),
+        (
+            "gap(8) → gap_scaled(4)",
+            Flex::row("r").gap(8.0).gap_scaled(4.0),
+            5.0,
+        ),
+        (
+            "gap_scaled(4) → gap(8)",
+            Flex::row("r").gap_scaled(4.0).gap(8.0),
+            10.0,
+        ),
+        (
+            "gap_fixed(6) → gap_scaled(4)",
+            Flex::row("r").gap_fixed(6.0).gap_scaled(4.0),
+            5.0,
+        ),
+        (
+            "gap_scaled(4) → gap_fixed(6)",
+            Flex::row("r").gap_scaled(4.0).gap_fixed(6.0),
+            6.0,
+        ),
+    ];
+
+    for (name, flex, expect_gap) in cases {
+        let flex = flex
+            .push(Box::new(Fixed::new("a", 40.0, 20.0)))
+            .push(Box::new(Fixed::new("b", 40.0, 20.0)));
+        let (r, _) = arrange_all(flex, 1.25);
+        let gap = r[1].x - r[0].x - r[0].w;
+        assert!(
+            (gap - expect_gap).abs() < 0.01,
+            "{name}：期望 gap={expect_gap}，实际 {gap}"
+        );
+    }
+}
