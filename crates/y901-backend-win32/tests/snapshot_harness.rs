@@ -581,7 +581,24 @@ fn invalidate_rect_partial_equals_full() {
     // B：追加 token（只改数据），精确标脏那一行
     cell.set(26);
     let line = tree.rect_of("stream").expect("stream");
-    tree.invalidate_rect(Rect::new(line.x + 8.0, line.y + 8.0, 320.0, 20.0));
+    // **脏区必须覆盖"实际画出来的"字形**，而不只是这行的逻辑矩形。
+    //
+    // 字号按 DPI 缩放（`px * dpi_scale`），而这条测试行的固定高度是 20px、
+    // 文字又从 `line.y + 2` 起笔：本机 125% 缩放下默认 16 号字的物理高度正好
+    // 是 20px，于是字形会溢出到这行**下方 1~2px**。只标 `320x20` 时，溢出的
+    // 那两行像素既不重绘也不被覆盖，局部刷新与全量重绘必然不一致
+    // （实测差异 156 字节，首个差异在行底边下一行）。
+    //
+    // 这是**测试的脏区写窄了**，不是渲染错：真实控件标脏时用的是自身 bounds，
+    // 而它的 bounds 会随字号一起长高。这里用 4px 余量把"字形溢出"包进来，
+    // 同时仍然只标窗口内的一小块，局部重绘的语义没有被削弱。
+    let pad = 4.0;
+    tree.invalidate_rect(Rect::new(
+        line.x + 8.0 - pad,
+        line.y + 8.0 - pad,
+        320.0 + 2.0 * pad,
+        20.0 + 2.0 * pad,
+    ));
     window.request_snapshot();
     window.render(&mut tree);
     let (px1, w1, h1) = window.take_snapshot().expect("快照 A/B 失败");

@@ -1,12 +1,35 @@
 # 项目状态
 
-- **HEAD**: `56e06a9`
+- **HEAD**: 本轮 5 个提交（`fix(table)` → `fix(render)` ×2 → `style: cargo fmt` → `chore(gate)`），
+  最新一条见 `git log -1`
 - **tags**: v0.1.0 ~ **v0.1.17**
-- **测试**: `passed=751` / `ignored=58` / `include_ignored=809`（唯一来源 `docs/evidence/numbers.txt`）
-- **门禁**: `scripts/gate.ps1` 六步（MSRV / 测试计数 / clippy / 哈希 / missing_docs / audit）
+- **测试**: `passed=956` / `ignored=60` / `include_ignored=1016`（唯一来源 `docs/evidence/numbers.txt`）
+- **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
-- **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xDBB308DD1657EF9C` / `400x220`
+- **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 本轮（2026-11-18）：P0 渲染修复 + 门禁恢复
+
+**四个 P0 修复**（每个都有像素证据，见各提交说明）：
+
+1. `fix(table)` 表头/行绘制与命中顺序：表头在数据行之上，点第 N 行不再选中第 N-1 行。
+2. `fix(render)` `GlyphInfo::bearing_y` 统一为 y-up 位图底边偏移 + 基线随字号缩放
+   （同一表单行内 14 号标签与 16 号输入值底边同为 y=365）。
+3. `fix(render)` L0 分数缩放采样补最右/最下一行，墨迹底边不再被切。
+4. `fix(render)` **字形四边形整像素吸附**：位图 1:1 贴图 + 线性采样，落在分数像素上
+   就会把相邻纹素混一次（125% 缩放下竖笔峰值亮度只有正文色的 57%）。修后
+   文字峰值亮度 249→255、亮部像素 +13%、边缘梯度 p95 +12.8%。
+
+**门禁恢复**（此前门禁红在第 1b 步，没人看）：
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| `cargo fmt --all -- --check` | 69 个文件不符 | 0（独立 `style:` 提交，纯空白/排序） |
+| 测试基线 | `751`（严重过期） | `956`（实测），`include_ignored=1016` |
+| doc 数字 | `passed=751` / `include_ignored=809` | 由 `sync-doc-numbers.ps1` 重新生成 |
+| test-inventory | 指纹过期 | 127 个二进制 / 1013 条用例 |
+| GPU 用例 `invalidate_rect_partial_equals_full` | 125% DPI 下红 | 绿（脏区按"实际字形高度"标，见测试注释） |
 
 ## 已知问题
 
@@ -105,8 +128,22 @@
 
 ## 下一轮计划
 
-本轮审查清单（#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20）**已全部处理**。
-下一步建议：打 `v0.1.10`，并把 `docs/STATUS.md` 作为每轮固定产出。
+门禁已恢复绿色，下一步按 ROI：
+
+1. **文字清晰度收尾**：用 `Y901_GAMMA_AB=1` 出 A/B 数据决定 `pow(cov, 1/2.2)` 的去留；
+   把"锐度"（文字像素中 ≥90% 文字色的占比、边缘梯度 p95）写成 `font_3c_pixels` 的断言，
+   防止以后又悄悄变糊。
+2. **DPI 策略统一**（需先决策）：现状是字号按 `dpi_scale` 放大、布局常量不放大。
+   实测 125% 下表格行距 28→35（跟字号走）而列起点 53→57（几乎不动），
+   且 20px 高的固定行装不下 25px 的字形（`invalidate_rect` 用例因此暴露过脏区外溢）。
+   三条路线：全量缩放 / 完全 DPI 无关 / 保持混合（需文档说明），先读
+   `docs/design/text-scaling.md` 确认原意图。
+3. **验证覆盖**：补 `scripts/hw-smoke.ps1`，把 60 条 `#[ignore]` 的 GPU/窗口用例
+   在有 GPU 的机器上跑一遍并把日志落到 `docs/evidence/`；再加一条 soft vs d3d 的
+   像素差回归（容差内），防止"两个后端错一行"复发。
+4. **发布**：push（本轮 5 个提交全部未推）、`0.1.20 → 0.1.21`、
+   RELEASE_NOTES、tag。
+5. **杂物**：根目录 `clippy.txt` / `todo.tsv` 是生成物，建议移出仓库或进 `.gitignore`。
 
 ## 审查报告状态
 
@@ -114,11 +151,11 @@
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **751**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **956**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 
-## 下一阶段候选（按 ROI 排序）
+## 历史候选（v0.1.17 期列出，仍然有效）
 
 | 项 | 工作量 | 依赖 |
 |---|---|---|
