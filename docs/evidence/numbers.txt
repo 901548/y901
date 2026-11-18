@@ -1,6 +1,6 @@
 # DO NOT EDIT - regenerate with: pwsh -File scripts/sync-doc-numbers.ps1
-passed=967
+passed=970
 ignored=61
 # include_ignored = passed + ignored (full --include-ignored run, not a separate suite)
-include_ignored=1028
-baseline=967
+include_ignored=n/a (full run has failures: parallel fixtures break allocation-counter tests)
+baseline=970

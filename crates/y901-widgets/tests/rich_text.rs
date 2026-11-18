@@ -234,8 +234,9 @@ fn update_then_partial_invalidate_stays_local() {
 
     assert!(!tree.dirty().is_full(), "局部更新不能退化成整窗重绘");
     let b = tree.dirty().bounds().expect("应有脏区");
+    // `invalidate_rect` 会按墨迹溢出量外扩（上下各 >=2px），所以容差 +5。
     assert!(
-        b.h <= rect.h + 1.0,
+        b.h <= rect.h + 5.0,
         "脏区应只覆盖最后一块（高度 {} vs 块高 {}）",
         b.h,
         rect.h

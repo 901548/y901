@@ -54,6 +54,28 @@ fn ink_depth_exceeds_line_height() {
 }
 
 #[test]
+fn report_app_font_metrics() {
+    // 打印应用实际字体的度量，便于判断脏区外扩量该取多少。
+    let path = y901_render::resolve_font_path("NSimSun");
+    let (cw, ch) = y901_render::cell_metrics_for(16.0);
+    let cell = Size::new(cw, ch);
+    if let Ok(engine) = MyFontEngine::new(y901_render::load_font(&path).expect("font"), 16.0, cell)
+    {
+        let b = SoftBackend::new_headless(64, 64, Box::new(engine), cell).expect("soft");
+        let style = TextStyle::default();
+        eprintln!(
+            "[ink] app font({path}): line_h={:.2} ink={:.2} gap={:.2}",
+            b.line_height(&style),
+            b.ink_bounds(&style).1,
+            b.ink_bounds(&style).1 - b.line_height(&style)
+        );
+        // 应用字体的名义度量**可能刚好等于行高**（SimSun 实测 gap=0），
+        // 所以真正的外扩不能只靠它 —— `UiTree` 另外兜了一个最小安全边距。
+        assert!(b.line_height(&style) > 0.0);
+    }
+}
+
+#[test]
 fn ink_depth_scales_with_font_size() {
     let b = backend();
     let small = b.ink_bounds(&TextStyle::default().size(8.0)).1;

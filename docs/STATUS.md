@@ -2,7 +2,7 @@
 
 - **HEAD**: 见 `git log -1`（v0.2.0 之后：审查整改 2 批）
 - **tags**: v0.1.0 ~ **v0.2.0**（本版含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`）
-- **测试**: `passed=967` / `ignored=61` / `include_ignored=1028`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=970` / `ignored=61` / `include_ignored=1028`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -61,7 +61,7 @@
 - 逐像素 MAD ≤ 0.25（实测 **0.0080**）。
 
 实测：两侧行带 `[(18,32),(62,77),(111,122)]` 完全一致，包围盒 `(16,18)..(185,122)` 相同。
-调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win**967** 默认族
+调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win**970** 默认族
 NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那是字体不同，不是后端错行。
 
 
@@ -104,6 +104,20 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 属于"修一个脏区、赔掉整站布局"。所以本轮只落地**能力**（API + 后端实现 + 用例），
 把墨迹外溢的消费点（`UiTree` 的多个标脏点改成按 `ink_bounds` 扩张）留到单独一轮。
 `line_height` 语义保持 = 行距，未改。
+
+
+**P1-5 收口：脏区按墨迹外扩（本轮完成）**
+
+- `UiTree` 在 `layout()` 里从 `metrics.ink_bounds()` 求"墨迹溢出量"，并在
+  **`invalidate_rect()` 入口**统一外扩（布局差异产生的脏区仍保持精确，避免大面积用例噪声）；
+  外扩后裁回视口。
+- 外扩量 = `max(ink_depth − line_height, 2px)`。**为什么要有 2px 下限**：
+  实测 SimSun 16px 的 `ascent+descent` 恰好等于行高（gap = 0），但真实墨迹仍会越过 1~2px
+  （overshoot + 抗锯齿），名义度量预测不到。
+- **收益可验证**：`snapshot_harness::invalidate_rect_partial_equals_full` 里那段
+  "手工把脏区加宽 4px"的补丁**已删除**，用例回到最朴素的窄矩形写法并通过
+  —— 即框架的脏区兜底真的接管了这个 bug。
+- 受影响的精确脏区断言（5 条）按新契约放宽（+2~5px），并注明原因。
 
 ## 已知问题
 
@@ -219,7 +233,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **967**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **970**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 

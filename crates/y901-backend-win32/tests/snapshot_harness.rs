@@ -592,13 +592,13 @@ fn invalidate_rect_partial_equals_full() {
     // 这是**测试的脏区写窄了**，不是渲染错：真实控件标脏时用的是自身 bounds，
     // 而它的 bounds 会随字号一起长高。这里用 4px 余量把"字形溢出"包进来，
     // 同时仍然只标窗口内的一小块，局部重绘的语义没有被削弱。
-    let pad = 4.0;
-    tree.invalidate_rect(Rect::new(
-        line.x + 8.0 - pad,
-        line.y + 8.0 - pad,
-        320.0 + 2.0 * pad,
-        20.0 + 2.0 * pad,
-    ));
+    // **脏区只标逻辑行矩形，不加任何手工余量**。
+    //
+    // 修前这里必须手工 `pad = 4.0` 才绿（125% 下字形溢出这行 1~2px，
+    // 溢出的像素不在脏区里、局部重绘清不掉）。现在 `UiTree` 在标脏时统一
+    // 按 `ink_bounds` + 最小安全边距外扩（`add_dirty`），所以这里可以回到
+    // 最朴素的写法 —— 这条用例同时也守住了"框架兜底不许退化"。
+    tree.invalidate_rect(Rect::new(line.x + 8.0, line.y + 8.0, 320.0, 20.0));
     window.request_snapshot();
     window.render(&mut tree);
     let (px1, w1, h1) = window.take_snapshot().expect("快照 A/B 失败");

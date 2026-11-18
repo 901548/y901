@@ -316,7 +316,8 @@ fn invalidate_row_returns_row_rect_and_stays_local() {
     tree.invalidate_rect(rect);
     assert!(!tree.dirty().is_full(), "单行标脏不能退化成整窗");
     let b = tree.dirty().bounds().expect("应有脏区");
-    assert!(b.h <= 20.5, "脏区高度应只有一行：{b:?}");
+    // 行矩形 20.5 + 墨迹外扩（上下各 2）≈ 24.5 以内仍算"只脏一行"
+    assert!(b.h <= 24.5, "脏区高度应只有一行：{b:?}");
 }
 
 #[test]

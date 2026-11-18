@@ -106,8 +106,13 @@ impl MyFontEngine {
         })?;
         let units = face.units_per_em() as f32;
         let ascent = face.ascender() as f32 * size_px / units.max(1.0);
-        // `descender()` 在 OpenType 里是负值（基线以下），取反得到正的下伸高度。
-        let descent = -(face.descender() as f32) * size_px / units.max(1.0);
+        // 下伸高度：**优先 OS/2 的 sTypoDescender**，它更贴近真实墨迹；
+        // `hhea.descender` 在 CJK 字体上常常包含大量下部预留（本机实测 0.47em），
+        // 直接拿来扩张脏区会让每次重绘多扫 5px/行。
+        // 两者在 OpenType 里都是负值（基线以下），取反得到正数。
+        let typo_desc = face.typographic_descender().map(|d| d as f32);
+        let desc_units = typo_desc.unwrap_or_else(|| face.descender() as f32);
+        let descent = (-desc_units) * size_px / units.max(1.0);
         Ok(Self {
             data,
             size: size_px,

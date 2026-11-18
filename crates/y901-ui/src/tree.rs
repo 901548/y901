@@ -234,6 +234,12 @@ pub struct UiTree {
     /// 为何要存：事件分发（`event` / `send_focus`）拿不到 `metrics`，
     /// 但命中测试需要与绘制同一个尺寸。存在这里后拷贝进 `EventCtx`。
     scale: f32,
+    /// **墨迹溢出量**（像素）：`ink_bounds` 深度 − `line_height`。
+    ///
+    /// 脏区按控件 rect 计算，而墨迹可以越过 rect（下伸字/圆字母 overshoot）。
+    /// 标脏时统一把矩形向外扩这么多，保证局部重绘能清掉溢出部分。
+    /// 在 `layout()` 里从 `metrics` 求值；字体度量不可用时为 0（行为同旧版）。
+    ink_margin: f32,
     /// **上一次 Tick 广播时 `wants_tick() == true` 的节点数**。
     ///
     /// 为何要存：`run_loop` 要据此决定 Tick 节拍（16ms 还是 idle_wait）。
@@ -452,6 +458,7 @@ impl UiTree {
             animations: Vec::new(),
             pending_texture_releases: Vec::new(),
             scale: 1.0,
+            ink_margin: 0.0,
             root,
             popups: Vec::new(),
             focus: None,
@@ -722,9 +729,11 @@ impl UiTree {
         let n = self.popups.len();
         // 最早弹出的那个记录了"弹出前的焦点"，它才是要还回去的目标。
         let restore = self.popups.first().and_then(|p| p.prev_focus.clone());
-        for p in self.popups.drain(..) {
-            if !p.rect.is_empty() {
-                self.dirty.add(p.rect);
+        // 先收集再看（`drain` 持有 `self.popups` 的可变借用，期间不能调 `&mut self` 的方法）
+        let popped: Vec<Rect> = self.popups.drain(..).map(|p| p.rect).collect();
+        for rect in popped {
+            if !rect.is_empty() {
+                self.dirty.add(rect);
             }
         }
         self.restore_focus(restore);
@@ -787,7 +796,18 @@ impl UiTree {
         if clamped.is_empty() {
             return;
         }
-        self.dirty.add(clamped);
+        // **按墨迹溢出量外扩**：调用方只给"逻辑矩形"（例如流式输出的一行），
+        // 而字形可以越过它 1~2px；不扩的话那几行像素永远不在脏区里。
+        // 只在这一入口外扩：布局差异产生的脏区仍保持精确（大量用例按精确矩形断言）。
+        let m = self.ink_margin;
+        let expanded = Rect::new(
+            clamped.x - m,
+            clamped.y - m,
+            clamped.w + 2.0 * m,
+            clamped.h + 2.0 * m,
+        );
+        // **外扩后仍要裁回视口**：脏区越界会被后端当作超采样。
+        self.dirty.add(expanded.intersect(window));
     }
 
     /// 标记某节点的尺寸可能变化（等价于组件返回 `EventResult::Relayout` 的效果）。
@@ -1585,6 +1605,23 @@ impl UiTree {
     pub fn layout(&mut self, viewport: Size, metrics: &dyn TextMetrics) {
         // **DPI 缩放源头**：事件分发时拿不到 `metrics`，所以在这里存下。
         self.scale = metrics.scale();
+        // **墨迹溢出量**：脏区按控件 rect 算，而墨迹可以越过 rect（下伸字/圆字母 overshoot）。
+        // 用 `ink_bounds`（真实 `ascent+descent`）与 `line_height` 的差值作为标脏时的外扩量。
+        // 上限取一行：异常字体度量不该把脏区撑到离谱。
+        {
+            let style = crate::TextStyle::default();
+            let (_, ink_depth) = metrics.ink_bounds(&style);
+            let line_h = metrics.line_height(&style);
+            // **字体名义度量 + 最小安全边距**：
+            // 实测 SimSun 16px 的 `ascent+descent` 正好等于 16（gap = 0），
+            // 但真实墨迹仍会越过行框 1~2px —— 来自字形 overshoot 与抗锯齿覆盖，
+            // 不是名义度量能预测的。所以取 `max(gap, 2px)`：
+            // 2px 足够覆盖这类溢出，又不会像 hhea 那样每行多扫 5px。
+            const MIN_INK_MARGIN: f32 = 2.0;
+            self.ink_margin = (ink_depth - line_h)
+                .max(MIN_INK_MARGIN)
+                .min(line_h.max(0.0));
+        }
         // 响应式：Signal 变过的节点先标脏，再进布局
         self.drain_invalidation();
         // Signal 与 dispatch 触及的节点在此统一比对语义面（方案 1'，一帧一次）
@@ -3423,8 +3460,9 @@ mod dirty_clip_tests {
     #[test]
     fn t5_too_many_dirty_rects_degrade_to_full() {
         let mut tree = laid_out_tree();
+        // 间距 10px：每块外扩 2px 后仍互不重叠，才能稳定触发"碎片过多降级"
         for i in 0..(DirtyRegion::MAX_RECTS + 1) {
-            let x = i as f32 * 3.0;
+            let x = i as f32 * 10.0;
             tree.invalidate_rect(Rect::new(x, 0.0, 1.0, 1.0));
         }
         assert!(tree.dirty().is_full(), "碎片过多必须降级为 full");
