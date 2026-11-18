@@ -3,7 +3,7 @@
 - **HEAD**: 本轮 5 个提交（`fix(table)` → `fix(render)` ×2 → `style: cargo fmt` → `chore(gate)`），
   最新一条见 `git log -1`
 - **tags**: v0.1.0 ~ **v0.1.17**
-- **测试**: `passed=960` / `ignored=60` / `include_ignored=1020`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=960` / `ignored=61` / `include_ignored=1021`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -50,6 +50,20 @@
 （**PASS 60 / 0 failed / 0 SKIP**，62s，HEAD `9a8060d`）。
 口径写进日志头：SKIP ≠ 通过；本机 GPU 是 **GameViewer 虚拟适配器**，
 功能正确性可引用、帧率/显存类结论不可引用。
+
+
+**双后端一致性（D 收尾）**：新增 `crates/y901-backend-win32/tests/backend_parity.rs`
+（`#[ignore]`，需 GPU）。同一棵树、**同一个字形引擎与字体文件**、DPI 固定 1.0，
+分别在 D3D11 与 CPU `SoftBackend` 上渲染混合字号三行文字，断言：
+
+- **墨迹包围盒逐边对齐**（±1px）与**逐行墨迹带完全相同** —— 这是"错一行"的直接判据
+  （当初 `bearing_y` 语义分叉就是这个症状，而 MAD 对整体平移不敏感，抓不住）；
+- 墨量比 [0.4, 2.5]（GPU 侧 gamma 校正会让它天然高约 1.5×，属已知有意差异）；
+- 逐像素 MAD ≤ 0.25（实测 **0.0080**）。
+
+实测：两侧行带 `[(18,32),(62,77),(111,122)]` 完全一致，包围盒 `(16,18)..(185,122)` 相同。
+调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win32 默认族
+NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那是字体不同，不是后端错行。
 
 ## 已知问题
 
@@ -159,7 +173,7 @@
    三条路线：全量缩放 / 完全 DPI 无关 / 保持混合（需文档说明），先读
    `docs/design/text-scaling.md` 确认原意图。
 3. **验证覆盖**：~~补 `scripts/hw-smoke.ps1`~~ —— 已完成（见上方 D 小节）。
-   剩：soft vs d3d 的像素差回归（容差内），防止"两个后端错一行"复发。
+   剩：~~soft vs d3d 像素差回归~~ —— 已完成（见上方"双后端一致性"）。
 4. **发布**：push（本轮 5 个提交全部未推）、`0.1.20 → 0.1.21`、
    RELEASE_NOTES、tag。
 5. **杂物**：根目录 `clippy.txt` / `todo.tsv` 是生成物，建议移出仓库或进 `.gitignore`。

@@ -1,7 +1,7 @@
 # 硬件冒烟证据 — 2026-11-18
 
 ## 环境
-- HEAD: 9a8060d
+- HEAD: e4512a4
 - rustc: rustc 1.92.0 (ded5c06cf 2025-12-08)
 - OS: Microsoft Windows NT 10.0.26200.0
 - GPU: GameViewer Virtual Display Adapter
@@ -14,10 +14,10 @@
 | 项 | 值 |
 |---|---|
 | 结论 | **PASS** |
-| passed | 60 |
+| passed | 61 |
 | failed | 0 |
 | SKIP（无设备等） | 0 |
-| 耗时 | 62s |
+| 耗时 | 53s |
 
 > SKIP 表示用例**主动**判定当前环境不具备条件（例如没有可用 D3D 设备），
 > 它会写 `SKIP:` 到临时日志。SKIP 不等于通过，但也不等于失败——
@@ -25,13 +25,15 @@
 
 ## 原始输出
 ```
-cargo.exe :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+cargo.exe :    Compiling y901-shell v0.1.20 (F:\Y901\crates\y901-shell)
 At F:\Y901\scripts\hw-smoke.ps1:63 char:8
 + $out = & cargo test --workspace --offline --no-fail-fast -- --ignored ...
 +        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.27s:String) [], RemoteException
+    + CategoryInfo          : NotSpecified: (   Compiling y9...tes\y901-shell):String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
  
+   Compiling y901-backend-web v0.1.20 (F:\Y901\crates\y901-backend-web)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.58s
      Running unittests src\lib.rs (target\debug\deps\y901_backend_web-53e8a795845451e7.exe)
 
 running 0 tests
@@ -49,7 +51,14 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; fini
 running 1 test
 test backend::rebuild_atlas_tests::rebuild_reuploads_atlas ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 58 filtered out; finished in 0.35s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 58 filtered out; finished in 0.36s
+
+     Running tests\backend_parity.rs (target\debug\deps\backend_parity-4ff0b2d74570844b.exe)
+
+running 1 test
+test d3d_and_soft_agree_on_ink_rows ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
 
      Running tests\black_screen_regression.rs (target\debug\deps\black_screen_regression-921b7803836eaafc.exe)
 
@@ -75,7 +84,7 @@ running 2 tests
 test pixel_statistics_and_png_baseline ... ok
 test probe_orientation_and_channels ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.58s
 
      Running tests\font_m1.rs (target\debug\deps\font_m1-cc1b92331dc9c382.exe)
 
@@ -100,7 +109,7 @@ test occupancy_matches_glyph_count_sanity ... ok
 test breakdown_rasterize_vs_atlas_insert ... ok
 test forced_eviction_thrash_measurement ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.62s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.65s
 
      Running tests\font_m3_cjk.rs (target\debug\deps\font_m3_cjk-d11929054bf4eb64.exe)
 
@@ -115,7 +124,7 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; fini
 running 1 test
 test all_phases_reference_cost ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.66s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.68s
 
      Running tests\input_events.rs (target\debug\deps\input_events-34f03c43c249dddf.exe)
 
@@ -126,11 +135,11 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; fini
      Running tests\opacity_parity.rs (target\debug\deps\opacity_parity-5e7a6dbf7394d49d.exe)
 
 running 3 tests
-test opacity_one_matches_baseline ... ok
 test opacity_halves_matches_between_d3d_and_soft ... ok
 test nested_opacity_matches_between_d3d_and_soft ... ok
+test opacity_one_matches_baseline ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
 
      Running tests\options_wiring.rs (target\debug\deps\options_wiring-f8de994fcf073f3b.exe)
 
@@ -148,24 +157,24 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; fini
 
 running 3 tests
 test bench_atlas_5000_glyphs ... ok
-test bench_empty_frame_baseline ... ok
 test bench_instance_submission_10k ... ok
+test bench_empty_frame_baseline ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
 
      Running tests\popup_anim_d3d.rs (target\debug\deps\popup_anim_d3d-a623a31b25151720.exe)
 
 running 1 test
 test popup_animation_progresses_on_d3d ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
 
      Running tests\present_bench.rs (target\debug\deps\present_bench-b79ea61fabd821da.exe)
 
 running 1 test
 test present_bench_sync0_vs_sync1 ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.65s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.68s
 
      Running tests\render_ctx_parity.rs (target\debug\deps\render_ctx_parity-c26ecedf223799bf.exe)
 
@@ -182,18 +191,18 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; fini
      Running tests\snapshot_harness.rs (target\debug\deps\snapshot_harness-0a85065a97b3fd34.exe)
 
 running 10 tests
-test text_inside_scrollview_is_not_clipped_away ... ok
-test round_rect_sdf_matches_math ... ok
 test text_label_paints_visible_non_background_pixels ... ok
+test text_inside_scrollview_is_not_clipped_away ... ok
 test round_stroke_draws_ring_only ... ok
-test gradient_matches_math_at_45_degrees ... ok
 test rebuild_of_cached_target_does_not_leave_black_areas ... ok
-test snapshot_harness_is_deterministic ... ok
+test round_rect_sdf_matches_math ... ok
 test gradient_round_rect_matches_math ... ok
-test invalidate_rect_partial_equals_full ... ok
+test gradient_matches_math_at_45_degrees ... ok
+test snapshot_harness_is_deterministic ... ok
 test two_disjoint_dirty_rects_match_full_redraw ... ok
+test invalidate_rect_partial_equals_full ... ok
 
-test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
 
      Running tests\soft_backend.rs (target\debug\deps\soft_backend-3472dae0ae6dc997.exe)
 
@@ -201,15 +210,15 @@ running 2 tests
 test soft_fill_rate_1280x800 ... ok
 test soft_matches_d3d_within_antialiasing_tolerance ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.48s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.50s
 
      Running tests\stroke_round_parity.rs (target\debug\deps\stroke_round_parity-839146c69db80385.exe)
 
 running 2 tests
-test stroke_round_rect_matches_under_transform ... ok
 test stroke_round_rect_matches_without_transform ... ok
+test stroke_round_rect_matches_under_transform ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
 
      Running tests\tabs_transition_d3d.rs (target\debug\deps\tabs_transition_d3d-a20dc3d92dfd2d03.exe)
 
@@ -376,7 +385,7 @@ test per_frame_clear_only_allocs ... ok
 test first_upload_allocs ... ok
 test per_frame_draw_image_allocs ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 8.14s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 6.17s
 
      Running tests\popup_anim.rs (target\debug\deps\popup_anim-964ab99042624810.exe)
 
@@ -444,7 +453,7 @@ running 2 tests
 test full_screen_fill_cost ... ok
 test demo_page_full_render_cost ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.82s
 
      Running tests\typing_frames.rs (target\debug\deps\typing_frames-b068e0d5ade5af96.exe)
 
@@ -553,7 +562,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; fini
 running 1 test
 test layout_10k_full_relayout ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.51s
 
      Running tests\overlay.rs (target\debug\deps\overlay-d33376a72baf5cfb.exe)
 
@@ -566,7 +575,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; fini
 running 1 test
 test bench_layout_allocations_10k ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
 
      Running tests\perf_bench.rs (target\debug\deps\perf_bench-6c90deeb50d61083.exe)
 
@@ -578,7 +587,7 @@ test bench_layout_id_length_sensitivity ... ok
 test bench_layout_50k_plain_leaf ... ok
 test bench_layout_50k_flat ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 38.35s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 23.88s
 
      Running tests\perf_dispatch_alloc.rs (target\debug\deps\perf_dispatch_alloc-5a37cb5c1248709c.exe)
 
@@ -624,7 +633,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; fini
 running 1 test
 test rev_snapshot_is_linear_on_10k_nodes ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 1.22s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 1.21s
 
      Running tests\revision.rs (target\debug\deps\revision-57ce9d9771249107.exe)
 

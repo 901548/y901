@@ -11,7 +11,7 @@
 |---|---|
 | `cargo test --workspace`（默认，跳过 `#[ignore]`） | **746 passed / 0 failed** |
 
-`include_ignored=1020`（唯一来源 `docs/evidence/numbers.txt`；不做二次计算，也不交由 `sync-doc-numbers.ps1` 推导）。
+`include_ignored=1021`（唯一来源 `docs/evidence/numbers.txt`；不做二次计算，也不交由 `sync-doc-numbers.ps1` 推导）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -22,7 +22,7 @@
 | 性能基准 | **30** | ui 12（`perf_bench` ×6、`perf_dispatch_alloc` ×3、`layout_bench`、`perf_alloc`、`rev_snapshot`）、win32 8（`perf_bench` ×3、`present_bench`、`breakdown_rasterize_vs_atlas_insert`、`cold_start_500_cjk_glyphs`、`all_phases_reference_cost`、`soft_fill_rate_1280x800`）、render 10（`cjk_cold_start` ×3、`mip_latin` ×3、`perf_texture_alloc` ×3、`which_method_is_closer_to_supersampled_truth`） |
 | 调试探针 | **5** | `debug_print_glyphs`、`debug_crossings_for_a`、`debug_print_cjk_frames`、`occupancy_matches_glyph_count_sanity`、`probe_orientation_and_channels` |
 | 压力测试 | **1** | `forced_eviction_thrash_measurement`（图集 eviction 抖动） |
-| **合计** | **58** | 分类明细为**旧口径**（当时总数 51），未随新增用例重算；以上五类不相加等于总数，总数以 `docs/evidence/numbers.txt` 的 `ignored=60` 为准。 |
+| **合计** | **58** | 分类明细为**旧口径**（当时总数 51），未随新增用例重算；以上五类不相加等于总数，总数以 `docs/evidence/numbers.txt` 的 `ignored=61` 为准。 |
 
 ## 7 个 GPU harness（真机 D3D11，全部 ok）
 
