@@ -75,6 +75,11 @@ impl FontEngine for WasmFontEngine {
         16.0 * 0.8
     }
 
+    fn descent(&self) -> f32 {
+        // 浏览器端字体度量是占位值（16px × 0.2 = 3.2），与 `ascent` 同一假设。
+        16.0 * 0.2
+    }
+
     /// 格宽（像素）：等宽回退固定 8。
     fn cell_width(&self) -> f32 {
         8.0

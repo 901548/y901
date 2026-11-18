@@ -841,6 +841,17 @@ impl TextMetrics for D3dBackend {
         }
     }
 
+    /// 墨迹深度 = `(ascent + descent) × 字号比`（见 `TextMetrics::ink_bounds`）。
+    fn ink_bounds(&self, style: &TextStyle) -> (f32, f32) {
+        let base_px = self.cell.h.max(1.0);
+        let px = match style.size {
+            Some(px) if px.is_finite() && px > 0.0 => px * self.dpi_scale,
+            _ => base_px,
+        };
+        let k = px / base_px;
+        (0.0, (self.text.ascent() + self.text.descent()) * k)
+    }
+
     fn scale(&self) -> f32 {
         // **窗口级 DPI**（96 = 100%），字段由 `window.rs` 注入。
         //

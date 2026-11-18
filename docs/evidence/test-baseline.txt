@@ -20,4 +20,7 @@
 # Measured at 2026-11-18 (审查整改 C/E 批后):
 #   default `cargo test --workspace --no-fail-fast`   passed 965, failed 0, ignored 61
 #   (新增 TextInput 组件级 DPI 用例 2 条)
-965
+# Measured at 2026-11-18 (P1-5 ink_bounds 之后):
+#   default `cargo test --workspace --no-fail-fast`   passed 967, failed 0, ignored 61
+#   (新增 ink_bounds 用例 2 条)
+967

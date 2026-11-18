@@ -561,6 +561,10 @@ impl FontEngine for TextEngine {
     fn ascent(&self) -> f32 {
         self.ascent
     }
+
+    fn descent(&self) -> f32 {
+        self.descent
+    }
     fn cell_width(&self) -> f32 {
         self.cell_width
     }
@@ -596,7 +600,7 @@ pub struct TextEngine {
     pub ascent: f32,
     // 诊断 API：`ascent` 字段：自研引擎用它算基线，DirectWrite 路径由 `metrics()` 读
     // 诊断 API：`has_dirty()` 与图集统计：后端据此跳过整张上传，`font_m3_atlas` 测试直接断言
-    // 归类：诊断 API —— `descent` 供基线排查，渲染只用 `ascent`
+    // 渲染用 `ascent`（基线）+ `descent`（墨迹下伸）
     #[allow(dead_code)]
     /// 基线到行底的距离；与 `ascent` 一起决定行高。
     pub descent: f32,

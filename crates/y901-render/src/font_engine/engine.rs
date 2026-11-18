@@ -49,6 +49,11 @@ pub struct MyFontEngine {
     cell: Size,
     /// 基线高度（从字体 `ascender` 算）。
     ascent: f32,
+    /// **基线下方的下伸高度**（从字体 `descender` 算，正数）。
+    ///
+    /// 与 `ascent` 一起决定"一行墨迹到底多深"：`ascent + descent`。
+    /// 它通常**大于** `cell.height`（1em 行框），所以下伸字/圆字母会越过行框 1~2px。
+    descent: f32,
     /// 图集：RGBA。
     atlas: Vec<u8>,
     atlas_size: u32,
@@ -101,11 +106,14 @@ impl MyFontEngine {
         })?;
         let units = face.units_per_em() as f32;
         let ascent = face.ascender() as f32 * size_px / units.max(1.0);
+        // `descender()` 在 OpenType 里是负值（基线以下），取反得到正的下伸高度。
+        let descent = -(face.descender() as f32) * size_px / units.max(1.0);
         Ok(Self {
             data,
             size: size_px,
             cell,
             ascent,
+            descent,
             atlas: vec![0; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize],
             atlas_size: ATLAS_SIZE,
             packer: SkylinePacker::new(ATLAS_SIZE),
@@ -648,6 +656,10 @@ impl FontEngine for MyFontEngine {
     }
     fn ascent(&self) -> f32 {
         self.ascent
+    }
+
+    fn descent(&self) -> f32 {
+        self.descent
     }
     fn cell_width(&self) -> f32 {
         self.cell.w

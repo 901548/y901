@@ -434,7 +434,24 @@ pub trait TextMetrics {
     /// 单行文本的墨迹外框尺寸。
     fn measure_text(&self, text: &str, style: &TextStyle) -> Size;
     /// 行高（基线间距）。
+    ///
+    /// **这是行距，不是墨迹深度**：它等于 1em 字身框（`round(px)`）。
+    /// 真实墨迹深度是 `ascent + descent`，通常比它大 1~2px（下伸字与圆字母 overshoot），
+    /// 需要"框必须装得下墨迹"的地方请用 [`TextMetrics::ink_bounds`]。
     fn line_height(&self, style: &TextStyle) -> f32;
+
+    /// **墨迹相对文本原点的上下外扩**：`(原点以上, 原点以下)`，单位像素。
+    ///
+    /// 用途：定高控件（`TextLabel` 等）与脏区必须保证**装得下墨迹**，
+    /// 否则下伸字/overshoot 会画到框外，局部重绘时那几行像素不会被清掉
+    /// （`snapshot_harness::invalidate_rect_partial_equals_full` 当初就是靠
+    /// 手工把测试脏区加宽 4px 才变绿的，根因就在这里）。
+    ///
+    /// 默认实现 = `(0, line_height)`：保持既有后端/测试度量的行为不变；
+    /// 真实后端应覆盖为字体实际的 `ascent + descent`。
+    fn ink_bounds(&self, style: &TextStyle) -> (f32, f32) {
+        (0.0, self.line_height(style))
+    }
     /// DPI 缩放，1.0 = 100%。
     fn scale(&self) -> f32;
 }

@@ -161,6 +161,12 @@ impl Widget for TextLabel {
     ) -> Size {
         // 与 `render()` **同源**：同一个 `to_text_style()`。
         let style = self.to_text_style();
+        // 高度仍用行高：`line_height` 是 1em 行框，而 hhea 的 ascent+descent
+        // 在本机 CJK 字体上是 1.33em（实测 16px 行：行高 16 而 ink_bounds 深度 21.28）。
+        // 直接拿墨迹深度定高会让所有标签高 33%，属于"修一个脏区、赔掉整站密度"。
+        //
+        // 墨迹外溢的正确落点是脏区扩张（`TextMetrics::ink_bounds` 已提供该数据，
+        // 见 STATUS.md 的 P1-5 记录）；那需要改 UiTree 的多个标脏点，单独一轮做。
         c.constrain(Size::new(
             metrics.measure_text(&self.current_text(), &style).w,
             metrics.line_height(&style),

@@ -218,6 +218,17 @@ pub trait FontEngine {
 
     /// 基线高度。
     fn ascent(&self) -> f32;
+    /// **基线下方的下伸高度**（基准字号下的像素值，正数）。
+    ///
+    /// 用途：判断"一行文本的墨迹到底有多深"。`line_height` 是**行距**（1em 字身框），
+    /// 而真实墨迹深度是 `ascent + descent`，二者不相等 —— 例如 16px 的 `SimSun`
+    /// 行高 16 但墨迹深度约 18，下伸字/圆字母 overshoot 会越过行框 1~2px。
+    /// 需要"框必须装得下墨迹"的地方（脏区、定高控件）用这个，而不是 `line_height`。
+    /// 默认实现：由 `cell_height - ascent` 反推（对测试替身与老实现保持兼容）。
+    /// 真实引擎应覆盖成字体自己的 `descender`。
+    fn descent(&self) -> f32 {
+        (self.cell_height() - self.ascent()).max(0.0)
+    }
     /// 格宽度。
     fn cell_width(&self) -> f32;
     /// 格高度。

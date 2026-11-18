@@ -2,7 +2,7 @@
 
 - **HEAD**: 见 `git log -1`（v0.2.0 之后：审查整改 2 批）
 - **tags**: v0.1.0 ~ **v0.2.0**（本版含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`）
-- **测试**: `passed=965` / `ignored=61` / `include_ignored=1026`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=967` / `ignored=61` / `include_ignored=1028`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -61,7 +61,7 @@
 - 逐像素 MAD ≤ 0.25（实测 **0.0080**）。
 
 实测：两侧行带 `[(18,32),(62,77),(111,122)]` 完全一致，包围盒 `(16,18)..(185,122)` 相同。
-调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win**965** 默认族
+调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win**967** 默认族
 NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那是字体不同，不是后端错行。
 
 
@@ -92,6 +92,18 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 "新增 `baseline_offset()`"之间选）、**P1-6** 组件内部 padding 未随 DPI 缩放、
 **内容清理**（README/ACCEPTANCE/WASM/STATUS 过期数字与旧哈希、`FRAMEWORK.md` 控制字符、
 `clippy.txt`+`todo.tsv` 移出仓库）。
+
+
+**P1-5 墨迹深度（部分完成）**：新增 `TextMetrics::ink_bounds(style) -> (above, below)`
+（默认实现 = `(0, line_height)`，向后兼容）+ `FontEngine::descent()`
+（DWrite metrics / ttf hhea，O(1) 不扫字形）。实测本机 CJK 字体 16px：
+**行高 16、墨迹深度 21.28（溢出 5.28px）** —— 这就是 `invalidate_rect` 当初要靠加宽测试脏区才绿的根因。
+
+**为什么不直接拿它定高**：hhea 的 `ascent+descent` 在该字体上是 **1.33em**，
+按它定高会让所有 `TextLabel` 高 33%（全站密度崩、像素基线全变）——
+属于"修一个脏区、赔掉整站布局"。所以本轮只落地**能力**（API + 后端实现 + 用例），
+把墨迹外溢的消费点（`UiTree` 的多个标脏点改成按 `ink_bounds` 扩张）留到单独一轮。
+`line_height` 语义保持 = 行距，未改。
 
 ## 已知问题
 
@@ -207,7 +219,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **965**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **967**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 
