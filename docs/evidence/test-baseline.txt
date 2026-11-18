@@ -17,4 +17,7 @@
 # Measured at 2026-11-18 (审查 P1/P2 修复后):
 #   default `cargo test --workspace --no-fail-fast`   passed 963, failed 0, ignored 61
 #   (新增：Flex 四个 setter 的 6×2 顺序用例 + mip 目标尺寸用例；backend_parity 加严)
-963
+# Measured at 2026-11-18 (审查整改 C/E 批后):
+#   default `cargo test --workspace --no-fail-fast`   passed 965, failed 0, ignored 61
+#   (新增 TextInput 组件级 DPI 用例 2 条)
+965

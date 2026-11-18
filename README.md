@@ -5,7 +5,7 @@ Rust 跨平台 GUI 框架，自带 Win32/D3D11 与 X11 后端。文本模型是*
 
 ## 状态
 
-**实验性（experimental）**。Windows D3D11 路径经过完整验证（130 个测试目标、像素门禁）；
+**实验性（experimental）**。Windows D3D11 路径经过完整验证（131 个测试目标、像素门禁）；
 X11 后端可在 Xvfb 下跑通，**未做真机验收**；macOS 无后端。
 
 ## 组件
@@ -44,13 +44,13 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 
 ```bash
 cargo check --workspace --all-targets      # 0 warning
-cargo test --workspace                     # 130 个测试目标
-powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 **963**x39AE41C1697CBFD0）
+cargo test --workspace                     # 131 个测试目标
+powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 **965**x39AE41C1697CBFD0）
 ```
 
 ## 已知限制
 
-- **Linux 输入法（IME）未实现**：中文只能显示、不能输入。
+- **Linux 输入法（IME）**：已接线 IBus（`3737df5`），可在 X11 下输入中文；浏览器端走隐藏 `<input>` 承接组字。
 - **macOS 后端未实现**。
 - **无障碍只有语义树**（`Widget::semantics`），**没有 OS 桥接**（UIA / AT-SPI）。
 - **Grid + Image 组合在 D3D cached-RT 路径下整帧空白**：已排除 clip/blit/scissor/脏区/实例超限，

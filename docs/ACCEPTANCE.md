@@ -3,15 +3,15 @@
 生成时间：2026-11-02
 命令：`cargo test --workspace -- --include-ignored`
 日志：`docs/evidence/correctness/final-760-include-ignored.log`（**历史记录**，文件名沿用旧口径 760）。
-当前口径以 `scripts/gate.ps1` 为准：**746 passed / 0 failed**（baseline 见 `docs/evidence/test-baseline.txt`）。
+当前口径以 `scripts/gate.ps1` 为准：**963 passed / 0 failed**（baseline 见 `docs/evidence/test-baseline.txt`）。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **746 passed / 0 failed** |
+| `cargo test --workspace`（默认，跳过 `#[ignore]`） | **963 passed / 0 failed** |
 
-`include_ignored=1024`（唯一来源 `docs/evidence/numbers.txt`；不做二次计算，也不交由 `sync-doc-numbers.ps1` 推导）。
+`include_ignored=1026`（唯一来源 `docs/evidence/numbers.txt`；不做二次计算，也不交由 `sync-doc-numbers.ps1` 推导）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 

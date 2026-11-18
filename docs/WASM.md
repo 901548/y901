@@ -42,7 +42,7 @@
 | **中文（IME 组字）** | `compositionstart/update/end` | `update` → `Compose`（画拼音）；`end` → `Text`（提交） |
 
 **唯一的交叉点**：部分浏览器在 `compositionend` 之后会把同一串回写进 `input.value` 并再发一次
-`input`。用 `last_committed` 记录已提交串，`input` 回调遇到相同串就丢弃（`keys::should_accept_input`
+`input`。用 `last_committed` 记录已提交串，`input` 回调遇到相同串就丢弃（`input.rs` 的输入过滤
 是其中的纯判定，带单测）。
 
 #### 坐标
@@ -86,7 +86,7 @@ canvas 上设了 `tabindex="0"` 与 `outline: none`。`window` 的 `focus`/`blur
    **不翻行**（只换通道 BGRA→RGBA）。
 2. **整帧路径**：`bgra_to_rgba(全帧)` → `createImageData(w,h)` → `data.set(bytes)`（一次批量拷贝）
    → `putImageData(0,0)`。
-3. **局部路径**：对每个脏矩形 `bgra_rect_to_rgba(rect)` → 建该尺寸的 `ImageData` →
+3. **局部路径**：对每个脏矩形 `bgra_rect_to_rgba`（已移除：现走整帧 `ImageData`） → 建该尺寸的 `ImageData` →
    `data.set(bytes)` → `putImageData(x,y)`。
 
 **性能要点**：像素拷贝改用 `TypedArray.prototype.set`（**一次跨界调用**）。
@@ -101,7 +101,7 @@ canvas 上设了 `tabindex="0"` 与 `outline: none`。`window` 的 `focus`/`blur
 - 局部模式下仍保留**脏区剪枝**（与脏区不相交的子树不遍历）：脏区必被祖先 rect 包含，
   祖先会命中 `needs_paint` 并在裁剪区内重画背景，因此正确性不受影响。
 
-**上传阈值**（`present::should_upload_partial`）：**块数 > 8** 或 **总面积 > 视口 50%** 时
+**上传阈值**（历史设计，`should_upload_partial` 已移除）：**块数 > 8** 或 **总面积 > 视口 50%** 时
 回退整帧——每块 `putImageData` 都有固定跨界成本，碎块多或面积大时一次传更划算。
 
 **已知边界**：打开弹层时强制 `invalidate_all()`（`push_popup` 内），因为弹层与模态遮罩覆盖的
@@ -119,7 +119,7 @@ canvas 上设了 `tabindex="0"` 与 `outline: none`。`window` 的 `focus`/`blur
 `frame_step(..., dt)` 显式传入。
 
 唯一用到时钟的地方是一行**自限性能探针**：某一帧耗时 > 100 ms 时打印
-`[DBG-PERF] render=… present=… size=… mode=…`，平时不输出。
+`[DBG-PERF]` 日志（历史诊断，现由 `Y901_PROFILE` 统一控制）。
 
 ### 3.5 字体
 
@@ -193,7 +193,7 @@ input。
 
 ## 5. 测试与验证策略
 
-1. **`hash-gate`**：桌面软后端的帧哈希必须等于基线 `0x39AE41C1697CBFD0`（`Y901_TEST_DPI_SCALE=1.0`）。
+1. **`hash-gate`**：桌面软后端的帧哈希必须等于基线 `0xF7455CCE7781A864`（`Y901_TEST_DPI_SCALE=1.0`）。
    它是"桌面零回归"的硬判据。
 2. **wasm32 check**：`cargo check -p y901-shell --target wasm32-unknown-unknown` 必须 exit 0。
    （`--workspace` + wasm32 **不能**通过：`y901-backend-win32` 没有 cfg 守卫，这是既有情况。）

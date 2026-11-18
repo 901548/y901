@@ -1,9 +1,8 @@
 # 项目状态
 
-- **HEAD**: 本轮 5 个提交（`fix(table)` → `fix(render)` ×2 → `style: cargo fmt` → `chore(gate)`），
-  最新一条见 `git log -1`
+- **HEAD**: 见 `git log -1`（v0.2.0 之后：审查整改 2 批）
 - **tags**: v0.1.0 ~ **v0.2.0**（本版含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`）
-- **测试**: `passed=963` / `ignored=61` / `include_ignored=1024`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=965` / `ignored=61` / `include_ignored=1026`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -62,7 +61,7 @@
 - 逐像素 MAD ≤ 0.25（实测 **0.0080**）。
 
 实测：两侧行带 `[(18,32),(62,77),(111,122)]` 完全一致，包围盒 `(16,18)..(185,122)` 相同。
-调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win**963** 默认族
+调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win**965** 默认族
 NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那是字体不同，不是后端错行。
 
 
@@ -196,15 +195,10 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 1. ~~**文字清晰度收尾**~~ —— 已完成（见上方 B 小节与 `docs/design/text-sharpness.md`）。
    剩余可选项：若日后要 GDI 那种"硬边"，需切 `DWRITE_RENDERING_MODE_GDI_CLASSIC`
    或改用点阵位图，属于独立提案。
-2. **DPI 策略统一**（需先决策）：现状是字号按 `dpi_scale` 放大、布局常量不放大。
-   实测 125% 下表格行距 28→35（跟字号走）而列起点 53→57（几乎不动），
-   且 20px 高的固定行装不下 25px 的字形（`invalidate_rect` 用例因此暴露过脏区外溢）。
-   三条路线：全量缩放 / 完全 DPI 无关 / 保持混合（需文档说明），先读
-   `docs/design/text-scaling.md` 确认原意图。
+2. **DPI 策略统一** —— 已完成（选项 A，`9a8060d` + `docs/design/dpi-policy.md`）。
 3. **验证覆盖**：~~补 `scripts/hw-smoke.ps1`~~ —— 已完成（见上方 D 小节）。
    剩：~~soft vs d3d 像素差回归~~ —— 已完成（见上方"双后端一致性"）。
-4. **发布**：push（本轮 5 个提交全部未推）、`0.1.20 → 0.1.21`、
-   RELEASE_NOTES、tag。
+4. **发布**：`0.2.0` 已提交并打 tag（本地 14 个提交待推，push 受网络代理阻断）。
 5. **杂物**：根目录 `clippy.txt` / `todo.tsv` 是生成物，建议移出仓库或进 `.gitignore`。
 
 ## 审查报告状态
@@ -213,7 +207,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **963**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **965**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 

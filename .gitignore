@@ -33,3 +33,7 @@ commitmsg.txt
 www/pkg/
 # \u9875\u9762\u7528\u5b57\u4f53\uff08\u7b2c\u4e09\u65b9\u8d44\u6e90\uff0c\u76ee\u524d\u662f\u4ece\u7cfb\u7edf\u5b57\u4f53\u590d\u5236\u7684\uff09
 www/fonts/
+
+# 生成物（审查：不应入库）
+clippy.txt
+todo.tsv

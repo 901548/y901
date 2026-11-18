@@ -77,6 +77,9 @@ pub struct TextInput {
     selection_color: Color,
     caret_color: Color,
     padding: Edges,
+    /// **最近一次布局用到的 DPI 缩放**：`render`/`event` 路径拿不到 `metrics`，
+    /// 但内边距要按同一口径缩放，所以在 measure/arrange 时缓存下来。
+    ui_scale: f32,
     item: FlexItem,
     rect: Rect,
 
@@ -128,6 +131,7 @@ impl TextInput {
             selection_color: Color::rgba(0.24, 0.45, 0.75, 0.55),
             caret_color: Color::rgba(0.85, 0.90, 1.0, 1.0),
             padding: Edges::symmetric(8.0, 4.0),
+            ui_scale: 1.0,
             item: FlexItem::default(),
             rect: Rect::ZERO,
             layout: Vec::new(),
@@ -196,10 +200,26 @@ impl TextInput {
 
     /// 设置内边距（文字与边框的距离）。
     ///
+    /// **量的单位是 DIP**：实际值 = `padding × metrics.scale()`（与 `Flex` 同口径）。
+    ///
     /// 返回：自身。副作用：影响 `measure` 结果，挂载后改需自行触发重排。
     pub fn padding(mut self, padding: Edges) -> Self {
         self.padding = padding;
         self
+    }
+
+    /// **实际内边距**：`padding()` 收的是 **DIP**，这里乘 `metrics.scale()`（DPI 策略同 `Flex`）。
+    ///
+    /// 为什么必须缩放：容器 `Flex::padding` 自 v0.2.0 起按 DPI 缩放，而输入框内部
+    /// padding 若还是固定像素，125% 下输入框内边距会比周围留白更紧 ——
+    /// "一半缩放一半不缩放"的问题会从容器搬进控件（审查 P1-6）。
+    fn padding_scaled(&self, scale: f32) -> Edges {
+        Edges {
+            left: self.padding.left * scale,
+            top: self.padding.top * scale,
+            right: self.padding.right * scale,
+            bottom: self.padding.bottom * scale,
+        }
     }
 
     /// 设置 flex 伸缩参数（宽/高策略）。
@@ -387,7 +407,8 @@ impl TextInput {
 
     /// 鼠标 X（屏幕坐标）→ 字节偏移。
     fn byte_at_screen_x(&self, x: f32) -> usize {
-        let inner_x = self.rect.x + self.padding.left;
+        let pad = self.padding_scaled(self.ui_scale);
+        let inner_x = self.rect.x + pad.left;
         let local = x - inner_x + self.scroll_x;
         self.byte_at_x(local)
     }
@@ -542,9 +563,11 @@ impl Widget for TextInput {
     ) -> Size {
         self.layout_from_metrics(metrics);
 
+        self.ui_scale = metrics.scale();
         let line_h = metrics.line_height(&self.style);
-        let padding_h = self.padding.horizontal();
-        let padding_v = self.padding.vertical();
+        let pad = self.padding_scaled(metrics.scale());
+        let padding_h = pad.horizontal();
+        let padding_v = pad.vertical();
 
         // **宽度不能跟着内容走**。
         //
@@ -576,7 +599,8 @@ impl Widget for TextInput {
         _cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
-        self.inner_w = (rect.w - self.padding.horizontal()).max(0.0);
+        self.ui_scale = metrics.scale();
+        self.inner_w = (rect.w - self.padding_scaled(metrics.scale()).horizontal()).max(0.0);
         self.layout_from_metrics(metrics);
         self.ensure_caret_visible();
     }
@@ -673,10 +697,11 @@ impl Widget for TextInput {
                 }
                 self.preedit = text.clone();
                 // 让应用层把 IME 候选窗钉在光标处
-                let caret_x =
-                    self.rect.x + self.padding.left + self.x_of_byte(self.buffer.cursor())
-                        - self.scroll_x;
-                let caret_y = self.rect.y + self.padding.top;
+                let caret_x = self.rect.x
+                    + self.padding_scaled(self.ui_scale).left
+                    + self.x_of_byte(self.buffer.cursor())
+                    - self.scroll_x;
+                let caret_y = self.rect.y + self.padding_scaled(self.ui_scale).top;
                 ctx.set_ime_candidate(Pos::new(caret_x, caret_y + 16.0));
                 EventResult::Redraw
             }
@@ -735,7 +760,7 @@ impl Widget for TextInput {
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
         let rect = self.rect;
-        let inner = rect.inset(self.padding);
+        let inner = rect.inset(self.padding_scaled(self.ui_scale));
         if inner.is_empty() {
             return;
         }
