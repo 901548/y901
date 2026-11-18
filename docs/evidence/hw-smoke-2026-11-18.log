@@ -1,0 +1,946 @@
+# 硬件冒烟证据 — 2026-11-18
+
+## 环境
+- HEAD: 9a8060d
+- rustc: rustc 1.92.0 (ded5c06cf 2025-12-08)
+- OS: Microsoft Windows NT 10.0.26200.0
+- GPU: GameViewer Virtual Display Adapter
+- 显示缩放: 125% (LogPixels=120)
+
+## 命令
+`cargo test --workspace --offline --no-fail-fast -- --ignored`
+
+## 结果
+| 项 | 值 |
+|---|---|
+| 结论 | **PASS** |
+| passed | 60 |
+| failed | 0 |
+| SKIP（无设备等） | 0 |
+| 耗时 | 62s |
+
+> SKIP 表示用例**主动**判定当前环境不具备条件（例如没有可用 D3D 设备），
+> 它会写 `SKIP:` 到临时日志。SKIP 不等于通过，但也不等于失败——
+> 这条区分正是这个脚本存在的理由。
+
+## 原始输出
+```
+cargo.exe :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+At F:\Y901\scripts\hw-smoke.ps1:63 char:8
++ $out = & cargo test --workspace --offline --no-fail-fast -- --ignored ...
++        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.27s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running unittests src\lib.rs (target\debug\deps\y901_backend_web-53e8a795845451e7.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.00s
+
+     Running tests\bindings_golden.rs (target\debug\deps\bindings_golden-75089669463c6885.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_backend_win32-25aeb28bde5143dc.exe)
+
+running 1 test
+test backend::rebuild_atlas_tests::rebuild_reuploads_atlas ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 58 filtered out; finished in 0.35s
+
+     Running tests\black_screen_regression.rs (target\debug\deps\black_screen_regression-921b7803836eaafc.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests\d3d_image.rs (target\debug\deps\d3d_image-d53b61a9def7a4cf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\d3d_text_scaling.rs (target\debug\deps\d3d_text_scaling-b9acc235952e0e3b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\font_3c_pixels.rs (target\debug\deps\font_3c_pixels-67895a459fe711c2.exe)
+
+running 2 tests
+test pixel_statistics_and_png_baseline ... ok
+test probe_orientation_and_channels ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+
+     Running tests\font_m1.rs (target\debug\deps\font_m1-cc1b92331dc9c382.exe)
+
+running 3 tests
+test debug_crossings_for_a ... ok
+test debug_print_glyphs ... ok
+test compare_with_directwrite_l1_l2 ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests\font_m2.rs (target\debug\deps\font_m2-743907834dce4d73.exe)
+
+running 1 test
+test l2_best_shift_diagnostic ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests\font_m3_atlas.rs (target\debug\deps\font_m3_atlas-2a2e7da4f49fd54b.exe)
+
+running 3 tests
+test occupancy_matches_glyph_count_sanity ... ok
+test breakdown_rasterize_vs_atlas_insert ... ok
+test forced_eviction_thrash_measurement ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.62s
+
+     Running tests\font_m3_cjk.rs (target\debug\deps\font_m3_cjk-d11929054bf4eb64.exe)
+
+running 2 tests
+test debug_print_cjk_frames ... ok
+test cold_start_500_cjk_glyphs ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.06s
+
+     Running tests\font_m3_prefetch.rs (target\debug\deps\font_m3_prefetch-9f0b2f99053b45b7.exe)
+
+running 1 test
+test all_phases_reference_cost ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.66s
+
+     Running tests\input_events.rs (target\debug\deps\input_events-34f03c43c249dddf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests\opacity_parity.rs (target\debug\deps\opacity_parity-5e7a6dbf7394d49d.exe)
+
+running 3 tests
+test opacity_one_matches_baseline ... ok
+test opacity_halves_matches_between_d3d_and_soft ... ok
+test nested_opacity_matches_between_d3d_and_soft ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests\options_wiring.rs (target\debug\deps\options_wiring-f8de994fcf073f3b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\perf_and_clip.rs (target\debug\deps\perf_and_clip-c20099bed68fee1f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\perf_bench.rs (target\debug\deps\perf_bench-69882382a2895e70.exe)
+
+running 3 tests
+test bench_atlas_5000_glyphs ... ok
+test bench_empty_frame_baseline ... ok
+test bench_instance_submission_10k ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running tests\popup_anim_d3d.rs (target\debug\deps\popup_anim_d3d-a623a31b25151720.exe)
+
+running 1 test
+test popup_animation_progresses_on_d3d ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+     Running tests\present_bench.rs (target\debug\deps\present_bench-b79ea61fabd821da.exe)
+
+running 1 test
+test present_bench_sync0_vs_sync1 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.65s
+
+     Running tests\render_ctx_parity.rs (target\debug\deps\render_ctx_parity-c26ecedf223799bf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\runtime_theme_font.rs (target\debug\deps\runtime_theme_font-cc5633b3551bccc1.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\snapshot_harness.rs (target\debug\deps\snapshot_harness-0a85065a97b3fd34.exe)
+
+running 10 tests
+test text_inside_scrollview_is_not_clipped_away ... ok
+test round_rect_sdf_matches_math ... ok
+test text_label_paints_visible_non_background_pixels ... ok
+test round_stroke_draws_ring_only ... ok
+test gradient_matches_math_at_45_degrees ... ok
+test rebuild_of_cached_target_does_not_leave_black_areas ... ok
+test snapshot_harness_is_deterministic ... ok
+test gradient_round_rect_matches_math ... ok
+test invalidate_rect_partial_equals_full ... ok
+test two_disjoint_dirty_rects_match_full_redraw ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+
+     Running tests\soft_backend.rs (target\debug\deps\soft_backend-3472dae0ae6dc997.exe)
+
+running 2 tests
+test soft_fill_rate_1280x800 ... ok
+test soft_matches_d3d_within_antialiasing_tolerance ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.48s
+
+     Running tests\stroke_round_parity.rs (target\debug\deps\stroke_round_parity-839146c69db80385.exe)
+
+running 2 tests
+test stroke_round_rect_matches_under_transform ... ok
+test stroke_round_rect_matches_without_transform ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running tests\tabs_transition_d3d.rs (target\debug\deps\tabs_transition_d3d-a20dc3d92dfd2d03.exe)
+
+running 1 test
+test tabs_transition_uses_panel_color_on_d3d ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_backend_x11-caa255212d1351de.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\golden.rs (target\debug\deps\golden-619c4ce8c94e9231.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.00s
+
+     Running tests\multi_window.rs (target\debug\deps\multi_window-95c05a21c5f89bf6.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\real_window.rs (target\debug\deps\real_window-ba0260c80f3ae6b1.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_core-0471a1031fa29694.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_extras-754f5f211b580655.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 33 filtered out; finished in 0.00s
+
+     Running tests\selection_reverse.rs (target\debug\deps\selection_reverse-44673c3b20bd3c1c.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\sgr_reverse.rs (target\debug\deps\sgr_reverse-9d0e1c6d1104f9d6.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\sgr_reverse_indexed.rs (target\debug\deps\sgr_reverse_indexed-d607ccac56fe3c17.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests\terminal_render_alloc.rs (target\debug\deps\terminal_render_alloc-c350e548460df00b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\terminal_widget.rs (target\debug\deps\terminal_widget-af1e55eedd4aa217.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_render-f5280bd43146cf43.exe)
+
+running 1 test
+test supersample::tests::which_method_is_closer_to_supersampled_truth ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 79 filtered out; finished in 0.03s
+
+     Running tests\cell_span_semantics.rs (target\debug\deps\cell_span_semantics-6099f75520f8831b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\cjk_cold_start.rs (target\debug\deps\cjk_cold_start-4f491afa082ebe7a.exe)
+
+running 3 tests
+test no_scaling_means_zero_mip_generation ... ok
+test cjk_500_cold_start_first_frame ... ok
+test cjk_500_glyph_and_mip_generation_time ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests\dirty_strategy_bench.rs (target\debug\deps\dirty_strategy_bench-512038b26f11447c.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\fill_rect_opaque.rs (target\debug\deps\fill_rect_opaque-7ab23f82ba9674ec.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\font_fallback.rs (target\debug\deps\font_fallback-803544ab46438401.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\grid_clip.rs (target\debug\deps\grid_clip-88fcb32b27b3341e.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\image.rs (target\debug\deps\image-582e6b281b984100.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\image_mip_quality.rs (target\debug\deps\image_mip_quality-931ee6790d3a9d76.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\mip_latin.rs (target\debug\deps\mip_latin-d7b73eef31b7b8bd.exe)
+
+running 3 tests
+test latin_l2_rasterize_vs_box ... ok
+test latin_l1_rasterize_vs_box ... ok
+test latin_l1_which_method_is_closer_to_ideal ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests\mip_storage.rs (target\debug\deps\mip_storage-d32e504d18970d90.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\opacity_soft.rs (target\debug\deps\opacity_soft-3cacaed608088432.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\per_text_size_width.rs (target\debug\deps\per_text_size_width-dd20d8dc5ed7c757.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\perf_texture_alloc.rs (target\debug\deps\perf_texture_alloc-2e7a44020adc8850.exe)
+
+running 3 tests
+test per_frame_clear_only_allocs ... ok
+test first_upload_allocs ... ok
+test per_frame_draw_image_allocs ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 8.14s
+
+     Running tests\popup_anim.rs (target\debug\deps\popup_anim-964ab99042624810.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\soft_glyphs.rs (target\debug\deps\soft_glyphs-de428c82518cec59.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests\stroke_round_aa.rs (target\debug\deps\stroke_round_aa-cde163127a9b4aea.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\text_scale_pixels.rs (target\debug\deps\text_scale_pixels-06b63d293a491586.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\transform.rs (target\debug\deps\transform-69a5d0a2c680e63d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_runtime-a92783393faacb65.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests\run_many_contract.rs (target\debug\deps\run_many_contract-2634fcf387d43aa4.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_shell-855795c13845d8c3.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests\audit_fixes.rs (target\debug\deps\audit_fixes-5fd522407d3ba438.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\no_c_deps.rs (target\debug\deps\no_c_deps-d5ea807d284c8c1c.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\render_cost.rs (target\debug\deps\render_cost-9ee87e32f06d0c2a.exe)
+
+running 2 tests
+test full_screen_fill_cost ... ok
+test demo_page_full_render_cost ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+
+     Running tests\typing_frames.rs (target\debug\deps\typing_frames-b068e0d5ade5af96.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_ui-bc9aeab680ad30be.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 105 filtered out; finished in 0.00s
+
+     Running tests\animation_tick.rs (target\debug\deps\animation_tick-039b83420faf620d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\animation_tree.rs (target\debug\deps\animation_tree-9997b47873fedbed.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests\broadcast_redraw.rs (target\debug\deps\broadcast_redraw-d4d20525253755ba.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\cursor_layers.rs (target\debug\deps\cursor_layers-7730de3007f87587.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\dirty_and_popup.rs (target\debug\deps\dirty_and_popup-fd53938abbdf7fc4.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests\dirty_union_shrink.rs (target\debug\deps\dirty_union_shrink-66ce6f4666b051b8.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\dpi_layout.rs (target\debug\deps\dpi_layout-d25bd974bac0d17d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\draw_char.rs (target\debug\deps\draw_char-c3fd9ae48e148f78.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\framework.rs (target\debug\deps\framework-9e94fc29a3f776d3.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+     Running tests\gap_scaled_precedence.rs (target\debug\deps\gap_scaled_precedence-23895200d5119e38.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\grid_perf.rs (target\debug\deps\grid_perf-079e34ac03c76f17.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\grid_span.rs (target\debug\deps\grid_span-cf0ec2ccbece87c4.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\hash_collision.rs (target\debug\deps\hash_collision-a2bea161e879808d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\hover.rs (target\debug\deps\hover-409ba294c175bb47.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\invalidation_handle.rs (target\debug\deps\invalidation_handle-379496476353e095.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\layout_bench.rs (target\debug\deps\layout_bench-68b4cdcf40842696.exe)
+
+running 1 test
+test layout_10k_full_relayout ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+
+     Running tests\overlay.rs (target\debug\deps\overlay-d33376a72baf5cfb.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests\perf_alloc.rs (target\debug\deps\perf_alloc-9da4c9383e25afbe.exe)
+
+running 1 test
+test bench_layout_allocations_10k ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s
+
+     Running tests\perf_bench.rs (target\debug\deps\perf_bench-6c90deeb50d61083.exe)
+
+running 6 tests
+test bench_dirty_region_streaming ... ok
+test bench_layout_10k_flat ... ok
+test bench_layout_10k_deep ... ok
+test bench_layout_id_length_sensitivity ... ok
+test bench_layout_50k_plain_leaf ... ok
+test bench_layout_50k_flat ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 38.35s
+
+     Running tests\perf_dispatch_alloc.rs (target\debug\deps\perf_dispatch_alloc-5a37cb5c1248709c.exe)
+
+running 3 tests
+test dispatch_allocs_per_event ... ok
+test hover_blank_area_allocs_per_event ... ok
+test hover_allocs_per_event ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\popup_and_hover.rs (target\debug\deps\popup_and_hover-66f83379811193a3.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\popup_requests.rs (target\debug\deps\popup_requests-8777505fa909b343.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests\primitives.rs (target\debug\deps\primitives-f79aa4fc0f05781f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests\relayout.rs (target\debug\deps\relayout-df132a6bb1040b65.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\request_layout.rs (target\debug\deps\request_layout-86467f1d334bed68.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\rev_snapshot.rs (target\debug\deps\rev_snapshot-b21c54d0b9e89495.exe)
+
+running 1 test
+test rev_snapshot_is_linear_on_10k_nodes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 1.22s
+
+     Running tests\revision.rs (target\debug\deps\revision-57ce9d9771249107.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\state.rs (target\debug\deps\state-8a694cd89d72f30a.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\subscriptions.rs (target\debug\deps\subscriptions-63b33db7b2d226b4.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\y901_widgets-8c7340bdf6b4bcd2.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 90 filtered out; finished in 0.00s
+
+     Running tests\audit.rs (target\debug\deps\audit-fdd5a5e361a967e7.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests\button_selected.rs (target\debug\deps\button_selected-b29fa3f0dc454bf2.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests\clip_leak.rs (target\debug\deps\clip_leak-b4828c38e29338a7.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\component_audit.rs (target\debug\deps\component_audit-5744d624c5e1d1df.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 19 filtered out; finished in 0.00s
+
+     Running tests\contract.rs (target\debug\deps\contract-ecb808009e9ec52c.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\cursor.rs (target\debug\deps\cursor-ebff56dbdee8a630.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\dialog_dynamic.rs (target\debug\deps\dialog_dynamic-44c7c6cfa6359dc4.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests\dialog_residual.rs (target\debug\deps\dialog_residual-97cf578b53234c05.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\downcast_audit.rs (target\debug\deps\downcast_audit-54e274c93f9551cf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\edge_cases.rs (target\debug\deps\edge_cases-94ca7b6ff8cb4236.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\file_drop.rs (target\debug\deps\file_drop-0d326ad78fc5c591.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\finale.rs (target\debug\deps\finale-56c5e42a87b2fc5e.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\focus.rs (target\debug\deps\focus-07e79e2229113edd.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests\focus_closed_subtree.rs (target\debug\deps\focus_closed_subtree-b059d666d47e98f6.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests\focus_tab.rs (target\debug\deps\focus_tab-9de931f3ab4d0c68.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\image_widget.rs (target\debug\deps\image_widget-8685a2be94dd481f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\keyboard_sequences.rs (target\debug\deps\keyboard_sequences-877a2b34b5f49bfa.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests\overlay_render.rs (target\debug\deps\overlay_render-745e2e455c75effd.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\p0.rs (target\debug\deps\p0-97c506fababc8d20.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\p1.rs (target\debug\deps\p1-eb918a5b8723e0bb.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\password_placeholder.rs (target\debug\deps\password_placeholder-fd04e1889129ae6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+     Running tests\reactive.rs (target\debug\deps\reactive-f95d42153b7c924d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests\rich_text.rs (target\debug\deps\rich_text-08995bba8c551e04.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\scroll_dirty.rs (target\debug\deps\scroll_dirty-858600972970850f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\scroll_partial_redraw.rs (target\debug\deps\scroll_partial_redraw-565e4115fa59d0bc.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests\scroll_split.rs (target\debug\deps\scroll_split-d3e7b68af51c6832.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests\set_focus_semantics.rs (target\debug\deps\set_focus_semantics-02fc969ee605320a.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\shared_texture.rs (target\debug\deps\shared_texture-00e852eace83d574.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\streaming_sticky_rows.rs (target\debug\deps\streaming_sticky_rows-b5af56e99a6627b5.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests\style_injection.rs (target\debug\deps\style_injection-ea906bf9451ee24b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests\tab_focus.rs (target\debug\deps\tab_focus-1c49cf046b01f13d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\tabs.rs (target\debug\deps\tabs-22eb5d65b4357b36.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\tabs_layout.rs (target\debug\deps\tabs_layout-9645d2482cb1523a.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\texture_release.rs (target\debug\deps\texture_release-43b30eb9b22cdd5f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests\theme_injection.rs (target\debug\deps\theme_injection-1966796d730fd0ec.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\tick_consumers.rs (target\debug\deps\tick_consumers-7a43da6ea98ba320.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests\tick_pruning.rs (target\debug\deps\tick_pruning-0fb35a38ca9b6a08.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests\tree_view_keys.rs (target\debug\deps\tree_view_keys-af78c6c05ceb35e4.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests\typing_dirty_scope.rs (target\debug\deps\typing_dirty_scope-c8ce7222c4858f1a.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+   Doc-tests y901_backend_web
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_backend_win32
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_backend_x11
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_extras
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_render
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_shell
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_ui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+   Doc-tests y901_widgets
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+```

@@ -44,6 +44,13 @@
   曾写过一条像素比值用例，实测**抓不到回归**（开关两种实现输出逐像素相同），已撤，
   理由写在设计文档里。
 
+
+**硬件用例证据（D）**：新增 `scripts/hw-smoke.ps1`，把默认套件不跑的 **60 条 `#[ignore]`**
+（GPU 回读 / 真实窗口 / DPI 探针）真跑一遍并落盘：`docs/evidence/hw-smoke-2026-11-18.log`
+（**PASS 60 / 0 failed / 0 SKIP**，62s，HEAD `9a8060d`）。
+口径写进日志头：SKIP ≠ 通过；本机 GPU 是 **GameViewer 虚拟适配器**，
+功能正确性可引用、帧率/显存类结论不可引用。
+
 ## 已知问题
 
 1. ~~`#15` ttf-parser 无轮廓点数上限~~ —— **已修**：`flatten.rs` 加 `MAX_LINES = 10_000` / `MAX_CONTOURS = 256`，
@@ -151,9 +158,8 @@
    且 20px 高的固定行装不下 25px 的字形（`invalidate_rect` 用例因此暴露过脏区外溢）。
    三条路线：全量缩放 / 完全 DPI 无关 / 保持混合（需文档说明），先读
    `docs/design/text-scaling.md` 确认原意图。
-3. **验证覆盖**：补 `scripts/hw-smoke.ps1`，把 60 条 `#[ignore]` 的 GPU/窗口用例
-   在有 GPU 的机器上跑一遍并把日志落到 `docs/evidence/`；再加一条 soft vs d3d 的
-   像素差回归（容差内），防止"两个后端错一行"复发。
+3. **验证覆盖**：~~补 `scripts/hw-smoke.ps1`~~ —— 已完成（见上方 D 小节）。
+   剩：soft vs d3d 的像素差回归（容差内），防止"两个后端错一行"复发。
 4. **发布**：push（本轮 5 个提交全部未推）、`0.1.20 → 0.1.21`、
    RELEASE_NOTES、tag。
 5. **杂物**：根目录 `clippy.txt` / `todo.tsv` 是生成物，建议移出仓库或进 `.gitignore`。

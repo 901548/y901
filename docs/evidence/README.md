@@ -46,9 +46,32 @@
 | `cross-platform/wsl-x11-tests-2026-11-02.log` | WSL Ubuntu-22.04 + Xvfb `:99` 上 `y901-backend-x11` 全量：**45 passed / 0 failed**（2 单测 + 32 golden + 11 真窗），exit 0 | 11-02 17:46 | 781e5de | 是（`scripts/wsl-x11-count.sh`） |
 | `cross-platform/wsl-helm-xvfb-2026-11-02.log` | Helm 在 Xvfb 跑通：**MIT-SHM 已启用 1200×800（3 840 000 B）**、首帧 **65.3 ms**、非背景 98.7%、1039 色；光标 `BadFont` 回退默认箭头 | 11-02 17:42 | 781e5de | 是（`scripts/wsl-helm-check.sh`） |
 | `cross-platform/xvfb-server-2026-11-02.log` | Xvfb `:99` 启动时的 unix socket 告警（该环境只有抽象命名空间，不影响 `DISPLAY=:99`），用于交代显示服务器环境 | 11-02 15:42 | 781e5de | 是 |
+| `hw-smoke-2026-11-18.log` | **60 条 `#[ignore]` 硬件/窗口用例全跑**：PASS 60 / 0 failed / 0 SKIP，62s。环境与原始输出都在文件里 | 11-18 17:28 | 9a8060d | 是（`scripts/hw-smoke.ps1`） |
 | `README.md` | 本索引自身（元数据，不是实验数据） | 11-03 07:40 | 3cfcd49 | — |
 
 > 为什么 WSL 三份的 commit 是 `781e5de`：它们跑于 11-02 17:42–17:46，`96f6c5f`（17:52）之前，当时工作区对应的最后一次提交就是 `781e5de`。
+
+
+## 硬件冒烟（`scripts/hw-smoke.ps1`，2026-11-18 起）
+
+默认的 `cargo test --workspace` **不跑** `#[ignore]` 那 60 条用例（GPU 回读、真实窗口、
+DPI 探针）。"没跑"和"通过"必须分开记录，所以有了这个脚本：它把那一批真跑一遍，
+把环境、命令、结果表与**原始输出**一起写进 `docs/evidence/hw-smoke-<日期>.log`。
+
+```
+pwsh -File scripts/hw-smoke.ps1            # 跑 + 落盘
+pwsh -File scripts/hw-smoke.ps1 -NoRecord  # 只跑，不写文件
+```
+
+口径说明（写进日志头，避免误引用）：
+
+- **SKIP 不等于通过**。用例若判定环境不具备条件（例如没有可用 D3D 设备），
+  会往临时文件写 `SKIP:`；脚本把它单列成一行计数。
+- **本机的 GPU 是 `GameViewer Virtual Display Adapter`**（远程串流虚拟适配器），
+  不是物理显卡。它能提供真实的 D3D11 设备，所以用例确实执行了；
+  但**帧率/显存类结论不能引用本文件**，只能引用"功能正确性"。
+- 显示缩放 125%（`LogPixels=120`）——这批用例里有一部分断言像素尺寸，
+  已按 `docs/design/dpi-policy.md` 固定 `Y901_TEST_DPI_SCALE=1.0` 或改为尺寸无关。
 
 ## 噪声样本说明（**不可引用**）
 
@@ -102,6 +125,9 @@ cargo test -p y901-backend-win32 --test soft_backend -- --ignored --nocapture so
 # 验收
 cargo test --workspace
 cargo test --workspace -- --include-ignored
+
+# 硬件/窗口用例（60 条 #[ignore]）→ 落盘到 docs/evidence/hw-smoke-<日期>.log
+pwsh -File scripts/hw-smoke.ps1
 
 # 跨平台（WSL，需 Xvfb :99）
 wsl -d Ubuntu-22.04 -e bash -lc "cd /mnt/f/Y901 && DISPLAY=:99 cargo test -p y901-backend-x11"
