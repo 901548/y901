@@ -21,9 +21,6 @@
 
 #![deny(missing_docs)]
 #[cfg(unix)]
-/// **输入法（IME）抽象与 IBus 客户端**：中文输入走这里，不影响框架契约。
-pub mod ime;
-#[cfg(unix)]
 /// X11 剪贴板（PRIMARY / CLIPBOARD 选择属主）。
 pub mod clipboard;
 #[cfg(unix)]
@@ -33,6 +30,9 @@ pub mod conn;
 pub mod decode;
 /// X11 请求与事件的编码。
 pub mod encode;
+#[cfg(unix)]
+/// **输入法（IME）抽象与 IBus 客户端**：中文输入走这里，不影响框架契约。
+pub mod ime;
 /// keycode → keysym → 平台无关 `Key` 的映射。
 pub mod keys;
 #[cfg(unix)]

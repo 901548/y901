@@ -133,7 +133,11 @@ fn namespaced_bindings_are_pinned() {
         SRC.contains("#[wasm_bindgen(js_name = \"console.log\")]"),
         "console.log 的绑定形态变了"
     );
-    assert_eq!(js_namespaces(), vec!["Date".to_string()], "命名空间集合变了");
+    assert_eq!(
+        js_namespaces(),
+        vec!["Date".to_string()],
+        "命名空间集合变了"
+    );
 }
 
 /// getter / setter / constructor / indexing_setter 的数量是"表面宽度"的度量：
@@ -156,7 +160,11 @@ fn binding_attribute_counts_are_stable() {
     assert_eq!(count("indexing_setter"), 0, "indexing_setter 数量变了");
     assert_eq!(count("structural"), 4, "structural 数量变了");
     // setProperty 有两个重载（带 priority / 不带），都要保留。
-    assert_eq!(count("js_name = \"setProperty\""), 2, "setProperty 重载少了");
+    assert_eq!(
+        count("js_name = \"setProperty\""),
+        2,
+        "setProperty 重载少了"
+    );
 }
 
 /// 关键类型名不能被改：它们与 JS 侧构造函数一一对应。

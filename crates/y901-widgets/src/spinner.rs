@@ -111,7 +111,11 @@ impl Widget for Spinner {
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
-        let want = if self.size_scaled > 0.0 { self.size_scaled } else { self.size * ctx.scale() };
+        let want = if self.size_scaled > 0.0 {
+            self.size_scaled
+        } else {
+            self.size * ctx.scale()
+        };
         let side = want.min(self.rect.w).min(self.rect.h);
         if side <= 0.0 {
             return;
@@ -124,8 +128,8 @@ impl Widget for Spinner {
 
         for i in 0..DOTS {
             // 从 12 点方向开始，顺时针
-            let angle = (i as f32) * std::f32::consts::TAU / DOTS as f32
-                - std::f32::consts::FRAC_PI_2;
+            let angle =
+                (i as f32) * std::f32::consts::TAU / DOTS as f32 - std::f32::consts::FRAC_PI_2;
             let px = cx + radius * angle.cos();
             let py = cy + radius * angle.sin();
             // 越接近当前相位越亮：0.15 ..= 1.0
@@ -170,7 +174,11 @@ mod tests {
     fn measure_is_square() {
         let mut s = Spinner::new("sp").size(32.0);
         let mut cache = LayoutCache::new();
-        let size = s.measure(&Metrics, Constraints::loose(Size::new(100.0, 100.0)), &mut cache);
+        let size = s.measure(
+            &Metrics,
+            Constraints::loose(Size::new(100.0, 100.0)),
+            &mut cache,
+        );
         assert_eq!(size.w, 32.0);
         assert_eq!(size.h, 32.0);
     }

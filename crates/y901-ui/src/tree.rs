@@ -1831,100 +1831,99 @@ impl UiTree {
         };
 
         let draw = |this: &mut UiTree, ctx: &mut dyn RenderCtx, paint_all: bool| {
-        // 单遍绘制：**树序就是绘制顺序**（后访问的后画，后画的在上）。
-        //
-        // 之前有 `Layer::{Base,Overlay,Modal}` + `deferred` 回放：子树先记路径、遍历完
-        // 再按层回放。那是"画在上层"的局部手段；现在浯层统一走
-        // `UiTree::popups`（树外、最后画），树内只需"父先子后、兄弟按序"。
-        {
-            let mut path: Vec<usize> = Vec::new();
-            // scratch 用 `mem::take` 取出（避免 `&mut self` 字段与 `this.root` 同时借用），用完放回。
-            let mut rects = std::mem::take(&mut this.render_rects);
-            let mut clips = std::mem::take(&mut this.render_clips);
-            render_pass(
-                this.root.as_mut(),
-                ctx,
-                &dirty,
-                paint_all,
-                &mut path,
-                &mut rects,
-                &mut clips,
-            );
-            this.render_rects = rects;
-            this.render_clips = clips;
-        }
-
-        if !this.popups.is_empty() {
-            let viewport = Rect::new(0.0, 0.0, this.viewport.w, this.viewport.h);
-            ctx.push_clip(viewport);
-            // 模态弹层：先铺一层遮罩（与 Dialog 的 0.55 黑一致）
-            if this.popups.iter().any(|p| p.modal) {
-                ctx.fill_rect(viewport, crate::Color::rgba(0.0, 0.0, 0.0, 0.55));
+            // 单遍绘制：**树序就是绘制顺序**（后访问的后画，后画的在上）。
+            //
+            // 之前有 `Layer::{Base,Overlay,Modal}` + `deferred` 回放：子树先记路径、遍历完
+            // 再按层回放。那是"画在上层"的局部手段；现在浯层统一走
+            // `UiTree::popups`（树外、最后画），树内只需"父先子后、兄弟按序"。
+            {
+                let mut path: Vec<usize> = Vec::new();
+                // scratch 用 `mem::take` 取出（避免 `&mut self` 字段与 `this.root` 同时借用），用完放回。
+                let mut rects = std::mem::take(&mut this.render_rects);
+                let mut clips = std::mem::take(&mut this.render_clips);
+                render_pass(
+                    this.root.as_mut(),
+                    ctx,
+                    &dirty,
+                    paint_all,
+                    &mut path,
+                    &mut rects,
+                    &mut clips,
+                );
+                this.render_rects = rects;
+                this.render_clips = clips;
             }
-            // **popup 也要递归渲染：**原先只调 `popup.widget.render(ctx)`，
-            // 导致 `Flex`/`Grid` 这类"靠子节点绘制"的容器在弹层里
-            // 只有面板尺寸、内容全空（ComboBox 用自绘制的 ComboList 所以没暴露）。
-            // 这里改成与普通树同一套递归入口，并复用一小份缓存。
-            let mut popup_path: Vec<usize> = Vec::new();
-            let mut popup_rects: Vec<Rect> = Vec::new();
-            let mut popup_clips: Vec<Option<Rect>> = Vec::new();
-            for popup in this.popups.iter_mut() {
-                if popup.rect.is_empty() {
-                    continue;
-                }
-                if popup.rect.intersect(viewport).is_empty() && !dirty.is_full() {
-                    continue;
-                }
-                // 弹层开启动画：从锚点缩放 + 淡入。
-                //
-                // 为什么"缩放"和"淡入"要同时做：只缩放会让内容瞬间出现（只是变小），
-                // 只淡入则没有"从哪里弹出来"的空间感。两者叠加才是常见弹层观感。
-                let progress = ctx.animation(crate::animation::key_of(popup.id()));
-                if progress < 1.0 {
-                    let anchor = Pos::new(
-                        popup.rect.x + popup.rect.w * 0.5,
-                        popup.rect.y + popup.rect.h * 0.5,
-                    );
-                    // scale 下限 0.8：再小会让文字糊成一团，且 rect 可能算成负尺寸
-                    let scale = (0.8 + 0.2 * progress).clamp(0.6, 1.0);
-                    ctx.push_transform(anchor, scale);
-                    popup_path.clear();
-                    popup_rects.clear();
-                    popup_clips.clear();
-                    render_pass(
-                        popup.widget.as_mut(),
-                        ctx,
-                        &dirty,
-                        paint_all,
-                        &mut popup_path,
-                        &mut popup_rects,
-                        &mut popup_clips,
-                    );
-                    ctx.pop_transform();
-                    // 淡入：用背景色盖一层 (1-progress) 透明度的膜
-                    let bg = ctx.background_color();
-                    ctx.fill_rect(
-                        popup.rect,
-                        crate::Color::rgba(bg.r, bg.g, bg.b, (1.0 - progress).clamp(0.0, 1.0)),
-                    );
-                } else {
-                    popup_path.clear();
-                    popup_rects.clear();
-                    popup_clips.clear();
-                    render_pass(
-                        popup.widget.as_mut(),
-                        ctx,
-                        &dirty,
-                        paint_all,
-                        &mut popup_path,
-                        &mut popup_rects,
-                        &mut popup_clips,
-                    );
-                }
-            }
-            ctx.pop_clip();
-        }
 
+            if !this.popups.is_empty() {
+                let viewport = Rect::new(0.0, 0.0, this.viewport.w, this.viewport.h);
+                ctx.push_clip(viewport);
+                // 模态弹层：先铺一层遮罩（与 Dialog 的 0.55 黑一致）
+                if this.popups.iter().any(|p| p.modal) {
+                    ctx.fill_rect(viewport, crate::Color::rgba(0.0, 0.0, 0.0, 0.55));
+                }
+                // **popup 也要递归渲染：**原先只调 `popup.widget.render(ctx)`，
+                // 导致 `Flex`/`Grid` 这类"靠子节点绘制"的容器在弹层里
+                // 只有面板尺寸、内容全空（ComboBox 用自绘制的 ComboList 所以没暴露）。
+                // 这里改成与普通树同一套递归入口，并复用一小份缓存。
+                let mut popup_path: Vec<usize> = Vec::new();
+                let mut popup_rects: Vec<Rect> = Vec::new();
+                let mut popup_clips: Vec<Option<Rect>> = Vec::new();
+                for popup in this.popups.iter_mut() {
+                    if popup.rect.is_empty() {
+                        continue;
+                    }
+                    if popup.rect.intersect(viewport).is_empty() && !dirty.is_full() {
+                        continue;
+                    }
+                    // 弹层开启动画：从锚点缩放 + 淡入。
+                    //
+                    // 为什么"缩放"和"淡入"要同时做：只缩放会让内容瞬间出现（只是变小），
+                    // 只淡入则没有"从哪里弹出来"的空间感。两者叠加才是常见弹层观感。
+                    let progress = ctx.animation(crate::animation::key_of(popup.id()));
+                    if progress < 1.0 {
+                        let anchor = Pos::new(
+                            popup.rect.x + popup.rect.w * 0.5,
+                            popup.rect.y + popup.rect.h * 0.5,
+                        );
+                        // scale 下限 0.8：再小会让文字糊成一团，且 rect 可能算成负尺寸
+                        let scale = (0.8 + 0.2 * progress).clamp(0.6, 1.0);
+                        ctx.push_transform(anchor, scale);
+                        popup_path.clear();
+                        popup_rects.clear();
+                        popup_clips.clear();
+                        render_pass(
+                            popup.widget.as_mut(),
+                            ctx,
+                            &dirty,
+                            paint_all,
+                            &mut popup_path,
+                            &mut popup_rects,
+                            &mut popup_clips,
+                        );
+                        ctx.pop_transform();
+                        // 淡入：用背景色盖一层 (1-progress) 透明度的膜
+                        let bg = ctx.background_color();
+                        ctx.fill_rect(
+                            popup.rect,
+                            crate::Color::rgba(bg.r, bg.g, bg.b, (1.0 - progress).clamp(0.0, 1.0)),
+                        );
+                    } else {
+                        popup_path.clear();
+                        popup_rects.clear();
+                        popup_clips.clear();
+                        render_pass(
+                            popup.widget.as_mut(),
+                            ctx,
+                            &dirty,
+                            paint_all,
+                            &mut popup_path,
+                            &mut popup_rects,
+                            &mut popup_clips,
+                        );
+                    }
+                }
+                ctx.pop_clip();
+            }
         };
 
         if paint_all {
@@ -2211,7 +2210,7 @@ impl UiTree {
                     Some(id) => {
                         let viewport = self.viewport;
                         let mut ctx = EventCtx::new(self.focus.clone(), viewport);
-        ctx.scale = self.scale;
+                        ctx.scale = self.scale;
                         ctx.phase = EventPhase::Target;
                         ctx.target = id.clone();
                         let result = match self.popups.iter_mut().find(|p| p.id == id) {
@@ -2582,7 +2581,14 @@ impl UiTree {
         let mut rects = std::mem::take(&mut self.broadcast_rects);
         rects.clear();
         let mut subs = 0usize;
-        broadcast(self.root.as_mut(), &mut ctx, event, &mut acc, &mut rects, &mut subs);
+        broadcast(
+            self.root.as_mut(),
+            &mut ctx,
+            event,
+            &mut acc,
+            &mut rects,
+            &mut subs,
+        );
         if matches!(event, UiEvent::Tick) {
             // **广播之后**才写入：`wants_tick()` 是组件在本次分发后的意愿。
             self.tick_subscribers = subs;
@@ -2753,7 +2759,14 @@ fn broadcast(
     *acc = acc.merge(r);
     if let Some(children) = node.children_mut() {
         for child in children.iter_mut() {
-            broadcast(child.as_mut(), ctx, event, acc, redraw_rects, tick_subscribers);
+            broadcast(
+                child.as_mut(),
+                ctx,
+                event,
+                acc,
+                redraw_rects,
+                tick_subscribers,
+            );
         }
     }
 }
@@ -3273,7 +3286,12 @@ mod dirty_clip_tests {
         ) -> Size {
             c.constrain(Size::ZERO)
         }
-        fn arrange(&mut self, _rect: Rect, _m: &dyn crate::widget::TextMetrics, _c: &mut LayoutCache) {
+        fn arrange(
+            &mut self,
+            _rect: Rect,
+            _m: &dyn crate::widget::TextMetrics,
+            _c: &mut LayoutCache,
+        ) {
             // 强制零矩形，不管布局给什么
         }
         fn rect(&self) -> Rect {
@@ -3354,7 +3372,9 @@ mod dirty_clip_tests {
         for op in &ctx.ops {
             let clip = op.clip.expect("局部重绘的每次绘制都应带剪裁区");
             assert!(
-                clip.intersect(op.rect).is_empty() || clip.contains_rect(op.rect) || !clip.is_empty(),
+                clip.intersect(op.rect).is_empty()
+                    || clip.contains_rect(op.rect)
+                    || !clip.is_empty(),
                 "剪裁区必须非空"
             );
         }
@@ -3499,5 +3519,4 @@ mod dirty_clip_tests {
     }
 
     // ---- T12：悬停在容器上不标脏容器的整块矩形 ----
-
 }

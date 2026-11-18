@@ -69,7 +69,6 @@ impl Switch {
     fn toggle(&mut self) {
         self.checked = !self.checked;
     }
-
 }
 
 impl Switch {
@@ -140,13 +139,15 @@ impl Widget for Switch {
                     std::time::Duration::from_millis(SLIDE_MS),
                     y901_ui::animation::Easing::EaseOutCubic,
                 );
-                ctx.start_animation(y901_ui::animation::key_of(&format!("{}-slide", self.id)), anim);
+                ctx.start_animation(
+                    y901_ui::animation::key_of(&format!("{}-slide", self.id)),
+                    anim,
+                );
                 self.emit(ctx);
                 EventResult::Redraw
             }
             UiEvent::Key { key, .. }
-                if matches!(key, y901_ui::Key::Enter)
-                    || matches!(key, y901_ui::Key::Char(' ')) =>
+                if matches!(key, y901_ui::Key::Enter) || matches!(key, y901_ui::Key::Char(' ')) =>
             {
                 self.toggle();
                 // **键盘切换也要发动画**：否则 Enter/Space 是硬跳，鼠标却是平滑过渡，
@@ -159,7 +160,10 @@ impl Widget for Switch {
                     std::time::Duration::from_millis(SLIDE_MS),
                     y901_ui::animation::Easing::EaseOutCubic,
                 );
-                ctx.start_animation(y901_ui::animation::key_of(&format!("{}-slide", self.id)), anim);
+                ctx.start_animation(
+                    y901_ui::animation::key_of(&format!("{}-slide", self.id)),
+                    anim,
+                );
                 self.emit(ctx);
                 EventResult::Redraw
             }
@@ -205,7 +209,12 @@ impl Widget for Switch {
         let travel = (self.rect.w - 2.0 * PAD - d).max(0.0);
         let kx = self.rect.x + PAD + d * 0.5 + travel * t;
         ctx.fill_round_rect(
-            Rect::new(kx - d * 0.5, self.rect.y + self.rect.h * 0.5 - d * 0.5, d, d),
+            Rect::new(
+                kx - d * 0.5,
+                self.rect.y + self.rect.h * 0.5 - d * 0.5,
+                d,
+                d,
+            ),
             knob,
             d * 0.5,
         );
@@ -243,22 +252,40 @@ mod tests {
     fn measure_is_track_size() {
         let mut sw = Switch::new("s", false);
         let mut cache = LayoutCache::new();
-        let size = sw.measure(&Metrics, Constraints::loose(Size::new(200.0, 100.0)), &mut cache);
+        let size = sw.measure(
+            &Metrics,
+            Constraints::loose(Size::new(200.0, 100.0)),
+            &mut cache,
+        );
         assert_eq!((size.w, size.h), (TRACK_W, TRACK_H));
     }
 
     #[test]
     fn click_inside_toggles_and_emits_command() {
-        let mut sw = Switch::new("s", false)
-            .command(y901_ui::Command::app("switch:toggle", y901_ui::json::Json::Null));
+        let mut sw = Switch::new("s", false).command(y901_ui::Command::app(
+            "switch:toggle",
+            y901_ui::json::Json::Null,
+        ));
         let mut cache = LayoutCache::new();
         sw.arrange(Rect::new(0.0, 0.0, 44.0, 24.0), &Metrics, &mut cache);
         let mut ctx = EventCtx::new(None, Size::new(200.0, 100.0));
         // 外部点击：不变
-        sw.event(&mut ctx, &UiEvent::MouseUp { pos: y901_ui::Pos::new(200.0, 200.0), button: y901_ui::MouseButton::Left });
+        sw.event(
+            &mut ctx,
+            &UiEvent::MouseUp {
+                pos: y901_ui::Pos::new(200.0, 200.0),
+                button: y901_ui::MouseButton::Left,
+            },
+        );
         assert!(!sw.checked());
         // 内部点击：切换 + 回调
-        sw.event(&mut ctx, &UiEvent::MouseUp { pos: y901_ui::Pos::new(20.0, 12.0), button: y901_ui::MouseButton::Left });
+        sw.event(
+            &mut ctx,
+            &UiEvent::MouseUp {
+                pos: y901_ui::Pos::new(20.0, 12.0),
+                button: y901_ui::MouseButton::Left,
+            },
+        );
         assert!(sw.checked());
         assert_eq!(ctx.commands.len(), 1, "应发出一条命令");
     }
@@ -267,6 +294,10 @@ mod tests {
     fn exposes_toggle_action() {
         let sw = Switch::new("s", false);
         let acts = sw.semantics().actions;
-        assert!(acts.iter().any(|a| a.name == "toggle"), "switch 应暴露 toggle，实测 {:?}", acts.iter().map(|a| a.name.clone()).collect::<Vec<_>>());
+        assert!(
+            acts.iter().any(|a| a.name == "toggle"),
+            "switch 应暴露 toggle，实测 {:?}",
+            acts.iter().map(|a| a.name.clone()).collect::<Vec<_>>()
+        );
     }
 }

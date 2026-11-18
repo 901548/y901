@@ -23,12 +23,20 @@ fn row(id: &'static str, label: &'static str, items: Vec<String>, sel: Option<us
     Flex::row(format!("{id}-row"))
         .gap(12.0)
         .align(Align::Center)
-        .push(Box::new(TextLabel::new(format!("{id}-t"), label).size(13.0)))
+        .push(Box::new(
+            TextLabel::new(format!("{id}-t"), label).size(13.0),
+        ))
         .push(Box::new(
             ComboBox::new(id, items)
                 .selected(sel)
-                .command(y901_ui::Command::app("combo_box:select", y901_ui::json::Json::Null))
-                .flex_item(FlexItem { height: y901_ui::widget::Dimension::Px(32.0), ..FlexItem::NO_LIMITS })
+                .command(y901_ui::Command::app(
+                    "combo_box:select",
+                    y901_ui::json::Json::Null,
+                ))
+                .flex_item(FlexItem {
+                    height: y901_ui::widget::Dimension::Px(32.0),
+                    ..FlexItem::NO_LIMITS
+                })
                 .flex_item(FlexItem::fixed(260.0, 32.0)),
         ))
 }
@@ -50,5 +58,13 @@ fn build() -> UiTree {
 }
 
 fn main() -> Result<(), String> {
-    create_runtime().run(Box::new(H), Box::new(build), Options { width: 520, height: 320, ..Default::default() })
+    create_runtime().run(
+        Box::new(H),
+        Box::new(build),
+        Options {
+            width: 520,
+            height: 320,
+            ..Default::default()
+        },
+    )
 }

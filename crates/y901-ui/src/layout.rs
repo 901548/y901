@@ -268,8 +268,18 @@ fn clamp_pair(
     cross: f32,
 ) -> (f32, f32) {
     let (mw, mh, cw, ch) = match axis {
-        Axis::Horizontal => (item.min_width, item.max_width, item.min_height, item.max_height),
-        Axis::Vertical => (item.min_height, item.max_height, item.min_width, item.max_width),
+        Axis::Horizontal => (
+            item.min_width,
+            item.max_width,
+            item.min_height,
+            item.max_height,
+        ),
+        Axis::Vertical => (
+            item.min_height,
+            item.max_height,
+            item.min_width,
+            item.max_width,
+        ),
     };
     (
         clamp_axis(main, mw, mh, main_avail),
@@ -560,12 +570,8 @@ pub fn flex_arrange_with(
             Align::End => (cross_avail - cross).max(0.0),
         };
         let child_rect = match axis {
-            Axis::Horizontal => {
-                Rect::new(inner.x + cursor, inner.y + cross_off, main, cross)
-            }
-            Axis::Vertical => {
-                Rect::new(inner.x + cross_off, inner.y + cursor, cross, main)
-            }
+            Axis::Horizontal => Rect::new(inner.x + cursor, inner.y + cross_off, main, cross),
+            Axis::Vertical => Rect::new(inner.x + cross_off, inner.y + cursor, cross, main),
         };
 
         cache.stats.arranged += 1;
@@ -1453,23 +1459,45 @@ mod gap_scaled_tests {
     }
     impl Box1 {
         fn new(id: &'static str, w: f32, h: f32) -> Self {
-            Self { id, size: Size::new(w, h), rect: Rect::ZERO, item: FlexItem::default() }
+            Self {
+                id,
+                size: Size::new(w, h),
+                rect: Rect::ZERO,
+                item: FlexItem::default(),
+            }
         }
     }
     impl Widget for Box1 {
-        fn id(&self) -> &str { self.id }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
+        fn id(&self) -> &str {
+            self.id
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _cache: &mut LayoutCache,
+        ) -> Size {
             c.constrain(self.size)
         }
         fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
             self.rect = rect;
         }
-        fn rect(&self) -> Rect { self.rect }
-        fn flex(&self) -> FlexItem { self.item }
-        fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult { EventResult::Ignored }
-        fn children(&self) -> &[Box<dyn Widget>] { &[] }
+        fn rect(&self) -> Rect {
+            self.rect
+        }
+        fn flex(&self) -> FlexItem {
+            self.item
+        }
+        fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult {
+            EventResult::Ignored
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &[]
+        }
         fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
-        fn semantics(&self) -> Semantics { Semantics::default() }
+        fn semantics(&self) -> Semantics {
+            Semantics::default()
+        }
     }
 
     fn layout_with(flex: &mut Flex, scale: f32) -> Vec<Rect> {
@@ -1554,23 +1582,45 @@ mod wrap_tests {
     }
     impl Box1 {
         fn new(id: &'static str, w: f32, h: f32) -> Self {
-            Self { id, size: Size::new(w, h), rect: Rect::ZERO, item: FlexItem::default() }
+            Self {
+                id,
+                size: Size::new(w, h),
+                rect: Rect::ZERO,
+                item: FlexItem::default(),
+            }
         }
     }
     impl Widget for Box1 {
-        fn id(&self) -> &str { self.id }
-        fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
+        fn id(&self) -> &str {
+            self.id
+        }
+        fn measure(
+            &mut self,
+            _m: &dyn TextMetrics,
+            c: Constraints,
+            _cache: &mut LayoutCache,
+        ) -> Size {
             c.constrain(self.size)
         }
         fn arrange(&mut self, rect: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
             self.rect = rect;
         }
-        fn rect(&self) -> Rect { self.rect }
-        fn flex(&self) -> FlexItem { self.item }
-        fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult { EventResult::Ignored }
-        fn children(&self) -> &[Box<dyn Widget>] { &[] }
+        fn rect(&self) -> Rect {
+            self.rect
+        }
+        fn flex(&self) -> FlexItem {
+            self.item
+        }
+        fn event(&mut self, _c: &mut EventCtx, _e: &UiEvent) -> EventResult {
+            EventResult::Ignored
+        }
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &[]
+        }
         fn render(&mut self, _ctx: &mut dyn RenderCtx) {}
-        fn semantics(&self) -> Semantics { Semantics::default() }
+        fn semantics(&self) -> Semantics {
+            Semantics::default()
+        }
     }
 
     /// 布一次局，返回 (measure 得到的尺寸, 子项 rects)。
@@ -1634,7 +1684,10 @@ mod wrap_tests {
         let mut f = Flex::row("r").wrap(true);
         let (size, rects) = layout(&mut f, 50.0, 100.0);
         assert!(rects.is_empty(), "空子项集不应有 rect");
-        assert!(size.w.is_finite() && size.h.is_finite(), "尺寸必须有限：{size:?}");
+        assert!(
+            size.w.is_finite() && size.h.is_finite(),
+            "尺寸必须有限：{size:?}"
+        );
         // 分行结果应为空（无行可排）。
         assert!(f.wrap_lines.is_empty(), "空子项集不五有分行结果");
     }
@@ -1677,4 +1730,3 @@ mod wrap_tests {
         assert_eq!(rects[1].y, 0.0, "b 撑满行高：{rects:?}");
     }
 }
-

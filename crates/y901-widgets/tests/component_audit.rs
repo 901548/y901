@@ -13,8 +13,8 @@ use std::rc::Rc;
 
 use y901_ui::layout::LayoutCache;
 use y901_ui::{
-    Color, Constraints, EventCtx, EventResult, Key, Pos, Rect, RenderCtx, Size, TextStyle,
-    TextMetrics, UiEvent, Widget,
+    Color, Constraints, EventCtx, EventResult, Key, Pos, Rect, RenderCtx, Size, TextMetrics,
+    TextStyle, UiEvent, Widget,
 };
 use y901_widgets::{
     Alert, AlertKind, Badge, Button, ComboBox, EmptyState, ErrorState, Popover, Spinner, Switch,
@@ -181,7 +181,9 @@ fn value_semantics_reflects_state() {
     let sem = sw.semantics();
     assert_eq!(sem.value, "off", "未选中 Switch 的 value 应为 off");
     assert!(
-        sem.props.iter().any(|(k, v)| k == "checked" && v == "false"),
+        sem.props
+            .iter()
+            .any(|(k, v)| k == "checked" && v == "false"),
         "应带 checked=false 属性"
     );
 
@@ -201,7 +203,9 @@ fn value_semantics_reflects_state() {
     let sem5 = alert.semantics();
     assert_eq!(sem5.value, "磁盘快满", "Alert 的 value 应为标题");
     assert!(
-        sem5.props.iter().any(|(k, v)| k == "kind" && v == "warning"),
+        sem5.props
+            .iter()
+            .any(|(k, v)| k == "kind" && v == "warning"),
         "Alert 应带 kind=warning 属性"
     );
 }
@@ -284,7 +288,8 @@ fn render_without_layout_does_not_panic_and_draws_nothing() {
             continue;
         }
         assert_eq!(
-            rec.fills, 0,
+            rec.fills,
+            0,
             "{} 未布局就画了 {} 次——应先判空矩形早退",
             c.id(),
             rec.fills
@@ -423,9 +428,10 @@ fn spinner_phase_wraps_every_8_ticks() {
 /// 关闭走 Command(约定:组件发命令、应用层解释),不发闭包回调。
 #[test]
 fn alert_dismiss_hit_region_and_command() {
-    let mut a = Alert::new("a", AlertKind::Error, "出错了").on_dismiss(
-        y901_ui::Command::app("audit.alert.dismiss", y901_ui::json::Json::obj()),
-    );
+    let mut a = Alert::new("a", AlertKind::Error, "出错了").on_dismiss(y901_ui::Command::app(
+        "audit.alert.dismiss",
+        y901_ui::json::Json::obj(),
+    ));
     let mut cache = LayoutCache::new();
     a.arrange(Rect::new(100.0, 50.0, 400.0, 48.0), &M, &mut cache);
     let mut ctx = EventCtx::new(None, Size::new(600.0, 200.0));
@@ -458,11 +464,9 @@ fn alert_dismiss_hit_region_and_command() {
 /// anchor 写 (10,10),组件被布局摆到 (200,50) 时,点 (210,60) 应弹出、点 (15,15) 不应弹出。
 #[test]
 fn popover_hits_arranged_rect_not_constructor_anchor() {
-    let mut p = Popover::new(
-        "p",
-        Rect::new(10.0, 10.0, 80.0, 24.0),
-        || Box::new(TextLabel::new("inner", "x")) as Box<dyn Widget>,
-    );
+    let mut p = Popover::new("p", Rect::new(10.0, 10.0, 80.0, 24.0), || {
+        Box::new(TextLabel::new("inner", "x")) as Box<dyn Widget>
+    });
     let mut cache = LayoutCache::new();
     p.arrange(Rect::new(200.0, 50.0, 80.0, 24.0), &M, &mut cache);
     let mut ctx = EventCtx::new(None, Size::new(400.0, 300.0));
@@ -498,14 +502,10 @@ fn popover_hits_arranged_rect_not_constructor_anchor() {
 fn popover_rebuilds_content_on_every_open() {
     let opens = Rc::new(Cell::new(0u32));
     let o2 = opens.clone();
-    let mut p = Popover::new(
-        "p",
-        Rect::new(0.0, 0.0, 80.0, 24.0),
-        move || {
-            o2.set(o2.get() + 1);
-            Box::new(TextLabel::new("inner", "x")) as Box<dyn Widget>
-        },
-    );
+    let mut p = Popover::new("p", Rect::new(0.0, 0.0, 80.0, 24.0), move || {
+        o2.set(o2.get() + 1);
+        Box::new(TextLabel::new("inner", "x")) as Box<dyn Widget>
+    });
     let mut cache = LayoutCache::new();
     p.arrange(Rect::new(0.0, 0.0, 80.0, 24.0), &M, &mut cache);
     let mut ctx = EventCtx::new(None, Size::new(200.0, 200.0));

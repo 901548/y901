@@ -260,12 +260,10 @@ fn default_run_many_error_index_is_accurate_for_later_window() {
         fail_at: Some(1),
     };
 
-    let options = vec![
-        Options::default(),
-        Options::default(),
-        Options::default(),
-    ];
-    let err = rt.run_many(options, make).expect_err("第 1 个窗口失败时应返 Err");
+    let options = vec![Options::default(), Options::default(), Options::default()];
+    let err = rt
+        .run_many(options, make)
+        .expect_err("第 1 个窗口失败时应返 Err");
     assert!(err.contains("窗口 1"), "错误必须指向窗口 1：{err}");
     assert!(err.contains("mock-boom-1"), "应保留原始错误：{err}");
     assert_eq!(rt.runs.load(Ordering::SeqCst), 2, "第 0、1 个跑完后才失败");

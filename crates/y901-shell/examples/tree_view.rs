@@ -53,8 +53,7 @@ impl TreeDemo {
 }
 
 impl Host for TreeDemo {
-    fn idle(&mut self, _tree: &mut UiTree) {
-    }
+    fn idle(&mut self, _tree: &mut UiTree) {}
 
     fn command(&mut self, _tree: &mut UiTree, _cmd: Command) -> bool {
         false // 这个示例没有应用级命令：交互全在 TreeView 内部

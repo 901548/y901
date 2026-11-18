@@ -19,8 +19,7 @@ struct Shell;
 
 impl Host for Shell {
     fn idle(&mut self, tree: &mut UiTree) {
-        for _ in 0..8 {
-        }
+        for _ in 0..8 {}
         for _ in tree.poll_subscriptions(std::time::Instant::now()) {}
     }
 

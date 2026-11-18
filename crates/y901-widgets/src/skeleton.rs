@@ -94,8 +94,11 @@ impl Skeleton {
 
     /// 追加一个矩形占位。
     pub fn rect(mut self, width: Dimension, height: f32, radius: f32) -> Self {
-        self.shapes
-            .push(SkeletonShape::Rect { width, height, radius });
+        self.shapes.push(SkeletonShape::Rect {
+            width,
+            height,
+            radius,
+        });
         self
     }
 
@@ -218,11 +221,7 @@ impl Widget for Skeleton {
                     y += height;
                 }
                 SkeletonShape::Circle { size } => {
-                    ctx.fill_round_rect(
-                        Rect::new(self.rect.x, y, size, size),
-                        color,
-                        size * 0.5,
-                    );
+                    ctx.fill_round_rect(Rect::new(self.rect.x, y, size, size), color, size * 0.5);
                     y += size;
                 }
                 SkeletonShape::Rect {
@@ -291,7 +290,11 @@ mod tests {
     fn works_with_no_shapes() {
         let mut sk = Skeleton::new("s");
         let mut cache = LayoutCache::new();
-        let size = sk.measure(&Metrics, Constraints::loose(Size::new(100.0, 100.0)), &mut cache);
+        let size = sk.measure(
+            &Metrics,
+            Constraints::loose(Size::new(100.0, 100.0)),
+            &mut cache,
+        );
         assert_eq!(size.h, 0.0);
     }
 }

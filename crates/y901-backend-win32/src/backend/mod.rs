@@ -489,7 +489,11 @@ impl D3dBackend {
         // 基线比例 = ascent / cell_h（字体属性，不随字号变），与 soft 同式
         let base_ascent = self.text.ascent();
         let base_cell_h = self.cell.h;
-        let ascent_ratio = if base_cell_h > 0.0 { base_ascent / base_cell_h } else { 0.8 };
+        let ascent_ratio = if base_cell_h > 0.0 {
+            base_ascent / base_cell_h
+        } else {
+            0.8
+        };
         let ascent = cell_h * ascent_ratio;
 
         let mut pen_x = origin.x;
@@ -502,7 +506,9 @@ impl D3dBackend {
                 self.fill_rect(Rect::new(pen_x, origin.y, span * cell_w, cell_h), style.bg);
             }
             if ch != ' ' {
-                self.push_glyph_sized(pen_x, origin.y, span, ch, style.fg, style.bold, px_final, ascent, cell_w);
+                self.push_glyph_sized(
+                    pen_x, origin.y, span, ch, style.fg, style.bold, px_final, ascent, cell_w,
+                );
             }
             if style.underline {
                 self.fill_rect(

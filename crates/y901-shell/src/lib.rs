@@ -62,17 +62,12 @@ pub fn create_runtime() -> Box<dyn PlatformRuntime> {
         use wasm_bindgen::JsCast;
         let window = y901_backend_web::bindings::global_window()
             .expect("Y901: 没有 window（不在浏览器里？）");
-        let document = window
-            .document()
-            .expect("Y901: 没有 document");
+        let document = window.document().expect("Y901: 没有 document");
         let canvas = document
             .get_element_by_id("y901-canvas")
             .expect("Y901: 页面需要 <canvas id=\"y901-canvas\">")
             .unchecked_into::<y901_backend_web::bindings::HtmlCanvasElement>();
-        Box::new(
-            y901_backend_web::WasmRuntime::new(canvas)
-                .expect("Y901: 创建浏览器运行时失败"),
-        )
+        Box::new(y901_backend_web::WasmRuntime::new(canvas).expect("Y901: 创建浏览器运行时失败"))
     }
 
     #[cfg(all(

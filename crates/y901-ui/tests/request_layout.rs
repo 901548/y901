@@ -65,10 +65,7 @@ fn request_layout_sets_flag_and_take_consumes_it() {
     let mut tree = UiTree::new(leaf("root"));
     // 构造时可能已请求过一次布局：先取走并归零，确保下面的断言只反映我们这次调用。
     let _ = tree.take_layout_request();
-    assert!(
-        !tree.take_layout_request(),
-        "取走之后标志必须是 false"
-    );
+    assert!(!tree.take_layout_request(), "取走之后标志必须是 false");
 
     tree.request_layout();
     assert!(

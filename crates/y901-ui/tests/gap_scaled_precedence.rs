@@ -37,12 +37,7 @@ impl Widget for Leaf {
     fn id(&self) -> &str {
         self.id
     }
-    fn measure(
-        &mut self,
-        _m: &dyn TextMetrics,
-        c: Constraints,
-        _cache: &mut LayoutCache,
-    ) -> Size {
+    fn measure(&mut self, _m: &dyn TextMetrics, c: Constraints, _cache: &mut LayoutCache) -> Size {
         c.constrain(Size::new(10.0, 10.0))
     }
     fn arrange(&mut self, r: Rect, _m: &dyn TextMetrics, _cache: &mut LayoutCache) {
@@ -76,8 +71,14 @@ fn child_xs(flex: &mut Flex, metrics: &dyn TextMetrics) -> (f32, f32) {
 fn row() -> Flex {
     Flex::row("t")
         .padding(Edges::ZERO)
-        .push(Box::new(Leaf { id: "a", rect: Rect::ZERO }))
-        .push(Box::new(Leaf { id: "b", rect: Rect::ZERO }))
+        .push(Box::new(Leaf {
+            id: "a",
+            rect: Rect::ZERO,
+        }))
+        .push(Box::new(Leaf {
+            id: "b",
+            rect: Rect::ZERO,
+        }))
 }
 
 /// `.gap_scaled(8).gap(4)` → 用 4（后设置者生效）。

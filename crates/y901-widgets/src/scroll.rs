@@ -335,7 +335,8 @@ pub struct Scrollbar {
     pub(crate) id: String,
     // 诊断 API：`target`：ScrollCommand 的目标容器名，仅记录（拆成独立组件前保留）
     // 归类：内部字段 —— `target` 参与滚动目标计算，无直接读取点
-    #[allow(dead_code)] // 预留 API：当前未接线，留作未来拆分/扩展使用 // 留作把滚动条拆成独立组件时用
+    #[allow(dead_code)]
+    // 预留 API：当前未接线，留作未来拆分/扩展使用 // 留作把滚动条拆成独立组件时用
     target: String,
     pub(crate) rect: Rect,
     pub(crate) visible: bool,

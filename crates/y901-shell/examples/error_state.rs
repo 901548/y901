@@ -32,7 +32,10 @@ fn build() -> UiTree {
     let a = ErrorState::new("a", "加载失败").flex_item(FlexItem::height(140.0));
     let b = ErrorState::new("b", "同步失败")
         .description("连接超时，请检查网络后重试")
-        .action("重试", y901_ui::Command::app("error_state:retry", y901_ui::json::Json::Null))
+        .action(
+            "重试",
+            y901_ui::Command::app("error_state:retry", y901_ui::json::Json::Null),
+        )
         .flex_item(FlexItem::height(220.0));
     let root = Flex::column("root")
         .background(bg)
@@ -44,6 +47,14 @@ fn build() -> UiTree {
 }
 
 fn main() -> Result<(), String> {
-    create_runtime().run(Box::new(H), Box::new(build), Options {
-            theme: Some(example_theme()), width: 520, height: 480, ..Default::default() })
+    create_runtime().run(
+        Box::new(H),
+        Box::new(build),
+        Options {
+            theme: Some(example_theme()),
+            width: 520,
+            height: 480,
+            ..Default::default()
+        },
+    )
 }

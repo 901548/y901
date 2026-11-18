@@ -401,7 +401,6 @@ extern "C" {
     pub fn console_log(s: &str);
 }
 
-
 /// `Date.now()`——毫秒时间戳。
 ///
 /// 用途：区分"输入法提交后紧跟的幻影 keydown"与"真实按键"。

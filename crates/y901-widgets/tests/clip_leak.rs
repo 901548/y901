@@ -52,12 +52,7 @@ fn assert_clip_is_clean(tree: &mut UiTree, tag: &str) {
     let probe_rgb = 0x00FF00FFu32; // A=00 R=FF G=00 B=FF → 不透明版在下面算
     let _ = probe_rgb;
     let px = |x: u32, y: u32| soft.pixel(x, y).expect("pixel");
-    let corners = [
-        (0u32, 0u32),
-        (W - 1, 0),
-        (0, H - 1),
-        (W - 1, H - 1),
-    ];
+    let corners = [(0u32, 0u32), (W - 1, 0), (0, H - 1), (W - 1, H - 1)];
     for (x, y) in corners {
         // 探针是不透明品红：RGB 必须一致（alpha 已在 §探针里写死为 0xFF）
         let got = px(x, y);

@@ -222,7 +222,11 @@ impl Widget for TextLabel {
         let style = self.to_text_style();
         let line_h = ctx.line_height(&style);
         let dy = ((self.rect.h - line_h) * 0.5).max(0.0);
-        ctx.draw_text(Pos::new(self.rect.x, self.rect.y + dy), &self.current_text(), &style);
+        ctx.draw_text(
+            Pos::new(self.rect.x, self.rect.y + dy),
+            &self.current_text(),
+            &style,
+        );
     }
 
     fn semantics(&self) -> Semantics {

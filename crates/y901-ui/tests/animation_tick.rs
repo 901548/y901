@@ -75,5 +75,8 @@ fn repeated_tick_is_safe_when_idle() {
 #[test]
 fn zero_dt_tick_is_safe() {
     let mut tree = UiTree::new(Box::new(Leaf));
-    assert!(!tree.tick_animations(Duration::ZERO), "zero dt must not panic");
+    assert!(
+        !tree.tick_animations(Duration::ZERO),
+        "zero dt must not panic"
+    );
 }

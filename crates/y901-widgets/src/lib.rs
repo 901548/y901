@@ -22,49 +22,53 @@
 //! [`Stack`]: y901_ui::Stack
 
 #![deny(missing_docs)]
-pub mod button;
-pub mod combo_box;
-pub mod skeleton;
-pub mod popover;
-pub mod badge;
 pub mod alert;
-pub mod switch;
-pub mod error_state;
-mod state_layout;
-pub mod empty_state;
-pub mod spinner;
-pub mod table;
+pub mod badge;
+pub mod button;
 pub mod checkbox;
+pub mod combo_box;
 pub mod context_menu;
+pub mod empty_state;
+pub mod error_state;
 pub mod image;
 pub mod label;
 pub mod list;
 pub mod list_view;
 pub mod overlay;
+pub mod popover;
 pub mod progress;
 pub mod radio;
 pub mod rich_text;
 pub mod scroll;
+pub mod skeleton;
 pub mod slider;
+pub mod spinner;
 pub mod split;
+mod state_layout;
 pub mod style;
+pub mod switch;
+pub mod table;
 pub mod tabs;
 pub mod text_input;
 pub mod tooltip;
 pub mod tree_view;
 
+pub use badge::{Badge, BadgeKind};
 pub use button::Button;
 pub use checkbox::Checkbox;
+pub use combo_box::ComboBox;
 pub use context_menu::ContextMenu;
 pub use image::Image;
 pub use label::{parse_color, TextLabel};
 pub use list::VerticalList;
 pub use list_view::{ListView, RowPainter};
 pub use overlay::{Dialog, Menu};
+pub use popover::Popover;
 pub use progress::ProgressBar;
 pub use radio::RadioGroup;
 pub use rich_text::{Block, InlineStyle, RichText, Span, StyledText};
 pub use scroll::{ScrollView, Scrollbar};
+pub use skeleton::{Skeleton, SkeletonShape};
 pub use slider::Slider;
 pub use split::SplitView;
 pub use style::WidgetStyle;
@@ -72,16 +76,15 @@ pub use tabs::Tabs;
 pub use text_input::{Clipboard, MemoryClipboard, NullClipboard, TextInput};
 pub use tooltip::{Tooltip, TooltipHost};
 pub use tree_view::{TreeItem, TreeView};
-pub use combo_box::{ComboBox};
-pub use skeleton::{Skeleton, SkeletonShape};
-pub use popover::{Popover};
-pub use badge::{Badge, BadgeKind};
 
 /// 把一条命令的 `args` 替换成新的（`Command` 本身没有 `with_args`，只能重建）。
 ///
 /// 为什么在组件层而不是 `y901-ui`：这只是"带上本次事件的参数"的便利函数，
 /// 属于组件约定而非框架能力；框架侧保持 `Command` 的极简定义。
-pub(crate) fn command_with_args(cmd: &y901_ui::Command, args: y901_ui::json::Json) -> y901_ui::Command {
+pub(crate) fn command_with_args(
+    cmd: &y901_ui::Command,
+    args: y901_ui::json::Json,
+) -> y901_ui::Command {
     use y901_ui::Command;
     match cmd {
         Command::App { name, .. } => Command::app(name.clone(), args),
@@ -89,8 +92,8 @@ pub(crate) fn command_with_args(cmd: &y901_ui::Command, args: y901_ui::json::Jso
     }
 }
 pub use alert::{Alert, AlertKind};
-pub use switch::Switch;
-pub use error_state::ErrorState;
 pub use empty_state::EmptyState;
+pub use error_state::ErrorState;
 pub use spinner::Spinner;
+pub use switch::Switch;
 pub use table::{Table, TableColumn};

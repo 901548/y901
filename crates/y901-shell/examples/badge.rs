@@ -10,7 +10,9 @@ impl Host for H {
     fn idle(&mut self, tree: &mut UiTree) {
         for _ in tree.poll_subscriptions(Instant::now()) {}
     }
-    fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool { false }
+    fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool {
+        false
+    }
 }
 
 /// 示例主题：`Y901_THEME=light` 时用 LIGHT，否则 DARK。
@@ -35,16 +37,29 @@ fn build() -> UiTree {
         .push(Box::new(Badge::new("w", "警告").kind(BadgeKind::Warning)))
         .push(Box::new(Badge::new("e", "失败").kind(BadgeKind::Error)))
         // STYLE-OVERRIDE：验证 WidgetStyle::bg 确实覆盖胶囊底色
+        .push(Box::new(Badge::new("styled", "style").style(
+            y901_widgets::WidgetStyle::default().bg(y901_ui::Color::rgba(0.95, 0.55, 0.10, 1.0)),
+        )))
         .push(Box::new(
-            Badge::new("styled", "style")
-                .style(y901_widgets::WidgetStyle::default().bg(y901_ui::Color::rgba(0.95, 0.55, 0.10, 1.0))),
+            Badge::dot("dot-e")
+                .kind(BadgeKind::Error)
+                .flex_item(FlexItem::fixed(8.0, 8.0)),
         ))
-        .push(Box::new(Badge::dot("dot-e").kind(BadgeKind::Error).flex_item(FlexItem::fixed(8.0, 8.0))))
-        .push(Box::new(y901_widgets::TextLabel::new("t", "← 未读圆点").size(12.0)));
+        .push(Box::new(
+            y901_widgets::TextLabel::new("t", "← 未读圆点").size(12.0),
+        ));
     UiTree::new(Box::new(root))
 }
 
 fn main() -> Result<(), String> {
-    create_runtime().run(Box::new(H), Box::new(build), Options {
-            theme: Some(example_theme()), width: 560, height: 120, ..Default::default() })
+    create_runtime().run(
+        Box::new(H),
+        Box::new(build),
+        Options {
+            theme: Some(example_theme()),
+            width: 560,
+            height: 120,
+            ..Default::default()
+        },
+    )
 }

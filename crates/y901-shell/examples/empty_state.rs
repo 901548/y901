@@ -24,7 +24,10 @@ fn build() -> UiTree {
     let a = EmptyState::new("a", "暂无数据").flex_item(FlexItem::height(140.0));
     let b = EmptyState::new("b", "还没有文件")
         .description("点击上方按钮上传第一个文件")
-        .action("上传", y901_ui::Command::app("empty_state:activate", y901_ui::json::Json::Null))
+        .action(
+            "上传",
+            y901_ui::Command::app("empty_state:activate", y901_ui::json::Json::Null),
+        )
         .flex_item(FlexItem::height(220.0));
     let root = Flex::column("root")
         .background(bg)
@@ -36,5 +39,13 @@ fn build() -> UiTree {
 }
 
 fn main() -> Result<(), String> {
-    create_runtime().run(Box::new(H), Box::new(build), Options { width: 520, height: 480, ..Default::default() })
+    create_runtime().run(
+        Box::new(H),
+        Box::new(build),
+        Options {
+            width: 520,
+            height: 480,
+            ..Default::default()
+        },
+    )
 }

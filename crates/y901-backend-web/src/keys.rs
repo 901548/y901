@@ -74,11 +74,7 @@ pub fn button_from_dom(button: i16) -> Option<MouseButton> {
 /// 把 ⌘ 当成 Ctrl 会让 macOS 上的普通复制变成别的语义。
 pub fn mods_from_event(ctrl: bool, shift: bool, alt: bool, meta: bool) -> Modifiers {
     let _ = meta;
-    Modifiers {
-        ctrl,
-        shift,
-        alt,
-    }
+    Modifiers { ctrl, shift, alt }
 }
 
 /// `WheelEvent.deltaY` → 框架的 `RawEvent::Wheel.delta`。
@@ -418,7 +414,7 @@ mod tests {
         // 用户点了地址栏 / 其他元素
         assert!(!should_refocus(true, false));
     }
-    
+
     // ---- should_send_keydown（统一闸门）----
 
     #[test]

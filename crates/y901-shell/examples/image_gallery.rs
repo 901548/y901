@@ -24,8 +24,7 @@ const SAMPLE_PNG: &[u8] = include_bytes!("assets/quadrants.png");
 struct GalleryDemo;
 
 impl Host for GalleryDemo {
-    fn idle(&mut self, _tree: &mut UiTree) {
-    }
+    fn idle(&mut self, _tree: &mut UiTree) {}
 
     fn command(&mut self, _tree: &mut UiTree, _cmd: Command) -> bool {
         false

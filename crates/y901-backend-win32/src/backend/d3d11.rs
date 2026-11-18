@@ -2472,11 +2472,11 @@ impl Gfx {
             && !INSTANCE_OVERFLOW_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed)
         {
             eprintln!(
-                    "[y901] 实例数 {} 超过单批上限 {}，本帧丢弃 {} 个实例（画面可能缺内容）。\
+                "[y901] 实例数 {} 超过单批上限 {}，本帧丢弃 {} 个实例（画面可能缺内容）。\
                      如复现，请调大 INSTANCE_CAPACITY 或改为分批提交。",
-                    instances.len(),
-                    INSTANCE_CAPACITY,
-                    instances.len() - INSTANCE_CAPACITY
+                instances.len(),
+                INSTANCE_CAPACITY,
+                instances.len() - INSTANCE_CAPACITY
             );
         }
         if count > 0 {

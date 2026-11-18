@@ -24,8 +24,7 @@ struct Shell;
 impl Host for Shell {
     fn idle(&mut self, tree: &mut UiTree) {
         // Tick 有上限：防止某个控件每帧都要求再一帧而死循环。
-        for _ in 0..8 {
-        }
+        for _ in 0..8 {}
         // 定时订阅即使没有消费者也要排空，否则会积压。
         for _ in tree.poll_subscriptions(Instant::now()) {}
     }

@@ -39,6 +39,9 @@ fn tick_consumers_really_use_tick_or_animation() {
         let uses = text.contains("UiEvent::Tick")
             || text.contains("ctx.animation(")
             || text.contains("start_animation(");
-        assert!(uses, "{name}.rs 登记为 Tick 消费者，但源码里找不到 Tick/动画使用点");
+        assert!(
+            uses,
+            "{name}.rs 登记为 Tick 消费者，但源码里找不到 Tick/动画使用点"
+        );
     }
 }

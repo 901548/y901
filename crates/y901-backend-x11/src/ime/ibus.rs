@@ -164,8 +164,15 @@ fn connect_ibus_bus(addr: &str) -> Result<RpcConn, String> {
     let mut conn = RpcConn::connect_to_path(unix, Timeout::Duration(Duration::from_secs(2)))
         .map_err(|e| format!("IBus 连接失败：{e}"))?;
     // 私有总线同样需要 Hello 握手，否则 IBus 不认我们的唯一名。
-    call_simple(&mut conn, "Hello", "/org/freedesktop/DBus", "org.freedesktop.DBus", "org.freedesktop.DBus", |_| {})
-        .map_err(|e| format!("IBus Hello 失败：{e}"))?;
+    call_simple(
+        &mut conn,
+        "Hello",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "org.freedesktop.DBus",
+        |_| {},
+    )
+    .map_err(|e| format!("IBus Hello 失败：{e}"))?;
     // 让连接线程的 refill 不阻塞太久。
     Ok(conn)
 }
@@ -184,9 +191,8 @@ fn ibus_address() -> Result<String, String> {
                 let name = e.file_name().to_string_lossy().to_string();
                 if name.ends_with("-unix-0") {
                     if let Ok(text) = std::fs::read_to_string(e.path()) {
-                        if let Some(line) = text
-                            .lines()
-                            .find_map(|l| l.strip_prefix("IBUS_ADDRESS="))
+                        if let Some(line) =
+                            text.lines().find_map(|l| l.strip_prefix("IBUS_ADDRESS="))
                         {
                             let line = line.trim();
                             if !line.is_empty() {
@@ -249,9 +255,16 @@ fn call_simple(
 
 /// 创建输入上下文并完成能力/引擎/焦点初始化，返回上下文路径。
 fn create_context(conn: &mut RpcConn, engine: &str) -> Result<String, String> {
-    let params = call_simple(conn, "CreateInputContext", ROOT, "org.freedesktop.IBus", SERVICE, |m| {
-        m.body.push_param("y901").ok();
-    })?;
+    let params = call_simple(
+        conn,
+        "CreateInputContext",
+        ROOT,
+        "org.freedesktop.IBus",
+        SERVICE,
+        |m| {
+            m.body.push_param("y901").ok();
+        },
+    )?;
     let ctx = params
         .iter()
         .find_map(|p| match p {
@@ -274,12 +287,7 @@ fn create_context(conn: &mut RpcConn, engine: &str) -> Result<String, String> {
 }
 
 /// 连接线程主循环：处理命令（按键/焦点/候选位置）并把信号转成事件。
-fn conn_loop(
-    mut conn: RpcConn,
-    ctx_path: String,
-    cmd_rx: Receiver<Cmd>,
-    evt_tx: Sender<ImeEvent>,
-) {
+fn conn_loop(mut conn: RpcConn, ctx_path: String, cmd_rx: Receiver<Cmd>, evt_tx: Sender<ImeEvent>) {
     loop {
         // 1) 先处理主线程命令（非阻塞）
         while let Ok(cmd) = cmd_rx.try_recv() {
@@ -290,11 +298,18 @@ fn conn_loop(
                     state,
                     reply,
                 } => {
-                    let handled = call_simple(&mut conn, "ProcessKeyEvent", &ctx_path, IFACE, SERVICE, |m| {
-                        m.body.push_param(keyval).ok();
-                        m.body.push_param(keycode).ok();
-                        m.body.push_param(state).ok();
-                    })
+                    let handled = call_simple(
+                        &mut conn,
+                        "ProcessKeyEvent",
+                        &ctx_path,
+                        IFACE,
+                        SERVICE,
+                        |m| {
+                            m.body.push_param(keyval).ok();
+                            m.body.push_param(keycode).ok();
+                            m.body.push_param(state).ok();
+                        },
+                    )
                     .ok()
                     .and_then(|params| {
                         params.iter().find_map(|p| match p {
@@ -306,12 +321,19 @@ fn conn_loop(
                     let _ = reply.send(handled);
                 }
                 Cmd::Cursor { x, y, w, h } => {
-                    let _ = call_simple(&mut conn, "SetCursorLocation", &ctx_path, IFACE, SERVICE, |m| {
-                        m.body.push_param(x).ok();
-                        m.body.push_param(y).ok();
-                        m.body.push_param(w).ok();
-                        m.body.push_param(h).ok();
-                    });
+                    let _ = call_simple(
+                        &mut conn,
+                        "SetCursorLocation",
+                        &ctx_path,
+                        IFACE,
+                        SERVICE,
+                        |m| {
+                            m.body.push_param(x).ok();
+                            m.body.push_param(y).ok();
+                            m.body.push_param(w).ok();
+                            m.body.push_param(h).ok();
+                        },
+                    );
                 }
                 Cmd::FocusIn => {
                     let _ = call_simple(&mut conn, "FocusIn", &ctx_path, IFACE, SERVICE, |_| {});
@@ -436,10 +458,7 @@ mod tests {
             attrs,
         ]));
         let params = vec![boxed_variant(text_obj)];
-        assert_eq!(
-            find_text(&params[0]),
-            Some("NIHAO_PLACEHOLDER".to_string())
-        );
+        assert_eq!(find_text(&params[0]), Some("NIHAO_PLACEHOLDER".to_string()));
     }
 
     /// 空文本（组字取消 / HidePreeditText）必须返回 None，否则会误提交空串。

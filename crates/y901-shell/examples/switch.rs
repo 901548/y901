@@ -23,14 +23,21 @@ fn row(id: &'static str, label: &'static str, on: bool) -> Flex {
     Flex::row(format!("{id}-row"))
         .gap(16.0)
         .align(Align::Center)
-        .push(Box::new(TextLabel::new(format!("{id}-t"), label).size(14.0)))
-        .push(Box::new(TextLabel::new(format!("{id}-sp"), "").flex_item(FlexItem {
-            width: y901_ui::widget::Dimension::Flex(1.0),
-            ..FlexItem::NO_LIMITS
-        })))
+        .push(Box::new(
+            TextLabel::new(format!("{id}-t"), label).size(14.0),
+        ))
+        .push(Box::new(TextLabel::new(format!("{id}-sp"), "").flex_item(
+            FlexItem {
+                width: y901_ui::widget::Dimension::Flex(1.0),
+                ..FlexItem::NO_LIMITS
+            },
+        )))
         .push(Box::new(
             Switch::new(id, on)
-                .command(y901_ui::Command::app("switch:toggle", y901_ui::json::Json::Null))
+                .command(y901_ui::Command::app(
+                    "switch:toggle",
+                    y901_ui::json::Json::Null,
+                ))
                 .flex_item(FlexItem::fixed(44.0, 24.0)),
         ))
 }
@@ -57,6 +64,14 @@ fn build() -> UiTree {
 }
 
 fn main() -> Result<(), String> {
-    create_runtime().run(Box::new(H), Box::new(build), Options {
-            theme: Some(example_theme()), width: 420, height: 240, ..Default::default() })
+    create_runtime().run(
+        Box::new(H),
+        Box::new(build),
+        Options {
+            theme: Some(example_theme()),
+            width: 420,
+            height: 240,
+            ..Default::default()
+        },
+    )
 }

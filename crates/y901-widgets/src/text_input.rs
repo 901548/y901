@@ -787,12 +787,7 @@ impl Widget for TextInput {
 
         // **裁剪区向上撑 4px**：字形的上挑量可能超出 `inner` 顶边，
         // 严格按 `inner` 裁会把它切掉（"8080" → "ouou"）。
-        ctx.push_clip(Rect::new(
-            inner.x,
-            inner.y - 4.0,
-            inner.w,
-            inner.h + 4.0,
-        ));
+        ctx.push_clip(Rect::new(inner.x, inner.y - 4.0, inner.w, inner.h + 4.0));
 
         let line_h = ctx.line_height(&self.style);
         // **行框在 `inner` 里绝对居中**：不再 `max(0.0)`（它会在容器偏矮时
@@ -854,12 +849,7 @@ impl Widget for TextInput {
                 self.buffer.text()
             };
             if !draw_str.is_empty() {
-                ctx.push_clip(Rect::new(
-                    inner.x,
-                    inner.y - 4.0,
-                    inner.w,
-                    inner.h + 4.0,
-                ));
+                ctx.push_clip(Rect::new(inner.x, inner.y - 4.0, inner.w, inner.h + 4.0));
                 ctx.draw_text(Pos::new(origin_x, text_y), draw_str, &text);
                 ctx.pop_clip();
             }

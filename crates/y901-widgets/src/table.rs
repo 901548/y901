@@ -9,7 +9,7 @@
 use y901_ui::widget::{Dimension, FlexItem};
 use y901_ui::{
     Align, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Role, Semantics, Size, State,
-    TextStyle, TextMetrics, UiEvent, Widget,
+    TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 一列的定义。
@@ -271,9 +271,9 @@ impl Widget for Table {
                 if let Some(idx) = self.row_at(*pos) {
                     self.selected = Some(idx);
                     if let Some(cmd) = self.command.as_ref() {
-                    let args = y901_ui::json::Json::obj().set("row", idx as i32);
-                    ctx.emit_command(crate::command_with_args(cmd, args));
-                }
+                        let args = y901_ui::json::Json::obj().set("row", idx as i32);
+                        ctx.emit_command(crate::command_with_args(cmd, args));
+                    }
                     EventResult::Redraw
                 } else {
                     EventResult::Ignored
@@ -340,7 +340,18 @@ impl Widget for Table {
             let Some((x, w)) = cols.get(i).copied() else {
                 break;
             };
-            draw_cell(ctx, col, &col.title, x, header.y, w, HEADER_H * self.scale, &header_style, muted, self.scale);
+            draw_cell(
+                ctx,
+                col,
+                &col.title,
+                x,
+                header.y,
+                w,
+                HEADER_H * self.scale,
+                &header_style,
+                muted,
+                self.scale,
+            );
             let _ = text_fg;
         }
 
@@ -361,14 +372,28 @@ impl Widget for Table {
             } else {
                 row_bg
             };
-            ctx.fill_rect(Rect::new(self.rect.x, y, self.rect.w, ROW_H * self.scale), bg);
+            ctx.fill_rect(
+                Rect::new(self.rect.x, y, self.rect.w, ROW_H * self.scale),
+                bg,
+            );
             let style = TextStyle::fg(text_fg);
             for (i, col) in self.columns.iter().enumerate() {
                 let Some((x, w)) = cols.get(i).copied() else {
                     break;
                 };
                 let text = cells.get(i).map(String::as_str).unwrap_or("");
-                draw_cell(ctx, col, text, x, y, w, ROW_H * self.scale, &style, text_fg, self.scale);
+                draw_cell(
+                    ctx,
+                    col,
+                    text,
+                    x,
+                    y,
+                    w,
+                    ROW_H * self.scale,
+                    &style,
+                    text_fg,
+                    self.scale,
+                );
             }
             visible += 1;
         }
@@ -422,8 +447,8 @@ fn draw_cell(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use y901_ui::Color;
     use y901_ui::layout::LayoutCache;
+    use y901_ui::Color;
 
     struct Metrics;
     impl TextMetrics for Metrics {
@@ -481,7 +506,11 @@ mod tests {
         assert_eq!(t.len(), 2);
         assert_eq!(t.selected_index(), Some(1));
         let mut cache = LayoutCache::new();
-        let s = t.measure(&Metrics, Constraints::loose(Size::new(400.0, 400.0)), &mut cache);
+        let s = t.measure(
+            &Metrics,
+            Constraints::loose(Size::new(400.0, 400.0)),
+            &mut cache,
+        );
         assert_eq!(s.h, HEADER_H + 2.0 * ROW_H);
         assert!(s.w <= 400.0);
     }
@@ -504,10 +533,18 @@ mod tests {
         assert!(row0.bottom() <= row1.y, "数据行应从上到下排列");
 
         let x = t.rect.x + 4.0;
-        assert_eq!(t.row_at(Pos::new(x, header.y + 1.0)), None, "表头不应命中行");
+        assert_eq!(
+            t.row_at(Pos::new(x, header.y + 1.0)),
+            None,
+            "表头不应命中行"
+        );
         assert_eq!(t.row_at(Pos::new(x, row0.y + row0.h * 0.5)), Some(0));
         assert_eq!(t.row_at(Pos::new(x, row1.y + row1.h * 0.5)), Some(1));
-        assert_eq!(t.row_at(Pos::new(x, row0.bottom())), Some(1), "行边界归属下方行");
+        assert_eq!(
+            t.row_at(Pos::new(x, row0.bottom())),
+            Some(1),
+            "行边界归属下方行"
+        );
 
         let mut ctx = EventCtx::new(None, Size::new(400.0, 300.0));
         t.event(
@@ -554,22 +591,39 @@ mod tests {
         t.arrange(Rect::new(0.0, 0.0, 400.0, 200.0), &Metrics, &mut cache);
         let cols = t.column_layout();
         // Percent(50) 占 400 的一半
-        assert!((cols[1].1 - 200.0).abs() < 0.5, "Percent(50) 应为 200，实测 {}", cols[1].1);
+        assert!(
+            (cols[1].1 - 200.0).abs() < 0.5,
+            "Percent(50) 应为 200，实测 {}",
+            cols[1].1
+        );
         // flex 列吃剩下的 200
-        assert!((cols[0].1 - 200.0).abs() < 0.5, "flex 应剩 200，实测 {}", cols[0].1);
+        assert!(
+            (cols[0].1 - 200.0).abs() < 0.5,
+            "flex 应剩 200，实测 {}",
+            cols[0].1
+        );
     }
 
     #[test]
     fn exposes_select_row_action() {
-        let t = Table::new("t").column(TableColumn::flex("a")).row(vec!["x".into()]);
+        let t = Table::new("t")
+            .column(TableColumn::flex("a"))
+            .row(vec!["x".into()]);
         let acts = t.semantics().actions;
-        assert!(acts.iter().any(|a| a.name == "select_row"), "table 应暴露 select_row");
+        assert!(
+            acts.iter().any(|a| a.name == "select_row"),
+            "table 应暴露 select_row"
+        );
     }
 
     #[test]
     fn style_is_stored_for_container_surface() {
         let st = crate::style::WidgetStyle::default().bg(Color::rgba(0.2, 0.2, 0.2, 1.0));
         let t = Table::new("t").column(TableColumn::flex("a")).style(st);
-        assert_eq!(t.style, Some(st), "style 应被保存（render 里用它覆盖表头底色）");
+        assert_eq!(
+            t.style,
+            Some(st),
+            "style 应被保存（render 里用它覆盖表头底色）"
+        );
     }
 }

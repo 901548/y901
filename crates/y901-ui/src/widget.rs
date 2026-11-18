@@ -1604,7 +1604,11 @@ mod event_ctx_scale_tests {
     #[test]
     fn event_ctx_scale_defaults_to_one() {
         let ctx = EventCtx::new(None, Size::new(100.0, 100.0));
-        assert_eq!(ctx.scale(), 1.0, "默认 scale 必须是 1.0，否则现有测试会变尺寸");
+        assert_eq!(
+            ctx.scale(),
+            1.0,
+            "默认 scale 必须是 1.0，否则现有测试会变尺寸"
+        );
     }
 
     /// **`scale` 可被 `UiTree` 写入并读回**（命中测试依赖它与绘制同源）。

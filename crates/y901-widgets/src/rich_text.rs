@@ -270,7 +270,11 @@ impl StyledText {
                 let lines = self.wrap(spans, per_line);
                 let hs = Self::compute_line_heights(metrics, spans, &lines, line_h);
                 // 空段落保底一行（与旧行为一致）。
-                if hs.is_empty() { line_h } else { hs.iter().sum() }
+                if hs.is_empty() {
+                    line_h
+                } else {
+                    hs.iter().sum()
+                }
             }
             Block::Code { lines, .. } => lines.len().max(1) as f32 * line_h + self.code_pad * 2.0,
         };
@@ -371,7 +375,11 @@ impl Widget for StyledText {
                 Block::Paragraph(spans) => {
                     let lines = self.wrap(spans, per_line);
                     let hs = Self::compute_line_heights(metrics, spans, &lines, line_h);
-                    if hs.is_empty() { line_h } else { hs.iter().sum() }
+                    if hs.is_empty() {
+                        line_h
+                    } else {
+                        hs.iter().sum()
+                    }
                 }
                 Block::Code { lines, .. } => {
                     lines.len().max(1) as f32 * line_h + self.code_pad * 2.0

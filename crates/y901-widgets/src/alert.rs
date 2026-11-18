@@ -7,7 +7,7 @@
 use y901_ui::widget::FlexItem;
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Role, Semantics, Size, State,
-    TextStyle, TextMetrics, UiEvent, Widget,
+    TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 提示类型。
@@ -255,8 +255,8 @@ impl Widget for Alert {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use y901_ui::Color;
     use y901_ui::layout::LayoutCache;
+    use y901_ui::Color;
 
     struct Metrics;
     impl TextMetrics for Metrics {
@@ -283,21 +283,37 @@ mod tests {
 
     #[test]
     fn dismiss_fires_only_inside_its_rect() {
-        
-        let mut a = Alert::new("a", AlertKind::Error, "boom").on_dismiss(y901_ui::Command::app("alert:dismiss", y901_ui::json::Json::Null));
+        let mut a = Alert::new("a", AlertKind::Error, "boom").on_dismiss(y901_ui::Command::app(
+            "alert:dismiss",
+            y901_ui::json::Json::Null,
+        ));
         let mut cache = LayoutCache::new();
         a.arrange(Rect::new(0.0, 0.0, 400.0, 48.0), &Metrics, &mut cache);
         let mut ctx = EventCtx::new(None, Size::new(400.0, 48.0));
-        a.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(10.0, 10.0), button: y901_ui::MouseButton::Left });
+        a.event(
+            &mut ctx,
+            &UiEvent::MouseUp {
+                pos: Pos::new(10.0, 10.0),
+                button: y901_ui::MouseButton::Left,
+            },
+        );
         assert!(ctx.commands.is_empty(), "点外部不应发命令");
         let r = a.dismiss_rect;
-        a.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(r.x + 4.0, r.y + 4.0), button: y901_ui::MouseButton::Left });
+        a.event(
+            &mut ctx,
+            &UiEvent::MouseUp {
+                pos: Pos::new(r.x + 4.0, r.y + 4.0),
+                button: y901_ui::MouseButton::Left,
+            },
+        );
         assert_eq!(ctx.commands.len(), 1, "点×应发出命令");
     }
 
     #[test]
     fn style_is_stored_for_container_surface() {
-        let st = crate::style::WidgetStyle::default().bg(Color::rgba(0.1, 0.2, 0.3, 1.0)).radius(3.0);
+        let st = crate::style::WidgetStyle::default()
+            .bg(Color::rgba(0.1, 0.2, 0.3, 1.0))
+            .radius(3.0);
         let a = Alert::new("a", AlertKind::Info, "t").style(st);
         assert_eq!(a.style, Some(st), "style 应被保存（render 里用它覆盖底色）");
     }

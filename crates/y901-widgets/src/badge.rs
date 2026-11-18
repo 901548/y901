@@ -6,7 +6,7 @@
 use y901_ui::widget::FlexItem;
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Role, Semantics, Size, State,
-    TextStyle, TextMetrics, UiEvent, Widget,
+    TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 徽标语义。
@@ -30,7 +30,11 @@ impl BadgeKind {
         let dim = |c: y901_ui::Color| y901_ui::Color::rgba(c.r * 0.62, c.g * 0.62, c.b * 0.62, 1.0);
         match self {
             BadgeKind::Default => None,
-            BadgeKind::Accent => Some(theme.style(y901_ui::Role::BUTTON, y901_ui::State::Pressed).bg),
+            BadgeKind::Accent => Some(
+                theme
+                    .style(y901_ui::Role::BUTTON, y901_ui::State::Pressed)
+                    .bg,
+            ),
             BadgeKind::Success => Some(dim(theme.success_color())),
             BadgeKind::Warning => Some(dim(theme.warning_color())),
             BadgeKind::Error => Some(dim(theme.error_color())),
@@ -151,7 +155,10 @@ impl Widget for Badge {
         }
         let style = TextStyle::fg(Color::WHITE);
         let tw = m.measure_text(&self.text, &style).w;
-        c.constrain(Size::new(tw + PAD_X * 2.0 * self.scale, BADGE_H * self.scale))
+        c.constrain(Size::new(
+            tw + PAD_X * 2.0 * self.scale,
+            BADGE_H * self.scale,
+        ))
     }
 
     fn arrange(
@@ -183,7 +190,11 @@ impl Widget for Badge {
             let theme = ctx.theme();
             theme.style(Role::PANEL, State::Hovered).bg
         };
-        let bg = self.style.and_then(|s| s.bg).or_else(|| self.kind.bg(ctx.theme())).unwrap_or(fallback);
+        let bg = self
+            .style
+            .and_then(|s| s.bg)
+            .or_else(|| self.kind.bg(ctx.theme()))
+            .unwrap_or(fallback);
         let radius = if self.dot_only {
             self.rect.w.min(self.rect.h) * 0.5
         } else {

@@ -38,8 +38,7 @@ impl CounterApp {
 }
 
 impl Host for CounterApp {
-    fn idle(&mut self, _tree: &mut UiTree) {
-    }
+    fn idle(&mut self, _tree: &mut UiTree) {}
 
     fn command(&mut self, tree: &mut UiTree, cmd: Command) -> bool {
         let Command::App { name, .. } = &cmd else {

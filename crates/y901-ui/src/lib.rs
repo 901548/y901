@@ -65,6 +65,5 @@ pub use tree::{hash_semantics, DirtyRegion, NodeInfo, UiTree};
 pub use widget::MountCtx;
 pub use widget::{
     ActionSpec, Align, Axis, Axis2, Constraints, Cursor, Dimension, EventCtx, FlexItem, InputKind,
-    Justify,
-    RenderCtx, Role, Semantics, TextMetrics, Widget, AA_SAMPLES, GRADIENT_STEPS,
+    Justify, RenderCtx, Role, Semantics, TextMetrics, Widget, AA_SAMPLES, GRADIENT_STEPS,
 };

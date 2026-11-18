@@ -7,7 +7,10 @@
 
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
-use y901_ui::{widget::Dimension, Align, Color, Command, Edges, Flex, FlexItem, Justify, Role, State, Theme, UiTree};
+use y901_ui::{
+    widget::Dimension, Align, Color, Command, Edges, Flex, FlexItem, Justify, Role, State, Theme,
+    UiTree,
+};
 use y901_widgets::style::WidgetStyle;
 use y901_widgets::table::{Table, TableColumn};
 use y901_widgets::{Button, TextInput, TextLabel};
@@ -15,13 +18,11 @@ use y901_widgets::{Button, TextInput, TextLabel};
 struct Shell;
 
 impl Host for Shell {
-    fn idle(&mut self, _tree: &mut UiTree) {
-    }
+    fn idle(&mut self, _tree: &mut UiTree) {}
     fn command(&mut self, _tree: &mut UiTree, _cmd: Command) -> bool {
         false
     }
 }
-
 
 /// 一行"标签（右对齐、固定 80）+ 输入框"。
 fn form_row(

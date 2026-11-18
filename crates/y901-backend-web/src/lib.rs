@@ -28,7 +28,9 @@ pub use bindings::HtmlCanvasElement;
 pub use font_engine::WasmFontEngine;
 pub use frame::{frame_step, FrameStats};
 pub use input::{KeyInput, MouseInput, WheelInput};
-pub use keys::{button_from_dom, char_from_dom, key_from_dom, mods_from_event, wheel_delta_from_dom};
+pub use keys::{
+    button_from_dom, char_from_dom, key_from_dom, mods_from_event, wheel_delta_from_dom,
+};
 pub use present::Present;
 
 /// 光标 CSS 是否需要重写：值相同、且优先级已经是 `important` 时跳过。
@@ -401,7 +403,6 @@ impl WasmRuntime {
     }
 }
 
-
 /// **keydown 处理器。**
 ///
 /// 抽成函数的理由：P3 起 keydown 要挂在**两个**目标上（canvas 与隐藏 input），
@@ -449,14 +450,25 @@ fn keydown_handler(events: Rc<RefCell<VecDeque<RawEvent>>>) -> Closure<dyn FnMut
         let mods =
             keys::mods_from_event(ke.ctrl_key(), ke.shift_key(), ke.alt_key(), ke.meta_key());
         if let Some(k) = keys::key_from_dom(&code, &key) {
-            events.borrow_mut().push_back(RawEvent::KeyDown { key: k, mods });
+            events
+                .borrow_mut()
+                .push_back(RawEvent::KeyDown { key: k, mods });
         }
         // 阻止浏览器默认：Tab 跳焦点、空格滚动、Backspace 返回上一页、
         // 方向键/翻页键滚动页面。**Backspace 尤其重要**：不阻止就会跳转。
         if matches!(
             code.as_str(),
-            "Tab" | "Space" | "Backspace" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight"
-                | "Home" | "End" | "PageUp" | "PageDown"
+            "Tab"
+                | "Space"
+                | "Backspace"
+                | "ArrowUp"
+                | "ArrowDown"
+                | "ArrowLeft"
+                | "ArrowRight"
+                | "Home"
+                | "End"
+                | "PageUp"
+                | "PageDown"
         ) {
             let ev: &bindings::Event = val.unchecked_ref();
             ev.prevent_default();
@@ -474,7 +486,9 @@ fn active_is(id: &str) -> bool {
 
 /// `window` 的 `EventTarget` 视图（回调里首选它挂监听）。
 fn global_window_target() -> bindings::EventTarget {
-    let win_js: JsValue = bindings::global_window().map(JsValue::from).unwrap_or(JsValue::NULL);
+    let win_js: JsValue = bindings::global_window()
+        .map(JsValue::from)
+        .unwrap_or(JsValue::NULL);
     win_js.unchecked_into()
 }
 
@@ -563,7 +577,8 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             );
             // **记下待处理的光标位置**：命中测试需要 `tree`，回调里拿不到。
             cursor_for.set(Some((mx, my)));
-            evs.borrow_mut().push_back(RawEvent::MouseMove { x: mx, y: my });
+            evs.borrow_mut()
+                .push_back(RawEvent::MouseMove { x: mx, y: my });
         });
         let target: bindings::EventTarget = canvas_js.clone().unchecked_into();
         target.add_event_listener("mousemove", &handler);
@@ -581,8 +596,11 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         let ime_input_for_focus = ime_input.clone();
         let interacted_for = Rc::clone(&interacted_cell);
         let input_focus_for = Rc::clone(&input_had_focus_cell);
-        let canvas_for_focus =
-            Some(canvas_js.clone().unchecked_into::<bindings::HtmlCanvasElement>());
+        let canvas_for_focus = Some(
+            canvas_js
+                .clone()
+                .unchecked_into::<bindings::HtmlCanvasElement>(),
+        );
         let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
             let me: &bindings::MouseEvent = val.unchecked_ref();
             let Some(button) = keys::button_from_dom(me.button()) else {
@@ -651,12 +669,8 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             let we: &bindings::WheelEvent = val.unchecked_ref();
             // WheelEvent 继承 MouseEvent：坐标与修饰键都能从同一个 JS 对象取。
             let me: &bindings::MouseEvent = val.unchecked_ref();
-            let mods = keys::mods_from_event(
-                me.ctrl_key(),
-                me.shift_key(),
-                me.alt_key(),
-                me.meta_key(),
-            );
+            let mods =
+                keys::mods_from_event(me.ctrl_key(), me.shift_key(), me.alt_key(), me.meta_key());
             evs.borrow_mut().push_back(RawEvent::Wheel {
                 x: me.offset_x() as f32,
                 y: keys::to_ui_y(canvas_h.get(), me.offset_y() as f32),
@@ -716,8 +730,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                     composition: true,
                 });
             });
-            let target: bindings::EventTarget =
-                global_window_target();
+            let target: bindings::EventTarget = global_window_target();
             target.add_event_listener("compositionstart", &handler);
             listeners.push(Listener {
                 target,
@@ -738,8 +751,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                     composition: true,
                 });
             });
-            let target: bindings::EventTarget =
-                global_window_target();
+            let target: bindings::EventTarget = global_window_target();
             target.add_event_listener("compositionupdate", &handler);
             listeners.push(Listener {
                 target,
@@ -765,8 +777,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                     });
                 }
             });
-            let target: bindings::EventTarget =
-                global_window_target();
+            let target: bindings::EventTarget = global_window_target();
             target.add_event_listener("compositionend", &handler);
             listeners.push(Listener {
                 target,
@@ -808,7 +819,6 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             });
         }
 
-
         // ---- blur\uff1a\u9690\u85cf input \u79bb\u7126\u2192\u6e05\u6389\u53bb\u91cd\u6807\u8bb0 ----
         {
             let last_for = Rc::clone(&last_committed);
@@ -824,7 +834,6 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             });
         }
     }
-
 
     // ---- window resize（P4）----
     //

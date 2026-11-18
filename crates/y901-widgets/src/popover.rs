@@ -158,7 +158,11 @@ mod tests {
             Box::new(TextLabel::new("t", "hello")) as Box<dyn Widget>
         });
         let mut cache = LayoutCache::new();
-        let s = p.measure(&Metrics, Constraints::loose(Size::new(400.0, 400.0)), &mut cache);
+        let s = p.measure(
+            &Metrics,
+            Constraints::loose(Size::new(400.0, 400.0)),
+            &mut cache,
+        );
         assert_eq!((s.w, s.h), (80.0, 24.0), "锚点尺寸必须非零，否则收不到事件");
     }
 
@@ -172,12 +176,18 @@ mod tests {
         let mut ctx = EventCtx::new(None, Size::new(200.0, 200.0));
         p.event(
             &mut ctx,
-            &UiEvent::MouseUp { pos: Pos::new(150.0, 150.0), button: y901_ui::MouseButton::Left },
+            &UiEvent::MouseUp {
+                pos: Pos::new(150.0, 150.0),
+                button: y901_ui::MouseButton::Left,
+            },
         );
         assert!(ctx.popup_requests.is_empty(), "锚点外不应请求");
         p.event(
             &mut ctx,
-            &UiEvent::MouseUp { pos: Pos::new(20.0, 20.0), button: y901_ui::MouseButton::Left },
+            &UiEvent::MouseUp {
+                pos: Pos::new(20.0, 20.0),
+                button: y901_ui::MouseButton::Left,
+            },
         );
         assert_eq!(ctx.popup_requests.len(), 1);
         assert_eq!(ctx.popup_requests[0].anchor.w, 80.0);

@@ -60,14 +60,15 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetCursor, SetWindowLongPtrW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW,
     CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW, IDC_HAND, IDC_IBEAM,
     IDC_SIZEALL, IDC_SIZENS, IDC_SIZEWE, MSG, PM_REMOVE, QS_ALLINPUT, SW_SHOW, WM_CHAR, WM_DESTROY,
-    WM_DPICHANGED, WM_DROPFILES, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_NCCREATE, WM_NCDESTROY, WM_NULL, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP,
-    WM_SETCURSOR, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+    WM_DPICHANGED, WM_DROPFILES, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
+    WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+    WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_NULL, WM_PAINT,
+    WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN,
+    WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetWindowRect, MoveWindow, SetWindowPos, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOACTIVATE, SWP_NOZORDER, WS_POPUP, WS_VISIBLE,
+    GetWindowRect, MoveWindow, SetWindowPos, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_POPUP, WS_VISIBLE,
 };
 
 use y901_runtime::{Options, RawEvent};
@@ -509,22 +510,21 @@ fn build_soft_font_engine(
 ) -> Result<(Box<dyn crate::backend::font::FontEngine>, y901_ui::Size), String> {
     let (cw, ch) = crate::backend::font::cell_metrics_for(size);
     let cell = y901_ui::Size::new(cw, ch);
-    let engine: Box<dyn crate::backend::font::FontEngine> =
-        if std::env::var("Y901_FONT")
-            .map(|v| v == "self")
-            .unwrap_or(false)
-        {
-            Box::new(
-                y901_render::MyFontEngine::new(
-                    y901_render::load_font(&y901_render::resolve_font_path(family)).unwrap_or_default(),
-                    size,
-                    cell,
-                )
-                .map_err(|e| format!("MyFontEngine init failed: {e}"))?,
+    let engine: Box<dyn crate::backend::font::FontEngine> = if std::env::var("Y901_FONT")
+        .map(|v| v == "self")
+        .unwrap_or(false)
+    {
+        Box::new(
+            y901_render::MyFontEngine::new(
+                y901_render::load_font(&y901_render::resolve_font_path(family)).unwrap_or_default(),
+                size,
+                cell,
             )
-        } else {
-            Box::new(crate::backend::font::TextEngine::new(family, size, cw, ch)?)
-        };
+            .map_err(|e| format!("MyFontEngine init failed: {e}"))?,
+        )
+    } else {
+        Box::new(crate::backend::font::TextEngine::new(family, size, cw, ch)?)
+    };
     Ok((engine, cell))
 }
 
@@ -644,7 +644,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_CHAR => {
             // 临时诊断：确认 wndproc 到底收到了什么键。
-                        // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
+            // borderless fullscreen 没有标题栏与关闭按钮，必须给用户一条出路。
             // 只在全屏下生效：普通窗口的 Esc 仍作为普通按键上报（用户可能用它取消输入）。
             if is_fullscreen_window(hwnd) && msg == WM_KEYDOWN && wparam as u32 == VK_ESCAPE as u32
             {
@@ -1155,8 +1155,7 @@ impl Window {
                         right: 0,
                         bottom: 0,
                     };
-                    if GetWindowRect(self.hwnd, &mut q) != 0 {
-                                            }
+                    if GetWindowRect(self.hwnd, &mut q) != 0 {}
                 }
             } else {
                 // `SetWindowLongPtrW` 返回 0 既可能是“旧样式本就是 0”也可能是失败，
@@ -1191,8 +1190,7 @@ impl Window {
                     right: 0,
                     bottom: 0,
                 };
-                if GetWindowRect(self.hwnd, &mut q) != 0 {
-                                    }
+                if GetWindowRect(self.hwnd, &mut q) != 0 {}
             }
         }
         self.fullscreen = on;

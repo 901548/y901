@@ -14,7 +14,7 @@ use std::rc::Rc;
 use y901_ui::widget::FlexItem;
 use y901_ui::{
     Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Role, Semantics, Size, State,
-    TextStyle, TextMetrics, UiEvent, Widget,
+    TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 闭合框高度。
@@ -101,7 +101,12 @@ impl ComboBox {
 
     /// 闭合框矩形。
     fn box_rect(&self) -> Rect {
-        Rect::new(self.rect.x, self.rect.y, self.rect.w, (BOX_H * self.scale).min(self.rect.h))
+        Rect::new(
+            self.rect.x,
+            self.rect.y,
+            self.rect.w,
+            (BOX_H * self.scale).min(self.rect.h),
+        )
     }
 
     /// 当前显示的文字。
@@ -249,10 +254,7 @@ impl Widget for ComboBox {
                     width: self.box_rect().w.max(LIST_MIN_W),
                     rect: Rect::ZERO,
                 };
-                ctx.request_popup(
-                    Box::new(move || Box::new(list)),
-                    self.box_rect(),
-                );
+                ctx.request_popup(Box::new(move || Box::new(list)), self.box_rect());
                 EventResult::Redraw
             }
             _ => EventResult::Ignored,
@@ -290,7 +292,11 @@ impl Widget for ComboBox {
         let is_placeholder = self.selected.is_none();
         let style = TextStyle::fg(if is_placeholder { muted } else { text_fg });
         let ty = b.y + (b.h - ctx.line_height(&style)) * 0.5;
-        ctx.draw_text(Pos::new(b.x + 10.0 * self.scale, ty), self.display_text(), &style);
+        ctx.draw_text(
+            Pos::new(b.x + 10.0 * self.scale, ty),
+            self.display_text(),
+            &style,
+        );
 
         let arrow = "▾";
         let astyle = TextStyle::fg(muted);
@@ -347,7 +353,10 @@ impl Widget for ComboList {
         _c: Constraints,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
-        Size::new(self.width, self.items.len() as f32 * ITEM_H + LIST_PAD * 2.0)
+        Size::new(
+            self.width,
+            self.items.len() as f32 * ITEM_H + LIST_PAD * 2.0,
+        )
     }
 
     fn arrange(
@@ -476,7 +485,10 @@ mod tests {
         assert!(ctx.popup_requests.is_empty());
         let r = cb.event(
             &mut ctx,
-            &UiEvent::MouseUp { pos: Pos::new(20.0, 10.0), button: y901_ui::MouseButton::Left },
+            &UiEvent::MouseUp {
+                pos: Pos::new(20.0, 10.0),
+                button: y901_ui::MouseButton::Left,
+            },
         );
         assert_eq!(r, EventResult::Redraw);
         assert_eq!(ctx.popup_requests.len(), 1, "点击闭合框应请求弹出列表");
@@ -485,7 +497,10 @@ mod tests {
 
     #[test]
     fn popup_writes_selection_back_to_combo() {
-        let mut cb = ComboBox::new("c", vec!["a", "b"]).command(y901_ui::Command::app("combo_box:select", y901_ui::json::Json::Null));
+        let mut cb = ComboBox::new("c", vec!["a", "b"]).command(y901_ui::Command::app(
+            "combo_box:select",
+            y901_ui::json::Json::Null,
+        ));
         let mut cache = LayoutCache::new();
         cb.arrange(Rect::new(0.0, 0.0, 200.0, BOX_H), &Metrics, &mut cache);
         // 模拟 popup 侧写入 index 1
@@ -512,7 +527,11 @@ mod tests {
             rect: Rect::ZERO,
         };
         let mut cache = y901_ui::layout::LayoutCache::new();
-        list.arrange(Rect::new(0.0, 0.0, 200.0, 3.0 * ITEM_H), &Metrics, &mut cache);
+        list.arrange(
+            Rect::new(0.0, 0.0, 200.0, 3.0 * ITEM_H),
+            &Metrics,
+            &mut cache,
+        );
         list
     }
 
@@ -527,7 +546,10 @@ mod tests {
     fn escape_closes_without_changing_selection() {
         let mut list = popup_list(Some(1), 3);
         let mut ctx = EventCtx::new(None, Size::new(400.0, 400.0));
-        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Escape)), EventResult::Redraw);
+        assert_eq!(
+            list.event(&mut ctx, &key(y901_ui::Key::Escape)),
+            EventResult::Redraw
+        );
         assert_eq!(ctx.close_popup_requests.len(), 1, "Esc 应请求关闭浮层");
         assert_eq!(list.shared.get(), None, "Esc 不应改变选中");
     }
@@ -536,12 +558,21 @@ mod tests {
     fn down_moves_highlight_and_stops_at_bottom() {
         let mut list = popup_list(Some(0), 3);
         let mut ctx = EventCtx::new(None, Size::new(400.0, 400.0));
-        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Down)), EventResult::Redraw);
+        assert_eq!(
+            list.event(&mut ctx, &key(y901_ui::Key::Down)),
+            EventResult::Redraw
+        );
         assert_eq!(list.highlight, 1);
-        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Down)), EventResult::Redraw);
+        assert_eq!(
+            list.event(&mut ctx, &key(y901_ui::Key::Down)),
+            EventResult::Redraw
+        );
         assert_eq!(list.highlight, 2);
         // 已到最后一项：再按不动（停住，不循环）
-        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Down)), EventResult::Handled);
+        assert_eq!(
+            list.event(&mut ctx, &key(y901_ui::Key::Down)),
+            EventResult::Handled
+        );
         assert_eq!(list.highlight, 2);
     }
 
@@ -549,9 +580,15 @@ mod tests {
     fn up_moves_highlight_and_stops_at_top() {
         let mut list = popup_list(Some(1), 3);
         let mut ctx = EventCtx::new(None, Size::new(400.0, 400.0));
-        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Up)), EventResult::Redraw);
+        assert_eq!(
+            list.event(&mut ctx, &key(y901_ui::Key::Up)),
+            EventResult::Redraw
+        );
         assert_eq!(list.highlight, 0);
-        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Up)), EventResult::Handled);
+        assert_eq!(
+            list.event(&mut ctx, &key(y901_ui::Key::Up)),
+            EventResult::Handled
+        );
         assert_eq!(list.highlight, 0);
     }
 
@@ -561,7 +598,10 @@ mod tests {
         let mut ctx = EventCtx::new(None, Size::new(400.0, 400.0));
         let _ = list.event(&mut ctx, &key(y901_ui::Key::Down));
         let _ = list.event(&mut ctx, &key(y901_ui::Key::Down));
-        assert_eq!(list.event(&mut ctx, &key(y901_ui::Key::Enter)), EventResult::Redraw);
+        assert_eq!(
+            list.event(&mut ctx, &key(y901_ui::Key::Enter)),
+            EventResult::Redraw
+        );
         assert_eq!(list.shared.get(), Some(2), "应提交高亮项");
         assert_eq!(ctx.close_popup_requests.len(), 1);
     }
@@ -570,6 +610,9 @@ mod tests {
     fn exposes_select_action() {
         let cb = ComboBox::new("c", vec!["a", "b"]);
         let acts = cb.semantics().actions;
-        assert!(acts.iter().any(|a| a.name == "select"), "combo_box 应暴露 select");
+        assert!(
+            acts.iter().any(|a| a.name == "select"),
+            "combo_box 应暴露 select"
+        );
     }
 }

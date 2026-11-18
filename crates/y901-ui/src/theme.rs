@@ -235,7 +235,16 @@ impl Theme {
 
     /// 默认暗色主题。组件不得再硬编码颜色。
     pub const DARK: Theme = Theme {
-        slots: ["panel", "button", "text_input", "text", "list", "scrollbar", "list_item", "window"],
+        slots: [
+            "panel",
+            "button",
+            "text_input",
+            "text",
+            "list",
+            "scrollbar",
+            "list_item",
+            "window",
+        ],
         table: [
             // panel
             [
@@ -426,7 +435,16 @@ impl Theme {
 
 /// 高对比主题：证明"换肤"是真的（组件不持有任何颜色）。
 pub const LIGHT: Theme = Theme {
-    slots: ["panel", "button", "text_input", "text", "list", "scrollbar", "list_item", "window"],
+    slots: [
+        "panel",
+        "button",
+        "text_input",
+        "text",
+        "list",
+        "scrollbar",
+        "list_item",
+        "window",
+    ],
     table: [
         [
             Style::new(

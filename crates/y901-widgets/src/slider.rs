@@ -127,12 +127,7 @@ impl Slider {
     fn thumb(&self, scale: f32) -> Rect {
         let cx = self.thumb_center_x(scale);
         let t = thumb_size(scale);
-        Rect::new(
-            cx - t * 0.5,
-            self.rect.y + (self.rect.h - t) * 0.5,
-            t,
-            t,
-        )
+        Rect::new(cx - t * 0.5, self.rect.y + (self.rect.h - t) * 0.5, t, t)
     }
 
     /// 把屏幕 x 换算成值（clamp 到 0..=1）。

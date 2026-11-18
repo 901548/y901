@@ -64,7 +64,10 @@ mod tests {
             assert!((a.w - ACTION_W * scale).abs() < 0.01);
             assert!((a.h - ACTION_H * scale).abs() < 0.01);
             assert!(((a.x + a.w * 0.5) - 200.0).abs() < 0.01, "按钮应水平居中");
-            assert!((a.bottom() - (300.0 - 8.0 * scale)).abs() < 0.01, "按钮应贴底 8px");
+            assert!(
+                (a.bottom() - (300.0 - 8.0 * scale)).abs() < 0.01,
+                "按钮应贴底 8px"
+            );
         }
     }
 }

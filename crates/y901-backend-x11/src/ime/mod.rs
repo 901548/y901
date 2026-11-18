@@ -61,7 +61,7 @@ pub trait ImeClient: Send {
 
 /// **降级实现**：没有输入法（IBus 未运行 / 非 Linux / D-Bus 不可用）。
 ///
-/// 语义保证：`filter_key` 永远 `Forward`、`take_events` 永远空 —— 
+/// 语义保证：`filter_key` 永远 `Forward`、`take_events` 永远空 ——
 /// 因此"没有 IME"与"IME 关闭"在事件流上**完全不可区分**。
 #[derive(Debug, Default)]
 pub struct NoIme;
@@ -124,7 +124,8 @@ mod tests {
         tx.send(ImeEvent::Preedit("ni".into())).unwrap();
         tx.send(ImeEvent::Preedit("ni".into())).unwrap();
         tx.send(ImeEvent::Preedit("nih".into())).unwrap();
-        tx.send(ImeEvent::Commit("\u{4f60}\u{597d}".into())).unwrap();
+        tx.send(ImeEvent::Commit("\u{4f60}\u{597d}".into()))
+            .unwrap();
         let evs = drain(&rx);
         assert_eq!(
             evs,

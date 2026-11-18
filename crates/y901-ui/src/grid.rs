@@ -392,7 +392,11 @@ impl Grid {
     ) -> Vec<f32> {
         let m = tracks.len().max(1);
         // 同 `resolve_tracks`：无界可用空间时退化为"只看内容"，不要算出 inf。
-        let available = if available.is_finite() { available } else { 0.0 };
+        let available = if available.is_finite() {
+            available
+        } else {
+            0.0
+        };
         let mut p = vec![0.0f32; m + 1];
 
         // 约束按"终点 b"分桶，便于一遍扫描

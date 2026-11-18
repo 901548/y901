@@ -133,7 +133,11 @@ fn glyphs_of_different_heights_share_one_baseline() {
     for ch in ['L', 'o', '8', 'H'] {
         let (mut s, _cell) = canvas(16.0);
         s.clear();
-        s.draw_text(Pos::new(8.0, 8.0), &ch.to_string(), &TextStyle::fg(Color::WHITE));
+        s.draw_text(
+            Pos::new(8.0, 8.0),
+            &ch.to_string(),
+            &TextStyle::fg(Color::WHITE),
+        );
         let (_, _, _, y1) = ink_bbox(&s).unwrap_or_else(|| panic!("{ch:?} 应有墨迹"));
         eprintln!("[glyph] {ch:?} 墨迹底边 y = {y1}");
         bottoms.push((ch, y1));
@@ -151,10 +155,7 @@ fn glyphs_of_different_heights_share_one_baseline() {
     s.clear();
     s.draw_text(Pos::new(8.0, 8.0), "g", &TextStyle::fg(Color::WHITE));
     let (_, _, _, gy1) = ink_bbox(&s).expect("g 应有墨迹");
-    assert!(
-        gy1 > base,
-        "'g' 的下伸应低于基线：g={gy1}, 基线={base}"
-    );
+    assert!(gy1 > base, "'g' 的下伸应低于基线：g={gy1}, 基线={base}");
 }
 
 /// 字形必须落在自己的行盒里（不整体下移一个行高）。
@@ -166,11 +167,7 @@ fn text_stays_inside_its_line_box() {
     s.clear();
     // `cell` 是行盒高度；字形的墨迹不得越过盒子的底边太多（下伸除外）。
     let _ = cell;
-    s.draw_text(
-        Pos::new(8.0, origin_y),
-        "Lo8",
-        &TextStyle::fg(Color::WHITE),
-    );
+    s.draw_text(Pos::new(8.0, origin_y), "Lo8", &TextStyle::fg(Color::WHITE));
     let (_, y0, _, y1) = ink_bbox(&s).expect("应有墨迹");
     let box_bottom = origin_y + px;
     eprintln!("[glyph] 行盒 y {origin_y}..{box_bottom}，墨迹 y {y0}..{y1}");

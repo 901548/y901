@@ -59,12 +59,7 @@ impl Widget for Scene {
         let _ = self.bar.measure(m, c, cache);
         c.constrain(Size::new(c.max.w, c.max.h))
     }
-    fn arrange(
-        &mut self,
-        r: Rect,
-        m: &dyn TextMetrics,
-        cache: &mut y901_ui::layout::LayoutCache,
-    ) {
+    fn arrange(&mut self, r: Rect, m: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
         self.rect = r;
         // 布局段放在下方空白带（原绘制占 y+0..140，背景条到 y+140）。
         let bar_rect = Rect::new(r.x + 12.0, r.y + 146.0, (r.w - 24.0).max(0.0), 40.0);

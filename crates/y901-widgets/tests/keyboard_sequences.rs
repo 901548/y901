@@ -99,7 +99,12 @@ fn backspace_after_typing_clears_everything() {
     for i in 0..3 {
         press(&mut tree, y901_ui::Key::Backspace);
         let expect = &"abc"[..2 - i];
-        assert_eq!(text_of(&mut tree), expect, "第 {} 次 Backspace 后应为 {expect:?}", i + 1);
+        assert_eq!(
+            text_of(&mut tree),
+            expect,
+            "第 {} 次 Backspace 后应为 {expect:?}",
+            i + 1
+        );
     }
     assert_eq!(text_of(&mut tree), "", "三次 Backspace 必须删光");
 }
@@ -113,7 +118,11 @@ fn twenty_chars_then_twenty_backspaces() {
     for _ in 0..20 {
         press(&mut tree, y901_ui::Key::Backspace);
     }
-    assert_eq!(text_of(&mut tree), "", "20 次 Backspace 后必须为空（一次都不能丢）");
+    assert_eq!(
+        text_of(&mut tree),
+        "",
+        "20 次 Backspace 后必须为空（一次都不能丢）"
+    );
     // 再按一次：空串上 Backspace 不应 panic / 不应有负索引
     press(&mut tree, y901_ui::Key::Backspace);
     assert_eq!(text_of(&mut tree), "");
@@ -130,7 +139,11 @@ fn backspace_works_after_composition_commit() {
     assert_eq!(text_of(&mut tree), "你好", "前置：中文已提交");
 
     press(&mut tree, y901_ui::Key::Backspace);
-    assert_eq!(text_of(&mut tree), "你", "组字结束后的第一个 Backspace 必须生效（回归点）");
+    assert_eq!(
+        text_of(&mut tree),
+        "你",
+        "组字结束后的第一个 Backspace 必须生效（回归点）"
+    );
     press(&mut tree, y901_ui::Key::Backspace);
     assert_eq!(text_of(&mut tree), "", "第二次 Backspace 也要生效");
 }
@@ -169,7 +182,11 @@ fn backspace_survives_focus_loss_and_regain() {
     tree.dispatch(&UiEvent::Focus(true));
 
     press(&mut tree, y901_ui::Key::Backspace);
-    assert_eq!(text_of(&mut tree), "ab", "焦点恢复后 Backspace 必须立即生效");
+    assert_eq!(
+        text_of(&mut tree),
+        "ab",
+        "焦点恢复后 Backspace 必须立即生效"
+    );
 }
 
 // ---- 4. 中文提交后立刻打英文 ----

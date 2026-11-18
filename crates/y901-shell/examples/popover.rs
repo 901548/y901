@@ -11,7 +11,9 @@ impl Host for H {
     fn idle(&mut self, tree: &mut UiTree) {
         for _ in tree.poll_subscriptions(Instant::now()) {}
     }
-    fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool { false }
+    fn command(&mut self, _t: &mut UiTree, _c: Command) -> bool {
+        false
+    }
 }
 
 fn build() -> UiTree {
@@ -27,8 +29,12 @@ fn build() -> UiTree {
                 .padding(Edges::all(12.0))
                 .gap(8.0)
                 .push(Box::new(TextLabel::new("p-title", "导出设置").size(14.0)))
-                .push(Box::new(TextLabel::new("p-desc", "包含图片与元数据").size(12.0)))
-                .push(Box::new(Button::new("p-ok", "导出").flex_item(FlexItem::height(28.0)))),
+                .push(Box::new(
+                    TextLabel::new("p-desc", "包含图片与元数据").size(12.0),
+                ))
+                .push(Box::new(
+                    Button::new("p-ok", "导出").flex_item(FlexItem::height(28.0)),
+                )),
         ) as Box<dyn Widget>
     });
 
@@ -36,12 +42,24 @@ fn build() -> UiTree {
         .background(bg)
         .padding(Edges::all(24.0))
         .gap(12.0)
-        .push(Box::new(Button::new("trigger", "导出…").flex_item(FlexItem::height(32.0))))
-        .push(Box::new(TextLabel::new("hint", "点击下方区域展开").size(12.0)))
+        .push(Box::new(
+            Button::new("trigger", "导出…").flex_item(FlexItem::height(32.0)),
+        ))
+        .push(Box::new(
+            TextLabel::new("hint", "点击下方区域展开").size(12.0),
+        ))
         .push(Box::new(pop));
     UiTree::new(Box::new(root))
 }
 
 fn main() -> Result<(), String> {
-    create_runtime().run(Box::new(H), Box::new(build), Options { width: 560, height: 420, ..Default::default() })
+    create_runtime().run(
+        Box::new(H),
+        Box::new(build),
+        Options {
+            width: 560,
+            height: 420,
+            ..Default::default()
+        },
+    )
 }

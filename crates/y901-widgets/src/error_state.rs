@@ -7,7 +7,7 @@
 use y901_ui::widget::FlexItem;
 use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Role, Semantics, Size, State,
-    TextStyle, TextMetrics, UiEvent, Widget,
+    TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 内圈直径（从图标直径派生，避免两个磁数各自漂移）。
@@ -61,7 +61,11 @@ impl ErrorState {
 
     /// 期望高度：图标 + 标题 +（说明）+（按钮）。
     fn content_height(&self) -> f32 {
-        super::state_layout::content_height(self.scale, self.description.is_some(), self.action.is_some())
+        super::state_layout::content_height(
+            self.scale,
+            self.description.is_some(),
+            self.action.is_some(),
+        )
     }
 }
 
@@ -132,7 +136,12 @@ impl Widget for ErrorState {
         let cx = self.rect.x + self.rect.w * 0.5;
         // 错误红圆形占位（半透明底 + 实心内圈）
         ctx.fill_round_rect(
-            Rect::new(cx - super::state_layout::ICON_D * self.scale * 0.5, y, super::state_layout::ICON_D * self.scale, super::state_layout::ICON_D * self.scale),
+            Rect::new(
+                cx - super::state_layout::ICON_D * self.scale * 0.5,
+                y,
+                super::state_layout::ICON_D * self.scale,
+                super::state_layout::ICON_D * self.scale,
+            ),
             Color::rgba(error_red.r, error_red.g, error_red.b, 0.18),
             (super::state_layout::ICON_D * self.scale) * 0.5,
         );
@@ -167,7 +176,8 @@ impl Widget for ErrorState {
             ctx.fill_round_rect(self.action_rect, accent, 6.0);
             let style = TextStyle::fg(Color::WHITE);
             let lw = ctx.measure_text(label, &style).w;
-            let ly = self.action_rect.y + (super::state_layout::ACTION_H * self.scale - ctx.line_height(&style)) * 0.5;
+            let ly = self.action_rect.y
+                + (super::state_layout::ACTION_H * self.scale - ctx.line_height(&style)) * 0.5;
             ctx.draw_text(
                 Pos::new(self.action_rect.x + (self.action_rect.w - lw) * 0.5, ly),
                 label,
@@ -213,7 +223,10 @@ mod tests {
         let mut a = ErrorState::new("e", "加载失败");
         let mut b = ErrorState::new("e", "加载失败")
             .description("连接超时")
-            .action("确定", y901_ui::Command::app("error_state:activate", y901_ui::json::Json::Null));
+            .action(
+                "确定",
+                y901_ui::Command::app("error_state:activate", y901_ui::json::Json::Null),
+            );
         let mut cache = LayoutCache::new();
         let c = Constraints::loose(Size::new(400.0, 400.0));
         assert!(b.measure(&Metrics, c, &mut cache).h > a.measure(&Metrics, c, &mut cache).h);
@@ -221,15 +234,29 @@ mod tests {
 
     #[test]
     fn retry_only_fires_inside_its_rect() {
-        
-        let mut e = ErrorState::new("e", "t").action("确定", y901_ui::Command::app("error_state:activate", y901_ui::json::Json::Null));
+        let mut e = ErrorState::new("e", "t").action(
+            "确定",
+            y901_ui::Command::app("error_state:activate", y901_ui::json::Json::Null),
+        );
         let mut cache = LayoutCache::new();
         e.arrange(Rect::new(0.0, 0.0, 400.0, 200.0), &Metrics, &mut cache);
         let mut ctx = EventCtx::new(None, Size::new(400.0, 200.0));
-        e.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(4.0, 4.0), button: y901_ui::MouseButton::Left });
+        e.event(
+            &mut ctx,
+            &UiEvent::MouseUp {
+                pos: Pos::new(4.0, 4.0),
+                button: y901_ui::MouseButton::Left,
+            },
+        );
         assert!(ctx.commands.is_empty());
         let r = e.action_rect;
-        e.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(r.x + 4.0, r.y + 4.0), button: y901_ui::MouseButton::Left });
+        e.event(
+            &mut ctx,
+            &UiEvent::MouseUp {
+                pos: Pos::new(r.x + 4.0, r.y + 4.0),
+                button: y901_ui::MouseButton::Left,
+            },
+        );
         assert_eq!(ctx.commands.len(), 1);
     }
 }

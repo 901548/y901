@@ -7,7 +7,7 @@
 use y901_ui::widget::FlexItem;
 use y901_ui::{
     Align, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Role, Semantics, Size, State,
-    TextStyle, TextMetrics, UiEvent, Widget,
+    TextMetrics, TextStyle, UiEvent, Widget,
 };
 
 /// 空状态占位。
@@ -58,7 +58,11 @@ impl EmptyState {
 
     /// 期望高度：图标 + 标题 +（说明）+（按钮）+ 间距。
     fn content_height(&self) -> f32 {
-        super::state_layout::content_height(self.scale, self.description.is_some(), self.action.is_some())
+        super::state_layout::content_height(
+            self.scale,
+            self.description.is_some(),
+            self.action.is_some(),
+        )
     }
 }
 
@@ -142,7 +146,12 @@ impl Widget for EmptyState {
         // 图标占位：一个圆
         let cx = self.rect.x + self.rect.w * 0.5;
         ctx.fill_round_rect(
-            Rect::new(cx - super::state_layout::ICON_D * self.scale * 0.5, y, super::state_layout::ICON_D * self.scale, super::state_layout::ICON_D * self.scale),
+            Rect::new(
+                cx - super::state_layout::ICON_D * self.scale * 0.5,
+                y,
+                super::state_layout::ICON_D * self.scale,
+                super::state_layout::ICON_D * self.scale,
+            ),
             icon_bg,
             (super::state_layout::ICON_D * self.scale) * 0.5,
         );
@@ -151,11 +160,7 @@ impl Widget for EmptyState {
         // 标题（居中）
         let title_style = TextStyle::fg(text_fg);
         let tw = ctx.measure_text(&self.title, &title_style).w;
-        ctx.draw_text(
-            Pos::new(cx - tw * 0.5, y),
-            &self.title,
-            &title_style,
-        );
+        ctx.draw_text(Pos::new(cx - tw * 0.5, y), &self.title, &title_style);
         y += 24.0 * self.scale;
 
         // 说明（居中）
@@ -171,7 +176,8 @@ impl Widget for EmptyState {
             ctx.fill_round_rect(self.action_rect, accent, 6.0);
             let style = TextStyle::fg(y901_ui::Color::WHITE);
             let lw = ctx.measure_text(label, &style).w;
-            let ly = self.action_rect.y + (super::state_layout::ACTION_H * self.scale - ctx.line_height(&style)) * 0.5;
+            let ly = self.action_rect.y
+                + (super::state_layout::ACTION_H * self.scale - ctx.line_height(&style)) * 0.5;
             ctx.draw_text(
                 Pos::new(self.action_rect.x + (self.action_rect.w - lw) * 0.5, ly),
                 label,
@@ -217,7 +223,10 @@ mod tests {
         let mut a = EmptyState::new("e", "暂无数据");
         let mut b = EmptyState::new("e", "暂无数据")
             .description("点击上方按钮创建")
-            .action("确定", y901_ui::Command::app("empty_state:activate", y901_ui::json::Json::Null));
+            .action(
+                "确定",
+                y901_ui::Command::app("empty_state:activate", y901_ui::json::Json::Null),
+            );
         let mut cache = LayoutCache::new();
         let c = Constraints::loose(Size::new(400.0, 400.0));
         let ha = a.measure(&Metrics, c, &mut cache).h;
@@ -227,17 +236,31 @@ mod tests {
 
     #[test]
     fn action_only_fires_inside_its_rect() {
-        
-        let mut e = EmptyState::new("e", "t").action("确定", y901_ui::Command::app("empty_state:activate", y901_ui::json::Json::Null));
+        let mut e = EmptyState::new("e", "t").action(
+            "确定",
+            y901_ui::Command::app("empty_state:activate", y901_ui::json::Json::Null),
+        );
         let mut cache = LayoutCache::new();
         e.arrange(Rect::new(0.0, 0.0, 400.0, 200.0), &Metrics, &mut cache);
         let mut ctx = EventCtx::new(None, Size::new(400.0, 200.0));
         // 在按钮外点一下：不触发
-        e.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(4.0, 4.0), button: y901_ui::MouseButton::Left });
+        e.event(
+            &mut ctx,
+            &UiEvent::MouseUp {
+                pos: Pos::new(4.0, 4.0),
+                button: y901_ui::MouseButton::Left,
+            },
+        );
         assert!(ctx.commands.is_empty());
         // 在按钮内点一下：触发
         let c = e.action_rect;
-        e.event(&mut ctx, &UiEvent::MouseUp { pos: Pos::new(c.x + 4.0, c.y + 4.0), button: y901_ui::MouseButton::Left });
+        e.event(
+            &mut ctx,
+            &UiEvent::MouseUp {
+                pos: Pos::new(c.x + 4.0, c.y + 4.0),
+                button: y901_ui::MouseButton::Left,
+            },
+        );
         assert_eq!(ctx.commands.len(), 1);
     }
 }
