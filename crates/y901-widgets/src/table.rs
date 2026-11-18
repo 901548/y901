@@ -190,7 +190,22 @@ impl Table {
         out
     }
 
-    /// 命中测试：返回鼠标所在行（不含表头）。
+    /// 表头绘制区域。UI 坐标 y 轴向下，因此表头位于矩形顶部。
+    fn header_rect(&self) -> Rect {
+        Rect::new(self.rect.x, self.rect.y, self.rect.w, HEADER_H * self.scale)
+    }
+
+    /// 第 `index` 行的绘制区域（第 0 行紧贴表头下方）。
+    fn row_rect(&self, index: usize) -> Rect {
+        Rect::new(
+            self.rect.x,
+            self.rect.y + (HEADER_H + index as f32 * ROW_H) * self.scale,
+            self.rect.w,
+            ROW_H * self.scale,
+        )
+    }
+
+    /// 命中测试：返回鼠标所在行（不含表头），与绘制坐标从上往下对应。
     fn row_at(&self, pos: Pos) -> Option<usize> {
         if !self.rect.contains(pos) {
             return None;
@@ -315,16 +330,8 @@ impl Widget for Table {
 
         ctx.push_clip(self.rect);
 
-        // 表头
-        // **表头画在 `rect` 底部**：帧在 `present` 层做了 Y 转置，
-        // 若这里仍从 `rect.y` 向下画，上屏后会变成"表头在下、数据在上"。
-        // 改为从底部起算，经转置后就回到"表头最上、数据逐行向下"。
-        let header = Rect::new(
-            self.rect.x,
-            self.rect.y + self.rect.h - HEADER_H * self.scale,
-            self.rect.w,
-            HEADER_H * self.scale,
-        );
+        // UI 坐标系和后端缓冲都以左上为原点，Y 向下；表头绘制在顶部。
+        let header = self.header_rect();
         let header_bg = self.style.and_then(|s| s.bg).unwrap_or(header_bg);
         ctx.fill_rect(header, header_bg);
         let cols = self.column_layout();
@@ -340,8 +347,9 @@ impl Widget for Table {
         // 行
         let mut visible = 0usize;
         for (r, cells) in self.rows.iter().enumerate() {
-            let y = header.y - (r + 1) as f32 * ROW_H * self.scale;
-            if y + ROW_H * self.scale <= self.rect.y {
+            let row_rect = self.row_rect(r);
+            let y = row_rect.y;
+            if y >= self.rect.y + self.rect.h {
                 break;
             }
             let bg = if self.selected == Some(r) {
@@ -430,6 +438,38 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RectRecorder {
+        fills: Vec<Rect>,
+    }
+
+    impl TextMetrics for RectRecorder {
+        fn measure_text(&self, t: &str, _s: &TextStyle) -> Size {
+            Size::new(t.chars().count() as f32 * 7.0, 14.0)
+        }
+        fn line_height(&self, _s: &TextStyle) -> f32 {
+            14.0
+        }
+        fn scale(&self) -> f32 {
+            1.0
+        }
+    }
+
+    impl RenderCtx for RectRecorder {
+        fn size(&self) -> Size {
+            Size::new(400.0, 300.0)
+        }
+        fn fill_rect(&mut self, rect: Rect, _color: Color) {
+            self.fills.push(rect);
+        }
+        fn stroke_rect(&mut self, _rect: Rect, _color: Color, _width: f32) {}
+        fn draw_text(&mut self, _origin: Pos, _text: &str, _style: &TextStyle) -> f32 {
+            0.0
+        }
+        fn push_clip(&mut self, _rect: Rect) {}
+        fn pop_clip(&mut self) {}
+    }
+
     #[test]
     fn construct_and_measure() {
         let mut t = Table::new("t")
@@ -447,11 +487,57 @@ mod tests {
     }
 
     #[test]
-    fn row_hit_test_respects_header() {
-        let mut t = Table::new("t").column(TableColumn::flex("c")).row(vec!["x".into()]);
-        t.rect = Rect::new(0.0, 0.0, 200.0, 100.0);
-        assert_eq!(t.row_at(Pos::new(10.0, 10.0)), None, "表头不应命中行");
-        assert_eq!(t.row_at(Pos::new(10.0, HEADER_H + 5.0)), Some(0));
+    fn top_down_row_geometry_matches_hit_testing() {
+        let mut t = Table::new("t")
+            .column(TableColumn::flex("c"))
+            .row(vec!["first".into()])
+            .row(vec!["second".into()]);
+        t.rect = Rect::new(10.0, 20.0, 200.0, 120.0);
+
+        let header = t.header_rect();
+        let row0 = t.row_rect(0);
+        let row1 = t.row_rect(1);
+        assert_eq!(header, Rect::new(10.0, 20.0, 200.0, HEADER_H));
+        assert_eq!(row0, Rect::new(10.0, 20.0 + HEADER_H, 200.0, ROW_H));
+        assert_eq!(row1, Rect::new(10.0, 20.0 + HEADER_H + ROW_H, 200.0, ROW_H));
+        assert!(header.bottom() <= row0.y, "表头应在第一行上方");
+        assert!(row0.bottom() <= row1.y, "数据行应从上到下排列");
+
+        let x = t.rect.x + 4.0;
+        assert_eq!(t.row_at(Pos::new(x, header.y + 1.0)), None, "表头不应命中行");
+        assert_eq!(t.row_at(Pos::new(x, row0.y + row0.h * 0.5)), Some(0));
+        assert_eq!(t.row_at(Pos::new(x, row1.y + row1.h * 0.5)), Some(1));
+        assert_eq!(t.row_at(Pos::new(x, row0.bottom())), Some(1), "行边界归属下方行");
+
+        let mut ctx = EventCtx::new(None, Size::new(400.0, 300.0));
+        t.event(
+            &mut ctx,
+            &UiEvent::MouseUp {
+                pos: Pos::new(x, row1.y + row1.h * 0.5),
+                button: y901_ui::MouseButton::Left,
+            },
+        );
+        assert_eq!(t.selected_index(), Some(1), "点击第二行应选择第二行");
+    }
+
+    #[test]
+    fn render_draws_header_then_rows_top_down() {
+        let mut t = Table::new("t")
+            .column(TableColumn::fixed("c", 100.0))
+            .row(vec!["first".into()])
+            .row(vec!["second".into()]);
+        t.rect = Rect::new(10.0, 20.0, 200.0, 120.0);
+        let mut ctx = RectRecorder::default();
+
+        t.render(&mut ctx);
+
+        // fill order: header, row 0, row 1. Recorded geometry is the visible contract.
+        assert_eq!(ctx.fills.len(), 3);
+        assert_eq!(ctx.fills[0], t.header_rect());
+        assert_eq!(ctx.fills[1], t.row_rect(0));
+        assert_eq!(ctx.fills[2], t.row_rect(1));
+        assert!(ctx.fills[0].y < ctx.fills[1].y);
+        assert!(ctx.fills[1].y < ctx.fills[2].y);
     }
 
     #[test]
