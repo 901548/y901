@@ -104,6 +104,27 @@ fn glyph_top(origin_y: f32, ascent: f32, bearing_y: f32, height: f32) -> f32 {
     (origin_y + ascent).round() - bearing_y - height
 }
 
+/// 采样 L0 位图到缩小后的目标像素，使用像素中心映射并夹紧边界。
+///
+/// 朴素的 `dst * source / target` 在非整数缩放下可能永远不访问源图末行，
+/// 特别是 `s=0.75` 且维度取整时会切掉真实墨迹底行。
+#[inline]
+fn center_sample_index(dst: u32, source_len: u32, target_len: u32) -> u32 {
+    debug_assert!(source_len > 0 && target_len > 0);
+    ((((dst as f32 + 0.5) * source_len as f32) / target_len as f32).floor() as u32)
+        .min(source_len - 1)
+}
+
+/// 将基准引擎 ascent 换算为目标像素字号的 ascent。
+#[inline]
+fn ascent_at_size(base_ascent: f32, base_size: f32, target_size: f32) -> f32 {
+    if base_size.is_finite() && base_size > 0.0 {
+        base_ascent * target_size / base_size
+    } else {
+        base_ascent
+    }
+}
+
 impl SoftBackend {
     /// 设置 **DPI 缩放比**（物理 / 逻辑）。
     ///
@@ -434,8 +455,8 @@ impl SoftBackend {
     /// mip 链只能**缩小**（L1=1/2、L2=1/4），而字号可大可小；
     /// 按目标字号重新光栅化能得到**真实轮廓**，这正是引擎已具备的能力。
     ///
-    /// 基线：`ascent` 按**基准字号的 ascent/cell_h 比例**换算到新字号
-    /// （该比例是字体属性，不随字号变化）——**不是拍脑袋的 0.8**。
+    /// 基线：ascent 随目标字号按基准引擎字号同比缩放，且 `px_final` 已包括
+    /// DPI 与变换缩放。不要复用固定 ascent，否则不同字号会共用一条基线。
     fn draw_text_sized(&mut self, origin: Pos, text: &str, style: &TextStyle, px: f32) -> f32 {
         let mapped = self.map_point(origin);
         let origin = Pos::new(mapped.x, mapped.y);
@@ -444,10 +465,9 @@ impl SoftBackend {
         let px_final = (px * self.dpi_scale * scale).max(1.0);
         let (cell_w, cell_h) = crate::font::cell_metrics_for(px_final);
         // 与旧路径同式：基线 = 顶部 + ascent
-        // **引擎返回的就是像素级 ascent**：不能再乘 `cell_h / self.cell.h`。
-        // 曾经按比例缩放（cell_h=12, cell.h=16 时 ascent 12.8 → 9.6），
-        // 基线上移 → 字形顶部超出 clip 界 → **削顶**。
-        let ascent = self.text.ascent();
+        // 引擎返回的是其基准字号的像素级 ascent；按 px_final / size_px 缩放，
+        // 而不是按 cell_h / self.cell.h（可能是整数取整后的格高）近似换算。
+        let ascent = ascent_at_size(self.text.ascent(), self.text.size_px(), px_final);
         let atlas_size = self.text.atlas_size() as usize;
         let mut pen_x = origin.x;
         let start = pen_x;
@@ -475,12 +495,8 @@ impl SoftBackend {
                         // （y 向上：'8' = 0 贴基线，'设' = -2 下伸），不是顶部偏移。
                         // 顶部 = 基线 − bearing_y − 字形高度。
                         // **行级 baseline 取整 + 字形原始偏移**（见 `glyph_top`）
-                        let by = glyph_top(
-                            origin.y,
-                            ascent,
-                            g.bearing_y as f32,
-                            g.height as f32,
-                        ) as i32;
+                        let by =
+                            glyph_top(origin.y, ascent, g.bearing_y as f32, g.height as f32) as i32;
                         for gy in 0..g.height as i32 {
                             let dy = by + gy;
                             if dy < 0 || dy >= self.height as i32 {
@@ -939,8 +955,10 @@ impl RenderCtx for SoftBackend {
                                     }
                                 }
                                 // 从 slot 取像素：目标像素映射到级内坐标
-                                let sx = (gx as u32 * sw / g.width).min(sw - 1);
-                                let sy = (gy as u32 * sh / g.height).min(sh - 1);
+                                // 像素中心到源像素中心的映射可覆盖末端行/列，
+                                // 避免 L0 缩小时漏掉承载真实墨迹的最后一行。
+                                let sx = center_sample_index(gx as u32, sw, g.width);
+                                let sy = center_sample_index(gy as u32, sh, g.height);
                                 let ax = sg.slot.atlas_x as usize + sx as usize;
                                 let ay = sg.slot.atlas_y as usize + sy as usize;
                                 let si = (ay * atlas_size + ax) * 4;
@@ -1294,6 +1312,38 @@ mod glyph_top_tests {
     // ---- 基线对齐（"字在跳舞"的回归）----
 
     #[test]
+    fn sized_baseline_scales_from_base_font_size() {
+        use super::ascent_at_size;
+
+        let base_ascent = 16.0;
+        let base_size = 32.0;
+        let a12 = ascent_at_size(base_ascent, base_size, 12.0);
+        let a24 = ascent_at_size(base_ascent, base_size, 24.0);
+        assert!((a12 - 6.0).abs() < 0.001, "12px ascent = {a12}");
+        assert!((a24 - 12.0).abs() < 0.001, "24px ascent = {a24}");
+        assert!((a24 / a12 - 2.0).abs() < 0.001, "24px/12px ascent ratio");
+    }
+
+    #[test]
+    fn l0_center_sampling_reaches_last_source_row_at_fractional_scales() {
+        use super::center_sample_index;
+
+        // Rounded target dimensions from representative source glyph heights.
+        for (source_h, target_h) in [(10, 9), (8, 6)] {
+            // s=0.9 and s=0.75
+            let last_source_row = (0..target_h)
+                .map(|gy| center_sample_index(gy, source_h, target_h))
+                .max()
+                .expect("target has at least one row");
+            assert_eq!(
+                last_source_row,
+                source_h - 1,
+                "末端源行必须可达：{source_h} -> {target_h}"
+            );
+        }
+    }
+
+    #[test]
     fn all_glyph_bottoms_land_on_one_integer_baseline() {
         // Baseline formula: one integer baseline per line, bearing_y used as-is.
         let (origin_y, ascent) = (40.0f32, 16.93f32);
@@ -1311,16 +1361,26 @@ mod glyph_top_tests {
             let top = glyph_top(origin_y, ascent, bearing_y as f32, height as f32);
             let bottom = top + height as f32;
             // bottom = round(baseline) - bearing_y  (authentic bearing, no clamping)
-            assert_eq!(bottom, baseline - bearing_y as f32, "{name}: bottom must be baseline - bearing");
+            assert_eq!(
+                bottom,
+                baseline - bearing_y as f32,
+                "{name}: bottom must be baseline - bearing"
+            );
             assert_eq!(bottom.fract(), 0.0, "{name}: bottom must be integer pixel");
         }
         // Same bearing_y => identical bottom (no per-glyph rounding jitter)
         let a = glyph_top(origin_y, ascent, -1.0, 11.0) + 11.0;
         let b = glyph_top(origin_y, ascent, -1.0, 15.0) + 15.0;
-        assert_eq!(a, b, "a and b share bearing -1, so their bottoms must match");
+        assert_eq!(
+            a, b,
+            "a and b share bearing -1, so their bottoms must match"
+        );
         // Descenders keep their own lower bottom
         let g = glyph_top(origin_y, ascent, -5.0, 15.0) + 15.0;
-        assert!(g > a, "descender must sit lower than baseline-sitting glyphs");
+        assert!(
+            g > a,
+            "descender must sit lower than baseline-sitting glyphs"
+        );
     }
-        // 同一行内，所有“|bearing|≤1”的字底边必须**完全相等**
+    // 同一行内，所有“|bearing|≤1”的字底边必须**完全相等**
 }

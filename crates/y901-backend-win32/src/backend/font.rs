@@ -7,7 +7,8 @@
 //! - 缓存 GlyphInfo，并记录图集脏区供 D3D11 做 UpdateSubresource。
 //!
 //! 布局约定：调用方给出引擎坐标系里的 (base_x, baseline)，
-//! 绘制时 pos = (base_x + bearing_x, baseline + bearing_y)。
+//! `bearing_y` 统一为 y-up 的位图底边偏移；绘制顶部为
+//! `baseline - bearing_y - height`。
 //!
 //! ## Vtable 契约（本文件所有 `unsafe extern "system"` 声明与 `*Vtbl` 结构共用）
 //!
@@ -924,7 +925,9 @@ impl TextEngine {
             width,
             height,
             bearing_x: bounds.left,
-            bearing_y: bounds.top,
+            // DirectWrite bounds use screen y-down from baseline; negate bottom edge
+            // to store the shared y-up bottom-edge bearing convention.
+            bearing_y: bearing_y_from_dwrite_bottom(bounds.bottom),
             advance,
             atlas_x,
             atlas_y,
@@ -1013,6 +1016,26 @@ impl TextEngine {
             self.cache.len(),
             self.atlas_occupancy() * 100.0
         );
+    }
+}
+
+/// Convert DirectWrite's y-down bottom edge relative to baseline to y-up bearing.
+#[inline]
+fn bearing_y_from_dwrite_bottom(bounds_bottom: i32) -> i32 {
+    -bounds_bottom
+}
+
+#[cfg(test)]
+mod bearing_tests {
+    use super::bearing_y_from_dwrite_bottom;
+
+    #[test]
+    fn dwrite_bottom_is_converted_to_y_up_bearing() {
+        // A baseline-touching glyph has bottom=0; a descender extends downward.
+        assert_eq!(bearing_y_from_dwrite_bottom(0), 0);
+        assert_eq!(bearing_y_from_dwrite_bottom(3), -3);
+        // A glyph whose bitmap bottom is above baseline yields a positive bearing.
+        assert_eq!(bearing_y_from_dwrite_bottom(-2), 2);
     }
 }
 

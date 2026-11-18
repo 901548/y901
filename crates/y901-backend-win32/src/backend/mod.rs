@@ -551,7 +551,9 @@ impl D3dBackend {
         };
 
         let offset_x = glyph_offset(span, cell_w, gadv);
-        let pos = self.map_pos(Pos::new(x + offset_x + gbx as f32, y + ascent + gby as f32));
+        let baseline = y + ascent;
+        let top = glyph_top(baseline, gby as f32, gh as f32);
+        let pos = self.map_pos(Pos::new(x + offset_x + gbx as f32, top));
         // **不调 `map_size`**：字号已按 `px * scale` 光栅化，再乘一次就是双重缩放。
         let size = [gw as f32, gh as f32];
         let uv = [
@@ -603,10 +605,9 @@ impl D3dBackend {
         // 在**未缩放的字形空间**里算出矩形，最后整体过一次变换：
         // 这样变换语义只在一个地方实现，不会出现"半个量乘了缩放、另半个没乘"。
         let offset_x = glyph_offset(span, self.cell.w, sel.advance);
-        let raw_pos = Pos::new(
-            x + offset_x + sel.slot.bearing_x,
-            y + ascent + sel.slot.bearing_y,
-        );
+        let baseline = y + ascent;
+        let top = glyph_top(baseline, sel.slot.bearing_y, sel.h as f32);
+        let raw_pos = Pos::new(x + offset_x + sel.slot.bearing_x, top);
         let mapped = self.map_pos(raw_pos);
         let gsz = self.map_size(Size::new(sel.w as f32, sel.h as f32));
         let pos = mapped;
@@ -1195,6 +1196,14 @@ fn clip_quad(pos: Pos, size: [f32; 2], uv: [f32; 4], clip: Rect) -> Option<Clipp
     })
 }
 
+/// 从 y-up 的位图底边 bearing 得到屏幕坐标系字形顶部。
+/// `bearing_y` 是基线到位图底边的 y-up 距离，因此
+/// `top = baseline - bearing_y - height`。
+#[inline]
+fn glyph_top(baseline: f32, bearing_y: f32, height: f32) -> f32 {
+    baseline - bearing_y - height
+}
+
 /// 字形在格子里的水平居中偏移。
 ///
 /// `span * cell_w` 是"该字形应占的宽度"（格契约），`advance` 是字体实际推进宽度。
@@ -1208,13 +1217,14 @@ pub(crate) fn glyph_offset(span: f32, cell_w: f32, advance: f32) -> f32 {
 
 #[cfg(test)]
 mod glyph_offset_tests {
-    use super::glyph_offset;
+    use super::{glyph_offset, glyph_top};
 
-    /// 精确 2:1：offset 必须为 0（Windows 现有外观的回归保证）。
+    /// D3D quad top must follow the shared bottom-bearing convention, including descenders.
     #[test]
-    fn exact_2to1_has_zero_offset() {
-        assert_eq!(glyph_offset(2.0, 8.0, 16.0), 0.0);
-        assert_eq!(glyph_offset(1.0, 8.0, 8.0), 0.0);
+    fn glyph_top_uses_y_up_bottom_bearing() {
+        let baseline = 50.0;
+        assert_eq!(glyph_top(baseline, 3.0, 12.0), 35.0);
+        assert_eq!(glyph_top(baseline, -2.0, 15.0), 37.0);
     }
 
     /// advance 偏小 10%（14.4 vs 16）：offset 为正，且字形居中在 2 格内。
