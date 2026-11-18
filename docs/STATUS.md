@@ -2,7 +2,7 @@
 
 - **HEAD**: 本轮 5 个提交（`fix(table)` → `fix(render)` ×2 → `style: cargo fmt` → `chore(gate)`），
   最新一条见 `git log -1`
-- **tags**: v0.1.0 ~ **v0.1.17**
+- **tags**: v0.1.0 ~ **v0.2.0**（本版含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`）
 - **测试**: `passed=960` / `ignored=61` / `include_ignored=1021`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
