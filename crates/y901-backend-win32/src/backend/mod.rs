@@ -551,9 +551,9 @@ impl D3dBackend {
         };
 
         let offset_x = glyph_offset(span, cell_w, gadv);
-        let baseline = y + ascent;
-        let top = glyph_top(baseline, gby as f32, gh as f32);
-        let pos = self.map_pos(Pos::new(x + offset_x + gbx as f32, top));
+        let top = glyph_top(y, ascent, gby as f32, gh as f32);
+        // **整像素吸附**：见 `glyph_top` / `snap_glyph_pos` 的说明。
+        let pos = snap_glyph_pos(self.map_pos(Pos::new(x + offset_x + gbx as f32, top)));
         // **不调 `map_size`**：字号已按 `px * scale` 光栅化，再乘一次就是双重缩放。
         let size = [gw as f32, gh as f32];
         let uv = [
@@ -605,10 +605,11 @@ impl D3dBackend {
         // 在**未缩放的字形空间**里算出矩形，最后整体过一次变换：
         // 这样变换语义只在一个地方实现，不会出现"半个量乘了缩放、另半个没乘"。
         let offset_x = glyph_offset(span, self.cell.w, sel.advance);
-        let baseline = y + ascent;
-        let top = glyph_top(baseline, sel.slot.bearing_y, sel.h as f32);
+        let top = glyph_top(y, ascent, sel.slot.bearing_y, sel.h as f32);
         let raw_pos = Pos::new(x + offset_x + sel.slot.bearing_x, top);
-        let mapped = self.map_pos(raw_pos);
+        // **整像素吸附**：即使这条路径会按 mip 级缩放四边形，左上角仍在整像素上，
+        // 避免"位置分数 + 尺寸分数"的双重模糊。
+        let mapped = snap_glyph_pos(self.map_pos(raw_pos));
         let gsz = self.map_size(Size::new(sel.w as f32, sel.h as f32));
         let pos = mapped;
         let size = [gsz.w, gsz.h];
@@ -1199,9 +1200,34 @@ fn clip_quad(pos: Pos, size: [f32; 2], uv: [f32; 4], clip: Rect) -> Option<Clipp
 /// 从 y-up 的位图底边 bearing 得到屏幕坐标系字形顶部。
 /// `bearing_y` 是基线到位图底边的 y-up 距离，因此
 /// `top = baseline - bearing_y - height`。
+///
+/// **行级 baseline 只取整一次**（与 `y901_render::soft` 的同名函数逐字一致）。
+///
+/// 为什么必须取整：图集位图是 1:1 贴到屏幕上的（四边形尺寸就是位图的
+/// `width x height`），采样器却是线性过滤。只要四边形落在分数像素上，
+/// 每个像素中心就会落在纹素内部而不是纹素中心，线性采样把相邻纹素按权重
+/// 混一次 —— 表现为**整屏文字发糊、笔画峰值亮度掉到 6 成**。
+///
+/// 实测（本机 125% 缩放，字号 16 → 物理 20px）：
+/// `1` 的竖笔在 100% 缩放时是 `169 167`（两个像素等值，位图原样），
+/// 在 125% 缩放时是 `74 143 90`（摊成三个像素，峰值只有正文色的 57%）。
+/// 原因是 `map_pos` 把逻辑坐标乘了 1.25（`x=66.25`），而这里原先不做取整。
+///
+/// soft 后端早就是整数贴图（`(origin_y + ascent).round()` + `floor`），
+/// 两边在这里必须给出**同一条整数基线**，否则同一棵树在两个后端上会错行。
 #[inline]
-fn glyph_top(baseline: f32, bearing_y: f32, height: f32) -> f32 {
-    baseline - bearing_y - height
+fn glyph_top(origin_y: f32, ascent: f32, bearing_y: f32, height: f32) -> f32 {
+    (origin_y + ascent).round() - bearing_y - height
+}
+
+/// 把已映射到屏幕坐标的字形四边形左上角**吸附到整像素**。
+///
+/// 与 [`glyph_top`] 同一个理由：位图 1:1、采样器线性，分数位置即糊。
+/// 只吸附字形（带 UV 采样），纯色矩形与 SDF 圆角**不吸附** ——
+/// 它们靠覆盖率公式做抗锯齿，保留小数位置才有平滑过渡。
+#[inline]
+fn snap_glyph_pos(p: Pos) -> Pos {
+    Pos::new(p.x.round(), p.y.round())
 }
 
 /// 字形在格子里的水平居中偏移。
@@ -1216,15 +1242,64 @@ pub(crate) fn glyph_offset(span: f32, cell_w: f32, advance: f32) -> f32 {
 }
 
 #[cfg(test)]
-mod glyph_offset_tests {
-    use super::{glyph_offset, glyph_top};
+mod glyph_geometry_tests {
+    use super::{glyph_offset, glyph_top, snap_glyph_pos};
+    use y901_ui::Pos;
 
     /// D3D quad top must follow the shared bottom-bearing convention, including descenders.
     #[test]
     fn glyph_top_uses_y_up_bottom_bearing() {
-        let baseline = 50.0;
-        assert_eq!(glyph_top(baseline, 3.0, 12.0), 35.0);
-        assert_eq!(glyph_top(baseline, -2.0, 15.0), 37.0);
+        // origin_y + ascent 就是基线；这里 ascent=0，基线=50
+        assert_eq!(glyph_top(50.0, 0.0, 3.0, 12.0), 35.0);
+        assert_eq!(glyph_top(50.0, 0.0, -2.0, 15.0), 37.0);
+    }
+
+    /// **清晰度回归守卫**：分数基线必须被吸附成整数顶部。
+    ///
+    /// 背景（实测）：125% 缩放 + 字号 16 → 物理 20px 时 `ascent = 13.75`，
+    /// 旧实现让四边形顶部落在 `x.75`，线性采样把竖笔摊成 3 个像素、
+    /// 峰值亮度只有正文色的 57%（"字体发糊"）。
+    #[test]
+    fn fractional_baseline_snaps_to_integer_top() {
+        // 基线 = 50 + 13.75 = 63.75 → round = 64
+        let top = glyph_top(50.0, 13.75, 0.0, 13.0);
+        assert_eq!(top, 51.0);
+        assert_eq!(top.fract(), 0.0, "字形顶部必须是整数，实际 {top}");
+    }
+
+    /// 与 `y901_render::soft` 的 `glyph_top` **同一条整数基线**：
+    /// 两个后端对同一棵树必须给出相同的顶部，否则软/硬渲染会错行。
+    #[test]
+    fn matches_soft_backend_baseline() {
+        for (origin_y, ascent, bearing_y, height) in [
+            (50.0_f32, 13.75_f32, 0.0_f32, 13.0_f32),
+            (0.0, 17.19, -2.0, 20.0),
+            (24.5, 10.4, 1.0, 15.0),
+            (7.25, 20.0, -4.0, 24.0),
+        ] {
+            let d3d = glyph_top(origin_y, ascent, bearing_y, height);
+            // soft 的公式：round(基线) − bearing − height
+            let soft = (origin_y + ascent).round() - bearing_y - height;
+            assert_eq!(d3d, soft, "软/硬基线不一致：{origin_y} + {ascent}");
+            assert_eq!(d3d.fract(), 0.0, "顶部必须为整数");
+        }
+    }
+
+    /// 字形四边形左上角吸附到最近的整像素（不吸附尺寸，尺寸由字号决定）。
+    #[test]
+    fn glyph_pos_snaps_to_pixel_grid() {
+        let snapped = snap_glyph_pos(Pos::new(66.25, 63.75));
+        assert_eq!((snapped.x, snapped.y), (66.0, 64.0));
+        // 已经是整数时必须原样返回（避免多余浮点往返让哈希漂移）
+        let exact = snap_glyph_pos(Pos::new(53.0, 144.0));
+        assert_eq!((exact.x, exact.y), (53.0, 144.0));
+    }
+
+    /// 精确 2:1：offset 必须为 0（Windows 现有外观的回归保证）。
+    #[test]
+    fn exact_2to1_has_zero_offset() {
+        assert_eq!(glyph_offset(2.0, 8.0, 16.0), 0.0);
+        assert_eq!(glyph_offset(1.0, 8.0, 8.0), 0.0);
     }
 
     /// advance 偏小 10%（14.4 vs 16）：offset 为正，且字形居中在 2 格内。
