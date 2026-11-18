@@ -9,6 +9,7 @@ use wasm_bindgen::prelude::*;
 /// `window` 对象。
 #[wasm_bindgen]
 extern "C" {
+    /// `window` 对象（全局单例，见 `GLOBAL_WINDOW`）。
     #[wasm_bindgen(js_name = "window")]
     pub type Window;
 
@@ -32,6 +33,7 @@ extern "C" {
     #[wasm_bindgen(thread_local_v2, js_name = "window")]
     static GLOBAL_WINDOW: Window;
 
+    /// `window.document`。
     #[wasm_bindgen(method, getter)]
     pub fn document(this: &Window) -> Option<Document>;
 }
@@ -39,15 +41,20 @@ extern "C" {
 /// `HtmlCanvasElement`。
 #[wasm_bindgen]
 extern "C" {
+    /// `HtmlCanvasElement`：实际绘图的画布。
     #[wasm_bindgen(js_name = "HtmlCanvasElement")]
     pub type HtmlCanvasElement;
 
+    /// `canvas.width`（设备像素）。
     #[wasm_bindgen(method, getter)]
     pub fn width(this: &HtmlCanvasElement) -> u32;
+    /// 设置 `canvas.width`（设备像素）。
     #[wasm_bindgen(method, setter)]
     pub fn set_width(this: &HtmlCanvasElement, v: u32);
+    /// `canvas.height`（设备像素）。
     #[wasm_bindgen(method, getter)]
     pub fn height(this: &HtmlCanvasElement) -> u32;
+    /// 设置 `canvas.height`（设备像素）。
     #[wasm_bindgen(method, setter)]
     pub fn set_height(this: &HtmlCanvasElement, v: u32);
 
@@ -89,6 +96,7 @@ extern "C" {
 /// 元素的内联样式表。
 #[wasm_bindgen]
 extern "C" {
+    /// 元素的内联样式表（`canvas.style`）。
     #[wasm_bindgen(js_name = "CSSStyleDeclaration")]
     pub type CssStyleDeclaration;
 
@@ -124,6 +132,7 @@ extern "C" {
 /// 2D 绘图上下文。
 #[wasm_bindgen]
 extern "C" {
+    /// 2D 绘图上下文。
     #[wasm_bindgen(js_name = "CanvasRenderingContext2D")]
     pub type CanvasRenderingContext2d;
 
@@ -139,6 +148,7 @@ extern "C" {
 /// `ImageData`。
 #[wasm_bindgen]
 extern "C" {
+    /// `ImageData`：整幅上屏用的像素缓冲。
     #[wasm_bindgen(js_name = "ImageData")]
     pub type ImageData;
 
@@ -154,11 +164,14 @@ extern "C" {
 /// 键盘事件。
 #[wasm_bindgen]
 extern "C" {
+    /// 键盘事件。
     #[wasm_bindgen(js_name = "KeyboardEvent")]
     pub type KeyboardEvent;
 
+    /// `KeyboardEvent.code`：物理键位，与键盘布局无关。
     #[wasm_bindgen(method, getter)]
     pub fn code(this: &KeyboardEvent) -> String;
+    /// `KeyboardEvent.key`：字符值，受键盘布局影响。
     #[wasm_bindgen(method, getter)]
     pub fn key(this: &KeyboardEvent) -> String;
 
@@ -193,13 +206,17 @@ extern "C" {
 /// 鼠标事件。
 #[wasm_bindgen]
 extern "C" {
+    /// 鼠标事件。
     #[wasm_bindgen(js_name = "MouseEvent")]
     pub type MouseEvent;
 
+    /// `MouseEvent.clientX`（视口坐标）。
     #[wasm_bindgen(method, getter, js_name = "clientX")]
     pub fn client_x(this: &MouseEvent) -> f64;
+    /// `MouseEvent.clientY`（视口坐标）。
     #[wasm_bindgen(method, getter, js_name = "clientY")]
     pub fn client_y(this: &MouseEvent) -> f64;
+    /// `MouseEvent.button`：0 左键 / 1 中键 / 2 右键。
     #[wasm_bindgen(method, getter)]
     pub fn button(this: &MouseEvent) -> i16;
 
@@ -231,9 +248,11 @@ extern "C" {
 /// 滚轮事件。
 #[wasm_bindgen]
 extern "C" {
+    /// 滚轮事件。
     #[wasm_bindgen(js_name = "WheelEvent")]
     pub type WheelEvent;
 
+    /// `WheelEvent.deltaY`（正 = 向下滚）。
     #[wasm_bindgen(method, getter, js_name = "deltaY")]
     pub fn delta_y(this: &WheelEvent) -> f64;
 }
@@ -241,6 +260,7 @@ extern "C" {
 /// 事件监听。S2 接线用。
 #[wasm_bindgen]
 extern "C" {
+    /// `EventTarget`：`addEventListener` 的宿主（canvas / window）。
     #[wasm_bindgen(js_name = "EventTarget")]
     pub type EventTarget;
 
@@ -265,6 +285,7 @@ extern "C" {
 /// DOM 事件基类\uff08\u7528\u6765\u8c03 `preventDefault`\uff09\u3002
 #[wasm_bindgen]
 extern "C" {
+    /// DOM 事件基类（用来调 `preventDefault`）。
     #[wasm_bindgen(js_name = "Event")]
     pub type Event;
 
@@ -277,6 +298,7 @@ extern "C" {
     #[wasm_bindgen(method, getter, structural, js_name = "isComposing")]
     pub fn is_composing(this: &Event) -> bool;
 
+    /// `event.preventDefault()`。
     #[wasm_bindgen(method, js_name = "preventDefault")]
     pub fn prevent_default(this: &Event);
 }
@@ -286,12 +308,15 @@ extern "C" {
 /// **手写而不用 `js_sys`**：`js-sys` 在离线环境解析不到，而我们只需要"建一个长度 + 整块写入"两个操作（见 `docs/WASM.md` D6）。
 #[wasm_bindgen]
 extern "C" {
+    /// `Uint8ClampedArray`：`ImageData` 的像素入参。
     #[wasm_bindgen(js_name = "Uint8ClampedArray")]
     pub type Uint8ClampedArray;
 
+    /// `new Uint8ClampedArray(length)`。
     #[wasm_bindgen(constructor)]
     pub fn new(length: u32) -> Uint8ClampedArray;
 
+    /// `array.set(src, offset)`：整块写入像素。
     #[wasm_bindgen(method, js_name = "set")]
     pub fn set_from(this: &Uint8ClampedArray, src: &[u8], offset: u32);
 
@@ -299,9 +324,11 @@ extern "C" {
 /// `Document`——用来按 id 取 canvas（页面约定见 `docs/WASM.md` §3.2）。
 #[wasm_bindgen]
 extern "C" {
+    /// `Document`：按 id 取 canvas、建元素。
     #[wasm_bindgen(js_name = "Document")]
     pub type Document;
 
+    /// `document.getElementById(id)`。
     #[wasm_bindgen(method, js_name = "getElementById")]
     pub fn get_element_by_id(this: &Document, id: &str) -> Option<Element>;
 
@@ -321,6 +348,7 @@ extern "C" {
 /// DOM `Element`（取到后用 `unchecked_into` 转成 `HtmlCanvasElement`）。
 #[wasm_bindgen]
 extern "C" {
+    /// DOM `Element`（可用 `unchecked_into` 转成具体类型）。
     #[wasm_bindgen(js_name = "Element")]
     pub type Element;
 
@@ -358,6 +386,7 @@ extern "C" {
 /// 拼音组字就发到它身上，我们再转成 `RawEvent::Ime`。
 #[wasm_bindgen]
 extern "C" {
+    /// `HTMLInputElement`：承接输入法组字的隐藏元素。
     #[wasm_bindgen(js_name = "HTMLInputElement")]
     pub type HtmlInputElement;
 
@@ -377,6 +406,7 @@ extern "C" {
 /// `CompositionEvent`：输入法组字事件。
 #[wasm_bindgen]
 extern "C" {
+    /// `CompositionEvent`：输入法组字事件。
     #[wasm_bindgen(js_name = "CompositionEvent")]
     pub type CompositionEvent;
 
@@ -397,6 +427,7 @@ pub fn global_window() -> Option<Window> {
 /// `console.log`。
 #[wasm_bindgen]
 extern "C" {
+    /// `console.log`。
     #[wasm_bindgen(js_name = "console.log")]
     pub fn console_log(s: &str);
 }
@@ -408,6 +439,7 @@ extern "C" {
 /// 且不需要 `performance` 对象。
 #[wasm_bindgen]
 extern "C" {
+    /// `Date.now()`：毫秒时间戳。
     #[wasm_bindgen(js_namespace = Date, js_name = now)]
     pub fn date_now() -> f64;
 }

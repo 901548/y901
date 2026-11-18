@@ -26,10 +26,14 @@
 | 项 | 修前 | 修后 |
 |---|---|---|
 | `cargo fmt --all -- --check` | 69 个文件不符 | 0（独立 `style:` 提交，纯空白/排序） |
-| 测试基线 | `751`（严重过期） | `956`（实测），`include_ignored=1016` |
-| doc 数字 | `passed=751` / `include_ignored=809` | 由 `sync-doc-numbers.ps1` 重新生成 |
+| 测试基线 | 停留在很早的旧值（严重过期） | 重新实测并写入 `test-baseline.txt` |
+| doc 数字 | 文档里的计数长期未刷新 | 由 `sync-doc-numbers.ps1` 重新生成 |
 | test-inventory | 指纹过期 | 127 个二进制 / 1013 条用例 |
+| `missing_docs`（`-W missing_docs` 构建） | web 后端 33 条 `pub` 项无文档 | 0 |
+| `sync-doc-numbers.ps1 -Check` | `$baseline` 在 `-Check` 分支从未赋值 → 文档里写"基线 **N**"必判 stale | 从 `numbers.txt` 读回，缺行即失败 |
 | GPU 用例 `invalidate_rect_partial_equals_full` | 125% DPI 下红 | 绿（脏区按"实际字形高度"标，见测试注释） |
+
+门禁现状：`scripts/gate.ps1`（含 audit）→ **GATE OK**（exit 0）。
 
 ## 已知问题
 

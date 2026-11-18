@@ -213,8 +213,11 @@ pub struct WasmState {
 /// 会同时可变借用"整块 state"和"state 里的 tree"，借用检查器不允许。
 /// 这一层包装把 `tree` / `host` 排除在外，于是三者可以并存（零 `take`、零签名改动）。
 pub struct WasmWindow<'a> {
+    /// Web 上没有 GPU：光栅化走 `SoftBackend`。
     pub soft: &'a mut SoftBackend,
+    /// 把像素送上 canvas 的呈现器。
     pub present: &'a mut Present,
+    /// 绑定的 `<canvas>` 元素。
     pub canvas: &'a HtmlCanvasElement,
     /// 事件缓冲（DOM 回调往里写，`wait_events` 从里取）。
     pub events: &'a Rc<RefCell<VecDeque<RawEvent>>>,

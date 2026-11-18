@@ -38,7 +38,15 @@ if ($Check) {
     $failed   = 0
     $includePassed = if ($numbersFromFile.ContainsKey('include_ignored')) { $numbersFromFile['include_ignored'] } else { -1 }
     $includeText = "$includePassed"
-    if ($numbersFromFile.ContainsKey('baseline')) { $script:baselineFromFile = $numbersFromFile['baseline'] }
+    # **`$baseline` 也必须从 numbers.txt 读回来**：
+    # 之前只写了 `$script:baselineFromFile`，而下面的规则用的是 `$baseline`，
+    # 于是 -Check 里它恒为空 —— 文档里只要写了“基线 **N**”，就永远被判 stale，
+    # gate 的 doc 数字步会稳定失败（而原因看起来像"文档没同步"）。
+    $baseline = if ($numbersFromFile.ContainsKey('baseline')) { $numbersFromFile['baseline'] } else { -1 }
+    if ($baseline -lt 0) {
+        Write-Host "[sync] FAIL: numbers.txt 缺少 baseline= 行"
+        exit 1
+    }
 } else {
     $defaultOut = & cargo test --workspace --offline 2>&1 | Out-String
     $passed = 0; $failed = 0; $ignored = 0
