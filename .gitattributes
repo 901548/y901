@@ -1,0 +1,8 @@
+# Linux 侧脚本必须保持 LF：在 Windows 工作区（core.autocrlf=true）里
+# `git archive` 会把未声明的文本文件导出成 CRLF，到了 Linux 上 bash 直接
+# 报 `$'\r': 未找到命令`（实测：scripts/linux-verify.sh 第 13 行）。
+*.sh text eol=lf
+
+# PowerShell 脚本必须带 BOM 且用 CRLF 以外的方式管理换行：BOM 由内容保证，
+# 这里只声明它们是文本，避免二进制误判。
+*.ps1 text
