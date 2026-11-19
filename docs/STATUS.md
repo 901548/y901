@@ -35,7 +35,7 @@
 - 新增版本化脚本 [scripts/linux-verify.sh](../scripts/linux-verify.sh)：x11 `check`
   （all-targets）/ `golden` / `xvfb-run real_window` + `stroke_round_aa` +
   `sgr_reverse` + `ui+widgets`，任一失败 exit 1。
-- Linux 全量（虚拟机）：**878 passed / 0 failed / 27 ignored**（150 个测试目标），
+- Linux 全量（虚拟机）：**881 passed / 0 failed / 27 ignored**（150 个测试目标），
   证据 [linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
 - `cargo audit` 恢复**真实联网刷新**（不再 STALE）：0 漏洞。
 - 本机 git 全局配置里指向 `127.0.0.1:7897` 的死代理已清除（备份
@@ -526,7 +526,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - 四条测试基建债（22 个测试无门控 / lib 的 4 处 `#[link]` /
   `file_drop` 硬编码 `C:\` / supersample 阈值绑定字体）就是靠它首次暴露的。
 - 已验证（2026-11-19，CentOS 7.9 虚拟机 + rustc 1.92）：
-  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **878 passed / 0 failed / 27 ignored**
+  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **881 passed / 0 failed / 27 ignored**
   （150 个测试目标）。证据：[linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
   与 Windows 的 982/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
 - **上一轮仅剩的两条红（已修）**：`y901-extras` 的 `sgr_reverse` 曾取"单元格右上角"像素
