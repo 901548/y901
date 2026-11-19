@@ -1,4 +1,4 @@
-# Unified gate: MSRV + tests(count) + clippy + pixel-hash + docs + audit.
+﻿# Unified gate: MSRV + tests(count) + clippy + pixel-hash + docs + audit.
 #
 # Four ways this gate used to lie, all fixed here:
 #   1. audit missing   -> said "skipped" and still printed GATE OK;

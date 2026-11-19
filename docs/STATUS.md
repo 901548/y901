@@ -518,6 +518,11 @@ cargo test --workspace --no-fail-fast 2>&1 \
   而 Rust/PowerShell 不会将它当转义处理，于是文件里出现字面串。
   **固定动作**：凡是含中文的新文件，落盘后 grep 一次 `\\u[0-9a-f]{4}`，有命中就修。
 
+- **`.ps1` 必须存成 UTF-8 with BOM**：Windows PowerShell 5.1 对**无 BOM** 的 UTF-8
+  按 ANSI 解码，中文字节会被错读；若某个汉字的第二字节恰好是 `0x5C`（反斜杠），
+  它会把后面的 `"` 转义掉，报"字符串缺少终止符"（本轮 `gate.ps1` 加一行中文警告时踩到）。
+  固定动作：改完 `.ps1` 后用 `read_bytes()[:3] == b'\xef\xbb\xbf'` 验证。
+
 - ~~**Linux 验收脚本未覆盖 `y901-render` 的 Soft 描边用例**~~（已修）：
   版本化的 [scripts/linux-verify.sh](../scripts/linux-verify.sh) 现在覆盖
   x11 `check` / `golden` / `real_window`、`render stroke_round_aa`、
