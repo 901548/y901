@@ -55,6 +55,15 @@ pub fn system_clipboard() -> Arc<dyn Clipboard> {
     }
 }
 
+/// 进程内串行锁：剪贴板是**系统全局资源**，同一个测试二进制里的多个用例
+/// 并行写它就会互相覆盖（实测 `xvfb-run cargo test -p y901-shell --lib`
+/// 20 次里 17 次红，而单用例各跑 10 次全绿）。
+///
+/// 定义在**模块级**而不是各自测试模块里：`clipboard.rs` 与 `widget_clipboard.rs`
+/// 各有一把锁时，两组用例仍然会互相抢占 —— 这正是上一版"加了锁还是偶发红"的原因。
+#[cfg(test)]
+pub(crate) static CLIPBOARD_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// 不可用时的兆底：每次调用都报同一个错误。
 struct NullClipboard(String);
 
@@ -225,11 +234,9 @@ mod linux {
 mod tests {
     use super::*;
 
-    /// 进程内串行锁：剪贴板是**系统全局资源**，两个测试并行跑会互相抢占。
-    ///
-    /// 锁中毒（前一个测试 panic 带着锁）不应让后续测试连带失败，
-    /// 所以一律用 `unwrap_or_else(|e| e.into_inner())` 取回内部值。
-    static CLIPBOARD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// 进程内串行锁（与 `widget_clipboard` 的用例共用同一把，
+    /// 否则两个测试模块并行时仍会互相覆盖剪贴板内容）。
+    use crate::clipboard::CLIPBOARD_TEST_LOCK as CLIPBOARD_LOCK;
 
     /// 写入后重试读取：其他进程可能在我们读之前抢占剪贴板。
     ///
