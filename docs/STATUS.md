@@ -134,7 +134,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 "先各自乘 k 再相加"之间差 `(k-1)·(ascent − height)`，缩小时会让 GPU 与 CPU 错 1 行——
 `backend_parity` 加了 0.3 缩放行后立刻抓到（D3D `(132,136)` vs CPU `(133,135)`），已改到映射后空间计算。
 
-验证：`cargo test --workspace` **963 passed / 0 failed**；
+验证（**当轮口径**）：`cargo test --workspace` **963 passed / 0 failed**；
 `--include-ignored` **1024 passed / 0 failed**；硬件冒烟 **61 passed / 0 failed / 0 SKIP**；
 `scripts/gate.ps1`（含 audit）→ **GATE OK**。
 
@@ -142,6 +142,11 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 "新增 `baseline_offset()`"之间选）、**P1-6** 组件内部 padding 未随 DPI 缩放、
 **内容清理**（README/ACCEPTANCE/WASM/STATUS 过期数字与旧哈希、`FRAMEWORK.md` 控制字符、
 `clippy.txt`+`todo.tsv` 移出仓库）。
+
+> **收口（2026-11-19）**：这三项均已完成 —— P1-5 见下方"P1-5 收口"与第二轮审查补齐；
+> P1-6 由 `d5b8c48`（`TextInput` padding 随 DPI 缩放）+ `VerticalList`/`Flex` 同一口径落地；
+> 内容清理在第二轮审查中完成（README/ACCEPTANCE/WASM/STATUS/FRAMEWORK 全部对齐，
+> `clippy.txt` / `todo.tsv` 已进 `.gitignore` 且不再跟踪）。
 
 
 **P1-5 墨迹深度（部分完成）**：新增 `TextMetrics::ink_bounds(style) -> (above, below)`
@@ -281,8 +286,12 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 2. **DPI 策略统一** —— 已完成（选项 A，`9a8060d` + `docs/design/dpi-policy.md`）。
 3. **验证覆盖**：~~补 `scripts/hw-smoke.ps1`~~ —— 已完成（见上方 D 小节）。
    剩：~~soft vs d3d 像素差回归~~ —— 已完成（见上方"双后端一致性"）。
-4. **发布**：`0.2.0` 已提交并打 tag（本地 14 个提交待推，push 受网络代理阻断）。
-5. **杂物**：根目录 `clippy.txt` / `todo.tsv` 是生成物，建议移出仓库或进 `.gitignore`。
+4. **发布**：`0.2.0` 已提交并打 tag；**已推送成功**（`main` 与全部 tag 在 `origin`，
+   曾阻断推送的是本机 git 里指向 `127.0.0.1:7897` 的死代理，已移除）。
+   `v0.2.0` 之后累积 12 个提交（Grid+Image 修复、Linux 双平台验收、剪贴板确定性等），
+   尚未发新版 —— 下一步是 `v0.2.1`。
+5. ~~**杂物**：根目录 `clippy.txt` / `todo.tsv` 是生成物，建议移出仓库或进 `.gitignore`~~ ——
+   已完成：两者已进 `.gitignore` 且不再被跟踪。
 
 ## 审查报告状态
 
@@ -290,18 +299,18 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **979**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁步骤：MSRV / fmt / 测试计数 / test-inventory / clippy / 像素哈希 / `missing_docs` / doc 数字 / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 
 ## 历史候选（v0.1.17 期列出，仍然有效）
 
-| 项 | 工作量 | 依赖 |
+| 项 | 状态 | 依赖 |
 |---|---|---|
-| 图片 mipmap（复用 `MipChain`） | 1~2h | 无 |
-| 真机 Present 数字 | 1h | 物理显示器 + 独占全屏 |
-| X11 真机验证 | 半天 | 真 Linux 机器 |
-| 多窗口支持 | 3~5d | 无（大改动） |
+| 图片 mipmap LOD | **已完成**（解析真值验证，见下方 mip 小节） | — |
+| 真机 Present 数字 | 待做 | 物理显示器 + 独占全屏 |
+| X11 真机验证 | 已在 **Xvfb** 全绿；真机仍待做 | 真 Linux 机器 |
+| 多窗口支持 | 待做 | 无（大改动，3~5d） |
 
 ## 图片 mipmap（步骤 1 完成：建链 + 坐标映射，选级强制 level=0）
 
@@ -312,11 +321,17 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 - **6 + 4 = 10 个测试**：LOD 边界（1.0 / 0.75 / 0.5 / 0.25 / 非法值 / clamp）
   + box 降采样为四点平均、左黑右白保持分界、1px 不再生成、存储 **1.3125×**。
 
-**未完成**（下一轮）：
-- `soft.rs` 的 `draw_image` **还没接** mip 选级（仍只采 L0），因此 `s=0.5` 的 MAD 对比“超采样真值"尚未做。
-- `Image` 结构体尚未加 `mips: Option<MipChain>`（动态/静态边界未咮定）。
-- `Cover` 模式"实际绘制倍率"与 `scale` 可能不同，选级应用前者；尚未实现与测量。
-- 存储成本已测（1.3125×），但尚未写进 `Image` 的文档。
+**当轮遗留项 → 后续状态**（2026-11-19 核对代码后更新，避免把已完成的工作读成 TODO）：
+- ~~`draw_image` 还没接 mip 选级~~ —— **已接**：`soft.rs` 用
+  `level_for_image(min(scale_x, scale_y))` 选级（见下方"步骤 2"）。
+- ~~`Image` 结构体加 `mips` 字段~~ —— **设计结论：不加**。mip 链属于**渲染后端**的资源，
+  由 `SoftBackend::mips`（按 `TextureId` 索引）持有；控件只上传一次字节，
+  不该在 UI 层复制一份派生数据。动态/静态边界在 `upload_texture*` 两个入口上区分。
+- ~~`Cover` 模式的实际倍率~~ —— **已覆盖**：`scale_x/scale_y` 取自
+  `style.layout()` 返回的 `dst/src`，而 `layout()` 已经把 `Cover` 的裁切算进去了，
+  所以选级用的就是"实际绘制倍率"。
+- ~~存储成本没写进文档~~ —— **已写**：`soft.rs` 的 `upload_texture` 文档注明
+  `L0+L1+L2 = 1.3125×`。
 
 ## 图片 mipmap 步骤 1（本轮）
 
@@ -329,7 +344,8 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
   但**本步骤强制 `level = 0`**，只证明"引入选级与坐标映射不改变渲染"。
 - `src` 到级坐标的映射：`src / 2^level`（L0 时即 `src` 本身）；dst 始终是屏幕坐标。
 
-**验证**：全量 816 全绿，像素哈希 **`0xDBB308DD1657EF9C` / 400×220 不变**。
+**验证**（当轮口径，非当前基线）：全量 816 全绿，像素哈希 **`0xDBB308DD1657EF9C` / 400×220 不变**。
+> 当前基线是 `0xF7455CCE7781A864` / 400×220 —— 后续文字清晰度修复改变了它，以 `docs/evidence/hash-baseline.txt` 为准。
 
 **未做（步骤 2）**：打开 `level = level_for_image(...)`，跑 `s=0.5` 与**超采样独立真值**的 MAD。
 
@@ -348,7 +364,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 
 ## 本轮教训
 
-- **测试全绿 ≠ 功能存在**：步骤 1 里 `box_levels_rgba` 根本没被调用，816 测试全绿、
+- **测试全绿 ≠ 功能存在**：步骤 1 里 `box_levels_rgba` 根本没被调用，**当轮** 816 测试全绿、
   编译通过，是 **clippy 的 `never used`** 把它抓出来的。
 - **真值必须真的独立**：我以为"四点平均就是独立真值"，但采样点分布
   凑巧退化成了被测实现的同一个块 —— MAD=0 是"两个一模一样的东西比较"。
@@ -458,7 +474,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - 已验证（2026-11-19，CentOS 7.9 虚拟机 + rustc 1.92）：
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **878 passed / 0 failed / 27 ignored**
   （150 个测试目标）。证据：[linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
-  与 Windows 的 978/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 979/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
 - **上一轮仅剩的两条红（已修）**：`y901-extras` 的 `sgr_reverse` 曾取"单元格右上角"像素
   断言精确 RGB，前提是 Windows 的 Segoe UI 字形不覆盖那个采样点；Linux 回退到
   DejaVuSans 后读到"前景 × 背景"的混合值（182,186,195 vs 期望 230,235,245）。
@@ -484,14 +500,36 @@ cargo test --workspace --no-fail-fast 2>&1 \
 > 那是**crate 级 `#![cfg(windows)]` 之前**的事；现在 Linux 全量测试可行，
 > 且有上方 2026-11-19 的实测记录（仅剩两条字体相关的采样假设差异）。
 
-## 数字检查的覆盖范围（已知限制）
+## 数字检查的覆盖范围
 
-`sync-doc-numbers.ps1 -Check` 当前只比对**加粗的三位数**（为避免把历史数字误报为漂移）。
-后果：**非加粗写法的旧数字会逃过检查**（v0.1.17 审查的 P1-01 就是这个）。
+**已从"只比对加粗三位数"升级为"含计数语义的行里所有三位数都必须对"**
+（2026-11-19，第二轮审查 P1-01 的根因修补）。
 
-下一步（下一轮）：让脚本比对含 `测试|passed|ignored` 的行里**所有**三位数，
-历史数字用显式标记豁免；Guide 索引由脚本从正文生成。
-本轮已把所有非加粗旧数字改为当前值，`-Check` 通过。
+为什么必须升级：上一版只认 `**N** passed` 这类手写形式，
+换一种写法就整条逃检 —— 实测漏掉了 README 的
+`978 passed / 0 failed / 61 ignored（149 个测试目标）`（真实值已 979/150）。<!-- counts-exempt -->
+
+现在的规则（`scripts/sync-doc-numbers.ps1 -Check`）：
+
+| 规则 | 说明 |
+|---|---|
+| 手写语义规则 | 保留：`**N** passed/failed/ignored`、`基线 **N**`、`include-ignored: **N**`、`` `key=N` `` |
+| **通用兜底** | 含 `测试 / passed / ignored / 基线 / 项测试 / include-ignored` 的行里，**每个三位数**必须是 `passed / ignored / targets / baseline / include_ignored` 之一 |
+| 非计数后缀豁免 | 紧跟 `% / × / x / px / DPI / 色 / 点 / 个像素` 的数字按"不是计数"跳过（如 `125%`、`400×220`、`1039 色`） |
+| 平台/历史豁免 | 行内显式出现 `Linux / Helm / 历史 / 旧口径 / 当轮` 或 `<!-- counts-exempt -->` 才豁免 |
+| 反向写入 | sync 的自动改写**逐行**进行并遵守同一套豁免，绝不把 Linux/Helm 的数改成 Windows 口径 |
+
+新增 `targets=` 字段（`test result:` 行数，当前 150）：`passed` 与"N 个测试目标"
+是两个独立派生量，只校准前者会留下"通过数对了、目标数停在旧值"的漂移。
+
+**验证方式（不靠"跑一次是绿的"）**：对检查器做了 5 组变异测试 ——
+非加粗 `passed` 漂移、目标数漂移、表格内 `passed` 漂移、`FRAMEWORK` 目标数漂移、
+新增一条无标记的假计数 —— **全部被抓到**；恢复后 `-Check` 通过（豁免行不误报）。
+
+**仍存在的已知限制**（诚实记录）：`Linux` / `Helm` 行被豁免，
+所以它们的数字漂移不会被这条检查发现 —— 那两台环境的计数无法在 Windows 上复现，
+只能靠"跑 `scripts/linux-verify.sh` 并把日志落盘"来核对。
+`Guide` 索引自动生成仍未做。
 
 ## 框架最终状态（v0.1.17-dev，审计与测试基建债清零）
 
@@ -499,8 +537,8 @@ cargo test --workspace --no-fail-fast 2>&1 \
 
 | 平台 | 通过 | 失败 | ignored | 备注 |
 |---|---|---|---|---|
-| **Windows** | **751** | 0 | 58 | `numbers.txt` 与 `test-baseline.txt` 口径 |
-| **Linux** | **661** | 0 | 25 | 差异来自平台 cfg 门控，**非测试丢失** |
+| **Windows** | **751** | 0 | 58 | **当轮口径**（当前见 `numbers.txt`） |
+| **Linux** | **661** | 0 | 25 | **当轮口径**；当前 878/0/27，见上方 2026-11-19 验收 |
 
 ### 审计
 
@@ -558,7 +596,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   需先澄清"harness"定义，再决定是补进表还是把标题改成"7 个像素对拍 + 3 个回归"。
 
 - **`sync-doc-numbers.ps1` 只保证数字对，不保证句子对**（已第三次改坏派生行）：
-  它会改对 `769` 这个数字，但会把 `--include-ignored` 行的句子结构改坏
+  它会改对 `769`（**历史口径**）这个数字，但会把 `--include-ignored` 行的句子结构改坏
   （写成 `718` 应为 `769`，或出现 `499` 等怪数）。
   短期：每次 commit 前人工检查 `ACCEPTANCE` 的派生行。
   长期：删掉 `ACCEPTANCE` 的派生表述，只留一行 `769`，不再列 `718 + 53` 这种二次计算。
@@ -602,7 +640,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   **约束**：不要把任何测试测量塞回 `-Check`，否则 gate 会重新变成“每次跑都赌博”。
 
 - **完整 sync 是唯一测量源**：只有无 `-Check` 的完整 sync 会跑测试并写 `numbers.txt`。
-  **注意**：`--include-ignored` 在并行负载下仍可能被 allocation-counter 污染（实测漂到 560）。
+  **注意**：`--include-ignored` 在并行负载下仍可能被 allocation-counter 污染（**当轮**实测漂到 560）。
   完整 sync 的守卫：**测试全部通过（exit 0）才写 `include_ignored`**，否则写 `n/a`。
   如果 `numbers.txt` 的 `include_ignored` 是 `n/a`，说明上次完整 sync 时有测试失败 —— 先修测试再跑完整 sync。
 

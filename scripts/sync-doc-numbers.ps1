@@ -43,6 +43,9 @@ if ($Check) {
     # 于是 -Check 里它恒为空 —— 文档里只要写了“基线 **N**”，就永远被判 stale，
     # gate 的 doc 数字步会稳定失败（而原因看起来像"文档没同步"）。
     $baseline = if ($numbersFromFile.ContainsKey('baseline')) { $numbersFromFile['baseline'] } else { -1 }
+    # 测试**目标数**（cargo 的 "test result:" 行数）：README/FRAMEWORK 写的是"N 个测试目标"，
+    # 它和 passed 是两个独立的派生量 —— 只校准 passed 会留下"passed 对了、目标数停在旧值"的漂移。
+    $targets  = if ($numbersFromFile.ContainsKey('targets'))  { $numbersFromFile['targets'] }  else { -1 }
     if ($baseline -lt 0) {
         Write-Host "[sync] FAIL: numbers.txt 缺少 baseline= 行"
         exit 1
@@ -57,6 +60,10 @@ if ($Check) {
     }
     if ($ignored -lt 0) {
         Write-Host "[sync] FAIL: numbers.txt 缺少 ignored= 行"
+        exit 1
+    }
+    if ($targets -lt 0) {
+        Write-Host "[sync] FAIL: numbers.txt 缺少 targets= 行（重新跑一次 sync 生成）"
         exit 1
     }
 } else {
@@ -74,6 +81,8 @@ if ($Check) {
     foreach ($m in [regex]::Matches($includeOut, 'test result: \w+\. (\d+) passed')) { $includePassed += [int]$m.Groups[1].Value }
     $includeText = if ($includeCode -eq 0) { "$includePassed" } else { "n/a (full run has failures: parallel fixtures break allocation-counter tests)" }
 
+    # 目标数 = cargo 输出里 "test result:" 的条数（每个 test binary 一条）。
+    $targets = ([regex]::Matches($defaultOut, 'test result: \w+\. \d+ passed')).Count
     $baselineLine = (Get-Content (Join-Path $root 'docs\evidence\test-baseline.txt') | Where-Object { $_ -notmatch '^#' -and $_.Trim() -ne '' } | Select-Object -First 1)
     $baseline = [int]$baselineLine.Trim()
     if ($passed -ne $baseline) {
@@ -82,7 +91,7 @@ if ($Check) {
     }
 
 }
-Write-Host "[sync] measured: passed=$passed failed=$failed ignored=$ignored include_ignored=$includeText baseline=$baseline"
+Write-Host "[sync] measured: passed=$passed failed=$failed ignored=$ignored targets=$targets include_ignored=$includeText baseline=$baseline"
 
 # **行内形式的统一表**：新增一个数字字段，**只需在这里加一行** ——
 # `-Check` 的校验规则与完整 sync 的写入都会**自动生成**。
@@ -117,7 +126,9 @@ $numbers = @(
   "# DO NOT EDIT - regenerate with: pwsh -File scripts/sync-doc-numbers.ps1",
   "passed=$passed",
   "ignored=$ignored",
-  "# include_ignored = passed + ignored (full --include-ignored run, not a separate suite)",
+  "# targets = number of test binaries ('test result:' lines in the default run)",
+  "targets=$targets",
+  "# include_ignored = observed passed count from a full --include-ignored run",
   "include_ignored=$includeText",
   "baseline=$baseline"
 )
@@ -169,6 +180,36 @@ foreach ($f in $docFiles) {
                 }
             }
         }
+
+        # **通用兜底（P1-01 根因）**：上面每条规则都是手写枚举，换个写法（不加粗、
+        # 换词序、写进表格）就整条逃检 —— 实测漏掉了 README 的
+        # "978 passed ... 149 个测试目标"（真实值已 979/150）。
+        #
+        # 兜底规则：**含计数语义的行里，所有三位数都必须是当前计数之一**。
+        # 用三位数是刻意的：避开年份（4 位）、哈希（0x… 被词边界排除）和小数。
+        # 明确不是计数的按后缀排除：百分比 / 尺寸 / 像素 / 颜色数。
+        # 平台相关（Linux/Helm）与历史口径的行必须**在文档里写明标记**才豁免
+        # （Linux / Helm / 历史 / 旧口径 / 当轮 / `<!-- counts-exempt -->`）——
+        # 豁免规则本身也要可审计，不能藏在脚本里。
+        $countKeywords = '测试|passed|ignored|基线|项测试|include[-_ ]?ignored|含 ignore'
+        $exemptMarkers = 'Linux|Helm|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
+        $allowed = @($passed, $ignored, $baseline, $targets, $includePassed) | Where-Object { $_ -ge 0 }
+        foreach ($line in ($t -split "`n")) {
+            if ($line -notmatch $countKeywords) { continue }
+            if ($line -match $exemptMarkers) { continue }
+            foreach ($m in [regex]::Matches($line, '(?<![\w.])(\d{3})(?![\w.])')) {
+                $n = [int]$m.Groups[1].Value
+                $suffix = $line.Substring($m.Index + $m.Length)
+                $prefix = $line.Substring(0, $m.Index)
+                # 不是计数：125% / 400×220 / 12px / 1039 色
+                if ($suffix -match '^\s*(%|×|x\b|px|DPI|色|点|个像素)') { continue }
+                if ($prefix -match '×\s*$') { continue }
+                if ($allowed -notcontains $n) {
+                    Write-Host "[sync] stale: $f -- $n 不是当前计数（$($allowed -join '/')）：$($line.Trim())"
+                    $stale++
+                }
+            }
+        }
         continue
     }
     # **不做全文 "数字 + passed/failed/ignored" 替换**：
@@ -204,6 +245,20 @@ foreach ($f in $docFiles) {
         }
     }
 
+    # 非加粗的 "N passed / M failed / K ignored" 与 "N 个测试目标"（README 的构建块就是这种写法）。
+    #
+    # **逐行做，并且跳过带平台/历史标记的行**：全局替换会把
+    # "Linux 878 passed / 0 failed / 27 ignored" 和 "Helm 230 passed / 0 failed / 3 ignored"
+    # 一起改成 Windows 口径 —— 那是**错误的修正**，比不修更糟。
+    $exempt = 'Linux|Helm|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
+    $t = [regex]::Replace($t, '(?m)^.*$', {
+        param($line)
+        $x = $line.Value
+        if ($x -match $exempt) { return $x }
+        $x = [regex]::Replace($x, '\b(\d{3})\s*passed\s*/\s*(\d+)\s*failed\s*/\s*(\d+)\s*ignored', { param($m) "$passed passed / $failed failed / $ignored ignored" })
+        $x = [regex]::Replace($x, '\b(\d{3})\s*个测试目标', { param($m) "$targets 个测试目标" })
+        $x
+    })
     $t = [regex]::Replace($t, '\*\*(\d{3})\*\*\s*项测试', { param($m) "**$passed** 项测试" })
     $t = [regex]::Replace($t, '(\d{3})\s*项测试', { param($m) "$passed 项测试" })
     # 测试行的加粗数字：只替换数字本身，不动冒号与其他字符

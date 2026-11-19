@@ -44,7 +44,7 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 
 ```bash
 cargo check --workspace --all-targets      # 0 warning
-cargo test --workspace                     # 978 passed / 0 failed / 61 ignored（149 个测试目标）
+cargo test --workspace                     # 979 passed / 0 failed / 61 ignored（150 个测试目标）
 powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 **979**xF7455CCE7781A864，400x220）
 ```
 

@@ -149,6 +149,17 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "[gate] ok: doc numbers in sync"
 
+# ---------------------------------------------------------------- doc-number checker self-test
+# 为什么门禁要跑"检查器的检查"：本轮之前 `-Check` 只认加粗写法，README 里非加粗的
+# `978 passed ... 149 个测试目标` 一路逃检。检查器本身必须有覆盖证明，
+# 否则"doc numbers in sync"只是"检查器没看见"的同义词。
+Step "doc-number checker self-test (mutation coverage)"
+& powershell -NoProfile -File (Join-Path $PSScriptRoot 'test-doc-numbers-check.ps1') | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    Fail "doc-number checker does not catch drift (mutation self-test failed)"
+}
+Write-Host "[gate] ok: doc-number checker catches injected drift"
+
 # ---------------------------------------------------------------- 6. security audit
 Step "cargo audit (must actually run and report 0 vulnerabilities)"
 if ($SkipAudit) {
