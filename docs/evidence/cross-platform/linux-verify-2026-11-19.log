@@ -1,26 +1,31 @@
 
 === CHECK_X11 ===
 $ cargo check -p y901-backend-x11 --all-targets
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+    Checking y901-core v0.2.0 (/root/Y901/crates/y901-core)
+    Checking y901-ui v0.2.0 (/root/Y901/crates/y901-ui)
+    Checking y901-render v0.2.0 (/root/Y901/crates/y901-render)
+    Checking y901-runtime v0.2.0 (/root/Y901/crates/y901-runtime)
+    Checking y901-backend-x11 v0.2.0 (/root/Y901/crates/y901-backend-x11)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.39s
 EXIT_CHECK_X11=0
 
 === GOLDEN ===
 $ cargo test -p y901-backend-x11 --test golden
 test intern_atom_pads_name_to_4_bytes ... ok
-test get_input_focus_forces_a_round_trip ... ok
 test intern_atom_with_aligned_name_has_no_padding ... ok
-test keymap_lookup_respects_first_keycode_and_columns ... ok
-test keysym_ascii_maps_to_char ... ok
+test get_input_focus_forces_a_round_trip ... ok
 test map_window_is_exactly_8_bytes ... ok
+test keymap_lookup_respects_first_keycode_and_columns ... ok
 test modifier_keysyms_are_not_characters ... ok
+test keysym_ascii_maps_to_char ... ok
+test pad4_aligns_upward ... ok
 test no_operation_packet ... ok
 test open_font_pads_name ... ok
-test pad4_aligns_upward ... ok
-test put_image_data_is_padded_to_4_bytes ... ok
 test put_image_length_field_caps_single_request_at_256kb ... ok
+test put_image_data_is_padded_to_4_bytes ... ok
 test put_image_zpixmap_stride_and_length ... ok
-test setup_request_layout ... ok
 test setup_request_without_auth_has_no_padding ... ok
+test setup_request_layout ... ok
 test x11_state_bits_map_to_modifiers ... ok
 test special_keysyms_map_to_function_keys ... ok
 
@@ -35,26 +40,27 @@ $ xvfb-run -a -s -screen 0 1280x800x24 cargo test -p y901-backend-x11 --test rea
 running 14 tests
 test concurrent_connections_probe ... ignored, 探针：实测 Xvfb 并发连接 4 个会 RST 1 个，此行为已记录（见下方数据）
 test clipboard_timeout_is_within_600ms ... ok
-test create_map_and_paint_a_solid_red_window ... ok
-test benchmark_shm_vs_putimage_1080p ... ok
 test clipboard_roundtrip_through_selection_protocol ... ok
+test benchmark_shm_vs_putimage_1080p ... ok
+test create_map_and_paint_a_solid_red_window ... ok
 test cursor_shapes_are_created_and_applied ... ok
 test probe_cursor_font ... ignored, 调试
 test put_image_requires_chunking_for_hd_sizes ... ok
-test handshake_reports_screen_and_visual ... ok
 test send_event_packet_layout ... ok
+test handshake_reports_screen_and_visual ... ok
 test keyboard_input_reaches_the_ui_layer ... ok
 test keyboard_mapping_covers_ascii ... ok
 test shm_and_fallback_produce_identical_pixels ... ok
 test window_implements_event_source_and_presenter ... ok
 
-test result: ok. 12 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.49s
+test result: ok. 12 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.56s
 
 EXIT_REAL_WINDOW=0
 
 === STROKE ===
 $ cargo test -p y901-render --test stroke_round_aa
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+   Compiling y901-render v0.2.0 (/root/Y901/crates/y901-render)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.34s
      Running tests/stroke_round_aa.rs (target/debug/deps/stroke_round_aa-a5d7b923129eaf49)
 
 running 1 test
@@ -66,7 +72,9 @@ EXIT_STROKE=0
 
 === SGR_REVERSE ===
 $ cargo test -p y901-extras --test sgr_reverse
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+   Compiling y901-widgets v0.2.0 (/root/Y901/crates/y901-widgets)
+   Compiling y901-extras v0.2.0 (/root/Y901/crates/y901-extras)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.75s
      Running tests/sgr_reverse.rs (target/debug/deps/sgr_reverse-2df439fd5213df4c)
 
 running 3 tests
@@ -80,8 +88,8 @@ EXIT_SGR_REVERSE=0
 
 === UI_WIDGETS ===
 $ cargo test -p y901-ui -p y901-widgets
-test fixed_padding_and_gap_do_not_scale ... ok
 test padding_and_gap_follow_dpi_like_flex ... ok
+test padding_and_gap_fixed_setters_are_last_call_wins ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -91,14 +99,14 @@ running 2 tests
 test crates/y901-ui/src/lib.rs - (line 22) - compile ... ok
 test crates/y901-ui/src/widget.rs - widget::Role (line 66) ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
 
    Doc-tests y901_widgets
 
 running 1 test
 test crates/y901-widgets/src/style.rs - style::WidgetStyle (line 15) ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
 
 EXIT_UI_WIDGETS=0
 
