@@ -527,6 +527,18 @@ struct SubresourceData {
     slice_pitch: u32,
 }
 
+/// Describe a tightly packed RGBA8 square texture for D3D11.
+///
+/// D3D11 pitches are measured in **bytes**, not pixels; this helper is shared
+/// by atlas creation and full-atlas resets so both pass the same layout.
+fn rgba_atlas_subresource(data: &[u8], size: u32) -> SubresourceData {
+    SubresourceData {
+        data: data.as_ptr() as *const c_void,
+        row_pitch: size * 4,
+        slice_pitch: size * size * 4,
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct Box3d {
@@ -2148,11 +2160,7 @@ impl Gfx {
             cpu_access_flags: 0,
             misc_flags: 0,
         };
-        let data = SubresourceData {
-            data: self.atlas_data.as_ptr() as *const c_void,
-            row_pitch: self.atlas_size * 4,
-            slice_pitch: self.atlas_size * self.atlas_size * 4,
-        };
+        let data = rgba_atlas_subresource(&self.atlas_data, self.atlas_size);
 
         let texture = device.create_texture_2d(&desc, &data)?;
         let srv = device.create_shader_resource_view(&texture)?;
@@ -2193,11 +2201,7 @@ impl Gfx {
         };
 
         if reset {
-            let subresource = SubresourceData {
-                data: data.as_ptr() as *const c_void,
-                row_pitch: size,
-                slice_pitch: size * size,
-            };
+            let subresource = rgba_atlas_subresource(data, size);
             context.update_subresource(&atlas.texture, &subresource);
             return Ok(());
         }
@@ -3078,7 +3082,17 @@ fn render_preconditions_ok(atlas_ready: bool, width: u32, height: u32) -> bool {
 
 #[cfg(test)]
 mod render_guard_tests {
-    use super::render_preconditions_ok;
+    use super::{render_preconditions_ok, rgba_atlas_subresource};
+
+    #[test]
+    fn rgba_atlas_subresource_uses_byte_pitches() {
+        let pixels = vec![0u8; 7 * 7 * 4];
+        let subresource = rgba_atlas_subresource(&pixels, 7);
+
+        assert_eq!(subresource.data, pixels.as_ptr().cast());
+        assert_eq!(subresource.row_pitch, 7 * 4);
+        assert_eq!(subresource.slice_pitch, 7 * 7 * 4);
+    }
 
     #[test]
     fn accepts_ready_atlas_with_nonzero_size() {

@@ -191,9 +191,11 @@ fn demo_page_keystroke_never_dirties_whole_window() {
             frame.rects
         );
         for r in &frame.rects {
+            // 框架对局部脏矩形统一外扩 `MIN_INK_MARGIN = 2px`（四边各 2px，
+            // 所以宽/高最多比输入框大 4px），这里只要求"没扩到整窗"。
             assert!(
-                r.w <= input.w + 2.0 && r.h <= input.h + 2.0,
-                "第 {i} 帧的脏区 {r:?} 比输入框 {input:?} 还大"
+                r.w <= input.w + 4.0 && r.h <= input.h + 4.0,
+                "第 {i} 帧的脏区 {r:?} 比输入框 {input:?} 的墨迹边距还大"
             );
         }
     }

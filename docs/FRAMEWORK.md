@@ -30,7 +30,7 @@ y901-shell ──> y901-backend-win32 ──> y901-runtime ──> y901-ui
 
 - `y901-ui` **零外部依赖**：它只依赖内部 crate `y901-core`（用于布局原语 `IntervalSet`）。
   这不是洁癖，而是测试策略的地基：
-  970 项测试（另有 7 项 GPU harness，`--ignored` 运行）里绝大多数不需要窗口、GPU、PTY。
+  本次工作区测试运行统计为 978 项通过、61 项忽略（149 个测试目标）；绝大多数无需窗口、GPU、PTY。
 - **`y901-backend-win32` 与 `y901-shell` 都直接依赖 `windows-sys`**（grep 可验证；前者用于窗口/渲染，后者用于命令行与磁盘操作）。
 - `y901-runtime` 单独存在的原因：`Host::policy()` 需要 `y901_agent::Policy`，
   而 `agent` 依赖 `ui`；若把 `Host` 放进 `ui` 会形成 `ui -> agent -> ui` 循环。
@@ -200,7 +200,7 @@ dlg.open();
 ## 10. 测试
 
 ```
-cargo test --workspace          # 712 项（另 7 个 GPU harness 需 --ignored）
+cargo test --workspace          # 工作区测试（测试数量以 scripts/test-count.ps1 为准）
 cargo build --workspace         # 零警告
 cargo clippy --workspace --all-targets   # 警告必须为 0（建议直接用 scripts/gate.ps1） 零警告
 scripts/test-count.ps1          # 唯一可信的计数方式（把输出写文件再解析）
@@ -404,7 +404,7 @@ let list = ListView::new("chat", 24.0)
 ## 已修复：`cell_span` 的格数已统一（曾有 5 处 `.max(1)` 违反契约）
 
 - **格数的唯一来源**：`y901_core::Grid::width_of_char`
-  （日志：0 → 组合符 0 格，窄 → 1，宽/全角 → 2；控制字符由 `unwrap_or(1)` 兵底为 1）。
+  （日志：0 → 组合符 0 格，窄 → 1，宽/全角 → 2；控制字符由 `unwrap_or(1)` 补底为 1）。
 - **两后端的 `cell_span` 本就同源**（均直接调 `width_of_char`）：
   - soft：`crates/y901-render/src/font_engine/engine.rs:121`
   - D3D：`crates/y901-backend-win32/src/backend/font.rs:1026`
@@ -572,10 +572,10 @@ let list = ListView::new("chat", 24.0)
 - **已排除**（均为实测）：clip 栈泄漏（4 push ↔ 4 pop 配平）、blit 未执行（双方都进入）、
   scissor 为空（双方都是整窗 is_full=true）、脏区分块（双方都是单块全屏）、
   实例超限（69 ≪ 10000）、Present 失败（返回 S_OK）。
-- **已知差异**：空白场景 atches=8（含 3 个图片批次）vs 正常场景 atches=1（无图片），
-  差异被压缩到批次循环（d3d11.rs 的 or b in batches）。
-- **静态审查未发现解释**：图集绑 	0/s0、图片绑 	1 共用 s0，画完只切回 pixel shader，
-  槽位无冲突；draw_instances(n, b.start) 语义待核实。
+- **已知差异**：空白场景批次数为 8（含 3 个图片批次），正常场景为 1（无图片）；
+  差异定位在 `d3d11.rs` 的 `for b in batches` 循环。
+- **静态审查未发现解释**：图集绑 `t0` 并用 `s0` 采样，图片绑 `t1` 并共用 `s0`；
+  图片批次绘制后只切回 pixel shader；`draw_instances(n, b.start)` 语义待核实。
 - **下一步**：逐批次打印 start/count/image 与 DrawInstanced 实参，或直接上 PIX/RenderDoc 抓帧。
 - **记录时间**：2026-11-14，commit db86941 之前即存在。
 

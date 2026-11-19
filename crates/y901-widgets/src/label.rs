@@ -166,7 +166,7 @@ impl Widget for TextLabel {
         // 直接拿墨迹深度定高会让所有标签高 33%，属于"修一个脏区、赔掉整站密度"。
         //
         // 墨迹外溢的正确落点是脏区扩张（`TextMetrics::ink_bounds` 已提供该数据，
-        // 见 STATUS.md 的 P1-5 记录）；那需要改 UiTree 的多个标脏点，单独一轮做。
+        // 见 STATUS.md 的 P1-5 记录）；`UiTree` 的全部局部标脏路径已按墨迹外扩。
         c.constrain(Size::new(
             metrics.measure_text(&self.current_text(), &style).w,
             metrics.line_height(&style),

@@ -26,4 +26,9 @@
 # Measured at 2026-11-18 (脏区按墨迹外扩之后):
 #   default `cargo test --workspace --no-fail-fast`   passed 970, failed 0, ignored 61
 #   (新增：脏区外扩 2 条；ink_bounds 诊断 1 条)
-970
+# Measured at 2026-11-19 (第二轮审查整改之后):
+#   default `cargo test --workspace --no-fail-fast`   passed 978, failed 0, ignored 61 / 149 个测试目标
+#   `--include-ignored`                               passed 1039, failed 0
+#   (新增：VerticalList DPI 3 条；节点级标脏像素回归 1 条；invalidate(id) 墨迹外扩 1 条；
+#    图集 RGBA 行距 1 条；帧预算 2 条)
+978

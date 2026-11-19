@@ -530,8 +530,25 @@ impl UiTree {
     /// 关闭浮层的重绘应由 `EventResult::Relayout` 触发全窗重绘。
     pub fn invalidate(&mut self, id: &str) {
         if let Some(rect) = self.rects.get(&crate::layout::id_key(id)).copied() {
-            self.dirty.add(rect);
+            self.add_dirty_rect(rect);
         }
+    }
+
+    /// Expand a logical dirty rect for text ink, then clip the result to the viewport.
+    /// All partial dirty paths go through this helper so ink margins are applied once.
+    fn add_dirty_rect(&mut self, rect: Rect) {
+        if rect.is_empty() {
+            return;
+        }
+        let margin = self.ink_margin;
+        let expanded = Rect::new(
+            rect.x - margin,
+            rect.y - margin,
+            rect.w + 2.0 * margin,
+            rect.h + 2.0 * margin,
+        );
+        let viewport = Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h);
+        self.dirty.add(expanded.intersect(viewport));
     }
 
     /// 整窗重绘：把脏区置为 `full`。
@@ -719,7 +736,7 @@ impl UiTree {
         self.popups.remove(pos);
         self.restore_focus(prev);
         if !rect.is_empty() {
-            self.dirty.add(rect);
+            self.add_dirty_rect(rect);
         }
         true
     }
@@ -732,9 +749,7 @@ impl UiTree {
         // 先收集再看（`drain` 持有 `self.popups` 的可变借用，期间不能调 `&mut self` 的方法）
         let popped: Vec<Rect> = self.popups.drain(..).map(|p| p.rect).collect();
         for rect in popped {
-            if !rect.is_empty() {
-                self.dirty.add(rect);
-            }
+            self.add_dirty_rect(rect);
         }
         self.restore_focus(restore);
         n
@@ -788,26 +803,10 @@ impl UiTree {
     /// 调用方已知那块区域需要重画，不必为了拿到矩形去遍历树。
     /// 注意：它**不会**触发重排；尺寸变了请另外 `mark_layout_dirty(id)`。
     pub fn invalidate_rect(&mut self, rect: Rect) {
-        if rect.is_empty() {
-            return;
-        }
-        let window = Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h);
-        let clamped = rect.intersect(window);
-        if clamped.is_empty() {
-            return;
-        }
-        // **按墨迹溢出量外扩**：调用方只给"逻辑矩形"（例如流式输出的一行），
-        // 而字形可以越过它 1~2px；不扩的话那几行像素永远不在脏区里。
-        // 只在这一入口外扩：布局差异产生的脏区仍保持精确（大量用例按精确矩形断言）。
-        let m = self.ink_margin;
-        let expanded = Rect::new(
-            clamped.x - m,
-            clamped.y - m,
-            clamped.w + 2.0 * m,
-            clamped.h + 2.0 * m,
-        );
-        // **外扩后仍要裁回视口**：脏区越界会被后端当作超采样。
-        self.dirty.add(expanded.intersect(window));
+        // Apply the margin **before** clipping: a logical rect just outside the viewport
+        // can still have its ink margin overlap visible pixels. `add_dirty_rect` ignores
+        // empty/outside results after clipping.
+        self.add_dirty_rect(rect);
     }
 
     /// 标记某节点的尺寸可能变化（等价于组件返回 `EventResult::Relayout` 的效果）。
@@ -1270,7 +1269,7 @@ impl UiTree {
                 // 之前这里无条件 `dirty = full()`，把"响应式更新"变成了"整窗重绘"——
                 // 那是为了兼容"变值可能带来重排"的保守做法。
                 // 重排场景不需要它：布局阶段的 `mark_moved` 会把新旧矩形都并进脏区。
-                Some(r) if !r.is_empty() => self.dirty.add(r),
+                Some(r) if !r.is_empty() => self.add_dirty_rect(r),
                 // 拿不到矩形（尚未布局 / 已删除）：只能整窗
                 _ => need_full = true,
             }
@@ -1700,11 +1699,11 @@ impl UiTree {
             let Some(new) = self.rects.get(&crate::layout::id_key(id)).copied() else {
                 // 节点消失了（弹窗关闭、列表删行、子树被隐藏）：
                 // **旧矩形必须重绘**，否则原来的内容留在屏幕上（弹窗残影）。
-                self.dirty.add(*old);
+                self.add_dirty_rect(*old);
                 continue;
             };
             if new != *old {
-                self.dirty.add(old.union(new));
+                self.add_dirty_rect(old.union(new));
             }
         }
     }
@@ -2470,7 +2469,7 @@ impl UiTree {
                     } else {
                         let rects = std::mem::take(&mut self.broadcast_rects);
                         for r in &rects {
-                            self.dirty.add(*r);
+                            self.add_dirty_rect(*r);
                         }
                         self.broadcast_rects = rects;
                         self.broadcast_rects.clear();

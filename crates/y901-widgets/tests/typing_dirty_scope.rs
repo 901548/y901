@@ -117,13 +117,14 @@ fn typing_marks_only_the_input_locally() {
     );
 
     for r in tree.dirty().rects() {
-        // 允许外扩 1px（抗锯齿/边框），但不允许扩到整个窗口
+        // 允许墨迹外扩：框架对每个局部脏矩形统一外扩 `MIN_INK_MARGIN = 2px`
+        // （默认度量的 `ink_bounds` 溢出为 0），但不允许扩到整个窗口。
         assert!(
-            r.x >= input.x - 1.0
-                && r.y >= input.y - 1.0
-                && r.right() <= input.right() + 1.0
-                && r.bottom() <= input.bottom() + 1.0,
-            "脏区 {r:?} 必须落在输入框 {input:?} 内"
+            r.x >= input.x - 2.0
+                && r.y >= input.y - 2.0
+                && r.right() <= input.right() + 2.0
+                && r.bottom() <= input.bottom() + 2.0,
+            "脏区 {r:?} 必须落在输入框 {input:?} 的墨迹边距内"
         );
     }
 }
@@ -149,7 +150,7 @@ fn consecutive_keystrokes_stay_local() {
         );
         for r in tree.dirty().rects() {
             assert!(
-                r.right() <= input.right() + 1.0 && r.bottom() <= input.bottom() + 1.0,
+                r.right() <= input.right() + 2.0 && r.bottom() <= input.bottom() + 2.0,
                 "第 {i} 次输入的脏区 {r:?} 超出输入框 {input:?}"
             );
         }
@@ -182,7 +183,7 @@ fn fixed_width_input_stays_local_too() {
     assert!(!tree.dirty().is_full(), "定宽输入框打字同样不该整窗重绘");
     for r in tree.dirty().rects() {
         assert!(
-            r.right() <= input.right() + 1.0 && r.bottom() <= input.bottom() + 1.0,
+            r.right() <= input.right() + 2.0 && r.bottom() <= input.bottom() + 2.0,
             "脏区 {r:?} 超出定宽输入框 {input:?}"
         );
     }

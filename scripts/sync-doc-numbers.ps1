@@ -47,6 +47,18 @@ if ($Check) {
         Write-Host "[sync] FAIL: numbers.txt 缺少 baseline= 行"
         exit 1
     }
+    # **numbers.txt 的数字必须与 baseline 同源**：baseline 是 `test-baseline.txt` 里
+    # 最近一次真实测量的通过数；若 numbers.txt 的 passed 与它不一致，说明有人手改了
+    # 文档数字（或只更新了其中一处）。gate 的测试计数步只会挡住"下降"，
+    # 上涨/手改只能靠这里挡。
+    if ($passed -ne $baseline) {
+        Write-Host "[sync] FAIL: numbers.txt 的 passed=$passed 与 baseline=$baseline 不一致（重新跑 sync 生成）"
+        exit 1
+    }
+    if ($ignored -lt 0) {
+        Write-Host "[sync] FAIL: numbers.txt 缺少 ignored= 行"
+        exit 1
+    }
 } else {
     $defaultOut = & cargo test --workspace --offline 2>&1 | Out-String
     $passed = 0; $failed = 0; $ignored = 0
@@ -130,7 +142,12 @@ foreach ($f in $docFiles) {
             @{ name = 'baseline';        pattern = '\u57fa\u7ebf\s*\*\*(\d+)\*\*';            want = $baseline },
             @{ name = 'include_ignored'; pattern = 'include-ignored`?\s*[|:]\s*\*\*(\d+)\*\*'; want = $includePassed },
             @{ name = 'include_ignored'; pattern = '\u542b ignore[^\n]{0,8}\*\*(\d+)\*\*';       want = $includePassed },
-            @{ name = 'passed';          pattern = '\*\*(\d+)\*\*\s*passed';                 want = $passed  }
+            @{ name = 'passed';          pattern = '\*\*(\d+)\*\*\s*passed';                 want = $passed  },
+            # Markdown 表格以及显式包含默认测试统计的行，也纳入检查，避免 ACCEPTANCE.md 漏检。
+            @{ name = 'passed table';    pattern = '\|\s*`cargo test --workspace --offline`[^|]*\|\s*\*\*(\d+)\s+passed'; want = $passed },
+            @{ name = 'passed summary';  pattern = '默认测试[^\n]{0,50}\*\*(\d+)\s+passed';       want = $passed },
+            @{ name = 'include summary'; pattern = '完整运行[^\n]{0,30}\*\*(\d+)\s+passed';       want = $includePassed },
+            @{ name = 'include count';   pattern = 'include_ignored\s*=\s*(\d+)';                    want = $includePassed }
             # **行内形式的规则由 `$inlineFields` 自动生成**（见下方 foreach）。
             # 为何限定反引号：散文里也会出现 "Windows 侧 ignored=58、Linux 侧=59"，
             # 那是**平台对比**，不该按本仓全局计数校验；加反引号地匹配能把它排除。

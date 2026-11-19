@@ -9,12 +9,25 @@ use y901_ui::{
     Size, TextMetrics, UiEvent, Widget,
 };
 
+fn scaled(edges: Edges, scale: f32) -> Edges {
+    Edges {
+        left: edges.left * scale,
+        top: edges.top * scale,
+        right: edges.right * scale,
+        bottom: edges.bottom * scale,
+    }
+}
+
 /// 垂直列表容器：等宽、依次排列、支持 gap 与 padding。
 pub struct VerticalList {
     id: String,
     children: Vec<Box<dyn Widget>>,
+    /// Padding base values in DIP, unless `fixed_padding` is set.
     padding: Edges,
+    fixed_padding: Option<Edges>,
+    /// Gap base value in DIP, unless `fixed_gap` is set.
     gap: f32,
+    fixed_gap: Option<f32>,
     item: FlexItem,
     rect: Rect,
 }
@@ -29,25 +42,51 @@ impl VerticalList {
             id: id.into(),
             children: Vec::new(),
             padding: Edges::ZERO,
+            fixed_padding: None,
             gap: 4.0,
+            fixed_gap: None,
             item: FlexItem::default(),
             rect: Rect::ZERO,
         }
     }
 
-    /// 设置内边距（子节点整体内缩）。
+    /// 设置内边距（DIP，随 DPI 缩放；子节点整体内缩）。
     ///
+    /// 与 `Flex::padding()` 口径一致。需要固定物理像素时使用
+    /// [`VerticalList::padding_fixed`]。后设置者优先。
     /// 返回：自身。副作用：无（下次布局生效）。
     pub fn padding(mut self, padding: Edges) -> Self {
         self.padding = padding;
+        self.fixed_padding = None;
         self
     }
 
-    /// 设置行间距（像素，可为负但无意义）。
+    /// 设置不随 DPI 缩放的物理像素内边距。
     ///
-    /// 返回：自身。副作用：无。
+    /// 与 `Flex::padding_fixed()` 口径一致。普通留白应使用 [`VerticalList::padding`]。
+    /// 后设置者优先。
+    pub fn padding_fixed(mut self, padding: Edges) -> Self {
+        self.fixed_padding = Some(padding);
+        self.padding = Edges::ZERO;
+        self
+    }
+
+    /// 设置行间距（DIP，随 DPI 缩放）。
+    ///
+    /// 与 `Flex::gap()` 口径一致。需要固定物理像素时使用 [`VerticalList::gap_fixed`]。
+    /// 后设置者优先。间距可为负，但通常无意义。
     pub fn gap(mut self, gap: f32) -> Self {
         self.gap = gap;
+        self.fixed_gap = None;
+        self
+    }
+
+    /// 设置不随 DPI 缩放的物理像素行间距。
+    ///
+    /// 与 `Flex::gap_fixed()` 口径一致。后设置者优先。
+    pub fn gap_fixed(mut self, gap: f32) -> Self {
+        self.fixed_gap = Some(gap);
+        self.gap = 0.0;
         self
     }
 
@@ -95,10 +134,15 @@ impl Widget for VerticalList {
         c: Constraints,
         cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
+        let scale = metrics.scale();
+        let padding = self
+            .fixed_padding
+            .unwrap_or_else(|| scaled(self.padding, scale));
+        let gap = self.fixed_gap.unwrap_or(self.gap * scale);
         flex_measure(
             Axis::Vertical,
-            self.padding,
-            self.gap,
+            padding,
+            gap,
             &mut self.children,
             metrics,
             c,
@@ -113,10 +157,15 @@ impl Widget for VerticalList {
         cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
+        let scale = metrics.scale();
+        let padding = self
+            .fixed_padding
+            .unwrap_or_else(|| scaled(self.padding, scale));
+        let gap = self.fixed_gap.unwrap_or(self.gap * scale);
         flex_arrange(
             Axis::Vertical,
-            self.padding,
-            self.gap,
+            padding,
+            gap,
             &mut self.children,
             rect,
             metrics,

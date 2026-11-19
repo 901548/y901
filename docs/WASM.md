@@ -18,7 +18,7 @@
 |---|---|---|
 | **D1** | 复用 `y901-runtime` 的 `frame_step`，不另写循环 | ✅ 已实现（含 `dt`，见 §8.1） |
 | **D2** | `run()` 立即返回，帧由 rAF 推进 | ✅ 已实现 |
-| **D3** | 呈现用 `putImageData` | ✅ 已实现，**并已做局部重绘 + 局部上传**（见 §3.2） |
+| **D3** | 呈现用 `putImageData` | ✅ 已实现；每次呈现都转换并上传整帧（见 §3.2） |
 | **D4** | DPI 强制 1.0 | ✅ 已实现（`SoftBackend` 以 `dpi_scale = 1.0` 构造） |
 | **D5** | IME 走隐藏 `<input>`，不做候选窗钉位 | ✅ 已实现；候选窗由浏览器绘制，我们不钉位 |
 | **D6** | 只依赖 `wasm-bindgen`，绑定手写 | ✅ 已实现（`bindings.rs` 约 400 行）；绑定 golden test 已实现（见 §5） |
@@ -84,28 +84,14 @@ canvas 上设了 `tabindex="0"` 与 `outline: none`。`window` 的 `focus`/`blur
 
 1. `SoftBackend` 的缓冲是 **BGRA、自上而下**，与 `ImageData` 的行序一致，
    **不翻行**（只换通道 BGRA→RGBA）。
-2. **整帧路径**：`bgra_to_rgba(全帧)` → `createImageData(w,h)` → `data.set(bytes)`（一次批量拷贝）
-   → `putImageData(0,0)`。
-3. **局部路径**：对每个脏矩形 `bgra_rect_to_rgba`（已移除：现走整帧 `ImageData`） → 建该尺寸的 `ImageData` →
-   `data.set(bytes)` → `putImageData(x,y)`。
+2. 每次呈现均走**整帧路径**：`bgra_to_rgba(全帧)` → `createImageData(w,h)` →
+   `data.set(bytes)`（一次批量拷贝）→ `putImageData(0,0)`。没有局部矩形上传实现。
 
-**性能要点**：像素拷贝改用 `TypedArray.prototype.set`（**一次跨界调用**）。
-旧实现是逐字节 `data[i] = v`，800×600×4 = **192 万次跨界调用**，每次交互卡约 1 秒。
+**性能要点**：像素拷贝使用 `TypedArray.prototype.set`（**一次跨界调用**）。
+旧实现逐字节写 `data[i] = v`，800×600×4 = **192 万次跨界调用**。
 
-**重绘策略（方案 D：按脏区裁剪的整树重绘）**：
-
-- `dirty.is_full()` → 一次整树绘制，**不加裁剪**，先 `soft.clear()`。
-- 否则 → **对每块脏矩形各画一遍整树**，`push_clip(rect)` 限制像素范围；**不清屏**
-  （保留缓冲，脏区外像素不动）。脏区内的绘制仍按完整顺序（父背景 → 子 → 文字），
-  所以"父背景没重画"的黑块不会出现。
-- 局部模式下仍保留**脏区剪枝**（与脏区不相交的子树不遍历）：脏区必被祖先 rect 包含，
-  祖先会命中 `needs_paint` 并在裁剪区内重画背景，因此正确性不受影响。
-
-**上传阈值**（历史设计，`should_upload_partial` 已移除）：**块数 > 8** 或 **总面积 > 视口 50%** 时
-回退整帧——每块 `putImageData` 都有固定跨界成本，碎块多或面积大时一次传更划算。
-
-**已知边界**：打开弹层时强制 `invalidate_all()`（`push_popup` 内），因为弹层与模态遮罩覆盖的
-区域不保证落在任何局部脏区里。弹层**动画结束帧**同样强制整窗重绘，否则留下半透明残影。
+**重绘策略**：每次需要呈现时先清空软缓冲，再令整棵 UI 树失效并完整重绘，最后上传整帧。
+这避免了“清屏后只绘制脏区”造成的画面丢失；Web 后端没有脏区裁剪绘制或局部上传路径。
 
 ### 3.3 DPI
 
@@ -197,9 +183,8 @@ input。
    它是"桌面零回归"的硬判据。
 2. **wasm32 check**：`cargo check -p y901-shell --target wasm32-unknown-unknown` 必须 exit 0。
    （`--workspace` + wasm32 **不能**通过：`y901-backend-win32` 没有 cfg 守卫，这是既有情况。）
-3. **纯函数单测**：事件映射（`keys.rs`）、坐标翻转（`to_ui_y`）、抠图与通道交换
-   （`present.rs`，含"整帧与局部逐字节一致"T8）、脏区裁剪重绘（`tree.rs`，T1-T7 用记录型
-   `RenderCtx`，不需要 GPU）。
+3. **纯函数单测**：事件映射（`keys.rs`）、坐标映射（`to_ui_y`）、通道交换
+   （`present.rs`）与脏区裁剪重绘逻辑（`tree.rs`，用记录型 `RenderCtx`，不需要 GPU）。
 4. **native 不受影响**：`cargo check --workspace --all-targets` 与 `cargo test --workspace` 必须绿。
 5. **绑定 golden test**：已实现（`crates/y901-backend-web/tests/bindings_golden.rs`）。
    native 下把 `bindings.rs` 当**源码快照**断言：50 个 `js_name` 值（含大小写）、
@@ -212,14 +197,14 @@ input。
 |---|---|---|
 | **S1** | 骨架 + `present` 管线 + rAF 帧步 + 首次 layout + 字体换装 + 方向/度量修正 | ✅ |
 | **S2** | 事件接线：鼠标 / 滚轮 / 键盘 / IME / 命令 / 光标 / resize | ✅ |
-| **性能** | 按脏区裁剪重绘 + 局部上传 + 批量拷贝 + 上传阈值 | ✅（实机手感待复测） |
+| **性能** | 整树重绘 + 整帧上传 + 批量拷贝 | ✅（实机手感待复测） |
 
 ## 7. 风险与对策（仍在生效的部分）
 
 | 风险 | 对策 |
 |---|---|
 | 手写绑定写错 JS 名字 → 运行时才炸 | 已有 native golden test（源码快照断言）+ 真机逐项验证 |
-| `putImageData` 的跨界成本 | 已改为批量 `set()` + 局部上传 + 阈值回退 |
+| `putImageData` 的跨界成本 | 整帧批量 `set()`，不做局部上传或阈值回退 |
 | 浏览器 IME 候选窗位置不可控 | 接受浏览器默认行为（D5），不钉位 |
 | `dpr` 非 1.0 破坏对拍 | 强制 1.0（D4） |
 | rAF 在后台标签页暂停 | 接受（动画停住），不做补偿 |

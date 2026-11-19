@@ -1,17 +1,12 @@
-//! **墨迹深度 ≠ 行高**：`line_height` 是 1em 行框，真实墨迹是 `ascent + descent`。
+//! **墨迹深度与行高是不同度量**：真实字体引擎的 `ascent + descent` 可能大于 `line_height`。
 //!
-//! 背景（审查 P1-5）：`snapshot_harness::invalidate_rect_partial_equals_full` 当初
-//! 是靠"手工把测试脏区加宽 4px"才变绿的——根因是框架用行高定高/算脏区，
-//! 而下伸字与圆字母 overshoot 会越过行框 1~2px，那几行像素不在脏区里，
-//! 局部重绘时清不掉。
+//! 这些用例只检查 `TextMetrics::ink_bounds()` 的字体度量，不断言 `TextLabel` 的高度策略。
+//! `TextLabel` 仍按 `line_height` 计算高度；脏区墨迹余量由 `UiTree` 单独处理。
 //!
-//! 修复方式（性能优先的"方案 ②"，不动布局）：新增 `TextMetrics::ink_bounds()`
-//! 返回墨迹相对文本原点的上下外扩，`TextLabel` 用它定高；`line_height` 语义不变。
-//!
-//! 这条用例用真实字体引擎（无 GPU），钉住三件事：
-//! 1. 真实后端的 `ink_bounds` 深度 > `line_height`（bug 的前提成立）；
-//! 2. `ink_bounds` 随字号线性缩放；
-//! 3. 未覆盖 `ink_bounds` 的后端（默认实现）行为与旧版一致。
+//! 用真实字体引擎（无 GPU）钉住三件事：
+//! 1. 本测试字体的 `ink_bounds` 下深度大于 `line_height`；
+//! 2. `ink_bounds` 深度随字号线性缩放；
+//! 3. 报告应用字体度量，后者不要求墨迹深度一定大于行高。
 
 #![cfg(test)]
 

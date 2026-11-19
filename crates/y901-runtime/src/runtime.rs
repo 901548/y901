@@ -37,6 +37,17 @@ fn idle_wait_ms() -> u32 {
         .unwrap_or(100)
 }
 
+/// Remaining portion of a 16 ms busy-frame budget, rounded down to wait granularity.
+fn busy_wait_ms(frame_elapsed: std::time::Duration) -> u32 {
+    std::time::Duration::from_millis(16)
+        .saturating_sub(frame_elapsed)
+        .as_millis() as u32
+}
+
+fn elapsed_ms(duration: std::time::Duration) -> u64 {
+    duration.as_millis() as u64
+}
+
 /// 一帧的观测结果。
 pub struct FrameStats {
     /// 本帧是否有事件或布局工作。
@@ -152,8 +163,6 @@ pub fn run_loop<W: WindowBackend>(
     let mut first_frame_done = false;
     // 上一帧是否有工作：有工作时不得等待，否则 Win32 会在每帧都“睡”一次。
     let mut was_busy = false;
-    // 上一帧的实际耗时（布局 + 绘制 + 呈现），供帧预算补偿使用。
-    let last_frame_ms: u64 = 0;
     // 后端是否**自节流**（D3D11 的 `Present(1)` 会阻塞到 vsync）。
     // 为何要猜：软后端（GDI）不自节流，若一律 `wait=0` 会空转烧 CPU；
     // 而 D3D11 若再多睡 16ms 就与 vsync 叠加成 30fps。故用"上一帧呈现耗时"判定。
@@ -163,8 +172,7 @@ pub fn run_loop<W: WindowBackend>(
     let mut last_tick_at = Instant::now();
 
     loop {
-        let frame_start = Instant::now();
-
+        let loop_start = Instant::now();
         // ---- 1. 事件 ----
         // **帧预算**：忙档不再 `wait=0`（那会让软后端空转烧 CPU），而是 16ms ≈ 60fps；
         // 闲档取 `min(idle_wait, 距下次 Tick 到期)`，让空闲动画也能按节拍出帧。
@@ -183,9 +191,9 @@ pub fn run_loop<W: WindowBackend>(
         let idle_ms = idle_wait_ms();
         let wait_ms = if was_busy {
             // **帧预算补偿**：16ms 是"帧周期上限"，不是"固定睡眠" ——
-            // 若本帧已经花了 该花的时间（布局 + 绘制 + 呈现），就只补足差额。
+            // 若本帧已经花了该花的时间（布局 + 绘制 + 呈现），就只补足差额。
             // 否则"固定 16ms 睡 + 5~8ms 工作"会把帧周期拉到 21~24ms（≈40fps）。
-            16u64.saturating_sub(last_frame_ms) as u32
+            busy_wait_ms(loop_start.saturating_duration_since(last_tick))
         } else {
             idle_ms.min(tick_due_ms)
         };
@@ -194,6 +202,8 @@ pub fn run_loop<W: WindowBackend>(
         };
         let tick_now = Instant::now();
         let dt = tick_now.saturating_duration_since(last_tick);
+        // Do not count event-wait time against the work budget or present_ms.
+        let work_start = Instant::now();
         // ---- 1..6. 一帧的通用部分（与 wasm 共用）----
         let stats = frame_step(window, tree, host, &raws, dt)?;
         let (had_work, need_layout, presented) =
@@ -211,14 +221,17 @@ pub fn run_loop<W: WindowBackend>(
         }
 
         // ---- 7. 统计 ----
+        // Measure frame work after render and after_present (excluding event wait)
+        // for the profiler's present_ms field.
+        let frame_elapsed = work_start.elapsed();
         if let Some(p) = profiler.as_mut() {
             p.record(
-                frame_start.elapsed().as_micros() as u64,
+                frame_elapsed.as_micros() as u64,
                 profile::FrameMeta {
                     had_work,
                     need_layout,
                     presented,
-                    present_ms: last_frame_ms,
+                    present_ms: elapsed_ms(frame_elapsed),
                 },
             );
         }
@@ -282,5 +295,24 @@ mod guard_tests {
             code.contains("RenderOutcome::Presented") && code.contains("RenderOutcome::Skipped"),
             "run_loop 必须同时用到两种 outcome"
         );
+    }
+
+    #[test]
+    fn busy_wait_uses_remaining_frame_budget() {
+        use super::busy_wait_ms;
+        use std::time::Duration;
+
+        assert_eq!(busy_wait_ms(Duration::from_millis(5)), 11);
+        assert_eq!(busy_wait_ms(Duration::from_millis(16)), 0);
+        assert_eq!(busy_wait_ms(Duration::from_millis(20)), 0);
+    }
+
+    #[test]
+    fn elapsed_ms_reports_the_supplied_frame_duration() {
+        use super::elapsed_ms;
+        use std::time::Duration;
+
+        assert_eq!(elapsed_ms(Duration::from_millis(23)), 23);
+        assert_eq!(elapsed_ms(Duration::from_micros(999)), 0);
     }
 }

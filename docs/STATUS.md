@@ -2,7 +2,7 @@
 
 - **HEAD**: 见 `git log -1`（v0.2.0 之后：审查整改 2 批）
 - **tags**: v0.1.0 ~ **v0.2.0**（本版含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`）
-- **测试**: `passed=970` / `ignored=61` / `include_ignored=1028`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=978` / `ignored=61` / `include_ignored=1039`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -102,22 +102,29 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 **为什么不直接拿它定高**：hhea 的 `ascent+descent` 在该字体上是 **1.33em**，
 按它定高会让所有 `TextLabel` 高 33%（全站密度崩、像素基线全变）——
 属于"修一个脏区、赔掉整站布局"。所以本轮只落地**能力**（API + 后端实现 + 用例），
-把墨迹外溢的消费点（`UiTree` 的多个标脏点改成按 `ink_bounds` 扩张）留到单独一轮。
+把墨迹外溢的消费点（`UiTree` 的多个标脏点改成按 `ink_bounds` 扩张）留到单独一轮
+（**已在该文件下方"P1-5 收口"与第二轮审查整改中完成**）。
 `line_height` 语义保持 = 行距，未改。
 
 
 **P1-5 收口：脏区按墨迹外扩（本轮完成）**
 
 - `UiTree` 在 `layout()` 里从 `metrics.ink_bounds()` 求"墨迹溢出量"，并在
-  **`invalidate_rect()` 入口**统一外扩（布局差异产生的脏区仍保持精确，避免大面积用例噪声）；
-  外扩后裁回视口。
+  **所有局部标脏路径**统一外扩：`invalidate_rect()`、`invalidate(id)`、
+  布局前后的新旧矩形并集（`mark_moved`）、Signal 失效、浮层关闭、广播矩形
+  —— 全部经由同一个 `add_dirty_rect()` 辅助函数；外扩后裁回视口。
+- **第二轮审查补齐**：早先只有 `invalidate_rect()` 入口外扩，节点级 `invalidate(id)`
+  与布局移动路径仍按精确矩形标脏。于是"j → o"这种**同宽同高**的文本内容变更
+  （125% DPI）会留下 164 个残影像素（行 56~71）。现在三条路径共用同一外扩，
+  并有纯 CPU 逐像素回归 `node_invalidate_ink_margin`（去掉外扩时 96 像素不一致）。
 - 外扩量 = `max(ink_depth − line_height, 2px)`。**为什么要有 2px 下限**：
   实测 SimSun 16px 的 `ascent+descent` 恰好等于行高（gap = 0），但真实墨迹仍会越过 1~2px
   （overshoot + 抗锯齿），名义度量预测不到。
 - **收益可验证**：`snapshot_harness::invalidate_rect_partial_equals_full` 里那段
   "手工把脏区加宽 4px"的补丁**已删除**，用例回到最朴素的窄矩形写法并通过
   —— 即框架的脏区兜底真的接管了这个 bug。
-- 受影响的精确脏区断言（5 条）按新契约放宽（+2~5px），并注明原因。
+- 受影响的精确脏区断言按新契约收紧为**显式边距断言**（不再是 `+5px` 这类宽容差）；
+  视口边缘的用例按"外扩后裁到视口"夹取期望值。
 
 ## 已知问题
 

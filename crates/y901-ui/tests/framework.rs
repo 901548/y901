@@ -318,6 +318,9 @@ fn dirty_region_prunes_untouched_subtrees() {
     };
 
     let root = Flex::row("root")
+        // 两列之间留 8px 缝：标脏会按墨迹外扩（默认度量下每边 2px），
+        // 贴边时外扩会越过中缝碰到右半树，那属于"应该重画"，不是剪枝失败。
+        .gap(8.0)
         .push(Box::new(
             Flex::column("left")
                 .flex_item(FlexItem::fill())
