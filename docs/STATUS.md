@@ -405,8 +405,18 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - **不要用 `--exclude` 绕过** —— 那只是掩盖问题。
 - 四条测试基建债（22 个测试无门控 / lib 的 4 处 `#[link]` /
   `file_drop` 硬编码 `C:\` / supersample 阈值绑定字体）就是靠它首次暴露的。
-- 已验证（demo）：**661 passed / 0 failed / 25 ignored**（128 个测试二进制）。
-  与 Windows 的 751/0/58 不同 —— **差异来自平台 cfg 门控，不是测试丢失**。
+- 已验证（2026-11-19，CentOS 7.9 虚拟机 + rustc 1.92）：Linux 全量
+  **878 passed / 2 failed / 27 ignored**（151 个测试目标）。失败的两条都在
+  `y901-extras` 的 `sgr_reverse`（`sgr7_/sgr27_`）：用例取"单元格右上角"像素断言
+  精确 RGB，前提是 Windows 的 Segoe UI 字形不覆盖那个采样点；Linux 回退到
+  DejaVuSans 后字形覆盖不同，采样到的是"前景色与背景的混合值"（实测 182,186,195
+  vs 期望 230,235,245）——**是字体相关的采样假设，不是 SGR 反色逻辑错**。
+  与 Windows 的 978/0/61 不同 —— **差异来自平台 cfg 门控 + 字体回退链**，不是测试丢失。
+- **x11 专项验收（2026-11-19）全部通过**：`cargo check -p y901-backend-x11 --all-targets`
+  exit 0；`golden` 32/0；`xvfb-run real_window` 12/0（2 ignored）。
+  与 `/root/Y901/linux_verify_cplan.sh` 的口径一致。
+- 另外：`y901-shell` 的剪贴板单测在 Xvfb 下偶发失败（X 选区 owner 竞争），重跑即过，
+  属环境不稳定，不在门禁内。
 
 ### X11 专项
 
@@ -418,7 +428,8 @@ cargo test --workspace --no-fail-fast 2>&1 \
 
 > 旧描述（已修正）曾写"`cargo test --workspace` 在 WSL 上不可行：
 > `y901-backend-win32` 在 Linux 下链接失败（预期）" ——
-> 那是**crate 级 `#![cfg(windows)]` 之前**的事；现在 Linux 全量测试可行且已过。
+> 那是**crate 级 `#![cfg(windows)]` 之前**的事；现在 Linux 全量测试可行，
+> 且有上方 2026-11-19 的实测记录（仅剩两条字体相关的采样假设差异）。
 
 ## 数字检查的覆盖范围（已知限制）
 
