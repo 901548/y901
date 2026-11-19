@@ -1,7 +1,7 @@
 # 项目状态
 
-- **HEAD**: 见 `git log -1`（v0.2.0 之后：审查整改 2 批）
-- **tags**: v0.1.0 ~ **v0.2.0**（本版含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`）
+- **HEAD**: 见 `git log -1`（v0.2.1；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收）
+- **tags**: v0.1.0 ~ **v0.2.1**（v0.2.0 含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`；v0.2.1 为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md`）
 - **测试**: `passed=982` / `ignored=61` / `include_ignored=1043`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
@@ -342,8 +342,8 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
    剩：~~soft vs d3d 像素差回归~~ —— 已完成（见上方"双后端一致性"）。
 4. **发布**：`0.2.0` 已提交并打 tag；**已推送成功**（`main` 与全部 tag 在 `origin`，
    曾阻断推送的是本机 git 里指向 `127.0.0.1:7897` 的死代理，已移除）。
-   `v0.2.0` 之后累积 12 个提交（Grid+Image 修复、Linux 双平台验收、剪贴板确定性等），
-   尚未发新版 —— 下一步是 `v0.2.1`。
+   `v0.2.0` 之后累积 15 个提交（Grid+Image 修复、per-node 墨迹边距、Linux 双平台验收、
+   剪贴板确定性等）—— 已发布 **v0.2.1**（`docs/RELEASE_NOTES_v0.2.1.md`）。
 5. ~~**杂物**：根目录 `clippy.txt` / `todo.tsv` 是生成物，建议移出仓库或进 `.gitignore`~~ ——
    已完成：两者已进 `.gitignore` 且不再被跟踪。
 

@@ -10,7 +10,7 @@
 | 口径 | 数量 |
 |---|---|
 | `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **982 passed / 0 failed / 61 ignored** |
-| `cargo test --workspace --offline -- --include-ignored` | **1040 passed / 0 failed** |
+| `cargo test --workspace --offline -- --include-ignored` | **1043 passed / 0 failed** |
 
 `include_ignored=1043`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
@@ -44,7 +44,38 @@
 | `two_disjoint_dirty_rects_match_full_redraw` | 两块不相邻脏区 == 整窗重绘（逐字节 0 差异） |
 | `grid_with_images_is_not_blank_on_gpu` | Grid + 4 图片不再整帧空白（62 381 种颜色；四象限主色命中） |
 
-## Clippy
+## 双平台验证矩阵（v0.2.1，2026-11-19）
+
+Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 Windows 上，
+`#[cfg(unix)]` 代码与 X11 运行时只能靠 `scripts/linux-verify.sh`（Xvfb）覆盖。
+两张表分开写，是为了让"哪边的数就是哪边的"一眼可查（混在一行会被 doc 检查判为口径不明）。
+
+### Windows（gate.ps1）
+
+| 检查 | 结果 |
+|---|---|
+| 默认测试 | **982 passed / 0 failed / 61 ignored**（150 个测试目标） |
+| `--include-ignored` | **1043 passed / 0 failed** |
+| clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
+| 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
+| `cargo audit` | 0 漏洞 |
+
+### Linux（CentOS 7.9 + Xvfb，虚拟机；scripts/linux-verify.sh）
+
+| 检查 | 结果 |
+|---|---|
+| Linux 默认测试（`xvfb-run cargo test --workspace`） | **881 passed / 0 failed / 27 ignored**（150 个测试目标） |
+| Linux x11 `check --all-targets` | exit 0 |
+| Linux x11 `golden` | 32 passed / 0 failed |
+| Linux `xvfb-run real_window` | 12 passed / 0 failed / 2 ignored |
+| Linux `render stroke_round_aa` / `extras sgr_reverse` / `ui+widgets` | 全部 exit 0（脚本汇总 6/6） |
+
+Linux 证据：
+[`linux-full-2026-11-19.log`](evidence/cross-platform/linux-full-2026-11-19.log)、
+[`linux-verify-2026-11-19.log`](evidence/cross-platform/linux-verify-2026-11-19.log)。
+命令：`xvfb-run -a -s '-screen 0 1280x800x24' cargo test --workspace --no-fail-fast`。
+
+## Clippy## Clippy
 
 `cargo clippy --workspace --all-targets --offline`：**0 error / 0 warning**
 

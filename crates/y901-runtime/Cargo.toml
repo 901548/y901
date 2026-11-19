@@ -10,7 +10,7 @@ edition.workspace = true
 # wasm 上 `std::time::Instant::now()` 会 panic（time not implemented）；
 # `web_time::Instant` 与它 API 一致，native 上直接转发给 std。
 web-time = "1"
-y901-ui = { path = "../y901-ui", version = "0.2.0" }
+y901-ui = { path = "../y901-ui", version = "0.2.1" }
 
 [dev-dependencies]
-y901-widgets = { path = "../y901-widgets", version = "0.2.0" }
+y901-widgets = { path = "../y901-widgets", version = "0.2.1" }

@@ -171,12 +171,18 @@ foreach ($f in $docFiles) {
                 $rules += @{ name = "inline $k"; pattern = ('`' + $k + '=(\d+)`'); want = $v }
             }
         }
-        foreach ($rule in $rules) {
-            foreach ($m in [regex]::Matches($t, $rule.pattern)) {
-                $n = [int]$m.Groups[1].Value
-                if ($n -ne [int]$rule.want) {
-                    Write-Host "[sync] stale: $f -- '$($rule.name)' is $($rule.want) but the line says $n"
-                    $stale++
+        # 语义规则也要遵守豁免：否则 "Linux 默认测试 881" 会被 `默认测试…passed` 规则
+        # 当成 Windows 口径报 stale（而它本来就是另一台机器的数）。
+        $ruleExempt = 'Linux|Helm|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
+        foreach ($line in ($t -split "`n")) {
+            if ($line -match $ruleExempt) { continue }
+            foreach ($rule in $rules) {
+                foreach ($m in [regex]::Matches($line, $rule.pattern)) {
+                    $n = [int]$m.Groups[1].Value
+                    if ($n -ne [int]$rule.want) {
+                        Write-Host "[sync] stale: $f -- '$($rule.name)' is $($rule.want) but the line says $n"
+                        $stale++
+                    }
                 }
             }
         }
