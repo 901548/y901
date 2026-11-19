@@ -234,12 +234,18 @@ pub struct UiTree {
     /// 为何要存：事件分发（`event` / `send_focus`）拿不到 `metrics`，
     /// 但命中测试需要与绘制同一个尺寸。存在这里后拷贝进 `EventCtx`。
     scale: f32,
-    /// **墨迹溢出量**（像素）：`ink_bounds` 深度 − `line_height`。
+    /// **树级墨迹边距**（像素）：按 `TextStyle::default()`（16px）算出的兜底值。
     ///
-    /// 脏区按控件 rect 计算，而墨迹可以越过 rect（下伸字/圆字母 overshoot）。
-    /// 标脏时统一把矩形向外扩这么多，保证局部重绘能清掉溢出部分。
-    /// 在 `layout()` 里从 `metrics` 求值；字体度量不可用时为 0（行为同旧版）。
+    /// 只用于"拿不到节点"的脏区路径（`invalidate_rect` / 广播矩形 / 尚未布局的节点）。
+    /// 有 id 的路径一律走 `node_ink_margin` 里的 per-node 值 —— 树级常数套到 24/48px
+    /// 标题上会不够（实测 48px 需要 13.9px，而树级只有 4.63px）。
     ink_margin: f32,
+    /// **per-node 墨迹边距**（`id_key → margin`），在 `layout()` 里随布局刷新。
+    ///
+    /// 为什么不标脏时现算：标脏发生在事件分发/布局阶段，那里拿不到 `metrics`
+    /// （`Widget::ink_overflow` 需要字体度量），而现查树是 O(n)。
+    /// 布局已经递归过整棵树，顺手采一遍是零额外遍历。
+    node_ink_margin: HashMap<u64, f32>,
     /// **上一次 Tick 广播时 `wants_tick() == true` 的节点数**。
     ///
     /// 为何要存：`run_loop` 要据此决定 Tick 节拍（16ms 还是 idle_wait）。
@@ -459,6 +465,7 @@ impl UiTree {
             pending_texture_releases: Vec::new(),
             scale: 1.0,
             ink_margin: 0.0,
+            node_ink_margin: HashMap::new(),
             root,
             popups: Vec::new(),
             focus: None,
@@ -530,17 +537,22 @@ impl UiTree {
     /// 关闭浮层的重绘应由 `EventResult::Relayout` 触发全窗重绘。
     pub fn invalidate(&mut self, id: &str) {
         if let Some(rect) = self.rects.get(&crate::layout::id_key(id)).copied() {
-            self.add_dirty_rect(rect);
+            self.add_dirty_rect_for(id, rect);
         }
     }
 
     /// Expand a logical dirty rect for text ink, then clip the result to the viewport.
-    /// All partial dirty paths go through this helper so ink margins are applied once.
-    fn add_dirty_rect(&mut self, rect: Rect) {
+    ///
+    /// 这是**唯一**的外扩实现，所有入口共用：
+    /// - `add_dirty_rect()`：树级默认边距（拿不到节点 id 的路径）；
+    /// - `add_dirty_rect_for()`：按节点自己的边距（`Widget::ink_overflow`）。
+    ///
+    /// 两处各写一份会立刻分叉 —— 本轮修的就是"只有 16px 够用"。
+    fn add_dirty_rect_with_margin(&mut self, rect: Rect, margin: f32) {
         if rect.is_empty() {
             return;
         }
-        let margin = self.ink_margin;
+        let margin = margin.max(0.0);
         let expanded = Rect::new(
             rect.x - margin,
             rect.y - margin,
@@ -549,6 +561,22 @@ impl UiTree {
         );
         let viewport = Rect::new(0.0, 0.0, self.viewport.w, self.viewport.h);
         self.dirty.add(expanded.intersect(viewport));
+    }
+
+    /// 用树级默认边距标脏（无节点上下文的路径）。
+    fn add_dirty_rect(&mut self, rect: Rect) {
+        let margin = self.ink_margin;
+        self.add_dirty_rect_with_margin(rect, margin);
+    }
+
+    /// 用**该节点自己的**墨迹边距标脏；节点没有覆盖时退回树级默认。
+    fn add_dirty_rect_for(&mut self, id: &str, rect: Rect) {
+        let margin = self
+            .node_ink_margin
+            .get(&crate::layout::id_key(id))
+            .copied()
+            .unwrap_or(self.ink_margin);
+        self.add_dirty_rect_with_margin(rect, margin);
     }
 
     /// 整窗重绘：把脏区置为 `full`。
@@ -1604,23 +1632,12 @@ impl UiTree {
     pub fn layout(&mut self, viewport: Size, metrics: &dyn TextMetrics) {
         // **DPI 缩放源头**：事件分发时拿不到 `metrics`，所以在这里存下。
         self.scale = metrics.scale();
-        // **墨迹溢出量**：脏区按控件 rect 算，而墨迹可以越过 rect（下伸字/圆字母 overshoot）。
-        // 用 `ink_bounds`（真实 `ascent+descent`）与 `line_height` 的差值作为标脏时的外扩量。
-        // 上限取一行：异常字体度量不该把脏区撑到离谱。
-        {
-            let style = crate::TextStyle::default();
-            let (_, ink_depth) = metrics.ink_bounds(&style);
-            let line_h = metrics.line_height(&style);
-            // **字体名义度量 + 最小安全边距**：
-            // 实测 SimSun 16px 的 `ascent+descent` 正好等于 16（gap = 0），
-            // 但真实墨迹仍会越过行框 1~2px —— 来自字形 overshoot 与抗锯齿覆盖，
-            // 不是名义度量能预测的。所以取 `max(gap, 2px)`：
-            // 2px 足够覆盖这类溢出，又不会像 hhea 那样每行多扫 5px。
-            const MIN_INK_MARGIN: f32 = 2.0;
-            self.ink_margin = (ink_depth - line_h)
-                .max(MIN_INK_MARGIN)
-                .min(line_h.max(0.0));
-        }
+        // **树级墨迹边距**（兜底）：按默认 16px 样式算一次，供没有节点上下文的
+        // 脏区路径使用。算法与 per-node 共用 `ink_margin_for()`，避免两份实现分叉。
+        //
+        // 它的**局限**（本轮修复）：24/32/48px 文本的真实溢出是 6.95/9.27/13.90px，
+        // 而这里只有 4.63px；所以有 id 的标脏一律走 `node_ink_margin`。
+        self.ink_margin = crate::widget::ink_margin_for(metrics, &crate::TextStyle::default());
         // 响应式：Signal 变过的节点先标脏，再进布局
         self.drain_invalidation();
         // Signal 与 dispatch 触及的节点在此统一比对语义面（方案 1'，一帧一次）
@@ -1647,6 +1664,8 @@ impl UiTree {
             self.snapshot_rects()
         };
         crate::layout::layout_tree(self.root.as_mut(), viewport, metrics, &mut self.cache);
+        // per-node 墨迹边距：布局刚递归过整棵树，顺手采一遍（零额外遍历）。
+        self.collect_ink_margins(metrics);
 
         // 浮层摆放：先量尺寸（浮层自己决定内容高），再用 `place_popup`
         // 把它放在锚点旁且不超出视口。绘制与命中都用这个 rect。
@@ -1668,6 +1687,36 @@ impl UiTree {
             }
             self.enforce_modal_focus();
         }
+    }
+
+    /// 采集每个节点的墨迹边距（布局后调用一次）。
+    ///
+    /// 输入：字体度量。副作用：重建 `node_ink_margin`。
+    /// 为何在布局后：`Widget::ink_overflow` 需要 `metrics` 与节点**当前**字号，
+    /// 而字号可能来自刚生效的 `TextStyle`（例如 Signal 驱动的字号切换）。
+    fn collect_ink_margins(&mut self, metrics: &dyn TextMetrics) {
+        fn walk(
+            node: &dyn Widget,
+            metrics: &dyn TextMetrics,
+            default: f32,
+            out: &mut HashMap<u64, f32>,
+        ) {
+            let margin = node.ink_overflow(metrics).unwrap_or(default);
+            out.insert(crate::layout::id_key(node.id()), margin);
+            if !node.is_open() {
+                return;
+            }
+            for child in node.children() {
+                walk(child.as_ref(), metrics, default, out);
+            }
+        }
+        let default = self.ink_margin;
+        let mut out = HashMap::new();
+        walk(self.root.as_ref(), metrics, default, &mut out);
+        for popup in &self.popups {
+            walk(popup.widget.as_ref(), metrics, default, &mut out);
+        }
+        self.node_ink_margin = out;
     }
 
     /// 快照当前每个节点的 rect（布局前调用）。
@@ -1699,11 +1748,11 @@ impl UiTree {
             let Some(new) = self.rects.get(&crate::layout::id_key(id)).copied() else {
                 // 节点消失了（弹窗关闭、列表删行、子树被隐藏）：
                 // **旧矩形必须重绘**，否则原来的内容留在屏幕上（弹窗残影）。
-                self.add_dirty_rect(*old);
+                self.add_dirty_rect_for(id, *old);
                 continue;
             };
             if new != *old {
-                self.add_dirty_rect(old.union(new));
+                self.add_dirty_rect_for(id, old.union(new));
             }
         }
     }

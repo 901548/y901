@@ -124,7 +124,7 @@ extern "C" {
     #[wasm_bindgen(method, js_name = "getPropertyPriority")]
     pub fn get_property_priority(this: &CssStyleDeclaration, name: &str) -> String;
 
-    /// `canvas.focus()`\uff1a\u70b9\u51fb\u540e\u628a\u952e\u76d8\u7126\u70b9\u62a2\u5230 canvas \u4e0a\u3002
+    /// `canvas.focus()`：点击后把键盘焦点抢到 canvas 上。
     #[wasm_bindgen(method)]
     pub fn focus(this: &HtmlCanvasElement);
 }
@@ -184,7 +184,7 @@ extern "C" {
     /// `KeyboardEvent.altKey`。
     #[wasm_bindgen(method, getter, js_name = "altKey")]
     pub fn alt_key(this: &KeyboardEvent) -> bool;
-    /// `KeyboardEvent.metaKey`（\u2318 / Win\uff09\u3002\u53ea\u53d6\u4e0d\u7528\uff1a\u6846\u67b6\u7684 `Modifiers` \u6ca1\u6709 meta \u4f4d\u3002
+    /// `KeyboardEvent.metaKey`（⌘ / Win）。只取不用：框架的 `Modifiers` 没有 meta 位。
     #[wasm_bindgen(method, getter, js_name = "metaKey")]
     pub fn meta_key(this: &KeyboardEvent) -> bool;
 
@@ -220,27 +220,27 @@ extern "C" {
     #[wasm_bindgen(method, getter)]
     pub fn button(this: &MouseEvent) -> i16;
 
-    /// `MouseEvent.offsetX`\u2014\u2014**\u76f8\u5bf9\u4e8e\u4e8b\u4ef6\u76ee\u6807\uff08canvas\uff09\u7684\u5750\u6807**\u3002
+    /// `MouseEvent.offsetX`——**相对于事件目标（canvas）的坐标**。
     ///
-    /// \u4e3a\u4f55\u7528 `offset*` \u800c\u4e0d\u7528 `client*` \u51cf `getBoundingClientRect()`\uff1a
-    /// canvas \u6ca1\u6709 CSS \u7f29\u653e\uff08\u5e03\u5c40\u5c3a\u5bf8 = \u5c5e\u6027\u5c3a\u5bf8\uff09\uff0c`offset*` \u5df2\u7ecf\u662f
-    /// canvas \u5185\u90e8\u7684\u843d\u70b9\uff0c**\u4e0d\u53d7\u9875\u9762\u6eda\u52a8\u4e0e\u9876\u90e8\u504f\u79fb\u5f71\u54cd**\uff0c\u4e5f\u5c11\u4e00\u6b21 DOM \u8c03\u7528\u3002
+    /// 为何用 `offset*` 而不用 `client*` 减 `getBoundingClientRect()`：
+    /// canvas 没有 CSS 缩放（布局尺寸 = 属性尺寸），`offset*` 已经是
+    /// canvas 内部的落点，**不受页面滚动与顶部偏移影响**，也少一次 DOM 调用。
     #[wasm_bindgen(method, getter, js_name = "offsetX")]
     pub fn offset_x(this: &MouseEvent) -> f64;
-    /// `MouseEvent.offsetY`\u3002
+    /// `MouseEvent.offsetY`。
     #[wasm_bindgen(method, getter, js_name = "offsetY")]
     pub fn offset_y(this: &MouseEvent) -> f64;
 
-    /// `MouseEvent.ctrlKey`\u3002
+    /// `MouseEvent.ctrlKey`。
     #[wasm_bindgen(method, getter, js_name = "ctrlKey")]
     pub fn ctrl_key(this: &MouseEvent) -> bool;
-    /// `MouseEvent.shiftKey`\u3002
+    /// `MouseEvent.shiftKey`。
     #[wasm_bindgen(method, getter, js_name = "shiftKey")]
     pub fn shift_key(this: &MouseEvent) -> bool;
-    /// `MouseEvent.altKey`\u3002
+    /// `MouseEvent.altKey`。
     #[wasm_bindgen(method, getter, js_name = "altKey")]
     pub fn alt_key(this: &MouseEvent) -> bool;
-    /// `MouseEvent.metaKey`\u3002
+    /// `MouseEvent.metaKey`。
     #[wasm_bindgen(method, getter, js_name = "metaKey")]
     pub fn meta_key(this: &MouseEvent) -> bool;
 }
@@ -264,15 +264,15 @@ extern "C" {
     #[wasm_bindgen(js_name = "EventTarget")]
     pub type EventTarget;
 
-    /// `addEventListener(type, listener)`\u2014\u2014\u4e0d\u5e26 options \u7684\u7b80\u5199\u5f62\u5f0f\u3002
+    /// `addEventListener(type, listener)`——不带 options 的简写形式。
     #[wasm_bindgen(method, js_name = "addEventListener")]
     pub fn add_event_listener(this: &EventTarget, kind: &str, cb: &Closure<dyn FnMut(JsValue)>);
 
-    /// `addEventListener(type, listener, options)`\u3002
+    /// `addEventListener(type, listener, options)`。
     ///
-    /// \u4e3a\u4f55\u9700\u8981\u5b83\uff1a\u90e8\u5206\u4e8b\u4ef6\uff08\u5c24\u5176 `wheel`\uff09\u5728\u67d0\u4e9b\u76ee\u6807\u4e0a\u9ed8\u8ba4**\u88ab\u52a8**\uff0c
-    /// \u88ab\u52a8\u76d1\u542c\u5668\u91cc\u8c03 `preventDefault()` \u65e0\u6548\u4e14\u63a7\u5236\u53f0\u62a5\u8b66\u3002
-    /// \u4f20 `{ passive: false }` \u624d\u80fd\u771f\u6b63\u963b\u6b62\u9875\u9762\u6eda\u52a8\u3002
+    /// 为何需要它：部分事件（尤其 `wheel`）在某些目标上默认**被动**，
+    /// 被动监听器里调 `preventDefault()` 无效且控制台报警。
+    /// 传 `{ passive: false }` 才能真正阻止页面滚动。
     #[wasm_bindgen(method, js_name = "addEventListener")]
     pub fn add_event_listener_with_options(
         this: &EventTarget,
@@ -282,14 +282,14 @@ extern "C" {
     );
 }
 
-/// DOM 事件基类\uff08\u7528\u6765\u8c03 `preventDefault`\uff09\u3002
+/// DOM 事件基类（用来调 `preventDefault`）。
 #[wasm_bindgen]
 extern "C" {
     /// DOM 事件基类（用来调 `preventDefault`）。
     #[wasm_bindgen(js_name = "Event")]
     pub type Event;
 
-    /// \u963b\u6b62\u6d4f\u89c8\u5668\u9ed8\u8ba4\u884c\u4e3a\uff08\u9875\u9762\u6eda\u52a8\u3001Tab \u8df3\u7126\u7b49\uff09\u3002
+    /// 阻止浏览器默认行为（页面滚动、Tab 跳焦等）。
     /// **`event.isComposing`**（`InputEvent` / `KeyboardEvent` 都有）。
     ///
     /// 用途：统一监听时判断「这次事件是不是输入法组字产生的」。

@@ -2,7 +2,7 @@
 
 - **HEAD**: 见 `git log -1`（v0.2.0 之后：审查整改 2 批）
 - **tags**: v0.1.0 ~ **v0.2.0**（本版含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`）
-- **测试**: `passed=979` / `ignored=61` / `include_ignored=1040`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=982` / `ignored=61` / `include_ignored=1043`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -40,6 +40,60 @@
 - `cargo audit` 恢复**真实联网刷新**（不再 STALE）：0 漏洞。
 - 本机 git 全局配置里指向 `127.0.0.1:7897` 的死代理已清除（备份
   `~/.gitconfig.bak-20261119`），`main` 与全部 tag 已推送。
+
+
+### D. 第三轮复审（2026-11-19）：A-1 / A-2 与一批文档/脚本卫生
+
+**A-1 大字号局部重绘残影（上轮"统一脏区"的遗漏分支）—— 已修**
+
+- **根因**：`UiTree::layout()` 只用 `TextStyle::default()`（16px）算**一个**树级
+  `ink_margin`（实测 4.63px），然后把这个常数套到所有节点上；而
+  `TextLabel::size(24/32/48)` 的真实溢出是 6.95 / 9.27 / 13.90px。
+  第二轮复审用 SoftBackend 探针实测差异像素：24px **72**、32px **136**、48px **312**。
+- **修法**：新增 `Widget::ink_overflow(metrics) -> Option<f32>`（默认 `None` = 用树级值），
+  `TextLabel` / `StyledText` / `TextInput` 按**自身样式**返回；
+  `UiTree` 在布局后顺手采集 `node_ink_margin: id → margin`（零额外遍历），
+  并新增 `add_dirty_rect_for(id, rect)`；`invalidate(id)` 与 `mark_moved`（新旧矩形）
+  全部改走 per-node 版本。外扩算法抽成 `ink_margin_for()`，树级默认与 per-node 共用。
+- **回归**：`node_invalidate_ink_margin` 覆盖 **16/24/32/48px**（同宽同高 j→o、
+  只 `invalidate(id)`、局部清屏 vs 整窗重绘逐像素比对），并断言脏区外扩量随字号增长；
+  另有"树级默认对 48px 不够"的反向对照 + `StyledText` 最大 span 边距断言。
+  **变异验证**：把 `TextLabel::ink_overflow` 改回 `None`，24px 立刻红（first diff 在 24px 用例）。
+- **已知边界**：`StyledText::render` 自己 `push_clip(self.rect)`，其墨迹不可能越界，
+  所以富文本只做"声明边距"的单元断言（像素级测不到）；将来若取消自裁剪，
+  per-node 边距已经就位。
+
+**A-2 `sync-doc-numbers.ps1` 在吃 `0x` 前缀 / 词内数字 —— 已修**
+
+- **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**982**`
+  （→ `**982**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
+  `win**982** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+- **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
+  基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
+  （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
+- **自证**：`test-doc-numbers-check.ps1` 从 5 条变异扩到 **7 条**，新增
+  "0x 被吃"与"win32 → win**N**"两类，全部被抓到；恢复后 `-Check` 通过。
+- **数据修复**：README 基线恢复为 `0xF7455CCE7781A864`，STATUS 恢复 `win32 默认族`。
+
+**B 批（文档/工程卫生）**
+
+| # | 问题 | 处理 |
+|---|---|---|
+| 3 | `empty_clipboard_maps_to_none` 恒真（match 三分支都通过） | 改为**注入假剪贴板**的确定性断言（空串→None、非空→原样），另加"不可用→None"用例 |
+| 4 | 门禁审计降级无痕迹 | 缓存库 ≤7 天时结论打印 `GATE OK (CACHED DB N.Nd; offline audit)`，`audit.log` 标题行加 `cached_db_days=` |
+| 5 | 仓库跟踪 `scripts/__pycache__/*.pyc` | `git rm --cached` + `.gitignore` 增加 `__pycache__/`、`*.pyc` |
+| 6 | `.gitignore` 第 37 行是 GBK 非法 UTF-8 | 逐行解码修复为 UTF-8（唯一非法行已还原中文注释） |
+| 7 | 55 行字面 `\uXXXX` 注释 | 解码 `profile.rs` 16 / web `lib.rs` 13 / `bindings.rs` 18 / `keys.rs` 1 / 两个 `.ps1` 6 行；仅保留 STATUS 里作为**示例**的那一处 |
+| 8 | `FRAMEWORK.md` 6 处"浯层"错字 | 全部改回"浮层" |
+| 9 | ACCEPTANCE GPU harness 口径互相矛盾 | 标题改为"GPU 像素验收用例"，并写明三个口径（8 条断言 / `snapshot_harness` 10 条 `#[ignore]` / 全仓 `ignored=61`）；STATUS 的文档债标为已修 |
+| 10 | `runtime.rs` 注释与实现脱钩（还在讲"自节流/上一帧呈现耗时"） | 改成 `last_tick` 差值口径，并写明旧 `last_frame_ms` 恒 0 的事故；`profile.rs` 注明 p50/p95 已改为**纯工作耗时**，不能与旧数字直接比 |
+
+**C 批（测试灵敏度）**
+
+- `d3d_text_scaling` 的墨量比/像素比区间从 `0.12..=0.45 / 0.15..=0.50` 收到
+  `0.30..=0.44 / 0.33..=0.47`（本机实测 0.372 / 0.400，CPU 对照 0.246 / 0.339），
+  并注明 gamma 校正使 D3D 侧天然偏高 ~1.5×。
+- 新增富文本（`StyledText`）最大 span 边距的单元回归（见 A-1）。
 
 ### C. `y901-shell` 剪贴板在 Xvfb 下的偶发红 —— 已修（两把锁各锁一半）
 
@@ -111,7 +165,7 @@
 - 逐像素 MAD ≤ 0.25（实测 **0.0080**）。
 
 实测：两侧行带 `[(18,32),(62,77),(111,122)]` 完全一致，包围盒 `(16,18)..(185,122)` 相同。
-调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win**979** 默认族
+调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win32 默认族
 NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那是字体不同，不是后端错行。
 
 
@@ -474,7 +528,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - 已验证（2026-11-19，CentOS 7.9 虚拟机 + rustc 1.92）：
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **878 passed / 0 failed / 27 ignored**
   （150 个测试目标）。证据：[linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
-  与 Windows 的 979/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 982/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
 - **上一轮仅剩的两条红（已修）**：`y901-extras` 的 `sgr_reverse` 曾取"单元格右上角"像素
   断言精确 RGB，前提是 Windows 的 Segoe UI 字形不覆盖那个采样点；Linux 回退到
   DejaVuSans 后读到"前景 × 背景"的混合值（182,186,195 vs 期望 230,235,245）。
@@ -590,7 +644,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   原文称"需要真机的测试只有 `rebuild_reuploads_atlas`"，实际 GPU / D3D11 依赖的 `#[ignore]` 有 **13** 个
   （`snapshot_harness` ×10 + `soft_matches_d3d_within_antialiasing_tolerance` + `pixel_statistics_and_png_baseline` + `rebuild_reuploads_atlas`）。
   需改为 13 个，或直接指向 `ACCEPTANCE.md` 的分类表。
-- **文档债：`docs/ACCEPTANCE.md` 的"7 个 GPU harness"小节与分类表不一致**（去 AI 阶段 4b 记录）。
+- ~~**文档债：`docs/ACCEPTANCE.md` 的"7 个 GPU harness"小节与分类表不一致**~~ —— 已修（2026-11-19）：标题改为"GPU 像素验收用例"并写明三个口径（8 条断言用例 / `snapshot_harness` 10 条 `#[ignore]` / 全仓 `ignored=61`）。
   `snapshot_harness` 现有 **10** 个 `#[ignore]`，小节只列 7 个；余下 3 个（`text_label_paints_visible_non_background_pixels`、
   `text_inside_scrollview_is_not_clipped_away`、`rebuild_of_cached_target_does_not_leave_black_areas`）是回归用例而非像素 harness。
   需先澄清"harness"定义，再决定是补进表还是把标题改成"7 个像素对拍 + 3 个回归"。

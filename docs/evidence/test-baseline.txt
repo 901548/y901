@@ -35,4 +35,8 @@
 #   default `cargo test --workspace --no-fail-fast`   passed 979, failed 0, ignored 61 / 150 个测试目标
 #   `--include-ignored`                               passed 1040, failed 0
 #   (新增：grid_image_gpu 回归 1 条 —— draw_instances 的 StartInstanceLocation 修复)
-979
+# Measured at 2026-11-19 (第三轮复审整改):
+#   default `cargo test --workspace --no-fail-fast`   passed 982, failed 0, ignored 61 / 150 个测试目标
+#   `--include-ignored`                               passed 1043, failed 0
+#   (新增：per-node 墨迹边距的 16/24/32/48px 回归、富文本最大 span 边距、剪贴板可注入假实现的断言)
+982

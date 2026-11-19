@@ -92,7 +92,7 @@ pub fn keysym_to_key(keysym: u32) -> Option<Key> {
         0xFF55 => Key::PageUp,
         0xFF56 => Key::PageDown,
         0xFFBE..=0xFFC9 => Key::Function((keysym - 0xFFBE + 1) as u8), // F1..F12
-        0xFFE1 | 0xFFE2 | 0xFFE3 | 0xFFE4 | 0xFFE9 | 0xFFEA => return None, // \u4fee\u9970\u952e\u672c\u8eab\u4e0d\u4ea7\u751f\u5b57\u7b26
+        0xFFE1 | 0xFFE2 | 0xFFE3 | 0xFFE4 | 0xFFE9 | 0xFFEA => return None, // 修饰键本身不产生字符
         _ => return None,
     })
 }

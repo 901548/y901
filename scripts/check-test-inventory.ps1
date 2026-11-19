@@ -76,7 +76,7 @@ function Hash-Names($names) {
 if ($timeouts.Count -gt 0) {
     Write-Host "[inv] PARSE ERROR: $($timeouts.Count) exe(s) timed out and cannot be fingerprinted:"
     $timeouts | ForEach-Object { Write-Host "  - $_" }
-    Write-Host "[inv] (\u8d85\u65f6\u4e0d\u80fd\u5f53\u6210 \u201c0 \u4e2a\u6d4b\u8bd5\u201d\uff0c\u5426\u5219\u4f1a\u8bef\u62a5\u201c\u5185\u5bb9\u53d8\u4e86\u201d)"
+    Write-Host "[inv] (超时不能当成 “0 个测试”，否则会误报“内容变了”)"
     exit 1
 }
 

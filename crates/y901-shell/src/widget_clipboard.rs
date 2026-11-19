@@ -87,19 +87,57 @@ mod tests {
         }
     }
 
+    /// 进程内假剪贴板：让"适配器语义"可以被**确定性**断言，
+    /// 不受 Xvfb / Windows 剪贴板全局状态影响。
+    #[derive(Default)]
+    struct FakeClipboard {
+        text: std::sync::Mutex<String>,
+    }
+
+    impl crate::clipboard::Clipboard for FakeClipboard {
+        fn get_text(&self) -> Result<String, String> {
+            Ok(self.text.lock().unwrap_or_else(|e| e.into_inner()).clone())
+        }
+        fn set_text(&self, text: &str) -> Result<(), String> {
+            *self.text.lock().unwrap_or_else(|e| e.into_inner()) = text.to_string();
+            Ok(())
+        }
+    }
+
     #[test]
     fn empty_clipboard_maps_to_none() {
-        let _guard = CLIPBOARD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // 空剪贴板对控件来说就是"没有东西可粘"
-        let mut c = WidgetClipboard::system();
+        // **确定性版本**：直接注入假剪贴板，断言适配器的映射规则。
+        // 旧版本走系统剪贴板并 match 掉所有分支 —— 那等于没有断言。
+        let fake = std::sync::Arc::new(FakeClipboard::default());
+        let mut c = WidgetClipboard { inner: fake };
         c.set("");
-        match c.get() {
-            None => {}
-            // 外部客户端（xclip 等）在我们写完之后接管了 selection：环境不可信，跳过
-            Some(s) if !s.is_empty() => {
-                eprintln!("[跳过] 空剪贴板被外部客户端覆盖为 {s:?}");
+        assert_eq!(
+            c.get(),
+            None,
+            "空串必须映射成 None（控件视角没有可粘贴内容）"
+        );
+
+        c.set("x");
+        assert_eq!(c.get().as_deref(), Some("x"), "非空内容必须原样返回");
+    }
+
+    #[test]
+    fn unavailable_clipboard_surfaces_as_none() {
+        // 读失败（环境不支持）在控件视角同样应是 None，而不是 panic / 空串。
+        struct Broken;
+        impl crate::clipboard::Clipboard for Broken {
+            fn get_text(&self) -> Result<String, String> {
+                Err("unavailable".to_string())
             }
-            Some(_) => {}
+            fn set_text(&self, _: &str) -> Result<(), String> {
+                Err("unavailable".to_string())
+            }
         }
+        let mut c = WidgetClipboard {
+            inner: std::sync::Arc::new(Broken),
+        };
+        assert_eq!(c.get(), None);
+        c.set("ignored"); // 写失败被吞掉：Ctrl+V/Ctrl+C 失败要安静
+        assert_eq!(c.get(), None);
     }
 }

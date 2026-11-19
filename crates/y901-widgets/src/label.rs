@@ -149,6 +149,14 @@ impl Widget for TextLabel {
         Role::TEXT
     }
 
+    /// 本标签自己字号的墨迹溢出（脏区外扩用）。
+    ///
+    /// 必须按**自身** `style` 算：`.size(48)` 的溢出是 13.9px，而框架树级默认
+    /// （16px）只有 4.63px —— 用默认值标脏时大字号文本的局部重绘会留残影。
+    fn ink_overflow(&self, metrics: &dyn TextMetrics) -> Option<f32> {
+        Some(y901_ui::ink_margin_for(metrics, &self.to_text_style()))
+    }
+
     fn flex(&self) -> FlexItem {
         self.item
     }

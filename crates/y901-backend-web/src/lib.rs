@@ -139,7 +139,7 @@ impl WasmState {
 /// 但一触发就抛 `closure invoked after dropped`。所以闭包必须跟着
 /// `WasmState` 活到页面结束。
 ///
-/// **P0 阶段只定义不安装**：\u8fd9个结构会在 P1 里被真正填满\u3002
+/// **P0 阶段只定义不安装**：这个结构会在 P1 里被真正填满。
 pub struct Listener {
     /// 挂在谁上（`window` 或 canvas）。
     pub target: bindings::EventTarget,
@@ -697,14 +697,14 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         });
     }
 
-    // ---- window \u7ea7\u952e\u76d8\u4e0e\u6587\u672c\u76d1\u542c\uff08**\u91cd\u6784**\uff09----
+    // ---- window 级键盘与文本监听（**重构**）----
     //
-    // \u5168\u90e8\u6302\u5728 **window** \u4e0a\uff1a\u65e0\u8bba\u7126\u70b9\u5728 canvas \u8fd8\u662f\u9690\u85cf input\uff0c\u4e8b\u4ef6\u90fd\u4f1a\u7ecf\u8fc7 window\u3002
-    // \u5904\u7406\u5668\u53ea\u770b\u4e24\u4ef6\u4e8b\uff1a`document.activeElement` \u662f\u4e0d\u662f\u6211\u4eec\u81ea\u5df1\u7684\u5143\u7d20\uff0c
-    // \u4ee5\u53ca\u4e8b\u4ef6\u81ea\u5df1\u7684 `isComposing`\u3002**\u4e0d\u518d\u7ef4\u62a4\u7ec4\u5b57\u6807\u5fd7**\u2014\u2014
-    // \u90a3\u4e2a\u6807\u5fd7\u4e00\u65e6\u56e0\u4e3a\u6d4f\u89c8\u5668\u4e0d\u53d1 `compositionend` \u800c\u5361\u6b7b\uff0c\u5c31\u4f1a\u628a\u6240\u6709\u6309\u952e\u6c38\u4e45\u541e\u6389\u3002
+    // 全部挂在 **window** 上：无论焦点在 canvas 还是隐藏 input，事件都会经过 window。
+    // 处理器只看两件事：`document.activeElement` 是不是我们自己的元素，
+    // 以及事件自己的 `isComposing`。**不再维护组字标志**——
+    // 那个标志一旦因为浏览器不发 `compositionend` 而卡死，就会把所有按键永久吞掉。
 
-    // ---- keydown\uff1a\u53ea\u53d1\u63a7\u5236\u952e\uff08\u5b57\u7b26\u7531 `input` \u63d0\u4ea4\uff09----
+    // ---- keydown：只发控制键（字符由 `input` 提交）----
     if bindings::global_window().is_some() {
         let handler = keydown_handler(Rc::clone(&events));
         let target: bindings::EventTarget = global_window_target();
@@ -716,15 +716,15 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
         });
     }
 
-    // ---- composition\uff08\u4e0e keydown \u4e00\u6837\u6302 window\uff09----
+    // ---- composition（与 keydown 一样挂 window）----
     if let Some(input_js) = ime_input.as_ref() {
-        // compositionstart\uff1a\u8fdb\u5165\u7ec4\u5b57\uff0c\u6e05\u7a7a\u65e7\u503c\uff0c\u7ed9\u754c\u9762\u4e00\u4e2a\u7a7a\u7684\u9884\u7f16\u8f91\u4e32
+        // compositionstart：进入组字，清空旧值，给界面一个空的预编辑串
         {
             let evs = Rc::clone(&events);
             let input_for_clear = input_js.clone();
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {
                 if !active_is(IME_ID) {
-                    return; // \u7ec4\u5b57\u53d1\u5728\u522b\u7684\u8f93\u5165\u6846\u4e0a\uff1a\u4e0d\u5f52\u6211\u4eec
+                    return; // 组字发在别的输入框上：不归我们
                 }
                 let el: &bindings::HtmlInputElement = input_for_clear.unchecked_ref();
                 el.set_value("");
@@ -741,7 +741,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 handler,
             });
         }
-        // compositionupdate\uff1a\u53ea\u753b\u4e0d\u63d0\u4ea4
+        // compositionupdate：只画不提交
         {
             let evs = Rc::clone(&events);
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |val: JsValue| {
@@ -762,7 +762,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
                 handler,
             });
         }
-        // compositionend\uff1a**\u552f\u4e00\u63d0\u4ea4\u70b9**\uff0c\u8bb0\u4e0b\u5df2\u63d0\u4ea4\u4e32\u4f9b input \u53bb\u91cd
+        // compositionend：**唯一提交点**，记下已提交串供 input 去重
         {
             let evs = Rc::clone(&events);
             let last_for = Rc::clone(&last_committed);
@@ -822,7 +822,7 @@ fn install_listeners(state: &mut WasmState) -> Result<(), String> {
             });
         }
 
-        // ---- blur\uff1a\u9690\u85cf input \u79bb\u7126\u2192\u6e05\u6389\u53bb\u91cd\u6807\u8bb0 ----
+        // ---- blur：隐藏 input 离焦→清掉去重标记 ----
         {
             let last_for = Rc::clone(&last_committed);
             let handler = Closure::<dyn FnMut(JsValue)>::new(move |_val: JsValue| {

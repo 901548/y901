@@ -520,6 +520,14 @@ impl Widget for TextInput {
         Role::TEXT_INPUT
     }
 
+    /// 按输入框**自己的**文本样式算墨迹溢出（脏区外扩用）。
+    ///
+    /// 树级默认按 16px 算；输入框可以通过 `.style(TextStyle::fg(..).size(28.0))`
+    /// 放大字号，那时真实溢出更大，用默认值会在局部重绘时留下下伸笔画残影。
+    fn ink_overflow(&self, metrics: &dyn TextMetrics) -> Option<f32> {
+        Some(y901_ui::ink_margin_for(metrics, &self.style))
+    }
+
     fn focusable(&self) -> bool {
         true
     }

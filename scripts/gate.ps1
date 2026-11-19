@@ -27,6 +27,10 @@ $root = Split-Path -Parent $PSScriptRoot
 $baselineTests = Join-Path $root 'docs\evidence\test-baseline.txt'
 # 审计是否降级到了缓存指南库（影响最终结论的措辞）
 $script:auditStale = $false
+# 审计降级痕迹：null = 联网审计；数字 = 用了 N 天前的缓存快照。
+# 为什么要暴露到最终结论里：旧版在缓存 ≤7 天时直接打印 GATE OK，
+# 从结论上看不出"这次没联网"，发布记录会误以为审计是联网的。
+$script:auditCacheDays = $null
 # 有多少个 D3D 探针因为没 GPU 而跳过（影响最终结论的措辞）
 $script:gpuSkipped = 0
 
@@ -193,6 +197,7 @@ else {
             }
             if ($null -ne $dbAgeDays -and $dbAgeDays -le 7) {
                 $script:auditStale = $false
+                $script:auditCacheDays = $dbAgeDays
                 Write-Host ("[gate] ok: audit ran against CACHED advisory DB snapshot {0:N1} day(s) old (fresh enough; offline refresh failed)" -f $dbAgeDays)
             }
             elseif (-not $AllowStaleAudit) {
@@ -223,7 +228,8 @@ if (-not (Test-Path $auditDir)) { New-Item -ItemType Directory -Force -Path $aud
 if ($SkipAudit) {
     $auditContent = "=== audit SKIPPED by -SkipAudit @ $(Get-Date -Format o) ==="
 } else {
-    $auditContent = "=== audit @ $(Get-Date -Format o) exit=$auditCode stale=$($script:auditStale) ===`n$auditOut"
+    $cacheNote = if ($null -ne $script:auditCacheDays) { (" cached_db_days={0:N1}" -f $script:auditCacheDays) } else { "" }
+    $auditContent = "=== audit @ $(Get-Date -Format o) exit=$auditCode stale=$($script:auditStale)$cacheNote ===`n$auditOut"
 }
 [System.IO.File]::WriteAllText($auditLogPath, $auditContent, [System.Text.UTF8Encoding]::new($false))
 if (-not (Test-Path $auditLogPath)) {
@@ -259,6 +265,11 @@ if ($notReleasable.Count -gt 0) {
 if ($script:auditStale) {
     # 被动降级（离线，指南库取不到）：代码质量通过，但非发布级
     Write-Host "GATE OK (DEV: STALE AUDIT)"
+    exit 0
+}
+if ($null -ne $script:auditCacheDays) {
+    # 缓存快照仍在有效期内，但**结论必须写明"这次没联网"**，否则发布记录会误读。
+    Write-Host ("GATE OK (CACHED DB {0:N1}d; offline audit)" -f $script:auditCacheDays)
     exit 0
 }
 Write-Host "GATE OK"

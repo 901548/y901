@@ -456,6 +456,26 @@ pub trait TextMetrics {
     fn scale(&self) -> f32;
 }
 
+/// 墨迹边距的唯一算法：`max(ink_depth − line_height, 2px)`，上限一行。
+///
+/// 为什么要有 2px 下限：名义度量常常"刚好等于行高"（实测 SimSun 16px 的
+/// `ascent+descent` 就是 16），但真实墨迹仍会越过行框 1~2px（字形 overshoot +
+/// 抗锯齿覆盖），名义度量预测不到。
+///
+/// 为什么上限是一行：异常字体度量（畸形 hhea）不该把脏区撑到整屏，
+/// 那会让局部重绘退化成整窗重绘。
+///
+/// 这个函数是**树级默认**与**各控件 per-node 覆盖**的共同实现 ——
+/// 两处各写一份就会出现"16px 对了、24px 漏了"那种分叉（本轮修的就是它）。
+pub fn ink_margin_for(metrics: &dyn TextMetrics, style: &TextStyle) -> f32 {
+    let (_, ink_depth) = metrics.ink_bounds(style);
+    let line_h = metrics.line_height(style);
+    const MIN_INK_MARGIN: f32 = 2.0;
+    (ink_depth - line_h)
+        .max(MIN_INK_MARGIN)
+        .min(line_h.max(0.0))
+}
+
 /// 渲染上下文：框架唯一的出图接口。
 ///
 /// 后端实现它（D3D11 / 软件 / 测试用的记录器），组件只往里画。
@@ -1592,6 +1612,22 @@ pub trait Widget {
     /// 副作用：无。只影响容器的排布，不改变自身矩形。
     fn padding(&self) -> Edges {
         Edges::ZERO
+    }
+
+    /// 本节点墨迹越出 `rect()` 的量（像素，四边统一取最大值）。
+    ///
+    /// 返回：`Some(margin)` = 本节点自己的墨迹边距；`None` = 沿用框架的树级默认
+    /// （用 `TextStyle::default()` 度量算出的那一份）。
+    ///
+    /// **为什么必须是 per-node**：树级默认只按 16px 算一次（实测边距 4.63px），
+    /// 而 `TextLabel::size(24/32/48)` 的真实墨迹溢出随字号线性增长
+    /// （6.95 / 9.27 / 13.90px）。用同一个常数套所有节点时，
+    /// 大字号文本的局部重绘会留下残影 —— 实测 24px 差 72 像素、48px 差 312 像素。
+    ///
+    /// 约束：返回值应随字号单调（通常就是 `max(ink_depth − line_height, 2px)`），
+    /// 且**不得超过一行**——异常字体度量不该把脏区撑到离谱。
+    fn ink_overflow(&self, _metrics: &dyn TextMetrics) -> Option<f32> {
+        None
     }
 
     /// 本帧是否必须全量重绘（例如全屏遮罩、动画）。

@@ -352,6 +352,27 @@ impl Widget for StyledText {
     fn flex(&self) -> y901_ui::FlexItem {
         self.item
     }
+
+    /// 混合字号文本的墨迹余量：取**所有 span 字号里最大的那个**。
+    ///
+    /// 为什么不是默认 16px：`RichText` 的行高按每行最大 `size` 算，
+    /// 所以溢出也由最大字号决定；用树级默认会低估 `InlineStyle::size(32)` 这类行。
+    fn ink_overflow(&self, metrics: &dyn TextMetrics) -> Option<f32> {
+        let mut worst = y901_ui::ink_margin_for(metrics, &TextStyle::default());
+        for block in &self.blocks {
+            let spans: &[Span] = match block {
+                Block::Paragraph(spans) => spans,
+                Block::Code { .. } => continue,
+            };
+            for span in spans {
+                let Some(px) = span.style.size else { continue };
+                let style = TextStyle::default().size(px);
+                worst = worst.max(y901_ui::ink_margin_for(metrics, &style));
+            }
+        }
+        Some(worst)
+    }
+
     fn layout_version(&self) -> u64 {
         self.version
     }

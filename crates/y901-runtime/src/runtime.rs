@@ -163,10 +163,15 @@ pub fn run_loop<W: WindowBackend>(
     let mut first_frame_done = false;
     // 上一帧是否有工作：有工作时不得等待，否则 Win32 会在每帧都“睡”一次。
     let mut was_busy = false;
-    // 后端是否**自节流**（D3D11 的 `Present(1)` 会阻塞到 vsync）。
-    // 为何要猜：软后端（GDI）不自节流，若一律 `wait=0` 会空转烧 CPU；
-    // 而 D3D11 若再多睡 16ms 就与 vsync 叠加成 30fps。故用"上一帧呈现耗时"判定。
-    // 上一帧的时间点（供动画 dt）。
+    // 上一帧的时间点：既供动画 `dt`，也用于**帧预算补偿**。
+    //
+    // 忙档的等待 = `16ms − (loop_start − last_tick)`，也就是"上一帧工作已经花掉多少，
+    // 这一帧只补剩下的差额"。为什么不再需要"猜后端是否自节流"：
+    //   - D3D11 的 `Present(1)` 会阻塞到 vsync，上一帧工作耗时本身就 ≈ 16ms，
+    //     差额自然趋近 0 —— 不需要额外的自节流标志；
+    //   - 软后端（GDI）工作只要几 ms，差额补到约 16ms —— 不会空转烧 CPU。
+    // 旧实现在这里维护 `last_frame_ms` 但**从未更新**（恒 0），于是每帧固定睡 16ms，
+    // 把帧周期拉到 21~24ms（≈40fps）；上一轮审查发现后改为现在的差值口径。
     let mut last_tick = Instant::now();
     // 最近一次发出 `UiEvent::Tick` 的时间（供 Tick 节拍）。
     let mut last_tick_at = Instant::now();

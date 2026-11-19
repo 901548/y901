@@ -145,14 +145,14 @@ foreach ($f in $docFiles) {
     $t = $orig
     # 只替换“数字 + 明确语义”的组合，不做全文数字替换
     if ($Check) {
-        # **\u6309\u884c\u8bed\u4e49**\u6821\u9a8c\uff1a\u6bcf\u4e2a\u6570\u5b57\u53ea\u5728\u5b83\u7684\u8bed\u8a00\u73af\u5883\u91cc\u88ab\u6bd4\u5bf9\u3002
-        # \u4e3a\u4f55\u4e0d\u80fd\u201c\u6574\u884c\u6240\u6709\u6570\u5b57\u201d\uff1a\u4e00\u53e5\u8bdd\u91cc\u53ef\u80fd\u540c\u65f6\u6709\u57fa\u7ebf/\u9ed8\u8ba4/ignore \u4e09\u4e2a\u6570\uff0c
-        # \u4e5f\u53ef\u80fd\u6709\u65e0\u5173\u6570\u5b57\uff08\u5982\u5de5\u5177\u7248\u672c 13\uff09\u3002\u56e0\u6b64\u7528**\u7d27\u8d34\u5173\u952e\u8bcd\u7684\u6a21\u5f0f**\u3002
+        # **按行语义**校验：每个数字只在它的语言环境里被比对。
+        # 为何不能“整行所有数字”：一句话里可能同时有基线/默认/ignore 三个数，
+        # 也可能有无关数字（如工具版本 13）。因此用**紧贴关键词的模式**。
         $rules = @(
             @{ name = 'ignored';         pattern = '`#\[ignore\]`\s*\*\*(\d+)\*\*'; want = $ignored },
-            @{ name = 'baseline';        pattern = '\u57fa\u7ebf\s*\*\*(\d+)\*\*';            want = $baseline },
+            @{ name = 'baseline';        pattern = '基线\s*\*\*(\d+)\*\*(?![\w.])';   want = $baseline },
             @{ name = 'include_ignored'; pattern = 'include-ignored`?\s*[|:]\s*\*\*(\d+)\*\*'; want = $includePassed },
-            @{ name = 'include_ignored'; pattern = '\u542b ignore[^\n]{0,8}\*\*(\d+)\*\*';       want = $includePassed },
+            @{ name = 'include_ignored'; pattern = '含 ignore[^\n]{0,8}\*\*(\d+)\*\*';       want = $includePassed },
             @{ name = 'passed';          pattern = '\*\*(\d+)\*\*\s*passed';                 want = $passed  },
             # Markdown 表格以及显式包含默认测试统计的行，也纳入检查，避免 ACCEPTANCE.md 漏检。
             @{ name = 'passed table';    pattern = '\|\s*`cargo test --workspace --offline`[^|]*\|\s*\*\*(\d+)\s+passed'; want = $passed },
@@ -176,6 +176,26 @@ foreach ($f in $docFiles) {
                 $n = [int]$m.Groups[1].Value
                 if ($n -ne [int]$rule.want) {
                     Write-Host "[sync] stale: $f -- '$($rule.name)' is $($rule.want) but the line says $n"
+                    $stale++
+                }
+            }
+        }
+
+        # **反自伤检测**：改写规则曾产出 `**979**xF7455...`（把 0x 的 0 当计数）
+        # 与 `win**963** 默认族`（把 win32 的 32 当计数）。这两类形态在语义上**永远不合法**，
+        # 与当前计数无关 —— 它们是"脚本改坏了文档"的指纹，必须无条件报错。
+        $scarRules = @(
+            @{ name = 'hex-baseline scar'; pattern = '\*\*\d+\*\*[xX][0-9A-Fa-f]' },
+            @{ name = 'word-glued scar';   pattern = '[A-Za-z]\*\*\d{3,4}\*\*' }
+        )
+        # 与通用兜底同一套豁免：文档里**举例说明**旧 bug 时会写出 scar 形态本身，
+        # 那种行必须显式标记（`<!-- counts-exempt -->` 或 历史/当轮），否则无法描述问题。
+        $scarExempt = 'Linux|Helm|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
+        foreach ($line in ($t -split "`n")) {
+            if ($line -match $scarExempt) { continue }
+            foreach ($scar in $scarRules) {
+                foreach ($m in [regex]::Matches($line, $scar.pattern)) {
+                    Write-Host "[sync] stale: $f -- 发现改写规则造成的脏数据（$($scar.name)）：$($m.Value)"
                     $stale++
                 }
             }
@@ -229,9 +249,17 @@ foreach ($f in $docFiles) {
     })
     # **派生表述**也要能自动改写，否则每次计数变化都要手工对齐。
     # 前瞻 (?=…) 保留后缀；后顾 (?<=…) 保留前缀。
-    $t = [regex]::Replace($t, '(?<!含 ignore\s{0,10})\*{0,2}(\d{1,4})\*{0,2}(?=\s*默认)', { param($m) "**$passed**" })
+    # 数字必须是独立 token：`win32 默认族` 的 `32` 曾被替换成 `win**963** 默认族`。
+    $t = [regex]::Replace($t, '(?<!含 ignore\s{0,10})(?<![\w.])\*{0,2}(\d{1,4})\*{0,2}(?![\w.])(?=\s*默认)', { param($m) "**$passed**" })
     $t = [regex]::Replace($t, '(含 ignore[^\n]{0,12}?)\*\*(\d{1,4})\*\*', { param($m) $m.Groups[1].Value + "**$includePassed**" })
-    $t = [regex]::Replace($t, '(基线\s*)\*{0,2}(\d{1,4})\*{0,2}', { param($m) $m.Groups[1].Value + "**$baseline**" })
+    # **必须排除 `0x` 前缀与词内数字**：旧规则把 `基线 0xF7455...` 的 `0` 换成
+    # `**979**`（→ `**979**xF7455...`），也把 `win32 默认族` 的 `32` 换成
+    # `**963**`（→ `win**963** 默认族`）。两处都是**脚本制造的脏数据**。
+    $t = [regex]::Replace($t, '(基线\s*)(0[xX][0-9A-Fa-f]+|(?<![\w.])\*{0,2}(\d{1,4})(?![\w.])\*{0,2})', {
+        param($m)
+        if ($m.Value -match '0[xX]') { return $m.Value }   # 十六进制基线原样保留
+        return $m.Groups[1].Value + "**$baseline**"
+    })
     $t = [regex]::Replace($t, '--include-ignored\s*\*\*(\d+)\*\*', { param($m) "--include-ignored **$includePassed**" })
     $t = [regex]::Replace($t, '包含\s*\*\*(\d+)\*\*', { param($m) "包含 **$includePassed**" })
     # **行内形式的写入同样由 `$inlineFields` 生成**：新增字段不需要再加这里的代码。
@@ -257,6 +285,12 @@ foreach ($f in $docFiles) {
         if ($x -match $exempt) { return $x }
         $x = [regex]::Replace($x, '\b(\d{3})\s*passed\s*/\s*(\d+)\s*failed\s*/\s*(\d+)\s*ignored', { param($m) "$passed passed / $failed failed / $ignored ignored" })
         $x = [regex]::Replace($x, '\b(\d{3})\s*个测试目标', { param($m) "$targets 个测试目标" })
+        # 另外两种在文档里真实出现、但旧写入路径不认识的写法：
+        #   FRAMEWORK: "N 项通过"；STATUS: "与 Windows 的 N/0/M 不同"；ACCEPTANCE: "完整运行 **N passed**"
+        # 不加这些，-Check 的通用兜底会报 stale，但 sync 又改不动 → 永远修不好。
+        $x = [regex]::Replace($x, '\b(\d{3})\s*项通过', { param($m) "$passed 项通过" })
+        $x = [regex]::Replace($x, '(与 Windows 的 )(\d{3})/0/(\d+)', { param($m) "$($m.Groups[1].Value)$passed/0/$ignored" })
+        $x = [regex]::Replace($x, '(完整运行[^\n]{0,30}\*\*)(\d+)', { param($m) "$($m.Groups[1].Value)$includePassed" })
         $x
     })
     $t = [regex]::Replace($t, '\*\*(\d{3})\*\*\s*项测试', { param($m) "**$passed** 项测试" })

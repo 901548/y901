@@ -40,7 +40,10 @@ $cases = @(
     @{ File = 'README.md'; Old = "$passed passed / 0 failed / $ignored ignored"; New = "$($passed - 1) passed / 0 failed / $ignored ignored"; Label = '非加粗的 passed 漂移（README 构建块）' },
     @{ File = 'README.md'; Old = "（$targets 个测试目标）"; New = "（$($targets - 1) 个测试目标）"; Label = '测试目标数漂移' },
     @{ File = 'docs\ACCEPTANCE.md'; Old = "| **$passed passed / 0 failed / $ignored ignored** |"; New = "| **$($passed - 1) passed / 0 failed / $ignored ignored** |"; Label = '表格内的 passed 漂移' },
-    @{ File = 'docs\FRAMEWORK.md'; Old = "$passed 项通过、$ignored 项忽略（$targets 个测试目标）"; New = "$passed 项通过、$ignored 项忽略（$($targets - 1) 个测试目标）"; Label = 'FRAMEWORK 目标数漂移' }
+    @{ File = 'docs\FRAMEWORK.md'; Old = "$passed 项通过、$ignored 项忽略（$targets 个测试目标）"; New = "$passed 项通过、$ignored 项忽略（$($targets - 1) 个测试目标）"; Label = 'FRAMEWORK 目标数漂移' },
+    # 反自伤：这两类"脚本改坏文档"的指纹必须被抓到（A-2）。
+    @{ File = 'README.md'; Old = '基线 0xF7455CCE7781A864'; New = "基线 **$passed**xF7455CCE7781A864"; Label = '十六进制基线被当成计数（0x 被吃）' },
+    @{ File = 'docs\STATUS.md'; Old = 'vs win32 默认族'; New = "vs win**$passed** 默认族"; Label = '词内数字被当成计数（win32 → win**N**）' }
 )
 
 $failures = 0
@@ -98,5 +101,5 @@ if ($failures -gt 0) {
     Write-Host "[mutate] $failures 条用例失败"
     exit 1
 }
-Write-Host "[mutate] ok: 5 条变异全部被抓到，且干净状态下不误报"
+Write-Host "[mutate] ok: $($cases.Count + 1) 条变异全部被抓到，且干净状态下不误报"
 exit 0
