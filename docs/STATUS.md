@@ -405,18 +405,21 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - **不要用 `--exclude` 绕过** —— 那只是掩盖问题。
 - 四条测试基建债（22 个测试无门控 / lib 的 4 处 `#[link]` /
   `file_drop` 硬编码 `C:\` / supersample 阈值绑定字体）就是靠它首次暴露的。
-- 已验证（2026-11-19，CentOS 7.9 虚拟机 + rustc 1.92）：Linux 全量
-  **878 passed / 2 failed / 27 ignored**（151 个测试目标）。失败的两条都在
-  `y901-extras` 的 `sgr_reverse`（`sgr7_/sgr27_`）：用例取"单元格右上角"像素断言
-  精确 RGB，前提是 Windows 的 Segoe UI 字形不覆盖那个采样点；Linux 回退到
-  DejaVuSans 后字形覆盖不同，采样到的是"前景色与背景的混合值"（实测 182,186,195
-  vs 期望 230,235,245）——**是字体相关的采样假设，不是 SGR 反色逻辑错**。
-  与 Windows 的 978/0/61 不同 —— **差异来自平台 cfg 门控 + 字体回退链**，不是测试丢失。
-- **x11 专项验收（2026-11-19）全部通过**：`cargo check -p y901-backend-x11 --all-targets`
-  exit 0；`golden` 32/0；`xvfb-run real_window` 12/0（2 ignored）。
-  与 `/root/Y901/linux_verify_cplan.sh` 的口径一致。
-- 另外：`y901-shell` 的剪贴板单测在 Xvfb 下偶发失败（X 选区 owner 竞争），重跑即过，
-  属环境不稳定，不在门禁内。
+- 已验证（2026-11-19，CentOS 7.9 虚拟机 + rustc 1.92）：
+  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **878 passed / 0 failed / 27 ignored**
+  （149 个测试目标）。证据：[linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
+  与 Windows 的 978/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+- **上一轮仅剩的两条红（已修）**：`y901-extras` 的 `sgr_reverse` 曾取"单元格右上角"像素
+  断言精确 RGB，前提是 Windows 的 Segoe UI 字形不覆盖那个采样点；Linux 回退到
+  DejaVuSans 后读到"前景 × 背景"的混合值（182,186,195 vs 期望 230,235,245）。
+  现在改为**格内背景众数**断言：仍要求精确 RGB，但对字体覆盖范围不敏感，Windows/Linux 双绿。
+- **x11 专项验收（2026-11-19）全部通过**，且脚本已进仓库
+  （[scripts/linux-verify.sh](../scripts/linux-verify.sh)）：
+  `check`（all-targets）、`golden 32/0`、`xvfb-run real_window 12/0`（2 ignored）、
+  `render stroke_round_aa`、`extras sgr_reverse`、`ui+widgets` —— 六项 `EXIT_*=0`。
+  证据：[linux-verify-2026-11-19.log](evidence/cross-platform/linux-verify-2026-11-19.log)。
+- 已知不稳定项：`y901-shell` 的剪贴板单测在 Xvfb 下有 X 选区 owner 竞争，可能偶发失败；
+  本轮全量运行恰好 0 failed，但它不在发布门禁内（门禁在 Windows 宿主上跑）。
 
 ### X11 专项
 
@@ -515,12 +518,10 @@ cargo test --workspace --no-fail-fast 2>&1 \
   而 Rust/PowerShell 不会将它当转义处理，于是文件里出现字面串。
   **固定动作**：凡是含中文的新文件，落盘后 grep 一次 `\\u[0-9a-f]{4}`，有命中就修。
 
-- **Linux 验收脚本未覆盖 `y901-render` 的 Soft 描边用例**：
-  `/root/Y901/linux_verify_cplan.sh` 只覆盖 x11 的 `check` / `golden` / `real_window`，
-  未覆盖 `y901-render` 的 `stroke_round_aa` 单测（本轮由 demo 手工补跑才发现通过）。
-  应把 `cargo test -p y901-render --test stroke_round_aa` 加进脚本，
-  否则
-后续 Linux 验收会“看不见”这条路径。
+- ~~**Linux 验收脚本未覆盖 `y901-render` 的 Soft 描边用例**~~（已修）：
+  版本化的 [scripts/linux-verify.sh](../scripts/linux-verify.sh) 现在覆盖
+  x11 `check` / `golden` / `real_window`、`render stroke_round_aa`、
+  `extras sgr_reverse` 与 `ui+widgets`；任一失败都会让脚本以 exit 1 结束。
 
 - **字体回退链未实现（P2）**：当前 NSimSun 只缺 U+2212，已用替身映射（→ `-`）解决。
   若未来需支持任意 Unicode（emoji、其他脚本、用户输入的特殊字符），

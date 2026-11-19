@@ -51,12 +51,33 @@ fn terminal(vt: &[u8], soft: &mut SoftBackend) -> (TerminalWidget, Rect, Size) {
     (t, rect, cell)
 }
 
-/// 取某单元格**右上角**的像素（避开字形与下伸部）。
-fn corner_px(px: &[u8], rect: Rect, cell: Size, row: usize, col: usize) -> (u8, u8, u8) {
-    let x = (rect.x + (col + 1) as f32 * cell.w).round() as u32 - 3;
-    let y = (rect.y + row as f32 * cell.h).round() as u32 + 2;
-    let i = ((y * W + x) * 4) as usize;
-    (px[i + 2], px[i + 1], px[i]) // BGRA → RGB
+/// 取某单元格的**背景色**：格内出现次数最多的颜色。
+///
+/// 为什么不取固定角落像素（曾经的写法）：不同平台会回退到不同字体
+/// （Windows Segoe UI / Linux DejaVuSans），字形覆盖范围不同，固定采样点可能
+/// 正好落在字形的抗锯齿边缘，读到"前景 × 背景"的混合值（Linux 实测
+/// `182,186,195`，而期望的纯背景是 `230,235,245`）。
+/// 背景色在整格里占绝大多数，取众数对字体不敏感，仍然是**精确 RGB 断言**。
+fn cell_bg(px: &[u8], rect: Rect, cell: Size, row: usize, col: usize) -> (u8, u8, u8) {
+    use std::collections::HashMap;
+
+    let x0 = (rect.x + col as f32 * cell.w).round() as u32 + 1;
+    let y0 = (rect.y + row as f32 * cell.h).round() as u32 + 1;
+    let x1 = ((rect.x + (col + 1) as f32 * cell.w).round() as u32).min(W) - 1;
+    let y1 = ((rect.y + (row + 1) as f32 * cell.h).round() as u32).min(H) - 1;
+
+    let mut counts: HashMap<(u8, u8, u8), usize> = HashMap::new();
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let i = ((y * W + x) * 4) as usize;
+            *counts.entry((px[i + 2], px[i + 1], px[i])).or_insert(0) += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|&(_, n)| n)
+        .map(|(c, _)| c)
+        .expect("单元格不应为空")
 }
 
 #[test]
@@ -74,7 +95,7 @@ fn sgr7_swaps_default_colours_with_exact_rgb() {
     // "abc" 保持默认背景
     for col in 0..3 {
         assert_eq!(
-            corner_px(&px, rect, cell, 0, col),
+            cell_bg(&px, rect, cell, 0, col),
             normal,
             "字符 {col} 应保持默认背景 {normal:?}"
         );
@@ -82,7 +103,7 @@ fn sgr7_swaps_default_colours_with_exact_rgb() {
     // "def" 背景应变成默认前景色
     for col in 3..6 {
         assert_eq!(
-            corner_px(&px, rect, cell, 0, col),
+            cell_bg(&px, rect, cell, 0, col),
             inverted,
             "字符 {col} 应反色为默认前景 {inverted:?}"
         );
@@ -105,14 +126,14 @@ fn sgr27_restores_default_colours() {
 
     for col in 0..3 {
         assert_eq!(
-            corner_px(&px, rect, cell, 0, col),
+            cell_bg(&px, rect, cell, 0, col),
             inverted,
             "ESC[7m 之后的字符 {col} 应反色"
         );
     }
     for col in 3..6 {
         assert_eq!(
-            corner_px(&px, rect, cell, 0, col),
+            cell_bg(&px, rect, cell, 0, col),
             normal,
             "ESC[27m 之后的字符 {col} 应恢复正常"
         );
@@ -143,7 +164,7 @@ fn selection_on_top_of_sgr7_cancels_out() {
     // SGR 7 反转一次 + 选区反转一次 = 两次 swap = 恢复原色
     for col in 0..3 {
         assert_eq!(
-            corner_px(&px, rect, cell, 0, col),
+            cell_bg(&px, rect, cell, 0, col),
             normal,
             "反色与选区叠加应双重反转回默认背景（字符 {col}）"
         );

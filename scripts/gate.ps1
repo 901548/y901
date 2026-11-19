@@ -1,4 +1,4 @@
-﻿# Unified gate: MSRV + tests(count) + clippy + pixel-hash + docs + audit.
+# Unified gate: MSRV + tests(count) + clippy + pixel-hash + docs + audit.
 #
 # Four ways this gate used to lie, all fixed here:
 #   1. audit missing   -> said "skipped" and still printed GATE OK;
@@ -219,7 +219,7 @@ if ($platformChanged.Count -gt 0) {
     Write-Host ""
     Write-Host "[gate] WARN: 本次改动含平台代码，Windows 绿灯不代表 Linux 能编："
     foreach ($f in $platformChanged) { Write-Host "  - $f" }
-    Write-Host "[gate] WARN: 请在 Linux 上跑 cargo check -p y901-backend-x11 --all-targets"
+    Write-Host "[gate] WARN: 请在 Linux 上跑 scripts/linux-verify.sh（含 x11 check/golden/real_window 等）"
     Write-Host ""
 }
 

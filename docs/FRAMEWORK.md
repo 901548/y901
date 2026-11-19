@@ -204,7 +204,11 @@ cargo test --workspace          # 工作区测试（测试数量以 scripts/test
 cargo build --workspace         # 零警告
 cargo clippy --workspace --all-targets   # 警告必须为 0（建议直接用 scripts/gate.ps1） 零警告
 scripts/test-count.ps1          # 唯一可信的计数方式（把输出写文件再解析）
+scripts/linux-verify.sh         # Linux 交付前验收：x11 check/golden/real_window + 字体敏感用例
 ```
+
+`gate.ps1` 只在 Windows 宿主上跑；`#[cfg(unix)]` 代码与 X11 运行时只能靠
+`scripts/linux-verify.sh`（或 CI 的 `xvfb-run`）覆盖，两者的证据都要附在发布记录里。
 
 绝大多数测试无需窗口/GPU：布局、事件路由、裁剪命中、语义树、`query` 选择器、
 图集打包、revision 语义面哈希都能在 CI 里跑。
