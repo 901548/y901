@@ -31,4 +31,8 @@
 #   `--include-ignored`                               passed 1039, failed 0
 #   (新增：VerticalList DPI 3 条；节点级标脏像素回归 1 条；invalidate(id) 墨迹外扩 1 条；
 #    图集 RGBA 行距 1 条；帧预算 2 条)
-978
+# Measured at 2026-11-19 (Grid+Image D3D 空白修复 + Linux 验收/P0 收尾):
+#   default `cargo test --workspace --no-fail-fast`   passed 979, failed 0, ignored 61 / 150 个测试目标
+#   `--include-ignored`                               passed 1040, failed 0
+#   (新增：grid_image_gpu 回归 1 条 —— draw_instances 的 StartInstanceLocation 修复)
+979

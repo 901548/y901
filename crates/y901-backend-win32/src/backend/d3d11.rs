@@ -1339,9 +1339,17 @@ impl Context {
     ///
     /// `count` 个实例必须已被实例化 buffer 覆盖；InputLayout 与 VS 必须已绑定。
     /// 违反后果：实例数超出 buffer 容量 → GPU 侧**越界读取**（通常不崩溃，但画面错乱且难定位）。
-    unsafe fn draw_instances(&self, count: u32, start_offset: u32) {
+    /// 画 `count` 个实例，从实例编号 `start_instance` 开始。
+    ///
+    /// **第 4 个参数是 `StartVertexLocation`，不是实例偏移**：本管线的顶点缓冲
+    /// 只有一个**按实例步进**的槽位，顶点由 `SV_VertexID`（0..5）生成。
+    /// 把批次起点传进 `StartVertexLocation` 时，它不会跳过实例 —— 每个批次都会
+    /// 从实例 0 开始画，图片批次的着色器就套在了背景实例上，整帧被涂成错误颜色
+    /// （Grid+Image 整帧空白的根因）。
+    /// 违反后果：批次边界失效，画面错乱且无任何错误码。
+    unsafe fn draw_instances(&self, count: u32, start_instance: u32) {
         let table = vtbl::<ContextVtbl>(self.as_ptr());
-        (table.draw_instanced)(self.as_ptr(), 6, count, start_offset, 0);
+        (table.draw_instanced)(self.as_ptr(), 6, count, 0, start_instance);
     }
 
     /// 把图片 SRV 绑到 t1（图集在 t0，互不影响）。
@@ -1944,13 +1952,38 @@ unsafe fn draw_scene(
     }
 
     // 批次循环：没有批次信息时行为与改动前**完全一致**（单次 draw）。
+    // 诊断开关（`Y901_DEBUG_BATCHES=1`）：打印每帧的批次切分与 draw 实参。
+    // 有意留在生产代码里 —— Grid+Image 空白这个 bug 就是靠它定位的，见 FRAMEWORK §16。
+    let debug_batches = std::env::var_os("Y901_DEBUG_BATCHES").is_some();
     if batches.is_empty() {
+        if debug_batches {
+            eprintln!("[batches] empty: single draw_instances(count={count})");
+        }
         context.draw_instances(count as u32, 0);
     } else {
+        if debug_batches {
+            eprintln!(
+                "[batches] count={count}, {} batches: {:?}",
+                batches.len(),
+                batches
+                    .iter()
+                    .map(|b| (b.start, b.count, b.image))
+                    .collect::<Vec<_>>()
+            );
+        }
         for b in batches {
             let n = b.count.min((count as u32).saturating_sub(b.start));
             if n == 0 {
                 continue;
+            }
+            if debug_batches {
+                eprintln!(
+                    "[batches]   draw start={} n={} image={:?} resolved={}",
+                    b.start,
+                    n,
+                    b.image,
+                    b.image.and_then(|id| images.get(&id)).is_some()
+                );
             }
             match b.image.and_then(|id| images.get(&id)) {
                 Some((_, srv, _, _, _)) => {
@@ -2659,42 +2692,24 @@ impl Gfx {
         // 这是后续 scissor / ClearType 改动的回归探针。
         if std::env::var_os("Y901_SNAPSHOT").is_some() {
             let h1 = self.read_back_hash();
-            // 重画一遍（同一份实例数据）
-            context.set_render_target(Some(&cached.rtv));
-            context.clear(&cached.rtv, [0.02, 0.02, 0.03, 1.0]);
-            context.set_pipeline(pipeline);
-            context.set_ps_texture(&atlas.srv, &atlas.sampler);
-            context.draw_instances(count as u32, 0);
-            context.set_render_target(Some(rtv));
-            if let Some(mapped) = context.map_discard(&pipeline.blit_buffer) {
-                let blit = Instance::solid(
-                    [0.0, 0.0],
-                    [w, h],
-                    [0.0, 0.0, 1.0, 1.0],
-                    [1.0, 1.0, 1.0, 1.0],
-                );
-                std::ptr::copy_nonoverlapping(
-                    &blit as *const Instance as *const u8,
-                    mapped.data as *mut u8,
-                    INSTANCE_SIZE,
-                );
-                context.unmap(&pipeline.blit_buffer);
-            }
-            let buffers = [pipeline.blit_buffer.as_ptr()];
-            let strides = [INSTANCE_SIZE as u32];
-            let offsets = [0u32];
-            let table = vtbl::<ContextVtbl>(context.as_ptr());
-            (table.iaset_vertex_buffers)(
-                context.as_ptr(),
-                0,
-                1,
-                buffers.as_ptr(),
-                strides.as_ptr(),
-                offsets.as_ptr(),
+            // 重画一遍（同一份实例数据）。**必须走同一个 draw_scene**：
+            // 旧实现直接 `draw_instances(count, 0)`，不经过批次循环，
+            // 含图片的帧会被"图集着色器画图片实例"污染，hash 必然不等 —— 假红。
+            draw_scene(
+                context,
+                pipeline,
+                atlas,
+                cached,
+                instances,
+                count,
+                batches,
+                &self.images,
+                full,
+                true,
+                w,
+                h,
             );
-            context.set_ps_texture(&cached.srv, &atlas.sampler);
-            context.set_ps_shader(&pipeline.blit_ps);
-            context.draw_instances(1, 0);
+            blit_cached(context, pipeline, cached, atlas, rtv, w, h);
             let h2 = self.read_back_hash();
             match (h1, h2) {
                 (Some(a), Some(b)) => eprintln!(

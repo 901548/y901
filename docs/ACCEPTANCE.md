@@ -3,16 +3,16 @@
 生成时间：2026-11-02
 命令：`cargo test --workspace -- --include-ignored`
 日志：`docs/evidence/correctness/final-760-include-ignored.log`（**历史记录**，文件名沿用旧口径 760）。
-当前实测口径（2026-11-19）：默认测试 **978 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1039 passed / 0 failed**。唯一数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。
+当前实测口径（2026-11-19）：默认测试 **979 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1040 passed / 0 failed**。唯一数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **978 passed / 0 failed / 61 ignored** |
-| `cargo test --workspace --offline -- --include-ignored` | **1039 passed / 0 failed** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **979 passed / 0 failed / 61 ignored** |
+| `cargo test --workspace --offline -- --include-ignored` | **1040 passed / 0 failed** |
 
-`include_ignored=1039`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
+`include_ignored=1040`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -25,7 +25,7 @@
 | 压力测试 | **1** | `forced_eviction_thrash_measurement`（图集 eviction 抖动） |
 | **合计** | **58** | 分类明细为**旧口径**（当时总数 51），未随新增用例重算；以上五类不相加等于总数，总数以 `docs/evidence/numbers.txt` 的 `ignored=61` 为准。 |
 
-## 7 个 GPU harness（真机 D3D11，全部 ok）
+## 8 个 GPU harness（真机 D3D11，全部 ok）
 
 | 用例 | 验证内容 |
 |---|---|
@@ -36,6 +36,7 @@
 | `gradient_round_rect_matches_math` | 圆角渐变叠加（2652 点，≤0.0089 + 四角裁切） |
 | `invalidate_rect_partial_equals_full` | 局部标脏重绘 == 整窗重绘（逐字节 0 差异） |
 | `two_disjoint_dirty_rects_match_full_redraw` | 两块不相邻脏区 == 整窗重绘（逐字节 0 差异） |
+| `grid_with_images_is_not_blank_on_gpu` | Grid + 4 图片不再整帧空白（62 381 种颜色；四象限主色命中） |
 
 ## Clippy
 

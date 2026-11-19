@@ -30,7 +30,7 @@ y901-shell ──> y901-backend-win32 ──> y901-runtime ──> y901-ui
 
 - `y901-ui` **零外部依赖**：它只依赖内部 crate `y901-core`（用于布局原语 `IntervalSet`）。
   这不是洁癖，而是测试策略的地基：
-  本次工作区测试运行统计为 978 项通过、61 项忽略（149 个测试目标）；绝大多数无需窗口、GPU、PTY。
+  本次工作区测试运行统计为 979 项通过、61 项忽略（150 个测试目标）；绝大多数无需窗口、GPU、PTY。
 - **`y901-backend-win32` 与 `y901-shell` 都直接依赖 `windows-sys`**（grep 可验证；前者用于窗口/渲染，后者用于命令行与磁盘操作）。
 - `y901-runtime` 单独存在的原因：`Host::policy()` 需要 `y901_agent::Policy`，
   而 `agent` 依赖 `ui`；若把 `Host` 放进 `ui` 会形成 `ui -> agent -> ui` 循环。
@@ -567,21 +567,37 @@ let list = ListView::new("chat", 24.0)
 
 ## 16. 已知限制：渲染
 
-### Grid + Image 组合渲染空白（未修复，需 PIX/RenderDoc）
+### ~~Grid + Image 组合渲染空白~~（已修复：批次起点传错了 draw 参数）
 
-- **现象**：examples/image_gallery.rs（Grid 里放 Image）**整帧空白** —— 连同一棵树里的
-  文字和背景都不显示；屏幕只剩清屏色。
-- **触发条件**：D3D 后端 + cached RT 路径 + **批次列表中含图片批次**（Batch.image = Some(id)）
-  + 容器为 Grid。**Flex + Image 正常，Grid + 文字正常**，所以单组件使用不受影响。
-- **已排除**（均为实测）：clip 栈泄漏（4 push ↔ 4 pop 配平）、blit 未执行（双方都进入）、
-  scissor 为空（双方都是整窗 is_full=true）、脏区分块（双方都是单块全屏）、
-  实例超限（69 ≪ 10000）、Present 失败（返回 S_OK）。
-- **已知差异**：空白场景批次数为 8（含 3 个图片批次），正常场景为 1（无图片）；
-  差异定位在 `d3d11.rs` 的 `for b in batches` 循环。
-- **静态审查未发现解释**：图集绑 `t0` 并用 `s0` 采样，图片绑 `t1` 并共用 `s0`；
-  图片批次绘制后只切回 pixel shader；`draw_instances(n, b.start)` 语义待核实。
-- **下一步**：逐批次打印 start/count/image 与 DrawInstanced 实参，或直接上 PIX/RenderDoc 抓帧。
-- **记录时间**：2026-11-14，commit db86941 之前即存在。
+- **历史现象**：`examples/image_gallery.rs`（Grid 里放 Image）在 D3D 后端**整帧空白** ——
+  连同一棵树里的文字和背景都不显示；Flex + Image 正常、Grid + 文字正常。
+- **根因（2026-11-19 定位）**：`Context::draw_instances` 把批次起点传给了
+  `DrawInstanced` 的**第 4 个参数 `StartVertexLocation`**，而实例数据是按实例步进的顶点槽，
+  正确的参数是**第 5 个 `StartInstanceLocation`**：
+
+  ```rust
+  // 修前（错）：每个批次都从实例 0 开始画，起点被当成"顶点偏移"
+  draw_instanced(6, count, start_offset, 0);
+  // 修后：
+  draw_instanced(6, count, 0, start_instance);
+  ```
+
+  于是"图片批次"用 `ps_image` 把**背景实例 0** 重新画了一遍（拿着背景的 uv 采样 2×2 图片纹理），
+  随后每个批次又从实例 0 开始 —— 整帧被涂成错误颜色，看起来就是"只剩清屏色"。
+  只有含图片批次时才会出现，所以 Flex+Image（单批次）与 Grid+文字（无图片批次）都正常。
+- **为什么早先没定位**：静态审查时只看了"批次 start/count/image 是否合理"，
+  没有核对 `DrawInstanced` 的实参顺序；已排除的候选（clip 栈、blit、scissor、脏区、实例上限）
+  确实都不是原因。
+- **修复证据**：同一棵树渲染后快照颜色从 **1 种**（`(12,0,0)` 整帧）变为 **62381 种**，
+  四象限主色 `(255,0,0)/(0,255,0)/(0,0,255)/(255,255,255)` 各出现 9k~15k 像素；
+  `Y901_SNAPSHOT=1` 的两次重画哈希相等（`0xddf6c99d30ffc70c`）。
+- **回归用例**：`crates/y901-backend-win32/tests/grid_image_gpu.rs`
+  （Grid + 4 个 Image + 文字；断言画面非单色且四象限主色至少出现两种；无 GPU 时打印跳过）。
+- **诊断开关（保留）**：`Y901_DEBUG_BATCHES=1` 打印每帧批次切分与每次 draw 的实例区间；
+  `Y901_NO_IMAGE_BATCH=1` 强制退化为单次 draw（用于二分"批次 vs 实例"问题）。
+- **顺带修复**：`Y901_SNAPSHOT=1` 的确定性自检原先自己拼了一遍"无批次"重画，
+  含图片的帧必然 hash 不等（假红）；现在复用 `draw_scene`，两条路径同构。
+- **记录时间**：2026-11-14 记录现象；2026-11-19 定位并修复。
 
 ## 17. 测试基础设施待办
 

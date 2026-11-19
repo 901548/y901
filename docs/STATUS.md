@@ -2,11 +2,45 @@
 
 - **HEAD**: 见 `git log -1`（v0.2.0 之后：审查整改 2 批）
 - **tags**: v0.1.0 ~ **v0.2.0**（本版含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`）
-- **测试**: `passed=978` / `ignored=61` / `include_ignored=1039`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=979` / `ignored=61` / `include_ignored=1040`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-19：第二轮审查收尾 + Grid+Image 整帧空白修复
+
+### A. Grid + Image 在 D3D 下整帧空白 —— 已修复（根因：draw 参数传错位）
+
+- **根因**：`Context::draw_instances` 把批次起点传给了 `DrawInstanced` 的第 4 参数
+  `StartVertexLocation`；实例缓冲是按实例步进的槽位，正确参数是第 5 个
+  `StartInstanceLocation`。于是图片批次用 `ps_image` 重画了**实例 0**（背景），
+  后续每个批次也都从实例 0 开始 —— 整帧被涂成错误颜色，看起来"只剩清屏色"。
+- **影响面**：只在"有图片批次"时出现；Flex+Image（单批次）与 Grid+文字（无图片批次）
+  都正常，因此长期没被发现。
+- **修复**：`draw_instances(count, start_instance)` → `DrawInstanced(6, count, 0, start_instance)`；
+  同时把 `Y901_SNAPSHOT=1` 的确定性自检改成复用 `draw_scene`（原先自己拼"无批次"重画，
+  含图片的帧必然 hash 不等，是假红）。
+- **证据**：同一棵树快照从 **1 种颜色**（`(12,0,0)` 整帧）变为 **62 381 种**，
+  四象限主色各 9k~15k 像素；`Y901_SNAPSHOT=1` 两次重画哈希相等（`0xddf6c99d30ffc70c`）。
+- **回归**：[grid_image_gpu.rs](../crates/y901-backend-win32/tests/grid_image_gpu.rs)
+  （Grid + 4 图片 + 文字；无 GPU 时打印跳过）。
+- **诊断开关（保留）**：`Y901_DEBUG_BATCHES=1` 打印批次切分与每次 draw 的实例区间；
+  `Y901_NO_IMAGE_BATCH=1` 强制单次 draw，用于二分"批次 vs 实例"。
+
+### B. 第二轮审查的 P0 收尾（Linux + 供应链）
+
+- `y901-extras` 的 `sgr_reverse` 两条红改为**格内背景众数**断言：仍是精确 RGB，
+  但对字体覆盖范围不敏感（Windows Segoe UI / Linux DejaVuSans 双绿）。
+- 新增版本化脚本 [scripts/linux-verify.sh](../scripts/linux-verify.sh)：x11 `check`
+  （all-targets）/ `golden` / `xvfb-run real_window` + `stroke_round_aa` +
+  `sgr_reverse` + `ui+widgets`，任一失败 exit 1。
+- Linux 全量（虚拟机）：**878 passed / 0 failed / 27 ignored**（149 个测试目标），
+  证据 [linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
+- `cargo audit` 恢复**真实联网刷新**（不再 STALE）：0 漏洞。
+- 本机 git 全局配置里指向 `127.0.0.1:7897` 的死代理已清除（备份
+  `~/.gitconfig.bak-20261119`），`main` 与全部 tag 已推送。
+
 
 ## 本轮（2026-11-18）：P0 渲染修复 + 门禁恢复
 
@@ -61,7 +95,7 @@
 - 逐像素 MAD ≤ 0.25（实测 **0.0080**）。
 
 实测：两侧行带 `[(18,32),(62,77),(111,122)]` 完全一致，包围盒 `(16,18)..(185,122)` 相同。
-调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win**970** 默认族
+调试中踩到并记录：两侧若用**不同字体文件**（`default_test_font_path()` vs win**979** 默认族
 NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那是字体不同，不是后端错行。
 
 
@@ -240,7 +274,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 > （#5 #7 #8 #9 #11 #12 #13 #14 #15 #18 #19 #20），且每个都有修复记录与提交。
 > 其余 **11 项因原始报告未保存而无法逐项核对** —— 不编造编号。
 > 下一次审计应重新跑全量审查，以新报告为准。
-- 门禁六步：MSRV / 测试 **970**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
+- 门禁六步：MSRV / 测试 **979**）/ clippy / 像素哈希 / `missing_docs` / `cargo audit`
 - **SAFETY 覆盖：100%（调用点口径）** —— d3d11 / font / window 的每个 `unsafe` 调用点都有契约，
   另有 vtable 契约与 context 三段式两段集中说明
 

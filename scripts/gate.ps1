@@ -169,11 +169,28 @@ else {
         $auditCode = $LASTEXITCODE
         Write-Host $auditOut
         if ($auditCode -eq 0) {
-            if (-not $AllowStaleAudit) {
-                Fail "audit requires network or explicit -AllowStaleAudit"
+            # 拉取失败不等于"指南库很旧"：若本地库是**最近 7 天**更新的快照，仍是有效审计。
+            # 为什么需要这条：GitHub 在部分网络下会间歇性拒绝 fetch，而"每次都被判 stale"
+            # 会让发布门禁变成靠 -AllowStaleAudit 的橡皮图章（实测发生过）。
+            $dbAgeDays = $null
+            $dbDir = Join-Path $HOME ".cargo\advisory-db"
+            if (Test-Path (Join-Path $dbDir ".git")) {
+                $epoch = & git -C $dbDir log -1 --format=%ct 2>$null
+                if ($epoch -and ($epoch -as [long])) {
+                    $dbAgeDays = ((Get-Date).ToUniversalTime() - [DateTimeOffset]::FromUnixTimeSeconds([long]$epoch).UtcDateTime).TotalDays
+                }
             }
-            $script:auditStale = $true
-            Write-Host "[gate] ok: audit ran against CACHED advisory DB (may be stale; re-run online for a release)"
+            if ($null -ne $dbAgeDays -and $dbAgeDays -le 7) {
+                $script:auditStale = $false
+                Write-Host ("[gate] ok: audit ran against CACHED advisory DB snapshot {0:N1} day(s) old (fresh enough; offline refresh failed)" -f $dbAgeDays)
+            }
+            elseif (-not $AllowStaleAudit) {
+                Fail "audit requires network or explicit -AllowStaleAudit (cached DB is older than 7 days or unknown)"
+            }
+            else {
+                $script:auditStale = $true
+                Write-Host "[gate] ok: audit ran against CACHED advisory DB (may be stale; re-run online for a release)"
+            }
         }
     }
     if ($auditCode -ne 0) {

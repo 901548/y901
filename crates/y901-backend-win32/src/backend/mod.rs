@@ -867,6 +867,10 @@ impl D3dBackend {
     /// 图集段与图片段交替排开，**不重排**实例：重排会改变重叠元素的层次。
     fn build_batches(&self) -> Vec<crate::backend::d3d11::Batch> {
         use crate::backend::d3d11::Batch;
+        // 诊断开关（复现 Grid+Image 空白时用）：强制退化回"单次 draw"。
+        if std::env::var_os("Y901_NO_IMAGE_BATCH").is_some() {
+            return Vec::new();
+        }
         let mut out = Vec::new();
         let mut cursor = 0usize;
         for &(start, count, id) in &self.image_marks {

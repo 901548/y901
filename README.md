@@ -45,7 +45,7 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 ```bash
 cargo check --workspace --all-targets      # 0 warning
 cargo test --workspace                     # 978 passed / 0 failed / 61 ignored（149 个测试目标）
-powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0xF7455CCE7781A864，400x220）
+powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 **979**xF7455CCE7781A864，400x220）
 ```
 
 ## 已知限制
@@ -53,8 +53,9 @@ powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0xF7455CCE778
 - **Linux 输入法（IME）**：已接线 IBus（`3737df5`），可在 X11 下输入中文；浏览器端走隐藏 `<input>` 承接组字。
 - **macOS 后端未实现**。
 - **无障碍只有语义树**（`Widget::semantics`），**没有 OS 桥接**（UIA / AT-SPI）。
-- **Grid + Image 组合在 D3D cached-RT 路径下整帧空白**：已排除 clip/blit/scissor/脏区/实例超限，
-  根因未定位，需要 PIX/RenderDoc（详见 `docs/FRAMEWORK.md` §16）。
+- ~~**Grid + Image 组合在 D3D cached-RT 路径下整帧空白**~~ —— 已修复（`draw_instances` 把批次起点
+  当成 `StartVertexLocation` 而非 `StartInstanceLocation`，详见 `docs/FRAMEWORK.md` §16）；回归用例
+  `crates/y901-backend-win32/tests/grid_image_gpu.rs`。
 - **组件内无法启动动画**：`UiTree::animate(..)` 在树侧，`EventCtx` 没有入口；
   因此 `Switch` 的滑块是即时移动（滚动/弹层动画不受影响）。
 - **文本模型要求等宽字体**：`cell_metrics_for` 固定按 `0.5em × 1em` 出 cell。
