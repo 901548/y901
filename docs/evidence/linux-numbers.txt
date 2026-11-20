@@ -8,4 +8,4 @@
 # 会把结果写回仓库里的这个文件，随后把文件带回 Windows 提交。
 passed=906
 ignored=27
-targets=150
+targets=151

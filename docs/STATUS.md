@@ -1,7 +1,7 @@
 # 项目状态
 
-- **HEAD**: 见 `git log -1`（v0.2.4；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收 + X11 DPI/XSettings + 墨迹绘制裁剪修复）
-- **tags**: v0.1.0 ~ **v0.2.4**（v0.2.0 含破坏性变更；v0.2.1 ~ v0.2.4 均为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md` / `v0.2.2` / `v0.2.3` / `v0.2.4`）
+- **HEAD**: 见 `git log -1`（v0.2.5；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收 + X11 DPI/XSettings + 墨迹绘制裁剪修复 + crates.io 首发准备）
+- **tags**: v0.1.0 ~ **v0.2.5**（v0.2.0 含破坏性变更；v0.2.1 ~ v0.2.5 均为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`）；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**
 - **测试**: `passed=989` / `ignored=61` / `include_ignored=1050`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
@@ -529,7 +529,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   `file_drop` 硬编码 `C:\` / supersample 阈值绑定字体）就是靠它首次暴露的。
 - 已验证（2026-11-20，Ubuntu 22.04 / WSL2 + rustc 1.92 + Xvfb）：
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **906 passed / 0 failed / 27 ignored**
-  （150 个测试目标）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
+  （151 个测试目标）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
   与 Windows 的 989/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
@@ -601,7 +601,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 | 平台/历史豁免 | 行内显式出现 `Linux / 历史 / 旧口径 / 当轮` 或 `<!-- counts-exempt -->` 才豁免；Linux 行另有独立数据源逐数校验 |
 | 反向写入 | sync 的自动改写**逐行**进行并遵守同一套豁免，绝不把 别处口径的数改成 Windows 口径 |
 
-新增 `targets=` 字段（`test result:` 行数，当前 150）：`passed` 与"N 个测试目标"
+新增 `targets=` 字段（`test result:` 行数，当前 151）：`passed` 与"N 个测试目标"
 是两个独立派生量，只校准前者会留下"通过数对了、目标数停在旧值"的漂移。
 
 **验证方式（不靠"跑一次是绿的"）**：对检查器做了 5 组变异测试 ——

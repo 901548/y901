@@ -1,8 +1,12 @@
 
 === CHECK_X11 ===
 $ cargo check -p y901-backend-x11 --all-targets --offline
-    Checking y901-backend-x11 v0.2.3 (/mnt/f/Y901/crates/y901-backend-x11)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.37s
+    Checking y901-core v0.2.5 (/mnt/f/Y901/crates/y901-core)
+    Checking y901-ui v0.2.5 (/mnt/f/Y901/crates/y901-ui)
+    Checking y901-runtime v0.2.5 (/mnt/f/Y901/crates/y901-runtime)
+    Checking y901-render v0.2.5 (/mnt/f/Y901/crates/y901-render)
+    Checking y901-backend-x11 v0.2.5 (/mnt/f/Y901/crates/y901-backend-x11)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.11s
 EXIT_CHECK_X11=0
 
 === GOLDEN ===
@@ -31,37 +35,43 @@ EXIT_GOLDEN=0
 
 === REAL_WINDOW ===
 $ xvfb-run -a -s -screen 0 1280x800x24 cargo test -p y901-backend-x11 --test real_window --offline
+test clipboard_timeout_is_within_600ms ... ok
 test probe_cursor_font ... ignored, 调试
 test put_image_requires_chunking_for_hd_sizes ... ok
-test clipboard_timeout_is_within_600ms ... ok
 test send_event_packet_layout ... ok
-test clipboard_roundtrip_through_selection_protocol ... ok
 test benchmark_shm_vs_putimage_1080p ... ok
 test create_map_and_paint_a_solid_red_window ... ok
+test clipboard_roundtrip_through_selection_protocol ... ok
 test cursor_shapes_are_created_and_applied ... ok
 test dpi_scale_prefers_explicit_env_over_xft ... ok
 test handshake_reports_screen_and_visual ... ok
 test keyboard_input_reaches_the_ui_layer ... ok
-test reads_xft_dpi_from_root_resource_manager ... ok
 test keyboard_mapping_covers_ascii ... ok
 test reads_xsettings_through_selection_protocol ... ok
 test runtime_scale_change_rebuilds_soft_backend ... ok
+test reads_xft_dpi_from_root_resource_manager ... ok
 test shm_and_fallback_produce_identical_pixels ... ok
 test window_implements_event_source_and_presenter ... ok
 
-test result: ok. 16 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.13s
+test result: ok. 16 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.03s
 
 EXIT_REAL_WINDOW=0
 
 === CLIPPY_X11 ===
 $ cargo clippy -p y901-backend-x11 --all-targets --offline -- -D warnings
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.59s
+    Checking y901-core v0.2.5 (/mnt/f/Y901/crates/y901-core)
+    Checking y901-ui v0.2.5 (/mnt/f/Y901/crates/y901-ui)
+    Checking y901-runtime v0.2.5 (/mnt/f/Y901/crates/y901-runtime)
+    Checking y901-render v0.2.5 (/mnt/f/Y901/crates/y901-render)
+    Checking y901-backend-x11 v0.2.5 (/mnt/f/Y901/crates/y901-backend-x11)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.31s
 EXIT_CLIPPY_X11=0
 
 === STROKE ===
 $ cargo test -p y901-render --test stroke_round_aa --offline
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.53s
-     Running tests/stroke_round_aa.rs (/home/y901548/y901-target/debug/deps/stroke_round_aa-5d53dad8c0e1a95f)
+   Compiling y901-render v0.2.5 (/mnt/f/Y901/crates/y901-render)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.00s
+     Running tests/stroke_round_aa.rs (/home/y901548/y901-target/debug/deps/stroke_round_aa-6d77c62ea0412b10)
 
 running 1 test
 test rounded_stroke_is_antialiased_and_bounded ... ok
@@ -72,13 +82,15 @@ EXIT_STROKE=0
 
 === SGR_REVERSE ===
 $ cargo test -p y901-extras --test sgr_reverse --offline
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.73s
-     Running tests/sgr_reverse.rs (/home/y901548/y901-target/debug/deps/sgr_reverse-3a8553536db04c9e)
+   Compiling y901-widgets v0.2.5 (/mnt/f/Y901/crates/y901-widgets)
+   Compiling y901-extras v0.2.5 (/mnt/f/Y901/crates/y901-extras)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.51s
+     Running tests/sgr_reverse.rs (/home/y901548/y901-target/debug/deps/sgr_reverse-b1a9cef950386222)
 
 running 3 tests
 test selection_on_top_of_sgr7_cancels_out ... ok
-test sgr7_swaps_default_colours_with_exact_rgb ... ok
 test sgr27_restores_default_colours ... ok
+test sgr7_swaps_default_colours_with_exact_rgb ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -97,14 +109,14 @@ running 2 tests
 test crates/y901-ui/src/lib.rs - (line 22) - compile ... ok
 test crates/y901-ui/src/widget.rs - widget::Role (line 66) ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
 
    Doc-tests y901_widgets
 
 running 1 test
 test crates/y901-widgets/src/style.rs - style::WidgetStyle (line 15) ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
 
 EXIT_UI_WIDGETS=0
 
@@ -121,17 +133,17 @@ running 2 tests
 test crates/y901-ui/src/lib.rs - (line 22) - compile ... ok
 test crates/y901-ui/src/widget.rs - widget::Role (line 66) ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
 
    Doc-tests y901_widgets
 
 running 1 test
 test crates/y901-widgets/src/style.rs - style::WidgetStyle (line 15) ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.60s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
 
 EXIT_FULL_WORKSPACE=0
-[linux-verify] wrote docs/evidence/linux-numbers.txt (passed=906 ignored=27 targets=150)
+[linux-verify] wrote docs/evidence/linux-numbers.txt (passed=906 ignored=27 targets=151)
 [linux-verify] REMINDER: copy this file back to the Windows checkout and commit it.
 
 === 汇总 ===

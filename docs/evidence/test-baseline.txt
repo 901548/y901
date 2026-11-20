@@ -55,4 +55,10 @@
 #   Linux 侧另有 11 条只在 cfg(unix) 下编译的用例（8 条 XSettings 解析与优先级、
 #     2 条 X11 集成：XSettings selection 往返 / 运行期缩放重建，1 条 Xft.dpi 协议读取），
 #     以及 4 条 Xauthority 单测，因此 Linux 计数是 906 而不是 989。
+# Measured at 2026-11-20 (v0.2.5: crates.io 首发准备 —— 拆 ui↔render dev-dep 环):
+#   default `cargo test --workspace --no-fail-fast`   passed 989, failed 0, ignored 61 / 151 个测试目标
+#   `--include-ignored`                               passed 1050, failed 0
+#   用例数不变：把 4 条 Grid 用例（ui/tests/grid_span.rs）与 1 条 hover 快照用例
+#   （ui/tests/hover.rs）迁到 render 侧（render/tests/ui_grid_span.rs、ui_hover_snapshot.rs），
+#   因此测试二进制从 135 个变成 137 个 —— 目标数（test result 行）150 → 151。
 989
