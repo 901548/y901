@@ -12,7 +12,7 @@
 //! 本仓库没有 JSON 数据库（也不想为一个守卫测试引进一个），
 //! 而 `cargo tree` 的文本输出足够精确；build.rs 则直接按路径读取。
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -57,84 +57,154 @@ const SYS_ALLOWLIST: &[&str] = &[
     "windows_x86_64_gnullvm",
     "windows_i686_gnu",
     "dirs-sys",
+    // wasm-bindgen JS API binding; no C source compilation.
+    "js-sys",
 ];
 
 fn cargo_home() -> PathBuf {
     std::env::var_os("CARGO_HOME")
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join(".cargo")))
         .unwrap_or_else(|| PathBuf::from(".cargo"))
 }
 
-/// 从 `cargo tree` 取依赖图里的所有 crate 名（去重、去版本号）。
-fn resolve_crate_names(manifest_dir: &Path) -> BTreeSet<String> {
-    match try_resolve_crate_names(manifest_dir) {
-        Ok(names) => names,
+/// 从 `cargo tree` 取依赖图里的所有 crate 名及已解析版本。
+fn resolve_crate_versions(manifest_dir: &Path) -> BTreeMap<String, BTreeSet<String>> {
+    match try_resolve_crate_versions(manifest_dir) {
+        Ok(versions) => versions,
         Err(stderr) => panic!("cargo tree 失败：{stderr}"),
     }
 }
 
-/// 同 `resolve_crate_names`，但把失败原因交回调用方（需要区分失败类型时用）。
-fn try_resolve_crate_names(manifest_dir: &Path) -> Result<BTreeSet<String>, String> {
+/// 同 `resolve_crate_versions`，但把失败原因交回调用方。
+fn try_resolve_crate_versions(
+    manifest_dir: &Path,
+) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     let out = Command::new(env!("CARGO"))
-        .args(["tree", "--prefix", "none", "--offline"])
+        .args([
+            "tree",
+            "--workspace",
+            "--target",
+            "all",
+            "--prefix",
+            "none",
+            "--offline",
+        ])
         .current_dir(manifest_dir)
         .output()
         .expect("需要 cargo 在 PATH 里");
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).to_string());
     }
-    Ok(parse_crate_names(&String::from_utf8_lossy(&out.stdout)))
+    Ok(parse_crate_versions(&String::from_utf8_lossy(&out.stdout)))
 }
 
-/// 解析 `cargo tree --prefix none` 的文本输出，只取每行第一个词（crate 名）。
-fn parse_crate_names(text: &str) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
+/// 解析 `cargo tree` 默认输出的 `crate v1.2.3`，按实际版本定位源码。
+fn parse_crate_versions(text: &str) -> BTreeMap<String, BTreeSet<String>> {
+    let mut versions = BTreeMap::<String, BTreeSet<String>>::new();
     for line in text.lines() {
-        // 格式：`crate v1.2.3 (可选路径)`；只取第一个词
-        let name = line.split_whitespace().next().unwrap_or("");
-        if name.is_empty() || name.starts_with('(') {
+        let mut fields = line.split_whitespace();
+        let (Some(name), Some(version)) = (fields.next(), fields.next()) else {
             continue;
-        }
-        names.insert(name.to_string());
+        };
+        versions
+            .entry(name.to_string())
+            .or_default()
+            .insert(version.to_string());
     }
-    names
+    versions
 }
 
-/// 在 registry 与本地 workspace 里找到某个 crate 的源码目录（取最新版本）。
-fn find_crate_dir(name: &str, workspace_root: &Path) -> Option<PathBuf> {
-    // 1) workspace 内部 crate
-    let local = workspace_root.join("crates").join(name);
-    if local.join("Cargo.toml").exists() {
-        return Some(local);
+/// 按 cargo tree 解析出的每个精确版本，定位对应源码目录。
+fn find_crate_dir(name: &str, version: &str, workspace_root: &Path) -> Option<PathBuf> {
+    let version = version.strip_prefix('v').unwrap_or(version);
+    // workspace 内部 crate 名由 Cargo.toml package.name 决定，路径未必与名字相同。
+    if let Some(path) = find_workspace_crate(name, version, workspace_root) {
+        return Some(path);
     }
-    // 2) registry 源码（src/*/name-version）
+    // Registry 缓存可能含有同一 crate 的多个版本，必须精确匹配每个已解析版本。
     let src = cargo_home().join("registry").join("src");
-    let mut best: Option<(Vec<u64>, PathBuf)> = None;
-    if let Ok(dirs) = std::fs::read_dir(&src) {
-        for d in dirs.flatten() {
-            if let Ok(entries) = std::fs::read_dir(d.path()) {
-                for e in entries.flatten() {
-                    let fname = e.file_name().to_string_lossy().to_string();
-                    let Some(rest) = fname.strip_prefix(&format!("{name}-")) else {
-                        continue;
-                    };
-                    // 只接受纯数字版本（避开 `foo-bar` 这种同前缀）
-                    if !rest.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-                        continue;
-                    }
-                    let ver: Vec<u64> = rest
-                        .split(['.', '-', '+'])
-                        .filter_map(|p| p.parse::<u64>().ok())
-                        .collect();
-                    if best.as_ref().is_none_or(|(b, _)| &ver > b) {
-                        best = Some((ver, e.path()));
-                    }
+    let expected = format!("{name}-{version}");
+    let roots = std::fs::read_dir(src).ok()?;
+    for root in roots.flatten() {
+        let candidate = root.path().join(&expected);
+        if candidate.join("Cargo.toml").exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// 按包名和版本在本仓 workspace manifests 中找本地 crate。
+fn find_workspace_crate(name: &str, version: &str, workspace_root: &Path) -> Option<PathBuf> {
+    let workspace_version = read_workspace_version(workspace_root)?;
+    let mut manifests = Vec::new();
+    walk_manifests(&workspace_root.join("crates"), &mut manifests);
+    for manifest in manifests {
+        let Ok(text) = std::fs::read_to_string(&manifest) else {
+            continue;
+        };
+        let (mut in_package, mut package_name, mut package_version) = (false, None, None);
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                in_package = line == "[package]";
+            } else if in_package {
+                if let Some(value) = manifest_string_value(line, "name") {
+                    package_name = Some(value);
+                } else if line.starts_with("version.workspace") {
+                    package_version = Some(workspace_version.clone());
+                } else if let Some(value) = manifest_string_value(line, "version") {
+                    package_version = Some(value.to_string());
                 }
             }
         }
+        if package_name == Some(name) && package_version.as_deref() == Some(version) {
+            return manifest.parent().map(Path::to_path_buf);
+        }
     }
-    best.map(|(_, p)| p)
+    None
+}
+
+fn read_workspace_version(workspace_root: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(workspace_root.join("Cargo.toml")).ok()?;
+    let mut in_workspace_package = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_workspace_package = line == "[workspace.package]";
+        } else if in_workspace_package {
+            if let Some(value) = manifest_string_value(line, "version") {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn manifest_string_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.strip_prefix(key)?
+        .trim_start()
+        .strip_prefix('=')?
+        .trim_start()
+        .strip_prefix('"')?
+        .split('"')
+        .next()
+}
+
+fn walk_manifests(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && path.file_name().is_some_and(|n| n != "target") {
+            walk_manifests(&path, out);
+        } else if path.file_name().is_some_and(|n| n == "Cargo.toml") {
+            out.push(path);
+        }
+    }
 }
 
 /// 工作区根（`crates/y901-app` 上两层）。
@@ -171,21 +241,21 @@ fn scan_build_rs(path: &Path, violations: &mut Vec<String>) {
 }
 
 /// 对**一个独立仓库**做完整审计，返回违规清单。
-///
-/// 为什么抽成函数：依赖树解析与审计分开，`audit` 复用已解析的名字集合，
-/// 避免同一棵树被解析两次（`resolve_crate_names` 会跑 cargo，代价不低）。
 fn audit(manifest_dir: &Path) -> (usize, usize, Vec<String>) {
-    let names = resolve_crate_names(manifest_dir);
-    audit_with_names(manifest_dir, &names)
+    let versions = resolve_crate_versions(manifest_dir);
+    audit_with_versions(manifest_dir, &versions)
 }
 
-/// [`audit`] 的主体：依赖树已由调用方解析好（兄弟仓守卫需要先按错误类型分流）。
-fn audit_with_names(manifest_dir: &Path, names: &BTreeSet<String>) -> (usize, usize, Vec<String>) {
+/// 审计已解析的依赖版本。
+fn audit_with_versions(
+    manifest_dir: &Path,
+    versions: &BTreeMap<String, BTreeSet<String>>,
+) -> (usize, usize, Vec<String>) {
     let mut violations: Vec<String> = Vec::new();
     let mut scanned = 0usize;
 
-    // 检查 1：名字规则
-    for name in names {
+    // 检查 1：名字规则。
+    for name in versions.keys() {
         if BLACKLIST.contains(&name.as_str()) {
             violations.push(format!(
                 "【黑名单】{}: {name}（需要 C/C++ 工具链或外部 C 库）",
@@ -200,7 +270,7 @@ fn audit_with_names(manifest_dir: &Path, names: &BTreeSet<String>) -> (usize, us
         }
     }
 
-    // 检查 2a：本仓库自己的 build.rs
+    // 检查 2a：本仓库自己的 build.rs。
     let mut in_repo = Vec::new();
     walk_build_scripts(&manifest_dir.join("crates"), &mut in_repo);
     walk_build_scripts(&manifest_dir.join("src"), &mut in_repo);
@@ -209,21 +279,25 @@ fn audit_with_names(manifest_dir: &Path, names: &BTreeSet<String>) -> (usize, us
         scanned += 1;
     }
 
-    // 检查 2b：依赖树里每个 crate 的 build.rs
-    let ws_root = manifest_dir.to_path_buf();
-    for name in names {
-        let Some(dir) = find_crate_dir(name, &ws_root) else {
-            continue;
-        };
-        let build_rs = dir.join("build.rs");
-        if !build_rs.exists() {
-            continue;
+    // 检查 2b：逐个依赖名+精确版本扫描 build.rs；源码缺失即失败关闭。
+    for (name, crate_versions) in versions {
+        for version in crate_versions {
+            let Some(dir) = find_crate_dir(name, version, manifest_dir) else {
+                violations.push(format!(
+                    "【源码缺失】{name} {version}：无法定位 Cargo 解析版本的源码"
+                ));
+                continue;
+            };
+            let build_rs = dir.join("build.rs");
+            if !build_rs.exists() {
+                continue;
+            }
+            scanned += 1;
+            scan_build_rs(&build_rs, &mut violations);
         }
-        scanned += 1;
-        scan_build_rs(&build_rs, &mut violations);
     }
 
-    (names.len(), scanned, violations)
+    (versions.len(), scanned, violations)
 }
 
 /// 递归收集某目录下所有 `build.rs`。
