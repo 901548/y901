@@ -5,6 +5,10 @@ description = "Terminal grid, reflow and cell width primitives for Y901."
 name = "y901-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["gui", "terminal", "text-layout"]
+categories = ["gui"]
 
 [dependencies]
 unicode-width = "0.2"

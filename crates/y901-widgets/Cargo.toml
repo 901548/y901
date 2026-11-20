@@ -5,6 +5,10 @@ description = "Reusable widgets (Button, TextInput, Table, Dialog, Alert, ...) f
 name = "y901-widgets"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["gui", "widgets", "ui"]
+categories = ["gui"]
 
 [dependencies]
 # wasm 上 `std::time::Instant::now()` 会 panic（time not implemented）；
@@ -12,8 +16,8 @@ edition.workspace = true
 web-time = "1"
 # PNG decode: pure Rust (png -> flate2 -> miniz_oxide). Zero C.
 png = "0.17"
-y901-core = { path = "../y901-core", version = "0.2.4" }
-y901-ui = { path = "../y901-ui", version = "0.2.4" }
+y901-core = { path = "../y901-core", version = "0.2.5" }
+y901-ui = { path = "../y901-ui", version = "0.2.5" }
 
 [dev-dependencies]
-y901-render = { path = "../y901-render", version = "0.2.4" }
+y901-render = { path = "../y901-render", version = "0.2.5" }
