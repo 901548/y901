@@ -46,6 +46,23 @@ if ($Check) {
     # 测试**目标数**（cargo 的 "test result:" 行数）：README/FRAMEWORK 写的是"N 个测试目标"，
     # 它和 passed 是两个独立的派生量 —— 只校准 passed 会留下"passed 对了、目标数停在旧值"的漂移。
     $targets  = if ($numbersFromFile.ContainsKey('targets'))  { $numbersFromFile['targets'] }  else { -1 }
+    # Linux 计数是**独立文件**（Windows 跑不出 Linux 的数）：只读它来校验文档里的 Linux 行，
+    # 这样"Linux 行整行豁免"就只剩 Helm（外部仓）一处。
+    $linuxNumbers = @{}
+    $linuxPath = Join-Path $root 'docs\evidence\linux-numbers.txt'
+    if (Test-Path $linuxPath) {
+        # **必须显式按 UTF-8 读**：PowerShell 5.1 的 `Get-Content` 默认按 ANSI 解码，
+        # 这个文件里有中文注释，实测会把 `passed=881` 与上一行注释**粘成一行**
+        # （于是只解析出 ignored/targets，Linux 校验静默失效）。
+        $linuxLines = [System.IO.File]::ReadAllLines($linuxPath, [System.Text.UTF8Encoding]::new($false))
+        foreach ($line in $linuxLines) {
+            if ($line -match '^\s*([a-z_]+)\s*=\s*(-?\d+)\s*$') { $linuxNumbers[$matches[1]] = [int]$matches[2] }
+        }
+    }
+    $linuxAllowed = @()
+    foreach ($k in @('passed', 'ignored', 'targets')) {
+        if ($linuxNumbers.ContainsKey($k)) { $linuxAllowed += $linuxNumbers[$k] }
+    }
     if ($baseline -lt 0) {
         Write-Host "[sync] FAIL: numbers.txt 缺少 baseline= 行"
         exit 1
@@ -203,6 +220,27 @@ foreach ($f in $docFiles) {
                 foreach ($m in [regex]::Matches($line, $scar.pattern)) {
                     Write-Host "[sync] stale: $f -- 发现改写规则造成的脏数据（$($scar.name)）：$($m.Value)"
                     $stale++
+                }
+            }
+        }
+
+        # **Linux 行专项**：含 "Linux" 且谈计数的行，数字必须来自 `linux-numbers.txt`。
+        # 之前这些行被整行豁免 —— 那等于"Linux 的数字永远正确"，
+        # 而它恰恰是最容易只在另一台机器上漂移的一类。
+        if ($linuxAllowed.Count -gt 0) {
+            foreach ($line in ($t -split "`n")) {
+                if ($line -notmatch 'Linux') { continue }
+                if ($line -notmatch $countKeywords) { continue }
+                foreach ($m in [regex]::Matches($line, '(?<![\w.])(\d{3})(?![\w.])')) {
+                    $n = [int]$m.Groups[1].Value
+                    $suffix = $line.Substring($m.Index + $m.Length)
+                    $prefix = $line.Substring(0, $m.Index)
+                    if ($suffix -match '^\s*(%|×|x\b|px|DPI|色|点|个像素)') { continue }
+                    if ($prefix -match '×\s*$') { continue }
+                    if ($linuxAllowed -notcontains $n) {
+                        Write-Host "[sync] stale: $f -- Linux 计数 $n 不在 linux-numbers.txt（$($linuxAllowed -join '/')）：$($line.Trim())"
+                        $stale++
+                    }
                 }
             }
         }

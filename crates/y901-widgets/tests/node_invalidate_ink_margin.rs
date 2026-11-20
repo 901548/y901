@@ -15,7 +15,7 @@ use y901_ui::{
     Color, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
     TextStyle, UiTree, Widget,
 };
-use y901_widgets::{InlineStyle, Span, StyledText, TextLabel};
+use y901_widgets::{Block, InlineStyle, Span, StyledText, TextLabel};
 
 const W: u32 = 260;
 const H: u32 = 140;
@@ -301,6 +301,101 @@ fn assert_size(size: f32) {
         diff, 0,
         "{size}px：节点级标脏的局部重绘与整窗重绘不一致：{diff} 像素不同，\
          首个差异 {first:?}（节点 {node:?}，脏区 {dirty_rects:?}）"
+    );
+}
+
+/// 富文本（`StyledText`）的混合字号：裁剪框按墨迹放宽后，下伸笔画不再被自裁剪切掉，
+/// 因此可以做与 `TextLabel` 相同的**像素级**局部重绘回归。
+fn build_rt(text: &str, size: f32) -> UiTree {
+    let mut rt = StyledText::new("rt");
+    rt.push_paragraph(vec![Span::styled(text, InlineStyle::size(size))]);
+    UiTree::new(Box::new(Host {
+        rect: Rect::ZERO,
+        children: vec![Box::new(rt)],
+    }))
+}
+
+#[test]
+fn mixed_size_rich_text_invalidate_matches_full_redraw() {
+    let metrics = ScaledMono;
+    // 48px：富文本自带 pad，字号太小则下伸笔画仍落在节点矩形内，测不出残影。
+    let size = 48.0f32;
+    let mut tree = build_rt("jjjj", size);
+    tree.layout(Size::new(W as f32, H as f32), &metrics);
+
+    let mut canvas = Canvas::new(W, H, BG);
+    tree.invalidate_all();
+    tree.render(&mut canvas);
+
+    let node = tree.rect_of("rt").expect("rich text node");
+    let expected_margin = (size * 1.2 - size).max(2.0).min(size);
+    let below = (node.bottom() as u32 + 1).min(H - 1);
+    let ink_below = (0..W)
+        .filter(|x| canvas.px[(below * W + x) as usize] != BG)
+        .count();
+    assert!(
+        ink_below > 0,
+        "富文本前置失败：节点矩形下方没有墨迹（size={size}）—— 自裁剪是否又收窄了？"
+    );
+
+    // 同宽同高内容变更 + 只做节点级标脏
+    tree.with_node_mut("rt", &mut |w| {
+        if let Some(any) = w.as_any_mut() {
+            if let Some(rt) = any.downcast_mut::<StyledText>() {
+                rt.update(vec![Block::Paragraph(vec![Span::styled(
+                    "oooo",
+                    InlineStyle::size(size),
+                )])]);
+            }
+        }
+    });
+    // `update()` 会让内部排版失效（`layout` 被 clear）。真实主循环里调用方会
+    // `request_layout()`，根节点缓存因此不再 fresh、整棵树重新 measure；
+    // 测试里直接 `clear_layout_cache()` 等价（而且更明确：这里要的就是强制重排）。
+    tree.clear_layout_cache();
+    tree.request_layout();
+    tree.layout(Size::new(W as f32, H as f32), &metrics);
+    tree.invalidate("rt");
+
+    let dirty_bounds = tree.dirty().bounds().expect("应有脏区");
+    let want_top = (node.y - expected_margin).max(0.0);
+    let want_bottom = (node.bottom() + expected_margin).min(H as f32);
+    assert!(
+        (dirty_bounds.y - want_top).abs() < 0.01
+            && (dirty_bounds.bottom() - want_bottom).abs() < 0.01,
+        "富文本脏区应按最大 span 外扩 {expected_margin:.2}px（期望 {want_top:.2}..{want_bottom:.2}，\
+         实际 {:.2}..{:.2}，节点 {node:?}）",
+        dirty_bounds.y,
+        dirty_bounds.bottom()
+    );
+
+    let dirty_rects = tree.dirty().rects().to_vec();
+    let mut partial = canvas.restored();
+    for r in &dirty_rects {
+        partial.clear(*r);
+    }
+    tree.render(&mut partial);
+
+    let mut tree_full = build_rt("oooo", size);
+    tree_full.layout(Size::new(W as f32, H as f32), &metrics);
+    let mut full = Canvas::new(W, H, BG);
+    tree_full.invalidate_all();
+    tree_full.render(&mut full);
+
+    let mut diff = 0usize;
+    let mut first = None;
+    for i in 0..partial.px.len() {
+        if partial.px[i] != full.px[i] {
+            diff += 1;
+            if first.is_none() {
+                first = Some((i as u32 % partial.w, i as u32 / partial.w));
+            }
+        }
+    }
+    assert_eq!(
+        diff, 0,
+        "富文本节点级标脏的局部重绘与整窗重绘不一致：{diff} 像素不同，首个差异 {first:?} \
+         （节点 {node:?}，脏区 {dirty_rects:?}）"
     );
 }
 

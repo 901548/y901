@@ -580,10 +580,16 @@ cargo test --workspace --no-fail-fast 2>&1 \
 非加粗 `passed` 漂移、目标数漂移、表格内 `passed` 漂移、`FRAMEWORK` 目标数漂移、
 新增一条无标记的假计数 —— **全部被抓到**；恢复后 `-Check` 通过（豁免行不误报）。
 
-**仍存在的已知限制**（诚实记录）：`Linux` / `Helm` 行被豁免，
-所以它们的数字漂移不会被这条检查发现 —— 那两台环境的计数无法在 Windows 上复现，
-只能靠"跑 `scripts/linux-verify.sh` 并把日志落盘"来核对。
-`Guide` 索引自动生成仍未做。
+**仍存在的已知限制**（诚实记录）：
+
+- **Helm 行仍整行豁免**：那是外部仓（`F:\Helm-Y901`），本仓既跑不了它的测试，
+  也不该在它的发布节奏里制造耦合；它的计数由 Helm 自己的 CI 负责。
+- `Guide` 索引自动生成仍未做。
+
+**Linux 行已不再豁免**（本轮改进）：新增独立数据源
+[`docs/evidence/linux-numbers.txt`](evidence/linux-numbers.txt)（`passed / ignored / targets`），
+`-Check` 对"含 Linux 且谈计数"的行逐数字校验；`linux-verify.sh` 在 Linux 上跑完
+全量 workspace 测试后写回该文件。自测脚本新增"Linux 计数漂移"变异用例。
 
 ## 框架最终状态（v0.1.17-dev，审计与测试基建债清零）
 
@@ -592,7 +598,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 | 平台 | 通过 | 失败 | ignored | 备注 |
 |---|---|---|---|---|
 | **Windows** | **751** | 0 | 58 | **当轮口径**（当前见 `numbers.txt`） |
-| **Linux** | **661** | 0 | 25 | **当轮口径**；当前 878/0/27，见上方 2026-11-19 验收 |
+| **Linux** | **661** | 0 | 25 | **当轮口径**；当前 881/0/27，见上方 2026-11-19 验收 |
 
 ### 审计
 

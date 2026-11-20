@@ -43,7 +43,9 @@ $cases = @(
     @{ File = 'docs\FRAMEWORK.md'; Old = "$passed 项通过、$ignored 项忽略（$targets 个测试目标）"; New = "$passed 项通过、$ignored 项忽略（$($targets - 1) 个测试目标）"; Label = 'FRAMEWORK 目标数漂移' },
     # 反自伤：这两类"脚本改坏文档"的指纹必须被抓到（A-2）。
     @{ File = 'README.md'; Old = '基线 0xF7455CCE7781A864'; New = "基线 **$passed**xF7455CCE7781A864"; Label = '十六进制基线被当成计数（0x 被吃）' },
-    @{ File = 'docs\STATUS.md'; Old = 'vs win32 默认族'; New = "vs win**$passed** 默认族"; Label = '词内数字被当成计数（win32 → win**N**）' }
+    @{ File = 'docs\STATUS.md'; Old = 'vs win32 默认族'; New = "vs win**$passed** 默认族"; Label = '词内数字被当成计数（win32 → win**N**）' },
+    # Linux 行不再整行豁免：它的数字由 docs/evidence/linux-numbers.txt 校验。
+    @{ File = 'docs\STATUS.md'; Old = 'Linux 全量（虚拟机）：**881 passed'; New = 'Linux 全量（虚拟机）：**878 passed'; Label = 'Linux 计数漂移（881 → 878）' }
 )
 
 $failures = 0

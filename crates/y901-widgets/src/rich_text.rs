@@ -117,6 +117,11 @@ pub enum Block {
 ///
 /// 它**不知道**什么叫 Markdown、什么叫"流式输出"——那些是调用方的事。
 pub struct StyledText {
+    /// 本帧的墨迹边距（`measure` 里按最大 span 字号算好，`render` 用来放宽裁剪）。
+    ///
+    /// 为什么需要缓存：`render` 的 `RenderCtx` 只暴露 `line_height`，拿不到 `ink_bounds`；
+    /// 而裁剪框要按墨迹放宽，否则大字号段落的**下伸笔画会被自己的裁剪切掉**。
+    ink_margin: f32,
     id: String,
     blocks: Vec<Block>,
     rect: Rect,
@@ -134,6 +139,7 @@ impl StyledText {
     /// 新建空富文本。
     pub fn new(id: impl Into<String>) -> Self {
         Self {
+            ink_margin: 0.0,
             id: id.into(),
             blocks: Vec::new(),
             rect: Rect::ZERO,
@@ -293,6 +299,22 @@ impl StyledText {
     ///
     /// 规则：`row_h = max(base, 该行各 span 的 line_height(size))`。
     /// **全 `None` span 时每行都等于 `base`** —— 与加字号前的 `n * base` **逐像素等价**。
+    /// 所有段落 span 里最大的墨迹边距（代码块按默认 16px 口径，含在初值内）。
+    fn max_span_margin(metrics: &dyn TextMetrics, blocks: &[Block]) -> f32 {
+        let mut worst = y901_ui::ink_margin_for(metrics, &TextStyle::default());
+        for block in blocks {
+            let spans: &[Span] = match block {
+                Block::Paragraph(spans) => spans,
+                Block::Code { .. } => continue,
+            };
+            for span in spans {
+                let Some(px) = span.style.size else { continue };
+                worst = worst.max(y901_ui::ink_margin_for(metrics, &TextStyle::default().size(px)));
+            }
+        }
+        worst
+    }
+
     fn compute_line_heights(
         metrics: &dyn TextMetrics,
         spans: &[Span],
@@ -358,19 +380,7 @@ impl Widget for StyledText {
     /// 为什么不是默认 16px：`RichText` 的行高按每行最大 `size` 算，
     /// 所以溢出也由最大字号决定；用树级默认会低估 `InlineStyle::size(32)` 这类行。
     fn ink_overflow(&self, metrics: &dyn TextMetrics) -> Option<f32> {
-        let mut worst = y901_ui::ink_margin_for(metrics, &TextStyle::default());
-        for block in &self.blocks {
-            let spans: &[Span] = match block {
-                Block::Paragraph(spans) => spans,
-                Block::Code { .. } => continue,
-            };
-            for span in spans {
-                let Some(px) = span.style.size else { continue };
-                let style = TextStyle::default().size(px);
-                worst = worst.max(y901_ui::ink_margin_for(metrics, &style));
-            }
-        }
-        Some(worst)
+        Some(Self::max_span_margin(metrics, &self.blocks))
     }
 
     fn layout_version(&self) -> u64 {
@@ -389,6 +399,7 @@ impl Widget for StyledText {
         let width = c.max.w;
         let line_h = metrics.line_height(&TextStyle::default());
         let per_line = self.chars_per_line(metrics, width);
+        self.ink_margin = Self::max_span_margin(metrics, &self.blocks);
         self.layout.clear();
         let mut y = self.pad;
         for block in &self.blocks {
@@ -434,10 +445,19 @@ impl Widget for StyledText {
         if self.rect.is_empty() {
             return;
         }
-        // 自己的绘制不得越出自己的矩形。
-        // 否则长行会画到邻居身上，而邻居只标自己的脏区时，
-        // 那些"越界像素"会被清掉却无人重画 → 残影/黑块。
-        ctx.push_clip(self.rect);
+        // 横向仍裁到自身矩形：长行不能画到邻居身上（邻居只标自己脏区时，
+        // 那些越界像素会被清掉却无人重画 → 残影/黑块）。
+        //
+        // **纵向必须按墨迹放宽**：行高是"行距"，大字号的下伸笔画（g/y/j）会落到
+        // 最后一行行框之下；若只裁到 rect，它们会被自己的裁剪切掉 —— 这是渲染错误，
+        // 不是"保护邻居"。放宽量与脏区外扩共用同一个 `ink_margin`。
+        let m = self.ink_margin.max(0.0);
+        ctx.push_clip(Rect::new(
+            self.rect.x,
+            self.rect.y - m,
+            self.rect.w,
+            self.rect.h + 2.0 * m,
+        ));
         let theme = ctx.theme();
         // 文本颜色必须取 `TEXT` 槽位。
         // 早期写成 `PANEL`：一旦主题里 panel 的 fg 是深色（浅色面板），

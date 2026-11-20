@@ -1,0 +1,11 @@
+# Linux 侧计数（由 scripts/linux-verify.sh 在 Linux 上生成，Windows 的 sync 只读不写）
+#
+# 为什么单独一个文件：`numbers.txt` 是 Windows 门禁口径，而 Linux 的计数只能在
+# Linux 上跑出来。两者分开存，`sync-doc-numbers.ps1 -Check` 才能分别校验
+# "Windows 行"与"Linux 行"，而不是把 Linux 行整行豁免（那会让它的漂移不可见）。
+#
+# 生成：在 Linux 上 `bash scripts/linux-verify.sh`（默认会跑全量 workspace 测试）
+# 会把结果写回仓库里的这个文件，随后把文件带回 Windows 提交。
+passed=881
+ignored=27
+targets=150

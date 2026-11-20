@@ -59,6 +59,49 @@ if [ "$SLOW" != "1" ]; then
     run UI_WIDGETS cargo test -p y901-ui -p y901-widgets $CARGO_FLAGS
 fi
 
+# 7) 全量 workspace（默认跑；SKIP_FULL=1 可跳过）
+#
+# 为什么把结果写回仓库：Linux 的计数是**独立数据源**（`docs/evidence/linux-numbers.txt`），
+# Windows 的 `sync-doc-numbers.ps1 -Check` 用它校验文档里的 Linux 行。
+# 不写回去，Linux 的数字就只能靠人肉比对日志。
+if [ "${SKIP_FULL:-0}" != "1" ]; then
+    FULL_LOG=/tmp/y901-linux-full.log
+    echo
+    echo "=== FULL_WORKSPACE ==="
+    echo "\$ xvfb-run -a cargo test --workspace --no-fail-fast $CARGO_FLAGS"
+    xvfb-run -a -s "-screen 0 1280x800x24" \
+        cargo test --workspace --no-fail-fast $CARGO_FLAGS >"$FULL_LOG" 2>&1
+    FULL_CODE=$?
+    tail -n 20 "$FULL_LOG"
+    echo "EXIT_FULL_WORKSPACE=$FULL_CODE"
+    RESULTS+=("FULL_WORKSPACE=$FULL_CODE")
+    if [ "$FULL_CODE" -ne 0 ]; then
+        FAILED=1
+        grep -E '^test .* FAILED|test result: FAILED' "$FULL_LOG" | head -n 20 || true
+    else
+        PASSED=$(grep 'test result:' "$FULL_LOG" | sed -n 's/.* \([0-9]\+\) passed;.*/\1/p' | awk '{s+=$1} END{print s+0}')
+        IGNORED=$(grep 'test result:' "$FULL_LOG" | sed -n 's/.* \([0-9]\+\) ignored;.*/\1/p' | awk '{s+=$1} END{print s+0}')
+        TARGETS=$(grep -c 'test result:' "$FULL_LOG")
+        NUMBERS=docs/evidence/linux-numbers.txt
+        mkdir -p "$(dirname "$NUMBERS")"
+        {
+            echo "# Linux 侧计数（由 scripts/linux-verify.sh 在 Linux 上生成，Windows 的 sync 只读不写）"
+            echo "#"
+            echo "# 为什么单独一个文件：numbers.txt 是 Windows 门禁口径，而 Linux 的计数只能在"
+            echo "# Linux 上跑出来。两者分开存，sync-doc-numbers.ps1 -Check 才能分别校验"
+            echo "# \"Windows 行\"与\"Linux 行\"，而不是把 Linux 行整行豁免（那会让它的漂移不可见）。"
+            echo "#"
+            echo "# 生成：在 Linux 上 bash scripts/linux-verify.sh（默认会跑全量 workspace 测试）"
+            echo "# 会把结果写回仓库里的这个文件，随后把文件带回 Windows 提交。"
+            echo "passed=$PASSED"
+            echo "ignored=$IGNORED"
+            echo "targets=$TARGETS"
+        } >"$NUMBERS"
+        echo "[linux-verify] wrote $NUMBERS (passed=$PASSED ignored=$IGNORED targets=$TARGETS)"
+        echo "[linux-verify] REMINDER: copy this file back to the Windows checkout and commit it."
+    fi
+fi
+
 echo
 echo "=== 汇总 ==="
 for r in "${RESULTS[@]}"; do echo "$r"; done

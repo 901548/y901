@@ -122,6 +122,51 @@ pub struct CreateArgs<'a> {
     pub fullscreen: bool,
 }
 
+/// 从 X11 屏幕的物理尺寸推 DPI 缩放（物理 / 逻辑）。
+///
+/// 输入：`info`（`Connection::info()`），并支持环境覆盖：
+/// - `Y901_X11_SCALE`：直接指定缩放（如 `1.5`）；
+/// - `Y901_DPI`：指定物理 DPI（如 `144`），内部换算成 `dpi / 96`。
+///
+/// 返回：**1.0 或 ≥ 1.25 的 0.25 倍数**。
+///
+/// 为什么不直接用连续的 `dpi / 96`：
+/// - Xvfb / 部分驱动报的 mm 只是近似（实测 1280×800 报 325mm ≈ 100 DPI），
+///   连续值会得到 1.04 这种"半吊子缩放"，把像素哈希与既有截图全部扰动；
+/// - 桌面惯例（GNOME/KDE 的缩放档位）就是 1.0 / 1.25 / 1.5 / 2.0。
+/// 因此：`< 1.2` 一律按 1.0，否则吸附到最近的 0.25。
+///
+/// 注意：这是**平台层的策略**，`UiTree` 只消费 `metrics.scale()`，不关心 DPI 从哪来。
+pub fn dpi_scale_from_screen(info: &crate::conn::ServerInfo) -> f32 {
+    if let Ok(raw) = std::env::var("Y901_X11_SCALE") {
+        if let Ok(v) = raw.trim().parse::<f32>() {
+            if v.is_finite() && v > 0.0 {
+                return v.clamp(1.0, 4.0);
+            }
+        }
+    }
+    if let Ok(raw) = std::env::var("Y901_DPI") {
+        if let Ok(v) = raw.trim().parse::<f32>() {
+            if v.is_finite() && v > 0.0 {
+                return snap_scale(v / 96.0);
+            }
+        }
+    }
+    if info.width_mm == 0 {
+        return 1.0;
+    }
+    let dpi = info.width as f32 * 25.4 / info.width_mm as f32;
+    snap_scale(dpi / 96.0)
+}
+
+/// 缩放吸附：`< 1.2` → 1.0；否则最近的 0.25，上限 4.0。
+fn snap_scale(raw: f32) -> f32 {
+    if !raw.is_finite() || raw < 1.2 {
+        return 1.0;
+    }
+    ((raw * 4.0).round() / 4.0).clamp(1.0, 4.0)
+}
+
 impl X11Window {
     /// 连接、建窗、建 GC、显示。
     ///
@@ -851,4 +896,54 @@ fn fullscreen_atoms(conn: &mut Connection, wid: u32, root: u32, add: bool) -> Re
         &ev,
     ))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod dpi_scale_tests {
+    use super::{dpi_scale_from_screen, snap_scale};
+    use crate::conn::ServerInfo;
+
+    fn screen(width_mm: u16) -> ServerInfo {
+        ServerInfo {
+            width: 1280,
+            height: 800,
+            width_mm,
+            height_mm: 0,
+            ..ServerInfo::default()
+        }
+    }
+
+    /// 环境变量会覆盖推断；测试环境里若用户设了它们，跳过这条断言（不算失败）。
+    fn env_clean() -> bool {
+        std::env::var_os("Y901_X11_SCALE").is_none() && std::env::var_os("Y901_DPI").is_none()
+    }
+
+    #[test]
+    fn snapping_uses_desktop_scale_steps() {
+        assert_eq!(snap_scale(1.0), 1.0);
+        assert_eq!(snap_scale(1.04), 1.0); // Xvfb 默认 ≈100 DPI：不能被当成 1.25
+        assert_eq!(snap_scale(1.19), 1.0);
+        assert_eq!(snap_scale(1.2), 1.25);
+        assert_eq!(snap_scale(1.5), 1.5);
+        assert_eq!(snap_scale(1.66), 1.75);
+        assert_eq!(snap_scale(2.0), 2.0);
+        assert_eq!(snap_scale(9.0), 4.0); // 上限，防奇异 EDID
+        assert_eq!(snap_scale(f32::NAN), 1.0);
+    }
+
+    #[test]
+    fn screen_mm_drives_dpi_scale() {
+        if !env_clean() {
+            eprintln!("[dpi-test] 跳过：Y901_X11_SCALE / Y901_DPI 已设置");
+            return;
+        }
+        // 1280px / 325mm ≈ 100 DPI → 1.0
+        assert_eq!(dpi_scale_from_screen(&screen(325)), 1.0);
+        // 1280px / 217mm ≈ 150 DPI → 1.5
+        assert_eq!(dpi_scale_from_screen(&screen(217)), 1.5);
+        // 1280px / 169mm ≈ 192 DPI → 2.0
+        assert_eq!(dpi_scale_from_screen(&screen(169)), 2.0);
+        // mm 缺失：不猜，按 1.0
+        assert_eq!(dpi_scale_from_screen(&screen(0)), 1.0);
+    }
 }

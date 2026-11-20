@@ -38,19 +38,38 @@ impl PlatformRuntime for X11Runtime {
         }
 
         let started = std::time::Instant::now();
-        let width = options.width.clamp(1, u16::MAX as u32);
-        let height = options.height.clamp(1, u16::MAX as u32);
 
-        // 字形引擎：Linux 上只有自研引擎（没有 DirectWrite）
+        // **DPI 缩放（本版新增）**：先连一次服务器读屏幕物理尺寸，推 `scale`。
+        // 为什么先探再建窗：软后端要用**物理**尺寸分配缓冲、字形引擎要用**物理**字号；
+        // 这两者都得在 `X11Window::create` 之前就定下来（它只接收已建好的 soft）。
+        //
+        // 覆盖率：`Y901_X11_SCALE` / `Y901_DPI` 可覆盖；否则按 mm 推并吸附到 0.25 档位
+        // （Xvfb 默认 ≈100 DPI → 1.0，所以既有 Linux 像素证据不受影响）。
+        let dpi_scale = match crate::conn::Connection::connect(&display) {
+            Ok(conn) => crate::window::dpi_scale_from_screen(conn.info()),
+            Err(e) => {
+                eprintln!("[y901] 读取 X11 屏幕信息失败（{e}），DPI 按 1.0 处理");
+                1.0
+            }
+        };
+        let width = ((options.width as f32 * dpi_scale).round() as u32).clamp(1, u16::MAX as u32);
+        let height =
+            ((options.height as f32 * dpi_scale).round() as u32).clamp(1, u16::MAX as u32);
+
+        // 字形引擎：Linux 上只有自研引擎（没有 DirectWrite）。
+        // 字号同样要乘 `dpi_scale`：引擎按**物理像素**光栅化，逻辑字号由 UI 层消费。
         let font = options.font.clone().unwrap_or_default();
-        let (cw, ch) = y901_render::cell_metrics_for(font.size);
+        let physical_font = (font.size * dpi_scale).max(1.0);
+        let (cw, ch) = y901_render::cell_metrics_for(physical_font);
         let cell = Size::new(cw, ch);
         let engine: Box<dyn y901_render::FontEngine> = Box::new(MyFontEngine::new(
             y901_render::load_font(&y901_render::resolve_font_path(&font.family))?,
-            font.size,
+            physical_font,
             cell,
         )?);
-        let soft = SoftBackend::new(width.max(1), height.max(1), engine, cell, options.theme)?;
+        let mut soft = SoftBackend::new(width.max(1), height.max(1), engine, cell, options.theme)?;
+        // 把缩放注入软后端：`TextMetrics::scale()` 与 per-text 字号都靠它。
+        soft.set_dpi_scale(dpi_scale);
 
         let mut window = X11Window::create(crate::window::CreateArgs {
             display: &display,
@@ -61,7 +80,7 @@ impl PlatformRuntime for X11Runtime {
             fullscreen: options.fullscreen,
         })?;
         eprintln!(
-            "[y901] X11 后端就绪：display={display} {}x{}，字形引擎=自研 TTF",
+            "[y901] X11 后端就绪：display={display} 逻辑 {}x{}（物理 {width}x{height}，scale={dpi_scale:.2}），字形引擎=自研 TTF",
             options.width, options.height
         );
 

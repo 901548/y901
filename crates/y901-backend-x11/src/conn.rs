@@ -91,6 +91,10 @@ pub struct ServerInfo {
     pub width: u16,
     /// 屏幕高（像素）
     pub height: u16,
+    /// 屏幕宽（毫米）—— 服务器按 EDID/配置报，用于推 DPI；0 = 未提供。
+    pub width_mm: u16,
+    /// 屏幕高（毫米）
+    pub height_mm: u16,
     /// 默认可视化类型（画窗口时要用）
     pub root_visual: u32,
     /// 根窗口深度（通常 24）
@@ -127,6 +131,8 @@ impl Connection {
                 resource_id_mask: 0,
                 vendor: String::new(),
                 root: 0,
+                width_mm: 0,
+                height_mm: 0,
                 width: 0,
                 height: 0,
                 root_visual: 0,
@@ -254,19 +260,22 @@ impl Connection {
         // Screen 字段偏移：root 0, colormap 4, white 8, black 12, input-masks 16,
         // width 20, height 22, width-mm 24, height-mm 26, min-maps 28, max-maps 30,
         // root-visual 32, backing-stores 36, save-unders 37, root-depth 38, n-depths 39
-        let chosen: Option<(u32, u16, u16, u32, u8)> = {
+        let chosen: Option<(u32, u16, u16, u16, u16, u32, u8)> = {
             let root = u32at(&body, off);
             let width = u16at(&body, off + 20);
             let height = u16at(&body, off + 22);
+            // width-mm / height-mm：X11 协议里是 u16；Xvfb 也照报（默认按 100 DPI 折算）。
+            let width_mm = u16at(&body, off + 24);
+            let height_mm = u16at(&body, off + 26);
             let root_visual = u32at(&body, off + 32);
             let root_depth = body[off + 38];
             if root != 0 && width > 0 && height > 0 && root_depth > 0 {
-                Some((root, width, height, root_visual, root_depth))
+                Some((root, width, height, width_mm, height_mm, root_visual, root_depth))
             } else {
                 None
             }
         };
-        let Some((root, width, height, root_visual, root_depth)) = chosen else {
+        let Some((root, width, height, width_mm, height_mm, root_visual, root_depth)) = chosen else {
             return Err(format!(
                 "无法从 Setup 响应中定位屏幕表（响应 {} 字节，n_screens={n_screens}）",
                 body.len()
@@ -281,6 +290,8 @@ impl Connection {
             root,
             width,
             height,
+            width_mm,
+            height_mm,
             root_visual,
             root_depth,
             min_keycode,
