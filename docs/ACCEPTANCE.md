@@ -3,16 +3,16 @@
 生成时间：2026-11-02
 命令：`cargo test --workspace -- --include-ignored`
 日志：`docs/evidence/correctness/final-760-include-ignored.log`（**历史记录**，文件名沿用旧口径 760）。
-当前实测口径（2026-11-19）：默认测试 **982 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1043 passed / 0 failed**。唯一数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。
+当前实测口径（2026-11-19）：默认测试 **983 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1044 passed / 0 failed**。唯一数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **982 passed / 0 failed / 61 ignored** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **983 passed / 0 failed / 61 ignored** |
 | `cargo test --workspace --offline -- --include-ignored` | **1043 passed / 0 failed** |
 
-`include_ignored=1043`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
+`include_ignored=1044`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -44,7 +44,7 @@
 | `two_disjoint_dirty_rects_match_full_redraw` | 两块不相邻脏区 == 整窗重绘（逐字节 0 差异） |
 | `grid_with_images_is_not_blank_on_gpu` | Grid + 4 图片不再整帧空白（62 381 种颜色；四象限主色命中） |
 
-## 双平台验证矩阵（v0.2.1，2026-11-19）
+## 双平台验证矩阵（v0.2.2，2026-11-20）
 
 Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 Windows 上，
 `#[cfg(unix)]` 代码与 X11 运行时只能靠 `scripts/linux-verify.sh`（Xvfb）覆盖。
@@ -54,7 +54,7 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **982 passed / 0 failed / 61 ignored**（150 个测试目标） |
+| 默认测试 | **983 passed / 0 failed / 61 ignored**（150 个测试目标） |
 | `--include-ignored` | **1043 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
@@ -64,7 +64,7 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| Linux 默认测试（`xvfb-run cargo test --workspace`） | **881 passed / 0 failed / 27 ignored**（150 个测试目标） |
+| Linux 默认测试（`xvfb-run cargo test --workspace`） | **884 passed / 0 failed / 27 ignored**（150 个测试目标） |
 | Linux x11 `check --all-targets` | exit 0 |
 | Linux x11 `golden` | 32 passed / 0 failed |
 | Linux `xvfb-run real_window` | 12 passed / 0 failed / 2 ignored |

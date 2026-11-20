@@ -270,12 +270,21 @@ impl Connection {
             let root_visual = u32at(&body, off + 32);
             let root_depth = body[off + 38];
             if root != 0 && width > 0 && height > 0 && root_depth > 0 {
-                Some((root, width, height, width_mm, height_mm, root_visual, root_depth))
+                Some((
+                    root,
+                    width,
+                    height,
+                    width_mm,
+                    height_mm,
+                    root_visual,
+                    root_depth,
+                ))
             } else {
                 None
             }
         };
-        let Some((root, width, height, width_mm, height_mm, root_visual, root_depth)) = chosen else {
+        let Some((root, width, height, width_mm, height_mm, root_visual, root_depth)) = chosen
+        else {
             return Err(format!(
                 "无法从 Setup 响应中定位屏幕表（响应 {} 字节，n_screens={n_screens}）",
                 body.len()

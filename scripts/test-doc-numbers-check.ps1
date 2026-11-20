@@ -45,7 +45,7 @@ $cases = @(
     @{ File = 'README.md'; Old = '基线 0xF7455CCE7781A864'; New = "基线 **$passed**xF7455CCE7781A864"; Label = '十六进制基线被当成计数（0x 被吃）' },
     @{ File = 'docs\STATUS.md'; Old = 'vs win32 默认族'; New = "vs win**$passed** 默认族"; Label = '词内数字被当成计数（win32 → win**N**）' },
     # Linux 行不再整行豁免：它的数字由 docs/evidence/linux-numbers.txt 校验。
-    @{ File = 'docs\STATUS.md'; Old = 'Linux 全量（虚拟机）：**881 passed'; New = 'Linux 全量（虚拟机）：**878 passed'; Label = 'Linux 计数漂移（881 → 878）' }
+    @{ File = 'docs\STATUS.md'; Old = 'Linux 全量（虚拟机）：**884 passed'; New = 'Linux 全量（虚拟机）：**881 passed'; Label = 'Linux 计数漂移（884 → 881）' }
 )
 
 $failures = 0

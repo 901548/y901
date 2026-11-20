@@ -309,7 +309,10 @@ impl StyledText {
             };
             for span in spans {
                 let Some(px) = span.style.size else { continue };
-                worst = worst.max(y901_ui::ink_margin_for(metrics, &TextStyle::default().size(px)));
+                worst = worst.max(y901_ui::ink_margin_for(
+                    metrics,
+                    &TextStyle::default().size(px),
+                ));
             }
         }
         worst

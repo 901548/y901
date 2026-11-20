@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "y901-backend-web"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "wasm-bindgen",
  "y901-core",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "y901-backend-win32"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "windows-sys",
  "y901-core",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "y901-backend-x11"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "rustbus",
  "y901-render",
@@ -668,14 +668,14 @@ dependencies = [
 
 [[package]]
 name = "y901-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "unicode-width",
 ]
 
 [[package]]
 name = "y901-extras"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "crossbeam-channel",
  "portable-pty",
@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "y901-render"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ttf-parser",
  "y901-core",
@@ -696,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "y901-runtime"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "web-time",
  "y901-ui",
@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "y901-shell"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "png",
  "wasm-bindgen",
@@ -721,7 +721,7 @@ dependencies = [
 
 [[package]]
 name = "y901-ui"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "web-time",
  "y901-core",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "y901-widgets"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "png",
  "web-time",

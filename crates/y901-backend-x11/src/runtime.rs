@@ -53,8 +53,7 @@ impl PlatformRuntime for X11Runtime {
             }
         };
         let width = ((options.width as f32 * dpi_scale).round() as u32).clamp(1, u16::MAX as u32);
-        let height =
-            ((options.height as f32 * dpi_scale).round() as u32).clamp(1, u16::MAX as u32);
+        let height = ((options.height as f32 * dpi_scale).round() as u32).clamp(1, u16::MAX as u32);
 
         // 字形引擎：Linux 上只有自研引擎（没有 DirectWrite）。
         // 字号同样要乘 `dpi_scale`：引擎按**物理像素**光栅化，逻辑字号由 UI 层消费。

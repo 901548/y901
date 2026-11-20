@@ -39,4 +39,8 @@
 #   default `cargo test --workspace --no-fail-fast`   passed 982, failed 0, ignored 61 / 150 个测试目标
 #   `--include-ignored`                               passed 1043, failed 0
 #   (新增：per-node 墨迹边距的 16/24/32/48px 回归、富文本最大 span 边距、剪贴板可注入假实现的断言)
-982
+# Measured at 2026-11-20 (v0.2.2 前置：X11 DPI、StyledText 裁剪、Linux 计数单独校验):
+#   default `cargo test --workspace --no-fail-fast`   passed 983, failed 0, ignored 61 / 150 个测试目标
+#   `--include-ignored`                               passed 1044, failed 0
+#   (Windows 侧新增：富文本像素回归 1 条；X11 的 2 条 DPI 单测只在 Linux 编译)
+983

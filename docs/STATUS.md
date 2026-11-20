@@ -1,8 +1,8 @@
 # 项目状态
 
-- **HEAD**: 见 `git log -1`（v0.2.1；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收）
-- **tags**: v0.1.0 ~ **v0.2.1**（v0.2.0 含破坏性变更，见 `RELEASE_NOTES_v0.2.0.md`；v0.2.1 为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md`）
-- **测试**: `passed=982` / `ignored=61` / `include_ignored=1043`（唯一来源 `docs/evidence/numbers.txt`）
+- **HEAD**: 见 `git log -1`（v0.2.2；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收 + X11 DPI）
+- **tags**: v0.1.0 ~ **v0.2.2**（v0.2.0 含破坏性变更；v0.2.1 / v0.2.2 均为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md` / `RELEASE_NOTES_v0.2.2.md`）
+- **测试**: `passed=983` / `ignored=61` / `include_ignored=1044`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -35,7 +35,7 @@
 - 新增版本化脚本 [scripts/linux-verify.sh](../scripts/linux-verify.sh)：x11 `check`
   （all-targets）/ `golden` / `xvfb-run real_window` + `stroke_round_aa` +
   `sgr_reverse` + `ui+widgets`，任一失败 exit 1。
-- Linux 全量（虚拟机）：**881 passed / 0 failed / 27 ignored**（150 个测试目标），
+- Linux 全量（虚拟机）：**884 passed / 0 failed / 27 ignored**（150 个测试目标），
   证据 [linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
 - `cargo audit` 恢复**真实联网刷新**（不再 STALE）：0 漏洞。
 - 本机 git 全局配置里指向 `127.0.0.1:7897` 的死代理已清除（备份
@@ -65,9 +65,9 @@
 
 **A-2 `sync-doc-numbers.ps1` 在吃 `0x` 前缀 / 词内数字 —— 已修**
 
-- **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**982**`
-  （→ `**982**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win**982** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+- **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
+  （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
+  `win***983** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -343,7 +343,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 4. **发布**：`0.2.0` 已提交并打 tag；**已推送成功**（`main` 与全部 tag 在 `origin`，
    曾阻断推送的是本机 git 里指向 `127.0.0.1:7897` 的死代理，已移除）。
    `v0.2.0` 之后累积 15 个提交（Grid+Image 修复、per-node 墨迹边距、Linux 双平台验收、
-   剪贴板确定性等）—— 已发布 **v0.2.1**（`docs/RELEASE_NOTES_v0.2.1.md`）。
+   剪贴板确定性等）—— 已发布 **v0.2.1**；随后 v0.2.2 收掉遗留（X11 DPI、StyledText 裁剪、Linux 计数校验）。
 5. ~~**杂物**：根目录 `clippy.txt` / `todo.tsv` 是生成物，建议移出仓库或进 `.gitignore`~~ ——
    已完成：两者已进 `.gitignore` 且不再被跟踪。
 
@@ -526,9 +526,9 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - 四条测试基建债（22 个测试无门控 / lib 的 4 处 `#[link]` /
   `file_drop` 硬编码 `C:\` / supersample 阈值绑定字体）就是靠它首次暴露的。
 - 已验证（2026-11-19，CentOS 7.9 虚拟机 + rustc 1.92）：
-  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **881 passed / 0 failed / 27 ignored**
+  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **884 passed / 0 failed / 27 ignored**
   （150 个测试目标）。证据：[linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
-  与 Windows 的 982/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 983/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
 - **上一轮仅剩的两条红（已修）**：`y901-extras` 的 `sgr_reverse` 曾取"单元格右上角"像素
   断言精确 RGB，前提是 Windows 的 Segoe UI 字形不覆盖那个采样点；Linux 回退到
   DejaVuSans 后读到"前景 × 背景"的混合值（182,186,195 vs 期望 230,235,245）。
@@ -598,7 +598,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 | 平台 | 通过 | 失败 | ignored | 备注 |
 |---|---|---|---|---|
 | **Windows** | **751** | 0 | 58 | **当轮口径**（当前见 `numbers.txt`） |
-| **Linux** | **661** | 0 | 25 | **当轮口径**；当前 881/0/27，见上方 2026-11-19 验收 |
+| **Linux** | **661** | 0 | 25 | **当轮口径**；当前 884/0/27，见上方 2026-11-19 验收 |
 
 ### 审计
 
