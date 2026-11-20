@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use y901_ui::layout::LayoutCache;
 use y901_ui::{
-    Constraints, EventCtx, EventResult, MouseButton, Pos, Rect, RenderCtx, Semantics, Size,
-    TextMetrics, UiEvent, UiTree, Widget,
+    Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Semantics, Size, TextMetrics,
+    UiEvent, UiTree, Widget,
 };
 
 /// 记录自己收到了哪些事件（按名字）。
@@ -208,28 +208,7 @@ fn removing_the_hovered_node_clears_it_without_panicking() {
     let _ = log;
 }
 
-#[test]
-fn hover_snapshot_reaches_render_ctx() {
-    use y901_render::soft::SoftBackend;
-    use y901_render::MyFontEngine;
-
-    let (cw, ch) = y901_render::cell_metrics_for(15.0);
-    let cell = Size::new(cw, ch);
-    let engine = MyFontEngine::new(
-        y901_render::load_font(&y901_render::default_test_font_path()).expect("font"),
-        15.0,
-        cell,
-    )
-    .expect("engine");
-    let mut soft = SoftBackend::new_headless(64, 64, Box::new(engine), cell).expect("soft");
-
-    let (mut t, _log) = tree();
-    t.dispatch(&mv(10.0));
-    t.invalidate_all();
-    t.render(&mut soft);
-    // 渲染后，后端应记得 hovered 是 "a"
-    use y901_ui::RenderCtx as _;
-    assert!(soft.is_hovered("a"), "渲染注入后 a 应处于 hovered");
-    assert!(!soft.is_hovered("b"));
-    let _ = MouseButton::Left; // 保持导入被使用
-}
+// 注：原先这里还有一条 `hover_snapshot_reaches_render_ctx`（验证 hover 快照被注入
+// `RenderCtx`）。它需要真实的 `SoftBackend`，也就是对本 crate 的**下游** y901-render
+// 的依赖 —— 那会形成 ui ↔ render 的 dev-dependency 环，crates.io 首次发布会死锁。
+// 现已迁到 `crates/y901-render/tests/ui_hover_snapshot.rs`（那边两边 crate 都可用）。

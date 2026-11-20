@@ -608,7 +608,7 @@ fn children_clip(&self, cell_rect: Rect) -> Option<Rect> { None }  // 默认不�
 - `children_clip(cell)`：**逐个**子控件各自的裁剪（Grid 的格子/并集）。
 
 **跨格控件为什么必须给并集**：若返回起始那一格，"跨三列"的控件只能画在第一列里，跨格就白跨了。
-（实测见 `crates/y901-ui/tests/grid_span.rs::spanning_child_is_clipped_to_the_union_not_the_first_cell`。）
+（实测见 `crates/y901-render/tests/ui_grid_span.rs::spanning_child_is_clipped_to_the_union_not_the_first_cell`；用例放在 render 侧，是因为它要真像素回读，而 ui 不能 dev-依赖 render——否则 crates.io 首次发布会因 ui↔render 环死锁。）
 
 注意：容器**不要自己遍历子控件绘制** —— 树会逐个节点渲染，容器再画一遍会**双重绘制**
 （半透明变深、文字发虚）。`Grid` 曾因此被裁剪测试抓出 bug。
