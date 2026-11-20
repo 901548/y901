@@ -6,9 +6,9 @@ EXIT_CHECK_X11=0
 
 === GOLDEN ===
 $ cargo test -p y901-backend-x11 --test golden
+test get_input_focus_forces_a_round_trip ... ok
 test intern_atom_pads_name_to_4_bytes ... ok
 test intern_atom_with_aligned_name_has_no_padding ... ok
-test create_window_without_values_has_no_value_list ... ok
 test keymap_lookup_respects_first_keycode_and_columns ... ok
 test keysym_ascii_maps_to_char ... ok
 test map_window_is_exactly_8_bytes ... ok
@@ -30,7 +30,7 @@ EXIT_GOLDEN=0
 
 === REAL_WINDOW ===
 $ xvfb-run -a -s -screen 0 1280x800x24 cargo test -p y901-backend-x11 --test real_window
-     Running tests/real_window.rs (target/debug/deps/real_window-97b7afe06397a6a4)
+     Running tests/real_window.rs (target/debug/deps/real_window-c39768aa4005cca4)
 
 running 14 tests
 test concurrent_connections_probe ... ignored, 探针：实测 Xvfb 并发连接 4 个会 RST 1 个，此行为已记录（见下方数据）
@@ -48,15 +48,14 @@ test keyboard_mapping_covers_ascii ... ok
 test shm_and_fallback_produce_identical_pixels ... ok
 test window_implements_event_source_and_presenter ... ok
 
-test result: ok. 12 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.61s
+test result: ok. 12 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.60s
 
 EXIT_REAL_WINDOW=0
 
 === STROKE ===
 $ cargo test -p y901-render --test stroke_round_aa
-   Compiling y901-render v0.2.1 (/root/Y901/crates/y901-render)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.42s
-     Running tests/stroke_round_aa.rs (target/debug/deps/stroke_round_aa-d7b3e837b14ac5e5)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running tests/stroke_round_aa.rs (target/debug/deps/stroke_round_aa-5af3813f93504764)
 
 running 1 test
 test rounded_stroke_is_antialiased_and_bounded ... ok
@@ -67,10 +66,8 @@ EXIT_STROKE=0
 
 === SGR_REVERSE ===
 $ cargo test -p y901-extras --test sgr_reverse
-   Compiling y901-widgets v0.2.1 (/root/Y901/crates/y901-widgets)
-   Compiling y901-extras v0.2.1 (/root/Y901/crates/y901-extras)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.66s
-     Running tests/sgr_reverse.rs (target/debug/deps/sgr_reverse-3180e7724f32312b)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running tests/sgr_reverse.rs (target/debug/deps/sgr_reverse-8f89028f8c0eef5f)
 
 running 3 tests
 test selection_on_top_of_sgr7_cancels_out ... ok
@@ -83,8 +80,8 @@ EXIT_SGR_REVERSE=0
 
 === UI_WIDGETS ===
 $ cargo test -p y901-ui -p y901-widgets
-test fixed_padding_and_gap_do_not_scale ... ok
 test padding_and_gap_fixed_setters_are_last_call_wins ... ok
+test fixed_padding_and_gap_do_not_scale ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -94,7 +91,7 @@ running 2 tests
 test crates/y901-ui/src/lib.rs - (line 22) - compile ... ok
 test crates/y901-ui/src/widget.rs - widget::Role (line 66) ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
 
    Doc-tests y901_widgets
 
@@ -125,7 +122,7 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 1 test
 test crates/y901-widgets/src/style.rs - style::WidgetStyle (line 15) ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
 
 EXIT_FULL_WORKSPACE=0
 [linux-verify] wrote docs/evidence/linux-numbers.txt (passed=884 ignored=27 targets=150)
