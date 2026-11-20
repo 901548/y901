@@ -77,7 +77,18 @@ pub struct X11Window {
     /// 这里记住旧尺寸并吞掉一次匹配的 `ConfigureNotify`（代价是"用户恰好把窗口拖回
     /// 这个尺寸"的一次事件被忽略，无害：下一次 Expose/Configure 会补上）。
     stale_configure: std::cell::Cell<Option<(u16, u16)>>,
+    /// 下一次给 MIT-SHM 段用的资源 ID 偏移（基数 | 这个值）。
+    ///
+    /// 为什么不能一直复用 `0x10`：重建段时必须给**新的** XID（旧的可能还被服务端附着，
+    /// 复用同一个 XID 会让服务端回 BadIDChoice）。安全区间是 `0x10..0x18`：
+    /// `0x01` 是窗口、`0x02` 是 GC、`0x20` 是光标字体，互不冲突；8 个槽位循环使用，
+    /// 而运行期改缩放是低频操作。
+    shm_slot: u32,
 }
+
+/// MIT-SHM 段可用的 XID 偏移区间（见 [`X11Window::shm_slot`]）。
+const SHM_SLOT_FIRST: u32 = 0x10;
+const SHM_SLOT_COUNT: u32 = 8;
 
 /// 对外可用的光标形状（与 `y901_ui::Cursor` 一一对应）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -564,6 +575,8 @@ impl X11Window {
             dpi_scale: 1.0,
             last_dpi_check: std::time::Instant::now(),
             stale_configure: std::cell::Cell::new(None),
+            // `create` 已经用掉 `SHM_SLOT_FIRST`，下一个槽位留给"改缩放后的重建"。
+            shm_slot: SHM_SLOT_FIRST + 1,
             ime: Box::new(crate::ime::NoIme),
             ime_focused: false,
         })
@@ -620,11 +633,10 @@ impl X11Window {
             Ok(soft) => {
                 self.soft = soft;
                 self.dpi_scale = new_scale;
-                // 尺寸变了，旧共享内存段不再匹配：这里只**停止使用**它
-                // （客户端 detach 随对象析构，服务端附着要到窗口销毁/连接关闭才回收）。
-                // `present` 会自动回退到分块 PutImage，画面正确、只是慢一点；
-                // 重建 SHM 段需要新的 seg_id，属另一件事，而运行期改缩放极少发生。
-                self.shm = None;
+                // 尺寸变了 → 旧共享内存段与新缓冲不匹配。**先让服务端 detach 再丢弃**，
+                // 然后立刻按新尺寸建一段新的：否则后面每一帧都退化成分块 PutImage
+                // （画面正确，但改一次缩放就永久丢掉 SHM 快路径，白白慢了）。
+                self.rebuild_shm(nw, nh);
                 // 记住旧尺寸：接下来可能还会收到**旧尺寸**的 ConfigureNotify，必须忽略一次。
                 self.stale_configure.set(Some((old_w, old_h)));
                 self.width = nw;
@@ -651,6 +663,44 @@ impl X11Window {
                 None
             }
         }
+    }
+
+    /// 按新尺寸重建 MIT-SHM 段；失败就静默回退到分块 PutImage（不影响正确性）。
+    ///
+    /// 两步都必要：
+    /// 1. 先发 `ShmDetach` 让**服务端**放开旧段 —— 只 drop 本地 `ShmSegment`
+    ///    （shmdt + IPC_RMID）会让段在服务端还附着时"标记删除"，直到连接关闭才真正回收；
+    /// 2. 用**新的 XID**（`shm_slot` 轮转）建新段，避免与仍被附着的旧 XID 撞车。
+    fn rebuild_shm(&mut self, w: u16, h: u16) {
+        if let Some(old) = self.shm.take() {
+            if let Err(e) = self
+                .conn
+                .send(&crate::encode::encode_shm_detach(old.major, old.seg_id))
+                .and_then(|()| self.conn.flush())
+            {
+                eprintln!("[y901] 缩放后 ShmDetach 失败：{e}（旧段靠连接关闭回收）");
+            } else if let Ok(errs) = self.conn.sync() {
+                if !errs.is_empty() {
+                    eprintln!("[y901] 缩放后 ShmDetach 报错：{errs:?}");
+                }
+            }
+            drop(old);
+        }
+        let base = self.conn.info().resource_id_base;
+        let slot = SHM_SLOT_FIRST + (self.shm_slot - SHM_SLOT_FIRST) % SHM_SLOT_COUNT;
+        self.shm_slot = SHM_SLOT_FIRST + (slot - SHM_SLOT_FIRST + 1) % SHM_SLOT_COUNT;
+        match try_enable_shm(&mut self.conn, base | slot, w, h, self.depth) {
+            Ok(Some(state)) => self.shm = Some(state),
+            Ok(None) => {
+                // 服务器不支持 / Y901_NO_SHM：保持 None，present 走 PutImage。
+            }
+            Err(e) => eprintln!("[y901] 缩放后重建 SHM 段失败：{e}（回退 PutImage）"),
+        }
+    }
+
+    /// 当前是否在用 MIT-SHM 快路径（诊断 / 测试用）。
+    pub fn shm_active(&self) -> bool {
+        self.shm.is_some()
     }
 
     /// 光栅器尺寸与窗口客户区对齐（启动后由 [`WindowBackend::relayout`] 调用）。

@@ -47,7 +47,26 @@ y901-core → y901-ui → y901-render → y901-widgets → y901-runtime
 （首次发布时下游 crate 的 `cargo publish` 会去 registry 找上游，索引没生效就会报
 "no matching package"）。逐条命令见 [`docs/CRATES_IO.md`](CRATES_IO.md)。
 
-## 4. 验证矩阵（2026-11-20）
+## 4. X11：缩放后重建 MIT-SHM 段（补 v0.2.4 的取舍）
+
+v0.2.4 引入运行期跟随缩放时，为了简单把"尺寸变了 → 停用 SHM"作为取舍：画面正确，
+但**改一次缩放就永久退化成每帧整窗 `PutImage`**（丢掉共享内存快路径）。
+
+本版补上重建：先发 `ShmDetach` 让服务端放开旧段（只 drop 本地段会让它在服务端仍附着时
+"标记删除"，直到连接关闭才回收），再用**轮转的新 XID**（`0x10..0x18`，避开窗口 `0x01`、
+GC `0x02`、光标字体 `0x20`）按新尺寸建段；任何一步失败都静默回退 `PutImage`，不影响正确性。
+
+回归断言（`real_window::runtime_scale_change_rebuilds_soft_backend`）：
+Xvfb 上 240×160 → 1.5 倍重建为 360×240 后，`shm_active()` 必须仍为 true，且按新尺寸
+`present` 成功。实测输出：
+
+```
+[y901] MIT-SHM 已启用（240x160，共享内存 153600字节）
+[y901] X11 缩放变化：1.00 → 1.50，客户区 → 360x240
+[x11] 缩放后 SHM 是否在位：true
+```
+
+## 5. 验证矩阵（2026-11-20）
 
 | 检查 | 结果 |
 |---|---|
@@ -56,14 +75,14 @@ y901-core → y901-ui → y901-render → y901-widgets → y901-runtime
 | 版本一致性 | workspace / 10 个 crate / Cargo.lock 全为 `0.2.5` |
 | 打包冒烟 | `cargo package -p y901-core` 成功（7 文件，含 README） |
 
-## 5. 已知限制
+## 6. 已知限制
 
 沿用 v0.2.4 的清单（每显示器 DPI、各向异性过滤、WASM 单 canvas、多窗口跨窗语义、
 macOS、present 设备丢失 / 双窗 IME 未实测），本版未改变。
 另外：**API 仍是 0.x 语义** —— 发布后若需破坏性变更，会升 minor（0.3.0）并在
 release notes 里给迁移说明。
 
-## 6. 升级注意
+## 7. 升级注意
 
 1. 无破坏性变更：`0.2.4 → 0.2.5` 直接升级。
 2. 下游若自己在 `y901-ui` 的 tests 里依赖 `y901-render`：那是你自己的 dev-dep，

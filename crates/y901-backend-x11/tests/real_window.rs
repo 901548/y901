@@ -1132,6 +1132,22 @@ fn runtime_scale_change_rebuilds_soft_backend() {
         "软后端缓冲必须按新物理尺寸重建"
     );
 
+    // **SHM 必须跟着重建**：改缩放后若永久退化成 PutImage，快路径就白丢了。
+    // Xvfb 支持 MIT-SHM（同一套测试里 shm_and_fallback 已证明），所以这里应为 true；
+    // 若机器上 SHM 本来不可用（Y901_NO_SHM / 服务器不支持），如实跳过而**不是**假绿。
+    if std::env::var_os("Y901_NO_SHM").is_none() {
+        eprintln!("[x11] 缩放后 SHM 是否在位：{}", w.shm_active());
+        assert!(
+            w.shm_active(),
+            "缩放后应重建 MIT-SHM 段，而不是永久回退 PutImage"
+        );
+    }
+
+    // 上屏仍必须成功（走 SHM 快路径）：尺寸取新缓冲大小，内容任意非空即可。
+    let (bw, bh) = (w.soft().width(), w.soft().height());
+    let pixels = vec![0x40u8; (bw * bh * 4) as usize];
+    w.present(&pixels, bw, bh).expect("缩放后 present 应成功");
+
     // 再调一次：设置没变 → 不得重复重建（返回 None）
     assert_eq!(w.refresh_scale_now(), None, "缩放没变时不应重建");
 

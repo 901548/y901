@@ -563,12 +563,17 @@ cargo test --workspace --no-fail-fast 2>&1 \
   `_XSETTINGS_SETTINGS` 属性 → 解析二进制块（整数 / 字符串 / 颜色三种类型，
   字符串按 4 字节补齐，未知类型整块作废以防错位）。**零新依赖**（只加了
   `GetSelectionOwner` 编码与解码，opcode 23）。
-- **运行期跟随缩放（v0.2.4 新增）**：桌面改缩放后，窗口在 ≤1 秒内发现并
+- **运行期跟随缩放（v0.2.4 新增，v0.2.5 补 SHM 重建）**：桌面改缩放后，窗口在 ≤1 秒内发现并
   **重建字形引擎 + 软后端**、按新物理尺寸 `ConfigureWindow`，随后照常重排重绘。
   检测方式是轮询（`Y901_X11_DPI_POLL_MS` 可调，默认 1000ms；设为 0 每次事件都查），
   **不是** `PropertyNotify` 订阅 —— 后者要给别人的窗口选 `PropertyChangeMask`
   并新增事件解码，成本高且漏事件会永久停在旧缩放。重建失败时保留旧缩放并停用跟随，
   不会每秒重试刷日志。
+- **缩放后 SHM 也会重建**（v0.2.5）：先发 `ShmDetach` 让服务端放开旧段，再用**轮转的新 XID**
+  （`0x10..0x18`，避免与仍被附着的旧 XID 撞车）按新尺寸建段；失败才回退分块 `PutImage`。
+  否则改一次缩放就永久丢掉共享内存快路径——画面仍对，但每帧多一次整窗拷贝。
+  回归断言在 `real_window::runtime_scale_change_rebuilds_soft_backend`：
+  改缩放后 `shm_active()` 必须仍为 true、且 `present` 成功。
 - **仍未覆盖**：每显示器（per-monitor）DPI —— X11 协议层没有可靠 API；
   多屏不同缩放只能靠显式环境变量。全屏状态下不主动改客户区尺寸（交给 WM）。
 - `DISPLAY=:99 cargo test -p y901-backend-x11`（需 Xvfb :99）
