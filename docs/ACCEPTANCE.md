@@ -44,7 +44,7 @@
 | `two_disjoint_dirty_rects_match_full_redraw` | 两块不相邻脏区 == 整窗重绘（逐字节 0 差异） |
 | `grid_with_images_is_not_blank_on_gpu` | Grid + 4 图片不再整帧空白（62 381 种颜色；四象限主色命中） |
 
-## 双平台验证矩阵（v0.2.2，2026-11-20）
+## 双平台验证矩阵（v0.2.3，2026-11-20）
 
 Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 Windows 上，
 `#[cfg(unix)]` 代码与 X11 运行时只能靠 `scripts/linux-verify.sh`（Xvfb）覆盖。
@@ -64,7 +64,7 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| Linux 默认测试（`xvfb-run cargo test --workspace`） | **884 passed / 0 failed / 27 ignored**（150 个测试目标） |
+| Linux 默认测试（`xvfb-run cargo test --workspace`） | **885 passed / 0 failed / 27 ignored**（150 个测试目标） |
 | Linux x11 `check --all-targets` | exit 0 |
 | Linux x11 `golden` | 32 passed / 0 failed |
 | Linux `xvfb-run real_window` | 12 passed / 0 failed / 2 ignored |

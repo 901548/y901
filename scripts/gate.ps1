@@ -144,6 +144,14 @@ $docCount = ([regex]::Matches($docOut, 'missing documentation')).Count
 if ($docCount -gt 0) { Fail "$docCount items without docs" }
 Write-Host "[gate] ok: 0 missing docs"
 
+# ---------------------------------------------------------------- version consistency
+Step "version consistency (workspace / crates / internal deps / Cargo.lock)"
+& powershell -NoProfile -File (Join-Path $PSScriptRoot 'check-version-consistency.ps1') | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    Fail "version inconsistency (release bump touched a wrong manifest or Cargo.lock pin)"
+}
+Write-Host "[gate] ok: versions consistent"
+
 # ---------------------------------------------------------------- doc numbers (appended)
 Step "doc numbers match docs/evidence/numbers.txt"
 & powershell -NoProfile -File (Join-Path $PSScriptRoot 'sync-doc-numbers.ps1') -Check | Out-Host

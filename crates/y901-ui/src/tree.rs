@@ -2939,6 +2939,7 @@ fn dispatch_rec(
 }
 
 /// 单遍渲染：Base 就地画，Overlay/Modal 记路径延后画。
+#[allow(clippy::too_many_arguments)] // 内部递归函数：参数就是绘制所需的最小集合（与 draw_scene 同风格）
 fn render_pass(
     node: &mut dyn Widget,
     ctx: &mut dyn RenderCtx,

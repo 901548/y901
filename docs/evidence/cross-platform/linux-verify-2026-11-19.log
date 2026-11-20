@@ -1,7 +1,12 @@
 
 === CHECK_X11 ===
 $ cargo check -p y901-backend-x11 --all-targets
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+    Checking y901-core v0.2.2 (/root/Y901/crates/y901-core)
+    Checking y901-ui v0.2.2 (/root/Y901/crates/y901-ui)
+    Checking y901-runtime v0.2.2 (/root/Y901/crates/y901-runtime)
+    Checking y901-render v0.2.2 (/root/Y901/crates/y901-render)
+    Checking y901-backend-x11 v0.2.2 (/root/Y901/crates/y901-backend-x11)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.34s
 EXIT_CHECK_X11=0
 
 === GOLDEN ===
@@ -48,13 +53,14 @@ test keyboard_mapping_covers_ascii ... ok
 test shm_and_fallback_produce_identical_pixels ... ok
 test window_implements_event_source_and_presenter ... ok
 
-test result: ok. 12 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.60s
+test result: ok. 12 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.63s
 
 EXIT_REAL_WINDOW=0
 
 === STROKE ===
 $ cargo test -p y901-render --test stroke_round_aa
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+   Compiling y901-render v0.2.2 (/root/Y901/crates/y901-render)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.39s
      Running tests/stroke_round_aa.rs (target/debug/deps/stroke_round_aa-5af3813f93504764)
 
 running 1 test
@@ -66,7 +72,9 @@ EXIT_STROKE=0
 
 === SGR_REVERSE ===
 $ cargo test -p y901-extras --test sgr_reverse
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+   Compiling y901-extras v0.2.2 (/root/Y901/crates/y901-extras)
+   Compiling y901-widgets v0.2.2 (/root/Y901/crates/y901-widgets)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.60s
      Running tests/sgr_reverse.rs (target/debug/deps/sgr_reverse-8f89028f8c0eef5f)
 
 running 3 tests
@@ -81,7 +89,7 @@ EXIT_SGR_REVERSE=0
 === UI_WIDGETS ===
 $ cargo test -p y901-ui -p y901-widgets
 test padding_and_gap_fixed_setters_are_last_call_wins ... ok
-test fixed_padding_and_gap_do_not_scale ... ok
+test padding_and_gap_follow_dpi_like_flex ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -91,14 +99,14 @@ running 2 tests
 test crates/y901-ui/src/lib.rs - (line 22) - compile ... ok
 test crates/y901-ui/src/widget.rs - widget::Role (line 66) ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
 
    Doc-tests y901_widgets
 
 running 1 test
 test crates/y901-widgets/src/style.rs - style::WidgetStyle (line 15) ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
 
 EXIT_UI_WIDGETS=0
 
@@ -125,7 +133,7 @@ test crates/y901-widgets/src/style.rs - style::WidgetStyle (line 15) ... ok
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
 
 EXIT_FULL_WORKSPACE=0
-[linux-verify] wrote docs/evidence/linux-numbers.txt (passed=884 ignored=27 targets=150)
+[linux-verify] wrote docs/evidence/linux-numbers.txt (passed=885 ignored=27 targets=150)
 [linux-verify] REMINDER: copy this file back to the Windows checkout and commit it.
 
 === 汇总 ===

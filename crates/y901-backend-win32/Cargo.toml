@@ -7,10 +7,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-y901-core = { path = "../y901-core", version = "0.2.2" }
-y901-ui = { path = "../y901-ui", version = "0.2.2" }
-y901-runtime = { path = "../y901-runtime", version = "0.2.2" }
-y901-render = { path = "../y901-render", version = "0.2.2" }
+y901-core = { path = "../y901-core", version = "0.2.3" }
+y901-ui = { path = "../y901-ui", version = "0.2.3" }
+y901-runtime = { path = "../y901-runtime", version = "0.2.3" }
+y901-render = { path = "../y901-render", version = "0.2.3" }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
   "Win32_Security",
@@ -24,4 +24,4 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 [dev-dependencies]
-y901-widgets = { path = "../y901-widgets", version = "0.2.2" }
+y901-widgets = { path = "../y901-widgets", version = "0.2.3" }
