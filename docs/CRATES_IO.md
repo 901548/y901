@@ -30,6 +30,38 @@ powershell -NoProfile -File scripts/check-version-consistency.ps1
 cargo package -p y901-core --allow-dirty --offline
 ```
 
+### 1b. 首发前把**全部 10 个 crate** 都打包验证一遍（不发布）
+
+首次发布时下游 crate 的 `cargo package` 必然报
+`no matching package named 'y901-xxx' found` —— 因为 cargo 会去 registry 解析依赖。
+但这不代表"打包有问题"。想在不发布的前提下验证全部 crate 都能打包，用
+`--config` 临时给上游打 `[patch.crates-io]`：
+
+```powershell
+$order = 'y901-core','y901-ui','y901-render','y901-widgets','y901-runtime',
+         'y901-extras','y901-backend-win32','y901-backend-x11','y901-backend-web','y901-shell'
+for ($i = 0; $i -lt $order.Count; $i++) {
+    $lines = @('[patch.crates-io]')
+    for ($j = 0; $j -lt $i; $j++) { $lines += "$($order[$j]) = { path = `"crates/$($order[$j])`" }" }
+    $cfg = "target\pkgcfg-$i.toml"
+    [System.IO.File]::WriteAllText((Join-Path $PWD $cfg), (($lines -join "`n") + "`n"))
+    cargo package -p $order[$i] --allow-dirty --offline --no-verify --config $cfg
+}
+```
+
+2026-11-20 实测：**10/10 全部打包成功**（7–78 个文件，18–179 KiB 压缩后）。
+这一步抓到过一个真问题：`y901-shell` 的 wasm 依赖 `y901-backend-web` **没写
+`version`**，导致 `cargo publish -p y901-shell` 会直接失败：
+
+```
+all dependencies must have a version requirement specified when packaging.
+dependency `y901-backend-web` does not specify a version
+```
+
+> 规则：**任何 path 依赖都必须同时写 `version`**，包括 `target.'cfg(...)'` 段里的。
+> 打包时 path 会被剥掉、只留版本约束，所以缺 version 的依赖根本没法发布。
+> 已修（v0.2.5）。
+
 > 说明：**下游 crate 的 `cargo package` 在首次发布时必然失败**（报
 > `no matching package named 'y901-xxx' found`），因为 cargo 会按"已经发布"去 registry
 > 解析 path 依赖。这不是打包错误，按 §2 的顺序发布即可。

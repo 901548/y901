@@ -33,7 +33,10 @@ y901-widgets = { path = "../y901-widgets", version = "0.2.5" }
 
 # **仅 wasm32**：浏览器后端。桌面构建完全不依赖它。
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-y901-backend-web = { path = "../y901-backend-web" }
+# version 必须写：crates.io 打包要求所有依赖都有版本约束（path 会被剥掉）。
+# 少了它 `cargo publish -p y901-shell` 会直接失败：
+#   "all dependencies must have a version requirement specified when packaging"
+y901-backend-web = { path = "../y901-backend-web", version = "0.2.5" }
 y901-runtime = { path = "../y901-runtime", version = "0.2.5" }
 y901-ui = { path = "../y901-ui", version = "0.2.5" }
 y901-render = { path = "../y901-render", version = "0.2.5" }
