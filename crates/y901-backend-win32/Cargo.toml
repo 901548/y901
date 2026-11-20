@@ -8,7 +8,7 @@ edition.workspace = true
 rust-version.workspace = true
 readme = "../../README.md"
 keywords = ["gui", "win32", "d3d11", "directwrite"]
-categories = ["gui", "windows-apis"]
+categories = ["gui", "os"]
 
 [dependencies]
 y901-core = { path = "../y901-core", version = "0.2.5" }
