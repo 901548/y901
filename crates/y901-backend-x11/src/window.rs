@@ -59,6 +59,24 @@ pub struct X11Window {
     /// **为何不用进程级 `static`**：`static` 它会让两个窗口共享同一个标志 ——
     /// A 窗口的 Esc 可能被 B 窗口的 `wait_events` 消费掉，A 反而退不出全屏。
     want_exit_fs: std::cell::Cell<bool>,
+    /// 运行期缩放变化的**重建配方**（`None` = 不跟随，行为与旧版一致）。
+    ///
+    /// 为什么存一个闭包而不是"字体 + 主题"字段：重建软后端需要**应用级**信息
+    /// （字体文件、字号、主题），那是 `runtime` 的选择，窗口层不该知道。
+    /// 闭包由 `runtime` 在创建后注入，窗口只负责"何时重建"。
+    rescale: Option<RescaleFactory>,
+    /// 当前生效的缩放比（用于判断"是否真的变了"）。
+    dpi_scale: f32,
+    /// 上次检查桌面设置的时间（节流：1 次/秒足够，桌面改缩放不是逐帧事件）。
+    last_dpi_check: std::time::Instant,
+    /// 缩放刚变时**要忽略一次的旧尺寸**。
+    ///
+    /// 为什么需要：改缩放会先 `ConfigureWindow` 到新尺寸，但事件队列里可能还排着
+    /// 一个**旧尺寸的 `ConfigureNotify`**（用户拖动/启动时 WM 发的）。若照它重排，
+    /// 就会把刚按新缩放建好的缓冲 resize 回旧尺寸 —— 字号是新的、缓冲是旧的，画面错位。
+    /// 这里记住旧尺寸并吞掉一次匹配的 `ConfigureNotify`（代价是"用户恰好把窗口拖回
+    /// 这个尺寸"的一次事件被忽略，无害：下一次 Expose/Configure 会补上）。
+    stale_configure: std::cell::Cell<Option<(u16, u16)>>,
 }
 
 /// 对外可用的光标形状（与 `y901_ui::Cursor` 一一对应）。
@@ -122,22 +140,59 @@ pub struct CreateArgs<'a> {
     pub fullscreen: bool,
 }
 
-/// 从 X11 屏幕的物理尺寸推 DPI 缩放（物理 / 逻辑）。
+/// "按新缩放重建软后端"的配方：输入缩放比，输出按新物理尺寸建好的光栅器。
 ///
-/// 输入：`info`（`Connection::info()`），并支持环境覆盖：
-/// - `Y901_X11_SCALE`：直接指定缩放（如 `1.5`）；
-/// - `Y901_DPI`：指定物理 DPI（如 `144`），内部换算成 `dpi / 96`。
+/// 抽成别名有两个原因：字段可读（否则一长串 `Box<dyn FnMut(...)>`），
+/// 且 clippy 的 `type_complexity` 阈值不再被这一个字段顶穿。
+pub type RescaleFactory = Box<dyn FnMut(f32) -> Result<SoftBackend, String>>;
+
+/// 选择 X11 的 DPI 缩放（物理 / 逻辑）。
 ///
-/// 返回：**1.0 或 ≥ 1.25 的 0.25 倍数**。
+/// **限制**：X11 setup 提供的是 screen-wide 像素与毫米尺寸，不是可靠的每显示器
+/// DPI API；当前只解析第一块屏（screen 0）。桌面缩放可以从两处读到：
+/// **XSettings**（`Xft/DPI`、`Gdk/WindowScalingFactor`，活的设置服务）与
+/// 根窗口 Xresource `Xft.dpi`（会话启动时的静态快照）。两处都没有时退回毫米估算。
+/// 无任何配置时坏/缺失 EDID 尺寸仍可能导致偏差，因此真实桌面可用显式环境变量覆盖。
 ///
-/// 为什么不直接用连续的 `dpi / 96`：
+/// 优先级（高 → 低）：
+/// 1. `Y901_X11_SCALE`：直接指定缩放（如 `1.5`），clamp 到 `1.0..=4.0`；
+/// 2. `Y901_DPI`：指定物理 DPI（如 `144`），换算 `dpi / 96` 后吸附档位；
+/// 3. XSettings：`max(Xft/DPI ÷ 96, Gdk/WindowScalingFactor)`（见
+///    [`XSettingsValues::scale`]），**不吸附**；
+/// 4. Xresource `Xft.dpi`（由 [`read_xft_dpi`] 读取），**不吸附**；仅接受 `72..=384`；
+/// 5. `info` 的毫米尺寸估算（**吸附到 1.0 / ≥1.25 的 0.25 档位**）；
+/// 6. 兜底 `1.0`。
+///
+/// 为什么 XSettings 排在 `Xft.dpi` 前面：XSettings 由设置管理器实时维护
+/// （GNOME/KDE 改缩放会立即更新），而 `RESOURCE_MANAGER` 是 `xrdb` 在会话启动时
+/// 载入的副本，改了缩放常常还是旧值。
+///
+/// 为什么毫米估算要吸附、而上面两处不吸附：
 /// - Xvfb / 部分驱动报的 mm 只是近似（实测 1280×800 报 325mm ≈ 100 DPI），
 ///   连续值会得到 1.04 这种"半吊子缩放"，把像素哈希与既有截图全部扰动；
-/// - 桌面惯例（GNOME/KDE 的缩放档位）就是 1.0 / 1.25 / 1.5 / 2.0。
-/// 因此：`< 1.2` 一律按 1.0，否则吸附到最近的 0.25。
+/// - 桌面惯例（GNOME/KDE 的缩放档位）就是 1.0 / 1.25 / 1.5 / 2.0；
+/// - XSettings / `Xft.dpi` 已经是用户明确写下的缩放意图，再吸附会改写它。
+///
+/// **运行期变化**：桌面改缩放后，窗口会在下一秒的 `wait_events` 里发现
+/// （见 [`X11Window::refresh_scale_now`]）并重建光栅器 + 调整客户区；不注入
+/// 重建配方时窗口不查设置，行为与旧版一致。
 ///
 /// 注意：这是**平台层的策略**，`UiTree` 只消费 `metrics.scale()`，不关心 DPI 从哪来。
-pub fn dpi_scale_from_screen(info: &crate::conn::ServerInfo) -> f32 {
+pub fn dpi_scale(info: &crate::conn::ServerInfo, xft_dpi: Option<f32>) -> f32 {
+    dpi_scale_with_xsettings(info, None, xft_dpi)
+}
+
+/// 同 [`dpi_scale`]，但把 XSettings（桌面设置服务）也纳入优先级。
+///
+/// 完整优先级（高 → 低）：环境变量 → **XSettings** → `Xft.dpi` → 屏幕毫米估算 → 1.0。
+/// XSettings 与 `Xft.dpi` 都**不吸附** 0.25 档：它们是"用户/桌面写下的意图"。
+/// 为什么 XSettings 排在 `Xft.dpi` 前面：XSettings 是活的设置服务（GNOME/KDE 改缩放
+/// 会更新它），而 `RESOURCE_MANAGER` 是会话启动时 `xrdb` 载入的静态副本，常常过期。
+pub fn dpi_scale_with_xsettings(
+    info: &crate::conn::ServerInfo,
+    xsettings: Option<XSettingsValues>,
+    xft_dpi: Option<f32>,
+) -> f32 {
     if let Ok(raw) = std::env::var("Y901_X11_SCALE") {
         if let Ok(v) = raw.trim().parse::<f32>() {
             if v.is_finite() && v > 0.0 {
@@ -152,11 +207,187 @@ pub fn dpi_scale_from_screen(info: &crate::conn::ServerInfo) -> f32 {
             }
         }
     }
+    if let Some(scale) = xsettings.and_then(|x| x.scale()) {
+        return scale;
+    }
+    if let Some(dpi) = xft_dpi.filter(|dpi| dpi.is_finite() && (72.0..=384.0).contains(dpi)) {
+        return (dpi / 96.0).clamp(1.0, 4.0);
+    }
     if info.width_mm == 0 {
         return 1.0;
     }
     let dpi = info.width as f32 * 25.4 / info.width_mm as f32;
     snap_scale(dpi / 96.0)
+}
+
+/// 从根窗口 `RESOURCE_MANAGER` 属性中读取 Xresources 的最后一个 `Xft.dpi` 数值。
+pub fn xft_dpi_from_resource_manager(data: &[u8]) -> Option<f32> {
+    let text = std::str::from_utf8(data).ok()?;
+    text.lines().filter_map(parse_xft_dpi_line).next_back()
+}
+
+fn parse_xft_dpi_line(line: &str) -> Option<f32> {
+    let (key, value) = line.split_once(':')?;
+    if key.trim() != "Xft.dpi" {
+        return None;
+    }
+    let value = value.trim();
+    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+        return None;
+    }
+    let dpi = value.parse::<f32>().ok()?;
+    (dpi.is_finite() && (72.0..=384.0).contains(&dpi)).then_some(dpi)
+}
+
+/// 查询可选的根窗口 `Xft.dpi`。属性缺失、类型不符或协议错误均回退到毫米估算。
+pub fn read_xft_dpi(conn: &mut crate::conn::Connection, root: u32) -> Option<f32> {
+    const STRING: u32 = 31; // X11 core atom STRING
+    conn.send(&crate::encode_intern_atom(b"RESOURCE_MANAGER", false))
+        .ok()?;
+    conn.flush().ok()?;
+    let property = conn.read_reply_u32().ok()?;
+    let (format, data) = conn
+        .get_property(root, property, STRING, 0, 4096, false)
+        .ok()?;
+    (format == 8)
+        .then(|| xft_dpi_from_resource_manager(&data))
+        .flatten()
+}
+
+/// XSettings 里与缩放相关的两项原始值（整数语义由 [`parse_xsettings`] 负责换算）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct XSettingsValues {
+    /// `Xft/DPI`，单位是 **DPI**（协议里存的是 `dpi × 1024`，这里已除回）。
+    pub xft_dpi: Option<f32>,
+    /// `Gdk/WindowScalingFactor`（GNOME 的整数缩放档：1 / 2 / 3）。
+    pub scaling_factor: Option<f32>,
+}
+
+impl XSettingsValues {
+    /// 折算成缩放比（`max(Xft/DPI ÷ 96, Gdk/WindowScalingFactor)`，clamp 到 `1.0..=4.0`）。
+    ///
+    /// 为什么取 **max** 而不是"DPI 优先"：GNOME 在 200% 时同时给
+    /// `Gdk/WindowScalingFactor = 2` 与 `Xft/DPI = 192`，两者一致；
+    /// 但有些桌面只更新其中一个（例如 KDE 只改 DPI），取 max 才不会把用户
+    /// 明确要的 2 倍缩放读成 1 倍。两个值都无效时返回 `None`（交给下一级来源）。
+    pub fn scale(&self) -> Option<f32> {
+        let by_dpi = self
+            .xft_dpi
+            .filter(|d| d.is_finite() && (72.0..=384.0).contains(d))
+            .map(|d| d / 96.0);
+        let by_factor = self
+            .scaling_factor
+            .filter(|s| s.is_finite() && (1.0..=4.0).contains(s));
+        match (by_dpi, by_factor) {
+            (Some(a), Some(b)) => Some(a.max(b)).map(|s| s.clamp(1.0, 4.0)),
+            (Some(a), None) => Some(a.clamp(1.0, 4.0)),
+            (None, Some(b)) => Some(b.clamp(1.0, 4.0)),
+            (None, None) => None,
+        }
+    }
+}
+
+/// 解析 XSettings 的 `_XSETTINGS_SETTINGS` 二进制块（freedesktop 规范）。
+///
+/// 布局（**小端序**，即首字节 `byte_order == 0`）：
+/// ```text
+/// 0     : byte-order (0 = LSB)
+/// 1..3  : unused
+/// 4-7   : SERIAL
+/// 8-11  : N_SETTINGS
+/// 12..  : N 个条目，每个：
+///           u8  type (0=Integer, 1=String, 2=Color)
+///           u8  unused
+///           u16 name_len
+///           name[name_len] (补齐到 4)
+///           u32 last_change_serial
+///           value: Integer → u32；String → u32 len + bytes(pad4)；Color → 4×u16
+/// ```
+///
+/// 返回 `None` 表示"整块不可解析"（字节序不对 / 截断 / 头部不完整）。
+/// 单个条目的类型不认识时**跳过该条目**而不是整块失败 —— 桌面可能加新键，
+/// 我们只关心 `Xft/DPI` 与 `Gdk/WindowScalingFactor`。
+pub fn parse_xsettings(data: &[u8]) -> Option<XSettingsValues> {
+    if data.len() < 12 {
+        return None;
+    }
+    // 大端序客户端在本地路线不会出现（x86_64/aarch64 均小端），直接不认。
+    if data[0] != 0 {
+        return None;
+    }
+    let rd_u32 = |off: usize| -> Option<u32> {
+        data.get(off..off + 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let n = rd_u32(8)? as usize;
+    let mut out = XSettingsValues {
+        xft_dpi: None,
+        scaling_factor: None,
+    };
+    let mut off = 12usize;
+    for _ in 0..n {
+        let kind = *data.get(off)?;
+        let name_len = u16::from_le_bytes([*data.get(off + 2)?, *data.get(off + 3)?]) as usize;
+        off += 4;
+        let name = data.get(off..off + name_len)?;
+        off += pad4_len(name_len);
+        off += 4; // last_change_serial
+        let value_start = off;
+        // 先推进 `off`，再解析值：任何类型都必须正确吃掉自己的字节，
+        // 否则后面所有条目都会错位（这比"读错一个键"更危险）。
+        match kind {
+            0 => off += 4,
+            1 => {
+                let len = rd_u32(off)? as usize;
+                off += 4 + pad4_len(len);
+            }
+            2 => off += 8,
+            // 未知类型：块长度未知，无法安全跳过 → 整个块作废。
+            _ => return None,
+        }
+        if off > data.len() {
+            return None;
+        }
+        match name {
+            b"Xft/DPI" if kind == 0 => {
+                let raw = rd_u32(value_start)?;
+                if raw > 0 {
+                    out.xft_dpi = Some(raw as f32 / 1024.0);
+                }
+            }
+            b"Gdk/WindowScalingFactor" if kind == 0 => {
+                out.scaling_factor = Some(rd_u32(value_start)? as f32);
+            }
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
+/// 向上取整到 4 的倍数（X11 的对齐单位）。
+fn pad4_len(n: usize) -> usize {
+    n.div_ceil(4) * 4
+}
+
+/// 读桌面设置服务（XSettings）里的缩放相关键。
+///
+/// 协议路径：`_XSETTINGS_S<screen>` 这个 selection 的 owner 就是设置管理器窗口，
+/// 键值二进制块在它的 `_XSETTINGS_SETTINGS` 属性上。
+/// 没有设置管理器（裸 Xvfb / 精简 WM）时 owner 为 0 → 返回 `None`，不是错误。
+pub fn read_xsettings(conn: &mut crate::conn::Connection, screen: u32) -> Option<XSettingsValues> {
+    let selection = intern(conn, format!("_XSETTINGS_S{screen}").as_bytes()).ok()?;
+    let owner = conn.get_selection_owner(selection).ok()?;
+    if owner == 0 {
+        return None;
+    }
+    let prop = intern(conn, b"_XSETTINGS_SETTINGS").ok()?;
+    let (format, data) = conn
+        .get_property(owner, prop, prop, 0, 1 << 20, false)
+        .ok()?;
+    if format != 8 {
+        return None;
+    }
+    parse_xsettings(&data)
 }
 
 /// 缩放吸附：`< 1.2` → 1.0；否则最近的 0.25，上限 4.0。
@@ -329,9 +560,97 @@ impl X11Window {
             frame: Vec::new(),
             fullscreen,
             want_exit_fs: std::cell::Cell::new(false),
+            rescale: None,
+            dpi_scale: 1.0,
+            last_dpi_check: std::time::Instant::now(),
+            stale_configure: std::cell::Cell::new(None),
             ime: Box::new(crate::ime::NoIme),
             ime_focused: false,
         })
+    }
+
+    /// 注入"运行期缩放重建配方"，并记录启动时的缩放比。
+    ///
+    /// 由 `runtime` 在创建窗口后调用：闭包捕获字体路径/字号/主题/逻辑尺寸，
+    /// 收到新的缩放比时返回一份**按新物理尺寸**建好的 [`SoftBackend`]。
+    ///
+    /// 不注入时窗口完全不查桌面设置（行为与旧版一致），
+    /// 这也是 `real_window` 等底层测试的默认状态。
+    pub fn set_rescale_factory(&mut self, dpi_scale: f32, factory: RescaleFactory) {
+        self.dpi_scale = if dpi_scale.is_finite() && dpi_scale > 0.0 {
+            dpi_scale
+        } else {
+            1.0
+        };
+        self.rescale = Some(factory);
+    }
+
+    /// 当前生效的缩放比（诊断/测试用）。
+    pub fn dpi_scale(&self) -> f32 {
+        self.dpi_scale
+    }
+
+    /// 检查桌面设置是否改了缩放；改了就地重建。
+    ///
+    /// 返回 `Some((w, h))` 表示**窗口客户区已按新缩放调整**，调用方应据此重排
+    /// （`wait_events` 会把它并成一个 `RawEvent::Resize`）。
+    ///
+    /// 为什么是"轮询"而不是 `PropertyNotify`：XSettings 的键值在别人窗口的属性上，
+    /// 要订阅它的变化得给陌生窗口选 `PropertyChangeMask` 并新增 `PropertyNotify`
+    /// 解码；轮询一次/秒的成本是两个小请求（InternAtom + GetProperty），
+    /// 比这条链路的维护成本低得多，也不会因为漏事件而永久停在旧缩放。
+    pub fn refresh_scale_now(&mut self) -> Option<(u16, u16)> {
+        // 先把闭包**取出来**：否则 `self.rescale` 的可变借用会与 `self.conn` 冲突。
+        let mut factory = self.rescale.take()?;
+        let info = self.conn.info().clone();
+        let xsettings = read_xsettings(&mut self.conn, 0);
+        let xft_dpi = read_xft_dpi(&mut self.conn, info.root);
+        let new_scale = dpi_scale_with_xsettings(&info, xsettings, xft_dpi);
+        if (new_scale - self.dpi_scale).abs() <= 0.01 {
+            self.rescale = Some(factory);
+            return None;
+        }
+        // 保持**逻辑尺寸**不变：物理 = round(旧物理 × 新缩放 / 旧缩放)。
+        let old_scale = self.dpi_scale;
+        let (old_w, old_h) = (self.width, self.height);
+        let ratio = new_scale / old_scale;
+        let nw = ((self.width as f32 * ratio).round() as i64).clamp(1, u16::MAX as i64) as u16;
+        let nh = ((self.height as f32 * ratio).round() as i64).clamp(1, u16::MAX as i64) as u16;
+        match factory(new_scale) {
+            Ok(soft) => {
+                self.soft = soft;
+                self.dpi_scale = new_scale;
+                // 尺寸变了，旧共享内存段不再匹配：这里只**停止使用**它
+                // （客户端 detach 随对象析构，服务端附着要到窗口销毁/连接关闭才回收）。
+                // `present` 会自动回退到分块 PutImage，画面正确、只是慢一点；
+                // 重建 SHM 段需要新的 seg_id，属另一件事，而运行期改缩放极少发生。
+                self.shm = None;
+                // 记住旧尺寸：接下来可能还会收到**旧尺寸**的 ConfigureNotify，必须忽略一次。
+                self.stale_configure.set(Some((old_w, old_h)));
+                self.width = nw;
+                self.height = nh;
+                let pkt = crate::encode::encode_configure_window(
+                    self.wid,
+                    &[
+                        (crate::encode::ConfigureMask::Width, nw as u32),
+                        (crate::encode::ConfigureMask::Height, nh as u32),
+                    ],
+                );
+                if let Err(e) = self.conn.send(&pkt).and_then(|()| self.conn.flush()) {
+                    eprintln!("[y901] 缩放后调整窗口尺寸失败：{e}（继续用新缓冲）");
+                }
+                eprintln!(
+                    "[y901] X11 缩放变化：{old_scale:.2} → {new_scale:.2}，客户区 → {nw}x{nh}"
+                );
+                self.rescale = Some(factory);
+                Some((nw, nh))
+            }
+            Err(e) => {
+                // 重建失败就**放弃跟随**（保留旧缩放与旧缓冲），而不是每秒重试刷日志。
+                eprintln!("[y901] 缩放变化后重建光栅器失败：{e}（保持 {old_scale:.2}）");
+                None
+            }
+        }
     }
 
     /// 光栅器尺寸与窗口客户区对齐（启动后由 [`WindowBackend::relayout`] 调用）。
@@ -400,10 +719,19 @@ impl X11Window {
                 w: self.width as u32,
                 h: self.height as u32,
             },
-            X11Event::ConfigureNotify { width, height, .. } => RawEvent::Resize {
-                w: *width as u32,
-                h: *height as u32,
-            },
+            X11Event::ConfigureNotify { width, height, .. } => {
+                // 缩放刚变时，事件队列里可能还排着**旧尺寸**的 ConfigureNotify：
+                // 若照它重排，会把刚按新缩放建好的缓冲 resize 回去（字号新、缓冲旧 → 错位）。
+                // 代价：用户恰好把窗口拖回这个尺寸的那一次事件被吞掉（下一次 Expose 会补）。
+                if self.stale_configure.get() == Some((*width, *height)) {
+                    self.stale_configure.set(None);
+                    return None;
+                }
+                RawEvent::Resize {
+                    w: *width as u32,
+                    h: *height as u32,
+                }
+            }
             X11Event::Key {
                 pressed,
                 keycode,
@@ -696,7 +1024,28 @@ impl WindowBackend for X11Window {
                 eprintln!("[y901] 退出全屏失败：{e}");
             }
         }
-        Some(self.poll(wait_ms))
+        // **运行期缩放检查**：只在注入过重建配方时才有成本（默认零开销）。
+        // 节流 1 秒：桌面改缩放是低频操作，而这里是每帧入口。
+        let mut resized = None;
+        if self.rescale.is_some() {
+            let interval = std::env::var("Y901_X11_DPI_POLL_MS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(1000);
+            if self.last_dpi_check.elapsed().as_millis() as u64 >= interval {
+                self.last_dpi_check = std::time::Instant::now();
+                resized = self.refresh_scale_now();
+            }
+        }
+        let mut raws = self.poll(wait_ms);
+        if let Some((w, h)) = resized {
+            // 合成一个 Resize：`run_loop` 只认事件，重排/全量失效都由它统一处理。
+            raws.push(RawEvent::Resize {
+                w: w as u32,
+                h: h as u32,
+            });
+        }
+        Some(raws)
     }
 
     fn viewport(&self) -> (u32, u32) {
@@ -707,7 +1056,7 @@ impl WindowBackend for X11Window {
     fn relayout(&mut self, tree: &mut UiTree) {
         let (w, h) = self.size();
         self.soft.resize(w as u32, h as u32);
-        tree.layout(Size::new(w as f32, h as f32), &mut self.soft);
+        tree.layout(Size::new(w as f32, h as f32), &self.soft);
         tree.invalidate_all();
     }
 
@@ -900,7 +1249,7 @@ fn fullscreen_atoms(conn: &mut Connection, wid: u32, root: u32, add: bool) -> Re
 
 #[cfg(test)]
 mod dpi_scale_tests {
-    use super::{dpi_scale_from_screen, snap_scale};
+    use super::{dpi_scale, snap_scale, xft_dpi_from_resource_manager};
     use crate::conn::ServerInfo;
 
     fn screen(width_mm: u16) -> ServerInfo {
@@ -938,12 +1287,190 @@ mod dpi_scale_tests {
             return;
         }
         // 1280px / 325mm ≈ 100 DPI → 1.0
-        assert_eq!(dpi_scale_from_screen(&screen(325)), 1.0);
+        assert_eq!(dpi_scale(&screen(325), None), 1.0);
         // 1280px / 217mm ≈ 150 DPI → 1.5
-        assert_eq!(dpi_scale_from_screen(&screen(217)), 1.5);
+        assert_eq!(dpi_scale(&screen(217), None), 1.5);
         // 1280px / 169mm ≈ 192 DPI → 2.0
-        assert_eq!(dpi_scale_from_screen(&screen(169)), 2.0);
+        assert_eq!(dpi_scale(&screen(169), None), 2.0);
         // mm 缺失：不猜，按 1.0
-        assert_eq!(dpi_scale_from_screen(&screen(0)), 1.0);
+        assert_eq!(dpi_scale(&screen(0), None), 1.0);
+    }
+
+    #[test]
+    fn parses_xft_dpi_from_resource_manager() {
+        assert_eq!(
+            xft_dpi_from_resource_manager(b"Xft.dpi: 144\n"),
+            Some(144.0)
+        );
+        assert_eq!(
+            xft_dpi_from_resource_manager(b"! comment\nXft.dpi : 110.5 \n"),
+            Some(110.5)
+        );
+        assert_eq!(xft_dpi_from_resource_manager(b"Xft.dpi: bad\n"), None);
+        assert_eq!(xft_dpi_from_resource_manager(b"Xft.dpi: 600\n"), None);
+        assert_eq!(
+            xft_dpi_from_resource_manager(b"Xft.dpi: 96\nXft.dpi: 144\n"),
+            Some(144.0)
+        );
+        assert_eq!(xft_dpi_from_resource_manager(b"! no dpi\n"), None);
+        assert_eq!(xft_dpi_from_resource_manager(b"\xff"), None);
+    }
+
+    #[test]
+    fn xft_dpi_precedes_screen_mm_and_retains_fractional_scale() {
+        if !env_clean() {
+            eprintln!("[dpi-test] 跳过：Y901_X11_SCALE / Y901_DPI 已设置");
+            return;
+        }
+        assert!((dpi_scale(&screen(325), Some(110.0)) - 110.0 / 96.0).abs() < 0.0001);
+        assert_eq!(dpi_scale(&screen(325), Some(144.0)), 1.5);
+        assert_eq!(dpi_scale(&screen(217), Some(40.0)), 1.5); // 无效 hint 回退 mm
+    }
+
+    // ---------------- XSettings ----------------
+
+    use super::{dpi_scale_with_xsettings, parse_xsettings, XSettingsValues};
+
+    /// 拼一个 XSettings 整数条目（名字补齐到 4；值 4 字节）。
+    fn int_entry(name: &str, value: u32) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.push(0u8); // type = Integer
+        v.push(0); // unused
+        v.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        v.extend_from_slice(name.as_bytes());
+        v.resize(4 + name.len().div_ceil(4) * 4, 0);
+        v.extend_from_slice(&0u32.to_le_bytes()); // last_change_serial
+        v.extend_from_slice(&value.to_le_bytes());
+        v
+    }
+
+    /// 拼一个 XSettings 字符串条目（用于验证"跳过未知键"时**偏移不错位**）。
+    fn string_entry(name: &str, value: &str) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.push(1u8); // type = String
+        v.push(0);
+        v.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        v.extend_from_slice(name.as_bytes());
+        v.resize(4 + name.len().div_ceil(4) * 4, 0);
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        v.extend_from_slice(value.as_bytes());
+        v.resize(v.len() + (4 - value.len() % 4) % 4, 0);
+        v
+    }
+
+    /// 拼整个 `_XSETTINGS_SETTINGS` 块。
+    fn blob(entries: &[Vec<u8>]) -> Vec<u8> {
+        let mut v = vec![0u8; 12]; // byte-order(0) + unused(3) + serial + n
+        v[8..12].copy_from_slice(&(entries.len() as u32).to_le_bytes());
+        for e in entries {
+            v.extend_from_slice(e);
+        }
+        v
+    }
+
+    #[test]
+    fn parses_xsettings_dpi_and_scaling_factor() {
+        // 192 DPI = 192×1024；同时给 Gdk 因子 2（GNOME 200% 的典型组合）
+        let data = blob(&[
+            string_entry("Net/ThemeName", "Adwaita"),
+            int_entry("Xft/DPI", 192 * 1024),
+            int_entry("Gdk/WindowScalingFactor", 2),
+            int_entry("Gtk/FontName", 0),
+        ]);
+        let v = parse_xsettings(&data).expect("应能解析");
+        assert_eq!(v.xft_dpi, Some(192.0));
+        assert_eq!(v.scaling_factor, Some(2.0));
+        assert_eq!(v.scale(), Some(2.0));
+    }
+
+    /// 字符串条目的长度补齐若算错，后面所有键都会错位 —— 这条专门盯着它。
+    #[test]
+    fn string_entries_advance_by_padded_length() {
+        for len in 1..=9usize {
+            let val = "x".repeat(len);
+            let data = blob(&[
+                string_entry("A", &val),
+                int_entry("Gdk/WindowScalingFactor", 3),
+            ]);
+            let v = parse_xsettings(&data).unwrap_or_else(|| panic!("len={len} 应能解析"));
+            assert_eq!(
+                v.scaling_factor,
+                Some(3.0),
+                "字符串长度 {len} 时后续条目错位"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_xsettings_is_rejected() {
+        assert_eq!(parse_xsettings(&[]), None, "空块");
+        assert_eq!(parse_xsettings(&[0; 11]), None, "头部不足 12 字节");
+        // 字节序标记为 1（大端）→ 不支持
+        let mut big = blob(&[int_entry("Xft/DPI", 96 * 1024)]);
+        big[0] = 1;
+        assert_eq!(parse_xsettings(&big), None);
+        // n_settings 声称有 5 条但只有 1 条
+        let mut short = blob(&[int_entry("Xft/DPI", 96 * 1024)]);
+        short[8..12].copy_from_slice(&5u32.to_le_bytes());
+        assert_eq!(
+            parse_xsettings(&short),
+            None,
+            "截断必须整块失败，不能返回半截结果"
+        );
+        // 未知类型：块长度未知，无法安全跳过
+        let mut unknown = blob(&[int_entry("Xft/DPI", 96 * 1024)]);
+        unknown[12] = 7;
+        assert_eq!(parse_xsettings(&unknown), None);
+    }
+
+    #[test]
+    fn xsettings_scale_takes_max_and_ignores_garbage() {
+        let only_dpi = XSettingsValues {
+            xft_dpi: Some(144.0),
+            scaling_factor: None,
+        };
+        assert_eq!(only_dpi.scale(), Some(1.5));
+        let only_factor = XSettingsValues {
+            xft_dpi: None,
+            scaling_factor: Some(2.0),
+        };
+        assert_eq!(only_factor.scale(), Some(2.0));
+        // 两者冲突时取 max：桌面只更新了一个值时不会把 2 倍读成 1 倍
+        let conflict = XSettingsValues {
+            xft_dpi: Some(96.0),
+            scaling_factor: Some(2.0),
+        };
+        assert_eq!(conflict.scale(), Some(2.0));
+        // 越界/NaN 全部忽略
+        let garbage = XSettingsValues {
+            xft_dpi: Some(f32::NAN),
+            scaling_factor: Some(99.0),
+        };
+        assert_eq!(garbage.scale(), None);
+    }
+
+    #[test]
+    fn xsettings_precedes_xft_and_mm_but_env_wins() {
+        if !env_clean() {
+            eprintln!("[dpi-test] 跳过：Y901_X11_SCALE / Y901_DPI 已设置");
+            return;
+        }
+        let xs = XSettingsValues {
+            xft_dpi: Some(192.0),
+            scaling_factor: None,
+        };
+        // XSettings(2.0) > Xft.dpi(1.5) > mm(1.0)
+        assert_eq!(
+            dpi_scale_with_xsettings(&screen(325), Some(xs), Some(144.0)),
+            2.0
+        );
+        // 没有 XSettings 就退回 Xft.dpi
+        assert_eq!(
+            dpi_scale_with_xsettings(&screen(325), None, Some(144.0)),
+            1.5
+        );
+        // 两者都没有 → mm 估算
+        assert_eq!(dpi_scale_with_xsettings(&screen(217), None, None), 1.5);
     }
 }

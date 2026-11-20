@@ -12,8 +12,8 @@ use y901_backend_x11::encode::{
 use y901_backend_x11::keys::{keysym_to_char, keysym_to_key, modifiers_from_state, Keymap};
 use y901_backend_x11::{
     decode_event, encode_change_property, encode_create_window, encode_get_input_focus,
-    encode_intern_atom, encode_map_window, encode_no_operation, encode_put_image,
-    encode_setup_request, pad4, DecodeError, X11Event,
+    encode_get_selection_owner, encode_intern_atom, encode_map_window, encode_no_operation,
+    encode_put_image, encode_setup_request, pad4, DecodeError, X11Event,
 };
 use y901_ui::Key;
 
@@ -73,6 +73,23 @@ fn setup_request_without_auth_has_no_padding() {
     #[rustfmt::skip]
     let want: &[u8] = &[b'l', 0, 0x0B, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     assert_bytes(&got, want, "Setup(empty)");
+}
+
+// ---------------------------------------------------------------- GetSelectionOwner
+
+#[test]
+fn get_selection_owner_is_exactly_8_bytes() {
+    // 布局：opcode 23 / unused / length=2 / selection atom
+    // 用途：XSettings 里 `_XSETTINGS_S0` 的 owner 就是设置管理器窗口。
+    let got = encode_get_selection_owner(0x1234_5678);
+    #[rustfmt::skip]
+    let want: &[u8] = &[
+        23, 0x00,        // opcode 23，unused
+        0x02, 0x00,      // length = 2 个 4 字节单位（含头部）
+        0x78, 0x56, 0x34, 0x12, // selection atom（小端）
+    ];
+    assert_bytes(&got, want, "GetSelectionOwner");
+    assert_eq!(got.len(), 8, "GetSelectionOwner 固定 8 字节");
 }
 
 // ---------------------------------------------------------------- InternAtom

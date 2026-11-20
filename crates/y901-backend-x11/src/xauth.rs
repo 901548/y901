@@ -102,6 +102,33 @@ pub fn find_cookie(entries: &[XauthEntry], display_number: u32, hostname: &str) 
     None
 }
 
+/// 本机主机名（用于匹配 `FamilyLocal` 条目）。
+///
+/// **为什么不能只信 `$HOSTNAME`**：该变量只在部分 shell/CI 环境里存在。
+/// 实测 Linux 上 `xvfb-run -a cargo test` 时测试进程里 `HOSTNAME` 就不存在，
+/// 于是 `FamilyLocal` 条目全部匹配失败 —— 服务端回
+/// "Authorization required, but no authorization protocol specified"，
+/// 看起来像"客户端没发认证"，实际是**有 cookie 却没匹配上**。
+///
+/// 顺序：`$HOSTNAME` → `/etc/hostname` → 空串（匹配不到 `FamilyLocal`，
+/// `FamilyWild` 条目仍然可用）。
+/// 副作用：可能读 `/etc/hostname`。
+pub fn local_hostname() -> String {
+    if let Ok(h) = std::env::var("HOSTNAME") {
+        let h = h.trim();
+        if !h.is_empty() {
+            return h.to_string();
+        }
+    }
+    if let Ok(h) = std::fs::read_to_string("/etc/hostname") {
+        let h = h.trim();
+        if !h.is_empty() {
+            return h.to_string();
+        }
+    }
+    String::new()
+}
+
 /// 从 `$XAUTHORITY`（没有就 `~/.Xauthority`）读取并选出对应屏幕的 cookie。
 ///
 /// 输入：`display_number`（如 99）、`hostname`。
@@ -117,4 +144,101 @@ pub fn load_cookie_from_home(display_number: u32, hostname: &str) -> Option<Vec<
     let bytes = std::fs::read(&path).ok()?;
     let entries = parse(&bytes);
     find_cookie(&entries, display_number, hostname)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{find_cookie, parse, FAMILY_LOCAL, FAMILY_WILD};
+
+    /// 按 Xauthority 字节格式拼一个条目（长度字段是**大端序**，无对齐填充）。
+    fn entry(family: u16, address: &[u8], number: &[u8], name: &[u8], data: &[u8]) -> Vec<u8> {
+        let mut out = family.to_be_bytes().to_vec();
+        for field in [address, number, name, data] {
+            out.extend_from_slice(&(field.len() as u16).to_be_bytes());
+            out.extend_from_slice(field);
+        }
+        out
+    }
+
+    #[test]
+    fn parses_multiple_entries_without_padding() {
+        let mut bytes = entry(
+            FAMILY_LOCAL,
+            b"host",
+            b"100",
+            b"MIT-MAGIC-COOKIE-1",
+            &[1; 16],
+        );
+        bytes.extend(entry(
+            FAMILY_WILD,
+            b"",
+            b"0",
+            b"MIT-MAGIC-COOKIE-1",
+            &[2; 16],
+        ));
+        let entries = parse(&bytes);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].family, FAMILY_LOCAL);
+        assert_eq!(entries[0].number, b"100");
+        assert_eq!(entries[1].address, b"");
+        assert_eq!(entries[1].data, vec![2u8; 16]);
+    }
+
+    #[test]
+    fn truncated_tail_is_ignored() {
+        let mut bytes = entry(FAMILY_LOCAL, b"host", b"0", b"MIT-MAGIC-COOKIE-1", &[7; 16]);
+        bytes.extend_from_slice(&[0x01, 0x00, 0x00]); // 半条记录
+        assert_eq!(parse(&bytes).len(), 1);
+    }
+
+    /// 回归：`HOSTNAME` 缺失时也必须能匹配 `FamilyLocal` 条目。
+    ///
+    /// 真实场景：`xvfb-run -a cargo test` 里 `HOSTNAME` 不存在，旧实现传空主机名，
+    /// 导致有 cookie 也不发认证，服务端回 "Authorization required..."。
+    #[test]
+    fn family_local_matches_known_hostname() {
+        let bytes = entry(
+            FAMILY_LOCAL,
+            b"myhost",
+            b"100",
+            b"MIT-MAGIC-COOKIE-1",
+            &[9; 16],
+        );
+        let entries = parse(&bytes);
+        assert_eq!(
+            find_cookie(&entries, 100, "myhost"),
+            Some(vec![9u8; 16]),
+            "FamilyLocal + 正确主机名必须命中"
+        );
+        assert_eq!(
+            find_cookie(&entries, 100, "otherhost"),
+            None,
+            "主机名不匹配不能命中"
+        );
+        assert_eq!(
+            find_cookie(&entries, 101, "myhost"),
+            None,
+            "屏幕号不匹配不能命中"
+        );
+    }
+
+    #[test]
+    fn family_wild_matches_any_hostname() {
+        let bytes = entry(FAMILY_WILD, b"", b"0", b"MIT-MAGIC-COOKIE-1", &[3; 16]);
+        let entries = parse(&bytes);
+        assert_eq!(find_cookie(&entries, 0, ""), Some(vec![3u8; 16]));
+        assert_eq!(find_cookie(&entries, 0, "whatever"), Some(vec![3u8; 16]));
+    }
+
+    #[test]
+    fn non_cookie_entries_are_skipped() {
+        let bytes = entry(
+            FAMILY_LOCAL,
+            b"host",
+            b"0",
+            b"XDM-AUTHORIZATION-1",
+            &[1; 16],
+        );
+        assert_eq!(find_cookie(&parse(&bytes), 0, "host"), None);
+    }
 }

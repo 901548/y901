@@ -346,13 +346,8 @@ fn conn_loop(mut conn: RpcConn, ctx_path: String, cmd_rx: Receiver<Cmd>, evt_tx:
 
         // 2) 收信号：短超时轮询，保证主循环节奏（refill 会阻塞最多 timeout）
         let deadline = Instant::now() + Duration::from_millis(POLL_MS);
-        let mut got_any = false;
-        while let Ok(msg) = conn.refill_once(Timeout::Duration(Duration::from_millis(2))) {
-            let _ = msg;
-            got_any = true;
-            break;
-        }
-        let _ = got_any;
+        // 单次非阻塞轮询（不循环：读完即进第 3 步消费队列）
+        let _ = conn.refill_once(Timeout::Duration(Duration::from_millis(2)));
 
         // 3) 取出已到达的信号（refill_once 内部已入队，这里逐条消费）
         while let Some(sig) = conn.try_get_signal() {
@@ -457,7 +452,7 @@ mod tests {
             Param::Base(Base::String("NIHAO_PLACEHOLDER".into())),
             attrs,
         ]));
-        let params = vec![boxed_variant(text_obj)];
+        let params = [boxed_variant(text_obj)];
         assert_eq!(find_text(&params[0]), Some("NIHAO_PLACEHOLDER".to_string()));
     }
 

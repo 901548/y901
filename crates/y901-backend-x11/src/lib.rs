@@ -53,12 +53,12 @@ pub use encode::{
     encode_change_property, encode_close_font, encode_configure_window, encode_convert_selection,
     encode_create_gc, encode_create_glyph_cursor, encode_create_window, encode_destroy_window,
     encode_free_cursor, encode_free_gc, encode_get_image, encode_get_input_focus,
-    encode_get_keyboard_mapping, encode_get_property, encode_intern_atom, encode_map_window,
-    encode_no_operation, encode_open_font, encode_put_image, encode_query_extension,
-    encode_send_event, encode_set_input_focus, encode_set_selection_owner, encode_setup_request,
-    encode_shm_attach, encode_shm_detach, encode_shm_put_image, encode_shm_query_version,
-    synth_key_event, ConfigureMask, GcMask, PropMode, PutImageArgs, ShmPutImageArgs, ValueMask,
-    WindowClass,
+    encode_get_keyboard_mapping, encode_get_property, encode_get_selection_owner,
+    encode_intern_atom, encode_map_window, encode_no_operation, encode_open_font, encode_put_image,
+    encode_query_extension, encode_send_event, encode_set_input_focus, encode_set_selection_owner,
+    encode_setup_request, encode_shm_attach, encode_shm_detach, encode_shm_put_image,
+    encode_shm_query_version, synth_key_event, ConfigureMask, GcMask, PropMode, PutImageArgs,
+    ShmPutImageArgs, ValueMask, WindowClass,
 };
 
 /// X11 协议主版本号。
@@ -108,6 +108,8 @@ pub mod opcode {
     pub const GET_PROPERTY: u8 = 20;
     /// `SetSelectionOwner`
     pub const SET_SELECTION_OWNER: u8 = 22;
+    /// `GetSelectionOwner`（用于查 XSettings manager 的窗口）
+    pub const GET_SELECTION_OWNER: u8 = 23;
     /// `ConvertSelection`
     pub const CONVERT_SELECTION: u8 = 24;
     /// `OpenFont`

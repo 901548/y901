@@ -14,8 +14,9 @@
 
 use y901_backend_x11::conn::{Connection, PUT_IMAGE_MAX_BYTES};
 use y901_backend_x11::encode::{
-    encode_create_gc, encode_create_window, encode_destroy_window, encode_intern_atom,
-    encode_map_window, encode_set_input_focus, CreateWindowArgs, GcMask, ValueMask, WindowClass,
+    encode_change_property, encode_create_gc, encode_create_window, encode_destroy_window,
+    encode_intern_atom, encode_map_window, encode_set_input_focus, encode_set_selection_owner,
+    CreateWindowArgs, GcMask, PropMode, ValueMask, WindowClass,
 };
 use y901_backend_x11::window::{CreateArgs, X11Window};
 use y901_backend_x11::X11Event;
@@ -360,7 +361,7 @@ fn put_image_requires_chunking_for_hd_sizes() {
     let rows = PUT_IMAGE_MAX_BYTES / (1920 * 4);
     eprintln!(
         "[x11] 1080p：单包最多 {rows} 行（{} 块）",
-        (1080 + rows - 1) / rows
+        1080_usize.div_ceil(rows)
     );
     let small = 320usize * 200 * 4;
     assert!(small <= PUT_IMAGE_MAX_BYTES, "320x200 单块即可");
@@ -470,7 +471,7 @@ fn keyboard_mapping_covers_ascii() {
         ("Down", 0xFF54),
         ("Tab", 0xFF09),
     ] {
-        let hit = km.keysyms.iter().any(|k| *k == ks);
+        let hit = km.keysyms.contains(&ks);
         eprintln!("[x11] keysym {label} ({ks:#06x}) 在表中：{hit}");
         assert!(hit, "键盘映射表里找不到 {label}");
     }
@@ -847,6 +848,301 @@ fn clipboard_roundtrip_through_selection_protocol() {
         eprintln!("[cb] {which:?}：写 {:?} → 读 {:?}", text, got);
         assert_eq!(got, text, "{which:?} 往返应一致");
     }
+}
+
+/// 内部化一个原子并读到它的 id。
+fn intern_atom(conn: &mut Connection, name: &[u8]) -> u32 {
+    conn.send(&encode_intern_atom(name, false))
+        .expect("发 InternAtom");
+    conn.flush().expect("flush");
+    conn.read_reply_u32().expect("读 InternAtom 回复")
+}
+
+/// 把根窗口的某个 STRING 属性整体替换为 `text`。
+fn set_root_string(conn: &mut Connection, root: u32, property: u32, text: &[u8]) {
+    // 31 = 预定义原子 STRING（X11 规范 §6.1）；根窗口属性的类型必须与 GetProperty 查询一致。
+    const STRING: u32 = 31;
+    conn.send(&encode_change_property(
+        root,
+        property,
+        STRING,
+        8,
+        PropMode::Replace,
+        text,
+    ))
+    .expect("发 ChangeProperty");
+    conn.flush().expect("flush");
+    let errs = conn.sync().expect("sync");
+    assert!(errs.is_empty(), "ChangeProperty 报错：{errs:?}");
+}
+
+/// 验收：`read_xft_dpi` 能通过**真协议**读到根窗口 `RESOURCE_MANAGER` 的 `Xft.dpi`。
+///
+/// 只测纯解析函数（`window.rs` 单测）不足以证明协议路径对：InternAtom、GetProperty
+/// 的类型/长度字段只要错一个字节，服务器就会回 BadAtom/BadValue 或返回空数据。
+/// 这里自己写属性再自己读，形成闭环；读完恢复原值，避免污染共享 Xvfb。
+#[test]
+fn reads_xft_dpi_from_root_resource_manager() {
+    let (_g, mut c) = connect();
+    let info = c.info().clone();
+    let property = intern_atom(&mut c, b"RESOURCE_MANAGER");
+
+    // 备份原属性（可能不存在）：共享 Xvfb 上跑完必须恢复。
+    let backup = c
+        .get_property(info.root, property, 31, 0, 1 << 14, false)
+        .ok()
+        .map(|(_, data)| data);
+
+    // 显式环境变量优先级更高，会让下面断言失效；临时清掉，Drop 时恢复。
+    let _scale_env = EnvGuard::remove("Y901_X11_SCALE");
+    let _dpi_env = EnvGuard::remove("Y901_DPI");
+
+    set_root_string(&mut c, info.root, property, b"Xft.dpi: 144\n");
+    let dpi = y901_backend_x11::window::read_xft_dpi(&mut c, info.root);
+    assert_eq!(dpi, Some(144.0), "应从根窗口 RESOURCE_MANAGER 读到 Xft.dpi");
+    // 144 DPI = 1.5 倍；Xft.dpi 不吸附，144 正好落在档位上
+    assert_eq!(y901_backend_x11::window::dpi_scale(&info, dpi), 1.5);
+
+    // 属性存在但没有 Xft.dpi：不能猜，必须回退（这里回退到毫米估算/1.0）
+    set_root_string(&mut c, info.root, property, b"XTerm*reverseVideo: on\n");
+    assert_eq!(
+        y901_backend_x11::window::read_xft_dpi(&mut c, info.root),
+        None
+    );
+
+    // 恢复：原值不存在时写空属性，对本解析器等价于“未设置”。
+    set_root_string(
+        &mut c,
+        info.root,
+        property,
+        backup.as_deref().unwrap_or(b""),
+    );
+    eprintln!("[x11] Xft.dpi 协议读取通过（已恢复原 RESOURCE_MANAGER）");
+}
+
+/// 验收：DPI 来源优先级 —— 显式环境变量 > `Xft.dpi` > 屏幕毫米估算。
+///
+/// 放在集成测试里而不是 `window.rs` 单测：这里能用 `SERVER_LOCK` 把改环境变量的
+/// 用例与其他用例串行化（单测模块里并行线程改 env 会互相干扰）。
+#[test]
+fn dpi_scale_prefers_explicit_env_over_xft() {
+    use y901_backend_x11::conn::ServerInfo;
+
+    let _g = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // 1280px / 325mm ≈ 100 DPI：毫米估算会给 1.0，便于区分其它来源。
+    let info = ServerInfo {
+        width: 1280,
+        height: 800,
+        width_mm: 325,
+        height_mm: 0,
+        ..ServerInfo::default()
+    };
+
+    let scale_env = EnvGuard::remove("Y901_X11_SCALE");
+    let dpi_env = EnvGuard::remove("Y901_DPI");
+    // 1) 无 env：Xft.dpi (144 → 1.5) 胜过 mm (1.0)
+    assert_eq!(y901_backend_x11::window::dpi_scale(&info, Some(144.0)), 1.5);
+    // 2) 无效 Xft.dpi 回退 mm
+    assert_eq!(y901_backend_x11::window::dpi_scale(&info, Some(600.0)), 1.0);
+    drop(scale_env);
+    drop(dpi_env);
+
+    {
+        // 3) Y901_DPI 覆盖 Xft.dpi
+        let _dpi = EnvGuard::set("Y901_DPI", "192");
+        assert_eq!(y901_backend_x11::window::dpi_scale(&info, Some(144.0)), 2.0);
+    }
+    {
+        // 4) Y901_X11_SCALE 优先级最高（且不要求 0.25 档位）
+        let _dpi = EnvGuard::set("Y901_DPI", "192");
+        let _scale = EnvGuard::set("Y901_X11_SCALE", "1.25");
+        assert_eq!(
+            y901_backend_x11::window::dpi_scale(&info, Some(144.0)),
+            1.25
+        );
+    }
+}
+
+// ---------------------------------------------------------------- XSettings
+
+/// 拼一个 XSettings 整数条目（名字补齐到 4 字节；值是 4 字节整数）。
+fn xsettings_int_entry(name: &str, value: u32) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.push(0u8); // type = Integer
+    v.push(0);
+    v.extend_from_slice(&(name.len() as u16).to_le_bytes());
+    v.extend_from_slice(name.as_bytes());
+    v.resize(4 + name.len().div_ceil(4) * 4, 0);
+    v.extend_from_slice(&0u32.to_le_bytes()); // last_change_serial
+    v.extend_from_slice(&value.to_le_bytes());
+    v
+}
+
+/// 拼整个 `_XSETTINGS_SETTINGS` 二进制块（小端序）。
+fn xsettings_blob(entries: &[Vec<u8>]) -> Vec<u8> {
+    let mut v = vec![0u8; 12]; // byte-order(0) + unused(3) + SERIAL + N
+    v[8..12].copy_from_slice(&(entries.len() as u32).to_le_bytes());
+    for e in entries {
+        v.extend_from_slice(e);
+    }
+    v
+}
+
+/// 验收：`read_xsettings` 走**真协议**（GetSelectionOwner + GetProperty）能读到桌面设置。
+///
+/// 自己**扮演设置管理器**：建一个窗口 → 抢下 `_XSETTINGS_S0` selection →
+/// 在窗口上写 `_XSETTINGS_SETTINGS` 属性 → 让被测函数去读。
+/// 这样 InternAtom/GetSelectionOwner/GetProperty 三个请求的字段只要错一个，
+/// 服务器就会回错误或返回空数据，测试立刻红。读完后释放 selection，不污染共享 Xvfb。
+#[test]
+fn reads_xsettings_through_selection_protocol() {
+    let (_g, mut c) = connect();
+    let info = c.info().clone();
+    let selection = intern_atom(&mut c, b"_XSETTINGS_S0");
+    let prop = intern_atom(&mut c, b"_XSETTINGS_SETTINGS");
+
+    // 1) 没有 owner 时必须是 None（裸 Xvfb 的真实情况），不能报错、不能猜
+    assert_eq!(
+        y901_backend_x11::window::read_xsettings(&mut c, 0),
+        None,
+        "无人持有 _XSETTINGS_S0 时应返回 None"
+    );
+
+    // 2) 自己建一个窗口当"设置管理器"
+    let wid = info.resource_id_base | 0x33;
+    c.send(&encode_create_window(&CreateWindowArgs {
+        wid,
+        parent: info.root,
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        border_width: 0,
+        class: WindowClass::InputOutput,
+        visual: info.root_visual,
+        values: &[],
+    }))
+    .expect("发 CreateWindow");
+    c.flush().expect("flush");
+    assert!(c.sync().expect("sync").is_empty(), "建窗失败");
+
+    // 3) 写入设置块：Xft/DPI = 192（=192×1024），Gdk 因子 = 2
+    let blob = xsettings_blob(&[
+        xsettings_int_entry("Xft/DPI", 192 * 1024),
+        xsettings_int_entry("Gdk/WindowScalingFactor", 2),
+    ]);
+    c.send(&encode_change_property(
+        wid,
+        prop,
+        prop,
+        8,
+        PropMode::Replace,
+        &blob,
+    ))
+    .expect("发 ChangeProperty");
+    c.flush().expect("flush");
+    assert!(c.sync().expect("sync").is_empty(), "写属性失败");
+
+    // 4) 抢 selection（time = 0 即 CurrentTime；本用例独占 SERVER_LOCK，无竞态）
+    c.send(&encode_set_selection_owner(wid, selection, 0))
+        .expect("发 SetSelectionOwner");
+    c.flush().expect("flush");
+    assert!(c.sync().expect("sync").is_empty(), "抢 selection 失败");
+    let owner = c.get_selection_owner(selection).expect("查 owner");
+    assert_eq!(owner, wid, "selection 应归我们刚建的窗口");
+
+    // 5) 真的读回来
+    let values =
+        y901_backend_x11::window::read_xsettings(&mut c, 0).expect("有 owner 且属性合法时必须读到");
+    eprintln!("[x11] XSettings 读回：{values:?}");
+    assert_eq!(values.xft_dpi, Some(192.0));
+    assert_eq!(values.scaling_factor, Some(2.0));
+    assert_eq!(values.scale(), Some(2.0));
+
+    // 6) 释放 selection：再读必须回到 None
+    c.send(&encode_set_selection_owner(0, selection, 0))
+        .expect("发 SetSelectionOwner(0)");
+    c.flush().expect("flush");
+    assert!(c.sync().expect("sync").is_empty(), "释放 selection 失败");
+    assert_eq!(
+        y901_backend_x11::window::read_xsettings(&mut c, 0),
+        None,
+        "释放后应回到 None"
+    );
+    c.send(&encode_destroy_window(wid))
+        .expect("发 DestroyWindow");
+    c.flush().expect("flush");
+    assert!(c.sync().expect("sync").is_empty(), "销毁窗口失败");
+    eprintln!("[x11] XSettings 协议往返通过（selection 已释放、窗口已销毁）");
+}
+
+/// 验收：**运行期缩放变化**会重建光栅器并把窗口客户区改到新物理尺寸。
+///
+/// 做法：注入一个"按缩放造软后端"的配方 → 把根窗口 `Xft.dpi` 改成 144 →
+/// 调 `refresh_scale_now()`。断言三件事：返回值是新尺寸、软后端缓冲跟着变、
+/// `dpi_scale()` 是真值。没有查 `PropertyNotify`，靠的是轮询接口，所以这里直接调它。
+#[test]
+fn runtime_scale_change_rebuilds_soft_backend() {
+    let _g = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let d = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
+    // 显式 env 优先级最高，会盖住 Xft.dpi；临时清掉，Drop 时恢复。
+    let _scale_env = EnvGuard::remove("Y901_X11_SCALE");
+    let _dpi_env = EnvGuard::remove("Y901_DPI");
+
+    let base_w = 240u16;
+    let base_h = 160u16;
+    let mut w = create_window_retry(&d, base_w, base_h, "rescale test");
+    assert_eq!(w.size(), (base_w, base_h));
+
+    // 配方：新物理尺寸 = 基准 × 缩放，字体也按缩放放大（与 runtime 的 build_soft 同构）
+    w.set_rescale_factory(
+        1.0,
+        Box::new(move |scale: f32| {
+            let nw = (base_w as f32 * scale).round() as u16;
+            let nh = (base_h as f32 * scale).round() as u16;
+            Ok(soft_for(nw, nh, 15.0 * scale))
+        }),
+    );
+    assert_eq!(w.dpi_scale(), 1.0);
+
+    // 改根窗口 RESOURCE_MANAGER：144 DPI → 1.5 倍
+    let mut c = Connection::connect(&d).expect("连接");
+    let info = c.info().clone();
+    let property = intern_atom(&mut c, b"RESOURCE_MANAGER");
+    let backup = c
+        .get_property(info.root, property, 31, 0, 1 << 14, false)
+        .ok()
+        .map(|(_, data)| data);
+    set_root_string(&mut c, info.root, property, b"Xft.dpi: 144\n");
+
+    let changed = w.refresh_scale_now();
+    eprintln!(
+        "[x11] 缩放重建：返回 {changed:?}，dpi_scale={:.2}，窗口={:?}，缓冲={}x{}",
+        w.dpi_scale(),
+        w.size(),
+        w.soft().width(),
+        w.soft().height()
+    );
+    assert_eq!(changed, Some((360, 240)), "1.5 倍后客户区应为 360×240");
+    assert_eq!(w.size(), (360, 240), "窗口尺寸字段应同步更新");
+    assert!((w.dpi_scale() - 1.5).abs() < 0.001, "缩放比应为 1.5");
+    assert_eq!(
+        (w.soft().width(), w.soft().height()),
+        (360, 240),
+        "软后端缓冲必须按新物理尺寸重建"
+    );
+
+    // 再调一次：设置没变 → 不得重复重建（返回 None）
+    assert_eq!(w.refresh_scale_now(), None, "缩放没变时不应重建");
+
+    // 恢复原属性，避免污染共享 Xvfb 上的其它用例
+    set_root_string(
+        &mut c,
+        info.root,
+        property,
+        backup.as_deref().unwrap_or(b""),
+    );
+    eprintln!("[x11] 运行期缩放重建通过（RESOURCE_MANAGER 已恢复）");
 }
 
 /// 结构断言：守住剪贴板应答超时 = 500ms。

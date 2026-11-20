@@ -190,7 +190,7 @@ impl Connection {
 
     fn handshake(&mut self, number: u32) -> Result<(), String> {
         // 1) 取认证数据（Xvfb 通常没有认证文件，那就发空）
-        let hostname = std::env::var("HOSTNAME").unwrap_or_default();
+        let hostname = crate::xauth::local_hostname();
         let cookie = crate::xauth::load_cookie_from_home(number, &hostname);
         let (auth_name, auth_data): (&[u8], Vec<u8>) = match cookie {
             Some(data) => (b"MIT-MAGIC-COOKIE-1", data),
@@ -452,6 +452,16 @@ impl Connection {
         Ok((format, data))
     }
 
+    /// 查询某个 selection 的 owner 窗口（`GetSelectionOwner`，opcode 23）。
+    ///
+    /// 返回 `0` 表示当前没有任何客户端拥有它（例如裸 Xvfb 上没有 XSettings manager）。
+    /// 这是**正常结果**，不是错误。
+    pub fn get_selection_owner(&mut self, selection: u32) -> Result<u32, String> {
+        self.send(&crate::encode::encode_get_selection_owner(selection))?;
+        self.flush()?;
+        self.read_reply_u32()
+    }
+
     /// 探测扩展：返回它的**主 opcode**（不支持则 `None`）。
     ///
     /// 为什么要问而不是硬编码：X11 扩展的 opcode 是**服务器分配的**，
@@ -649,7 +659,7 @@ impl Connection {
         loop {
             match self.stream.read(&mut buf) {
                 Ok(0) => return Err("服务端断开连接".to_string()),
-                Ok(n) if n == 32 => {
+                Ok(32) => {
                     match buf[0] {
                         0 => errors.push(parse_error(&buf)),
                         // 字节 0 == 1 是**响应**（reply），不是事件。
@@ -754,12 +764,12 @@ fn connect_socket(path: &std::path::Path) -> std::io::Result<UnixStream> {
                 use std::os::linux::net::SocketAddrExt;
                 let name = path.as_os_str().as_encoded_bytes();
                 let addr = std::os::unix::net::SocketAddr::from_abstract_name(name)?;
-                return UnixStream::connect_addr(&addr).map_err(|abs_err| {
+                UnixStream::connect_addr(&addr).map_err(|abs_err| {
                     std::io::Error::new(
                         abs_err.kind(),
                         format!("文件路径失败（{file_err}），抽象命名空间也失败（{abs_err}）"),
                     )
-                });
+                })
             }
             #[cfg(not(target_os = "linux"))]
             {

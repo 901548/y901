@@ -4,6 +4,13 @@
 //! 主循环已抽到 `y901-runtime::runtime::run_loop`；本文件只负责
 //! **窗口创建 + 字形引擎/光栅器初始化 + 窗口句柄接进循环**。
 //!
+//! ## DPI 与运行期缩放
+//!
+//! 启动时按 `XSettings → Xft.dpi → 屏幕毫米` 的优先级选缩放（见
+//! [`crate::window::dpi_scale_with_xsettings`]），并用**物理**尺寸/字号建软后端；
+//! 同时把"按新缩放重建软后端"的配方交给窗口（[`crate::window::X11Window::set_rescale_factory`]）。
+//! 桌面改缩放后窗口会在下一次 `wait_events` 里自己发现并重建 —— 不需要重启应用。
+//!
 //! ## 为什么没有 GPU 路径
 //!
 //! X11 下我们没有 D3D11（也不打算手写 Vulkan/GL）。
@@ -25,6 +32,31 @@ use crate::window::X11Window;
 /// X11 平台入口。
 pub struct X11Runtime;
 
+/// 按给定缩放与物理尺寸造一个软后端（启动与"运行期缩放"共用同一条路径）。
+///
+/// 为什么抽成函数：运行期缩放要**重建**整套东西（字体引擎 + 缓冲 + DPI 注入），
+/// 若与启动路径各写一份，迟早会出现"启动时字号乘了 scale、缩放后没乘"这类偏差。
+fn build_soft(
+    width: u32,
+    height: u32,
+    dpi_scale: f32,
+    font: &y901_runtime::FontConfig,
+    theme: Option<y901_ui::theme::Theme>,
+) -> Result<SoftBackend, String> {
+    let physical_font = (font.size * dpi_scale).max(1.0);
+    let (cw, ch) = y901_render::cell_metrics_for(physical_font);
+    let cell = Size::new(cw, ch);
+    let engine: Box<dyn y901_render::FontEngine> = Box::new(MyFontEngine::new(
+        y901_render::load_font(&y901_render::resolve_font_path(&font.family))?,
+        physical_font,
+        cell,
+    )?);
+    let mut soft = SoftBackend::new(width.max(1), height.max(1), engine, cell, theme)?;
+    // 把缩放注入软后端：`TextMetrics::scale()` 与 per-text 字号都靠它。
+    soft.set_dpi_scale(dpi_scale);
+    Ok(soft)
+}
+
 impl PlatformRuntime for X11Runtime {
     fn run(
         &mut self,
@@ -39,14 +71,20 @@ impl PlatformRuntime for X11Runtime {
 
         let started = std::time::Instant::now();
 
-        // **DPI 缩放（本版新增）**：先连一次服务器读屏幕物理尺寸，推 `scale`。
+        // **DPI 缩放**：先连一次服务器，读 **XSettings**（桌面设置服务）→ 根窗口
+        // `Xft.dpi`（Xresources）→ 屏幕毫米尺寸，按优先级推 `scale`。
         // 为什么先探再建窗：软后端要用**物理**尺寸分配缓冲、字形引擎要用**物理**字号；
         // 这两者都得在 `X11Window::create` 之前就定下来（它只接收已建好的 soft）。
-        //
-        // 覆盖率：`Y901_X11_SCALE` / `Y901_DPI` 可覆盖；否则按 mm 推并吸附到 0.25 档位
-        // （Xvfb 默认 ≈100 DPI → 1.0，所以既有 Linux 像素证据不受影响）。
         let dpi_scale = match crate::conn::Connection::connect(&display) {
-            Ok(conn) => crate::window::dpi_scale_from_screen(conn.info()),
+            Ok(mut conn) => {
+                let info = conn.info().clone();
+                let xsettings = crate::window::read_xsettings(&mut conn, 0);
+                let xft_dpi = crate::window::read_xft_dpi(&mut conn, info.root);
+                if let Some(x) = xsettings {
+                    eprintln!("[y901] XSettings：{x:?}");
+                }
+                crate::window::dpi_scale_with_xsettings(&info, xsettings, xft_dpi)
+            }
             Err(e) => {
                 eprintln!("[y901] 读取 X11 屏幕信息失败（{e}），DPI 按 1.0 处理");
                 1.0
@@ -58,17 +96,7 @@ impl PlatformRuntime for X11Runtime {
         // 字形引擎：Linux 上只有自研引擎（没有 DirectWrite）。
         // 字号同样要乘 `dpi_scale`：引擎按**物理像素**光栅化，逻辑字号由 UI 层消费。
         let font = options.font.clone().unwrap_or_default();
-        let physical_font = (font.size * dpi_scale).max(1.0);
-        let (cw, ch) = y901_render::cell_metrics_for(physical_font);
-        let cell = Size::new(cw, ch);
-        let engine: Box<dyn y901_render::FontEngine> = Box::new(MyFontEngine::new(
-            y901_render::load_font(&y901_render::resolve_font_path(&font.family))?,
-            physical_font,
-            cell,
-        )?);
-        let mut soft = SoftBackend::new(width.max(1), height.max(1), engine, cell, options.theme)?;
-        // 把缩放注入软后端：`TextMetrics::scale()` 与 per-text 字号都靠它。
-        soft.set_dpi_scale(dpi_scale);
+        let soft = build_soft(width, height, dpi_scale, &font, options.theme)?;
 
         let mut window = X11Window::create(crate::window::CreateArgs {
             display: &display,
@@ -78,6 +106,22 @@ impl PlatformRuntime for X11Runtime {
             soft,
             fullscreen: options.fullscreen,
         })?;
+
+        // **运行期跟随桌面缩放**：把"按新缩放建一份软后端"的配方交给窗口。
+        // 不注入时窗口根本不查设置（默认零开销）；注入后每秒最多查一次。
+        {
+            let logical = (options.width as f32, options.height as f32);
+            let font = font.clone();
+            let theme = options.theme;
+            window.set_rescale_factory(
+                dpi_scale,
+                Box::new(move |scale: f32| {
+                    let w = ((logical.0 * scale).round() as u32).clamp(1, u16::MAX as u32);
+                    let h = ((logical.1 * scale).round() as u32).clamp(1, u16::MAX as u32);
+                    build_soft(w, h, scale, &font, theme)
+                }),
+            );
+        }
         eprintln!(
             "[y901] X11 后端就绪：display={display} 逻辑 {}x{}（物理 {width}x{height}，scale={dpi_scale:.2}），字形引擎=自研 TTF",
             options.width, options.height

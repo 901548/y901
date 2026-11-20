@@ -864,3 +864,25 @@ pub fn encode_get_property(
     put_u32(&mut out, long_length);
     out
 }
+
+/// 编码 `GetSelectionOwner`（opcode 23）—— 查某个 selection 当前归谁。
+///
+/// 用途：XSettings 协议里 `_XSETTINGS_S0` 这个 selection 的 owner 就是
+/// “设置管理器”的窗口，真正的键值写在它的 `_XSETTINGS_SETTINGS` 属性上。
+/// 没有 owner（无桌面设置服务，如裸 Xvfb）时服务端回 `owner = 0`。
+///
+/// 布局（小端序）：
+/// ```text
+/// 0   : opcode 23
+/// 1   : unused 0
+/// 2-3 : length = 2
+/// 4-7 : selection atom
+/// ```
+pub fn encode_get_selection_owner(selection: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8);
+    out.push(opcode::GET_SELECTION_OWNER);
+    out.push(0);
+    put_u16(&mut out, 2);
+    put_u32(&mut out, selection);
+    out
+}
