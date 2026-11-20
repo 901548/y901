@@ -59,6 +59,12 @@ all dependencies must have a version requirement specified when packaging.
 dependency `y901-backend-web` does not specify a version
 ```
 
+> **categories 不是自由文本**：crates.io 只接受固定列表（`GET https://crates.io/api/v1/categories`）。
+> 写错会得到 `400 Bad Request: The following category slugs are not currently supported`
+> —— 这个错误只在**上传阶段**出现，`cargo package` 完全不拦。实测合法且相关的：
+> `gui` / `graphics` / `os` / `wasm` / `command-line-utilities`。
+> `keywords` 才是自由的（≤5 个，字母数字与 `-_`）。
+
 > 规则：**任何 path 依赖都必须同时写 `version`**，包括 `target.'cfg(...)'` 段里的。
 > 打包时 path 会被剥掉、只留版本约束，所以缺 version 的依赖根本没法发布。
 > 已修（v0.2.5）。
