@@ -236,6 +236,9 @@ fn assert_size(size: f32) {
 
     let node = tree.rect_of("t").expect("text node");
     let expected_margin = (size * 1.2 - size).max(2.0).min(size);
+    // **O(1) 快路径不能把 per-node 边距弄丢**：无变化时再 layout 一次会走
+    // `layout_tree` 的 is_fresh 快路径（skipped=true），此时不应重采、更不应清零边距。
+    tree.layout(Size::new(W as f32, H as f32), &metrics);
 
     // 前置：下伸笔画真的画到了节点矩形之外（否则用例证明不了任何事）
     let below = (node.bottom() as u32 + 1).min(H - 1);
@@ -396,6 +399,122 @@ fn mixed_size_rich_text_invalidate_matches_full_redraw() {
         diff, 0,
         "富文本节点级标脏的局部重绘与整窗重绘不一致：{diff} 像素不同，首个差异 {first:?} \
          （节点 {node:?}，脏区 {dirty_rects:?}）"
+    );
+}
+
+/// 两行宿主：第一个子节点是 48px 富文本，第二个是 16px 标签，**紧贴其下**。
+///
+/// 目的：富文本的下伸笔画会越出自己的 rect、压到下面那个标签的脏区里。
+/// 只按 rect 做绘制裁剪时，标签的局部刷新会把那几行笔画擦掉、却不重绘富文本
+/// （`StyledText` 放宽纵向裁剪后才暴露的邻居擦除问题）。
+struct TwoRows {
+    rect: Rect,
+    children: Vec<Box<dyn Widget>>,
+}
+
+impl Widget for TwoRows {
+    fn id(&self) -> &str {
+        "two-rows"
+    }
+    fn measure(
+        &mut self,
+        _m: &dyn TextMetrics,
+        c: Constraints,
+        _cache: &mut y901_ui::layout::LayoutCache,
+    ) -> Size {
+        c.constrain(Size::new(W as f32, H as f32))
+    }
+    fn arrange(&mut self, r: Rect, m: &dyn TextMetrics, cache: &mut y901_ui::layout::LayoutCache) {
+        self.rect = r;
+        let loose = Constraints::loose(Size::new(200.0, H as f32));
+        let top = self.children[0].measure(m, loose, cache);
+        self.children[0].arrange(Rect::new(10.0, 10.0, top.w, top.h), m, cache);
+        let below = self.children[1].measure(m, loose, cache);
+        // 紧贴富文本下方（留 5px）：标签脏区上边界 = 5 + 2·边距，会落在
+        // "富文本 rect 之外、墨迹之内"那条带里。
+        self.children[1].arrange(
+            Rect::new(10.0, 10.0 + top.h + 5.0, below.w, below.h),
+            m,
+            cache,
+        );
+    }
+    fn rect(&self) -> Rect {
+        self.rect
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        Some(&mut self.children)
+    }
+    fn event(&mut self, _c: &mut EventCtx, _e: &y901_ui::UiEvent) -> EventResult {
+        EventResult::Ignored
+    }
+    fn render(&mut self, _c: &mut dyn RenderCtx) {}
+    fn semantics(&self) -> Semantics {
+        Semantics::default()
+    }
+}
+
+#[test]
+fn neighbour_invalidate_does_not_erase_overhanging_ink() {
+    let metrics = ScaledMono;
+    let mut rich = StyledText::new("rich");
+    rich.push_paragraph(vec![Span::styled("jjjj", InlineStyle::size(48.0))]);
+    let mut tree = UiTree::new(Box::new(TwoRows {
+        rect: Rect::ZERO,
+        children: vec![
+            Box::new(rich),
+            Box::new(TextLabel::new("below", "below").size(16.0)),
+        ],
+    }));
+    tree.layout(Size::new(W as f32, H as f32), &metrics);
+
+    let mut canvas = Canvas::new(W, H, BG);
+    tree.invalidate_all();
+    tree.render(&mut canvas);
+
+    let rich_rect = tree.rect_of("rich").expect("rich");
+    let below_rect = tree.rect_of("below").expect("below");
+
+    // 只标下面那个标签：脏区上边界必须落在"富文本 rect 之下、墨迹之内"。
+    tree.invalidate("below");
+    let dirty = tree.dirty().bounds().expect("应有脏区");
+    assert!(
+        dirty.y > rich_rect.bottom(),
+        "前置失败：脏区没有落在富文本矩形之外（dirty={dirty:?}, rich={rich_rect:?}）"
+    );
+    assert!(
+        dirty.y < rich_rect.bottom() + 10.0,
+        "前置失败：脏区离富文本太远，测不到墨迹重叠（dirty={dirty:?}）"
+    );
+
+    let rects = tree.dirty().rects().to_vec();
+    let mut partial = canvas.restored();
+    for r in &rects {
+        partial.clear(*r);
+    }
+    tree.render(&mut partial);
+
+    // 与"同一状态整窗重绘"比对：脏区里被擦掉的富文本笔画必须被重绘回来。
+    let mut full = Canvas::new(W, H, BG);
+    tree.invalidate_all();
+    tree.render(&mut full);
+
+    let mut diff = 0usize;
+    let mut first = None;
+    for i in 0..partial.px.len() {
+        if partial.px[i] != full.px[i] {
+            diff += 1;
+            if first.is_none() {
+                first = Some((i as u32 % partial.w, i as u32 / partial.w));
+            }
+        }
+    }
+    assert_eq!(
+        diff, 0,
+        "邻居局部刷新擦掉了越界的墨迹：{diff} 像素不同，首个差异 {first:?} \
+         （rich={rich_rect:?}, below={below_rect:?}, dirty={dirty:?}）"
     );
 }
 

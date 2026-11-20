@@ -172,8 +172,8 @@ fn scan_build_rs(path: &Path, violations: &mut Vec<String>) {
 
 /// 对**一个独立仓库**做完整审计，返回违规清单。
 ///
-/// 为什么抽成函数：Helm-Y901 是**另一个独立工程**，
-/// 它的依赖树里塞进 `ring` 同样是违规，而守卫应当同时测两个仓。
+/// 为什么抽成函数：依赖树解析与审计分开，`audit` 复用已解析的名字集合，
+/// 避免同一棵树被解析两次（`resolve_crate_names` 会跑 cargo，代价不低）。
 fn audit(manifest_dir: &Path) -> (usize, usize, Vec<String>) {
     let names = resolve_crate_names(manifest_dir);
     audit_with_names(manifest_dir, &names)

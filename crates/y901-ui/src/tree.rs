@@ -1664,8 +1664,12 @@ impl UiTree {
             self.snapshot_rects()
         };
         crate::layout::layout_tree(self.root.as_mut(), viewport, metrics, &mut self.cache);
-        // per-node 墨迹边距：布局刚递归过整棵树，顺手采一遍（零额外遍历）。
-        self.collect_ink_margins(metrics);
+        // per-node 墨迹边距：只有**真的重排**时才重采。
+        // 若放在 `is_fresh` 快路径外面，每帧 layout 都会白走一遍全树（O(n)），
+        // 与"约束未变时 layout 是 O(1)"的契约冲突。
+        if !self.layout_stats().skipped {
+            self.collect_ink_margins(metrics);
+        }
 
         // 浮层摆放：先量尺寸（浮层自己决定内容高），再用 `place_popup`
         // 把它放在锚点旁且不超出视口。绘制与命中都用这个 rect。
@@ -1930,6 +1934,7 @@ impl UiTree {
                     this.root.as_mut(),
                     ctx,
                     &dirty,
+                    &this.node_ink_margin,
                     paint_all,
                     &mut path,
                     &mut rects,
@@ -1980,6 +1985,7 @@ impl UiTree {
                             popup.widget.as_mut(),
                             ctx,
                             &dirty,
+                            &this.node_ink_margin,
                             paint_all,
                             &mut popup_path,
                             &mut popup_rects,
@@ -2000,6 +2006,7 @@ impl UiTree {
                             popup.widget.as_mut(),
                             ctx,
                             &dirty,
+                            &this.node_ink_margin,
                             paint_all,
                             &mut popup_path,
                             &mut popup_rects,
@@ -2936,6 +2943,10 @@ fn render_pass(
     node: &mut dyn Widget,
     ctx: &mut dyn RenderCtx,
     dirty: &DirtyRegion,
+    // per-node 墨迹边距：判断"要不要重绘"时必须用 **rect ∪ 墨迹**。
+    // 只看 rect 会让"墨迹压到脏区里的邻居"被漏画：脏区清屏把它的笔画擦掉，
+    // 而它自己又没被重绘 → 局部刷新后笔画消失（StyledText 放宽裁剪后才暴露）。
+    ink: &HashMap<u64, f32>,
     // `paint_all`：**强制整树绘制**。局部重绘时画面被剪到脏区，脏区内必须按
     // **完整绘制顺序**重画（父背景 → 子 → 文字），否则会出现"父背景没画"的黑块。
     paint_all: bool,
@@ -2951,7 +2962,22 @@ fn render_pass(
     // **零尺寸节点不画**：`paint_all`（全量帧）会无条件调用 `render`，而零矩形节点画不出任何
     // 有效像素——却可能触发除零或产生空裁剪下的异常绘制。组件侧只有一半实现了 `rect.w <= 0` 早退，
     // 在这里统一兜住，比逐个组件补防御更可靠（不改 Widget trait）。
-    if (paint_all || node.needs_paint(dirty)) && !node.rect().is_empty() {
+    let node_rect = node.rect();
+    let margin = ink
+        .get(&crate::layout::id_key(node.id()))
+        .copied()
+        .unwrap_or(0.0);
+    // `needs_paint` 只看 rect；这里补一条"墨迹与脏区相交"的判据。
+    // 扩展量很小（通常 2~14px），不会明显增加绘制量，但能消除邻居擦除笔画的问题。
+    let ink_hits = margin > 0.0
+        && !node_rect.is_empty()
+        && dirty.intersects(Rect::new(
+            node_rect.x - margin,
+            node_rect.y - margin,
+            node_rect.w + 2.0 * margin,
+            node_rect.h + 2.0 * margin,
+        ));
+    if (paint_all || node.needs_paint(dirty) || ink_hits) && !node_rect.is_empty() {
         // 诊断开关：按**真实绘制顺序**打印每个节点的 id/矩形/裁切，
         // 用于定位"文字被后画的背景盖掉"这类问题。
         if std::env::var_os("Y901_PAINT_TRACE").is_some() {
@@ -2984,9 +3010,9 @@ fn render_pass(
     for c in node.children() {
         rects.push(c.rect());
     }
-    let node_rect = node.rect();
+    let parent_rect = node.rect();
     for r in rects.iter() {
-        clips.push(node.children_clip(*r).map(|c| c.intersect(node_rect)));
+        clips.push(node.children_clip(*r).map(|c| c.intersect(parent_rect)));
     }
     let count = clips.len() - base;
 
@@ -2998,7 +3024,16 @@ fn render_pass(
                 ctx.push_clip(c);
             }
             path.push(i);
-            render_pass(child.as_mut(), ctx, dirty, paint_all, path, rects, clips);
+            render_pass(
+                child.as_mut(),
+                ctx,
+                dirty,
+                ink,
+                paint_all,
+                path,
+                rects,
+                clips,
+            );
             path.pop();
             if child_clip.is_some() {
                 ctx.pop_clip();

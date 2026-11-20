@@ -47,7 +47,7 @@
 **要真正清掉，需要**（未执行）：
 
 1. 允许网络，用 `cargo update --precise` 重新解析整图；或
-2. 找到引入它的 manifest（可能在 `Helm` 侧而非本仓库），移除该依赖后再 update；或
+2. 找到引入它的 manifest（可能来自本仓库之外的工程），移除该依赖后再 update；或
 3. 手动删除 lock 条目并 `cargo build` 让 cargo 重新生成（需网络校验）。
 
 > **当前决策**：接受 lock 里的残留（不可达，不参与编译）。有网络环境时可用 `cargo update --workspace`

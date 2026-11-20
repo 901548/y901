@@ -47,7 +47,7 @@ if ($Check) {
     # 它和 passed 是两个独立的派生量 —— 只校准 passed 会留下"passed 对了、目标数停在旧值"的漂移。
     $targets  = if ($numbersFromFile.ContainsKey('targets'))  { $numbersFromFile['targets'] }  else { -1 }
     # Linux 计数是**独立文件**（Windows 跑不出 Linux 的数）：只读它来校验文档里的 Linux 行，
-    # 这样"Linux 行整行豁免"就只剩 Helm（外部仓）一处。
+    # 这样"Linux 行整行豁免"这种偷懒做法就不需要了。
     $linuxNumbers = @{}
     $linuxPath = Join-Path $root 'docs\evidence\linux-numbers.txt'
     if (Test-Path $linuxPath) {
@@ -190,7 +190,7 @@ foreach ($f in $docFiles) {
         }
         # 语义规则也要遵守豁免：否则 "Linux 默认测试 881" 会被 `默认测试…passed` 规则
         # 当成 Windows 口径报 stale（而它本来就是另一台机器的数）。
-        $ruleExempt = 'Linux|Helm|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
+        $ruleExempt = 'Linux|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
         foreach ($line in ($t -split "`n")) {
             if ($line -match $ruleExempt) { continue }
             foreach ($rule in $rules) {
@@ -213,7 +213,7 @@ foreach ($f in $docFiles) {
         )
         # 与通用兜底同一套豁免：文档里**举例说明**旧 bug 时会写出 scar 形态本身，
         # 那种行必须显式标记（`<!-- counts-exempt -->` 或 历史/当轮），否则无法描述问题。
-        $scarExempt = 'Linux|Helm|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
+        $scarExempt = 'Linux|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
         foreach ($line in ($t -split "`n")) {
             if ($line -match $scarExempt) { continue }
             foreach ($scar in $scarRules) {
@@ -252,11 +252,11 @@ foreach ($f in $docFiles) {
         # 兜底规则：**含计数语义的行里，所有三位数都必须是当前计数之一**。
         # 用三位数是刻意的：避开年份（4 位）、哈希（0x… 被词边界排除）和小数。
         # 明确不是计数的按后缀排除：百分比 / 尺寸 / 像素 / 颜色数。
-        # 平台相关（Linux/Helm）与历史口径的行必须**在文档里写明标记**才豁免
-        # （Linux / Helm / 历史 / 旧口径 / 当轮 / `<!-- counts-exempt -->`）——
+        # 平台相关（Linux）与历史口径的行必须**在文档里写明标记**才豁免
+        # （Linux / 历史 / 旧口径 / 当轮 / `<!-- counts-exempt -->`）——
         # 豁免规则本身也要可审计，不能藏在脚本里。
         $countKeywords = '测试|passed|ignored|基线|项测试|include[-_ ]?ignored|含 ignore'
-        $exemptMarkers = 'Linux|Helm|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
+        $exemptMarkers = 'Linux|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
         $allowed = @($passed, $ignored, $baseline, $targets, $includePassed) | Where-Object { $_ -ge 0 }
         foreach ($line in ($t -split "`n")) {
             if ($line -notmatch $countKeywords) { continue }
@@ -278,7 +278,7 @@ foreach ($f in $docFiles) {
     }
     # **不做全文 "数字 + passed/failed/ignored" 替换**：
     # 那会把散文里与本仓全局计数无关的数字一并改掉。
-    # 实例（已发生）："Helm `cargo test` 230 passed / 0 failed / 3 ignored"
+    # 实例（已发生）：外部工程的一行 "230 passed / 0 failed / 3 ignored"
     # 被改成 746 / 0 / 58；"real_window 从 11 passed 变 6 failed" 被改成 746 / 0。
     # 如今只改**加粗形式**（`**N** passed`）与带明确锚词的行；
     # 散文里裸写的 "230 passed" 不再被碰。
@@ -320,9 +320,9 @@ foreach ($f in $docFiles) {
     # 非加粗的 "N passed / M failed / K ignored" 与 "N 个测试目标"（README 的构建块就是这种写法）。
     #
     # **逐行做，并且跳过带平台/历史标记的行**：全局替换会把
-    # "Linux 878 passed / 0 failed / 27 ignored" 和 "Helm 230 passed / 0 failed / 3 ignored"
+    # "Linux 878 passed / 0 failed / 27 ignored" 与某外部工程的 "230 passed / 0 failed / 3 ignored"
     # 一起改成 Windows 口径 —— 那是**错误的修正**，比不修更糟。
-    $exempt = 'Linux|Helm|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
+    $exempt = 'Linux|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
     $t = [regex]::Replace($t, '(?m)^.*$', {
         param($line)
         $x = $line.Value

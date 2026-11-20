@@ -2,17 +2,17 @@
 
 生成时间：2026-11-02
 命令：`cargo test --workspace -- --include-ignored`
-日志：`docs/evidence/correctness/final-760-include-ignored.log`（**历史记录**，文件名沿用旧口径 760）。
-当前实测口径（2026-11-19）：默认测试 **983 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1044 passed / 0 failed**。唯一数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。
+日志：见下文“双平台验证矩阵”一节引用的证据文件（历史日志已随旧口径清理）。
+当前实测口径（2026-11-19）：默认测试 **984 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1045 passed / 0 failed**。唯一数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **983 passed / 0 failed / 61 ignored** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **984 passed / 0 failed / 61 ignored** |
 | `cargo test --workspace --offline -- --include-ignored` | **1043 passed / 0 failed** |
 
-`include_ignored=1044`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
+`include_ignored=1045`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -54,7 +54,7 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **983 passed / 0 failed / 61 ignored**（150 个测试目标） |
+| 默认测试 | **984 passed / 0 failed / 61 ignored**（150 个测试目标） |
 | `--include-ignored` | **1043 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |

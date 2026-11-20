@@ -38,7 +38,7 @@ pub fn is_supported() -> bool {
 /// 本平台不支持时给出的统一提示。
 #[cfg(not(target_os = "windows"))]
 const UNSUPPORTED: &str = "当前平台不支持密码存储（不会以明文保存）。\
-请使用 SSH 密钥，或在启动应用前设置环境变量 HELM_SSH_PASSWORD。";
+请使用 SSH 密钥，或由应用在启动时自行注入密码。";
 
 /// 加密一段明文，返回密文字节。
 ///
@@ -169,10 +169,7 @@ mod tests {
         if !is_supported() {
             // 这不是"跳过"，而是断言本平台的**正确行为**：明确报错，不降级
             let e = encrypt(b"secret").expect_err("不支持的平台必须返回 Err");
-            assert!(
-                e.contains("HELM_SSH_PASSWORD"),
-                "错误提示要指出替代方案：{e}"
-            );
+            assert!(e.contains("SSH 密钥"), "错误提示要指出替代方案：{e}");
             return;
         }
         let plain = b"sk-1234567890abcdef";

@@ -2,7 +2,7 @@
 
 - **HEAD**: 见 `git log -1`（v0.2.2；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收 + X11 DPI）
 - **tags**: v0.1.0 ~ **v0.2.2**（v0.2.0 含破坏性变更；v0.2.1 / v0.2.2 均为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md` / `RELEASE_NOTES_v0.2.2.md`）
-- **测试**: `passed=983` / `ignored=61` / `include_ignored=1044`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=984` / `ignored=61` / `include_ignored=1045`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -67,7 +67,7 @@
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***983** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***984** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -449,16 +449,11 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 - **审查报告**：12 项可追踪并已处理；11 项原始报告未落盘（见上方更正）
 - **SAFETY 100% 调用点覆盖**（d3d11 / font / window）+ vtable 契约 + context 三段式
 - **文本缩放**（CPU + D3D）与**图片 mipmap LOD** 均有像素/解析真值验证
-- **去 AI 完成**（Y901 + Helm-Y901 两仓）：
+- **去 AI 完成**（Y901 本仓）：
   - Y901 主仓：`7062463` 删除 `y901-agent` / `y901-mcp`，`28ffc88` 清 AI 痕迹；
-  - Helm-Y901（独立仓）：删 `y901-agent` 依赖；`host.rs` 的 `Policy` 是死字段（无读者），
-    删字段 + getter；`terminal_bridge.rs` 的 2 条测试改用本地 `dispatch_type` 辅助
-    （`UiTree::set_focus` + `dispatch_to(UiEvent::Text)`，替代已删除的 `dispatch_request`）；
-    `no_c_deps` 守卫恢复为"必须通过"（删跳过分支 + `deleted_local_dependency` + `DELETED_LOCAL_CRATES`）；
-  - 顺带修：Helm 的 `Options` 缺 `fullscreen` 字段（Y901 侧加字段后未同步，
-    被 `y901-agent` 缺失的编译错误掩盖），补了 3 处 `fullscreen: false`；
-  - 验证：Helm `cargo test` 230 passed / 0 failed / 3 ignored；Y901 `no_c_deps` 2 passed ——
-    **Helm 侧改动已应用，等待用户 commit**（Helm 工作区当前有 6 个文件待提交）。
+  - 业务工程已拆分为**独立仓库**，不在本仓范围内；本仓只保留零 C 依赖守卫
+    （`crates/y901-shell/tests/no_c_deps.rs`，见 `docs/ZERO_C_PROOF.md`）。
+  - 验证：`no_c_deps` 守卫通过（0 违规）。
 
 - **`sync_interval` 语义漏洞已修**：`Gfx::present` 之前写死 0，交换链无法遵守 vsync；
   现为参数，默认路径 `render_inner(tree, 1)` 由结构化测试钉死
@@ -528,7 +523,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - 已验证（2026-11-19，CentOS 7.9 虚拟机 + rustc 1.92）：
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **884 passed / 0 failed / 27 ignored**
   （150 个测试目标）。证据：[linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
-  与 Windows 的 983/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 984/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
 - **上一轮仅剩的两条红（已修）**：`y901-extras` 的 `sgr_reverse` 曾取"单元格右上角"像素
   断言精确 RGB，前提是 Windows 的 Segoe UI 字形不覆盖那个采样点；Linux 回退到
   DejaVuSans 后读到"前景 × 背景"的混合值（182,186,195 vs 期望 230,235,245）。
@@ -570,8 +565,8 @@ cargo test --workspace --no-fail-fast 2>&1 \
 | 手写语义规则 | 保留：`**N** passed/failed/ignored`、`基线 **N**`、`include-ignored: **N**`、`` `key=N` `` |
 | **通用兜底** | 含 `测试 / passed / ignored / 基线 / 项测试 / include-ignored` 的行里，**每个三位数**必须是 `passed / ignored / targets / baseline / include_ignored` 之一 |
 | 非计数后缀豁免 | 紧跟 `% / × / x / px / DPI / 色 / 点 / 个像素` 的数字按"不是计数"跳过（如 `125%`、`400×220`、`1039 色`） |
-| 平台/历史豁免 | 行内显式出现 `Linux / Helm / 历史 / 旧口径 / 当轮` 或 `<!-- counts-exempt -->` 才豁免 |
-| 反向写入 | sync 的自动改写**逐行**进行并遵守同一套豁免，绝不把 Linux/Helm 的数改成 Windows 口径 |
+| 平台/历史豁免 | 行内显式出现 `Linux / 历史 / 旧口径 / 当轮` 或 `<!-- counts-exempt -->` 才豁免；Linux 行另有独立数据源逐数校验 |
+| 反向写入 | sync 的自动改写**逐行**进行并遵守同一套豁免，绝不把 别处口径的数改成 Windows 口径 |
 
 新增 `targets=` 字段（`test result:` 行数，当前 150）：`passed` 与"N 个测试目标"
 是两个独立派生量，只校准前者会留下"通过数对了、目标数停在旧值"的漂移。
@@ -582,8 +577,8 @@ cargo test --workspace --no-fail-fast 2>&1 \
 
 **仍存在的已知限制**（诚实记录）：
 
-- **Helm 行仍整行豁免**：那是外部仓（`F:\Helm-Y901`），本仓既跑不了它的测试，
-  也不该在它的发布节奏里制造耦合；它的计数由 Helm 自己的 CI 负责。
+- **历史口径的数字不由检查器校验**：文档里写 "历史 / 当轮" 的行会豁免，
+  它们不会随代码自动纠偏（这是刻意的：历史就该保持原值）。
 - `Guide` 索引自动生成仍未做。
 
 **Linux 行已不再豁免**（本轮改进）：新增独立数据源
@@ -611,7 +606,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 |---|---|---|---|
 | 1 | **IME 两窗口同时组字不串** | 需真实 IME 环境 | 人工：两窗口各打一半中文，看组字条 |
 | 2 | **present 的设备丢失场景** | 真实设备丢失无法构造 | 已有 `Y901_SIMULATE_PRESENT_FAIL` 验证 **Err 传播路径**（非设备丢失本身） |
-| 3 | **Helm 多窗口拆分** | 等产品决策（标签集是否共享） | 先定义标签集语义再动手 |
+| 3 | **多窗口支持** | 3~5 天大改动，需先定标签集/焦点语义 | 先写设计文档再动手 |
 
 ### 测试开关清单（方便后来者）
 
@@ -635,15 +630,8 @@ cargo test --workspace --no-fail-fast 2>&1 \
   当前 `MAX_DIRTY_RECTS = 16` 是**替 D3D 兜底**的临时方案 —— 它不是设计，是巧合地正确。
 - `DirtyRegion::add` 的合并判据已改为"仅真实重叠"（`overlaps`），零重叠（含边/角相贴）不再合并。
   这是唯一不依赖后端常数即可确定净收益的改动。
-- **跨仓迁移债：`F:\Helm-Y901` 仍依赖已删除的 `y901-agent`**（去 AI 阶段 1 物理删除）。
-  - 后果：`crates/y901-app/tests/no_c_deps.rs` 的兄弟仓守卫 `sibling_repo_helm_has_no_c_dependencies`
-    对它跑 `cargo tree` 会失败。
-  - 现状：该守卫已改为**特定错误 + 显式打印 + 跳过**——仅当 stderr 同时满足
-    "`failed to read`/`failed to load source for dependency`"、"路径指向本仓 `crates/`"、
-    "命中的 crate 属于 `y901-agent`/`y901-mcp`" 三个条件时才跳过；其他任何 `cargo tree` 失败仍然红。
-    跳过时打印：`[守卫] Helm-Y901 依赖树无法解析：依赖的本地 crate 已被删除（y901-agent）`。
-  - TODO：**下一轮 demo 会话**迁移 `F:\Helm-Y901` 去除 agent/mcp 依赖后，
-    删除 `no_c_deps.rs` 里的跳过分支（代码中已标注 `TODO(去 AI 阶段 3)`），恢复对 Helm 的完整零 C 依赖审计。
+- **零 C 依赖守卫只覆盖本仓**：业务工程已拆分为独立仓库，它的依赖审计由该仓自己负责。
+  本仓守卫（`crates/y901-shell/tests/no_c_deps.rs`）解析失败会**报错而不是静默绿**。
 
 
 - **文档债：`docs/FRAMEWORK.md` 的"需要真机的测试"一节陈旧**（去 AI 阶段 4b 记录）。

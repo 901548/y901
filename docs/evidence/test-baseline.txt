@@ -43,4 +43,8 @@
 #   default `cargo test --workspace --no-fail-fast`   passed 983, failed 0, ignored 61 / 150 个测试目标
 #   `--include-ignored`                               passed 1044, failed 0
 #   (Windows 侧新增：富文本像素回归 1 条；X11 的 2 条 DPI 单测只在 Linux 编译)
-983
+# Measured at 2026-11-20 (v0.2.3: ink-aware culling + Helm split cleanup):
+#   default `cargo test --workspace --no-fail-fast`   passed 984, failed 0, ignored 61 / 150 个测试目标
+#   `--include-ignored`                               passed 1045, failed 0
+#   (新增：邻居越界墨迹不被局部刷新擦除的回归 1 条)
+984

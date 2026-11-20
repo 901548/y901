@@ -1,8 +1,0 @@
-[y901] MIT-SHM 已启用（1200x800，共享内存 3840000字节）
-[y901] 光标创建失败（CreateGlyphCursor 报错：[X11Error { code: 7, sequence: 16, bad_value: 2097220, minor_opcode: 0, major_opcode: 94 }, X11Error { code: 7, sequence: 17, bad_value: 2097304, minor_opcode: 0, major_opcode: 94 }, X11Error { code: 7, sequence: 18, bad_value: 2097212, minor_opcode: 0, major_opcode: 94 }]），使用默认箭头
-[y901] X11 后端就绪：display=:99 1200x800，字形引擎=自研 TTF
-[connect] tab-0 connecting to localhost (mock echo) (session helm-tab-0)
-[y901] first frame ready in 65.3ms：1200x800，非背景像素 947416 (98.7%)，独立颜色 1039种
-[connect] tab-0 connected: localhost (mock echo)
-[tabhost] file tab added: tab-1
-[tabhost] AI tab added: tab-2
