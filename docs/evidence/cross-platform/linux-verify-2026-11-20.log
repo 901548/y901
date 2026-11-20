@@ -61,7 +61,7 @@ EXIT_CLIPPY_X11=0
 === STROKE ===
 $ cargo test -p y901-render --test stroke_round_aa --offline
     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.48s
-     Running tests/stroke_round_aa.rs (/home/y901548/y901-target/debug/deps/stroke_round_aa-6d77c62ea0412b10)
+     Running tests/stroke_round_aa.rs (/home/<user>/y901-target/debug/deps/stroke_round_aa-6d77c62ea0412b10)
 
 running 1 test
 test rounded_stroke_is_antialiased_and_bounded ... ok
@@ -73,7 +73,7 @@ EXIT_STROKE=0
 === SGR_REVERSE ===
 $ cargo test -p y901-extras --test sgr_reverse --offline
     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.59s
-     Running tests/sgr_reverse.rs (/home/y901548/y901-target/debug/deps/sgr_reverse-b1a9cef950386222)
+     Running tests/sgr_reverse.rs (/home/<user>/y901-target/debug/deps/sgr_reverse-b1a9cef950386222)
 
 running 3 tests
 test selection_on_top_of_sgr7_cancels_out ... ok

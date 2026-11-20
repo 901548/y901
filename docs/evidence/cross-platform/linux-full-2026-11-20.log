@@ -1,7 +1,7 @@
    Compiling y901-backend-x11 v0.2.5 (/mnt/f/Y901/crates/y901-backend-x11)
    Compiling y901-shell v0.2.5 (/mnt/f/Y901/crates/y901-shell)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 4.09s
-     Running unittests src/lib.rs (/home/y901548/y901-target/debug/deps/y901_backend_web-e3ae43e1edfa0eb3)
+     Running unittests src/lib.rs (/home/<user>/y901-target/debug/deps/y901_backend_web-e3ae43e1edfa0eb3)
 
 running 36 tests
 test cursor_write_tests::changed_value_is_written ... ok
@@ -43,7 +43,7 @@ test present::tests::swaps_channels_without_reordering_rows ... ok
 
 test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/bindings_golden.rs (/home/y901548/y901-target/debug/deps/bindings_golden-d1363335a36de920)
+     Running tests/bindings_golden.rs (/home/<user>/y901-target/debug/deps/bindings_golden-d1363335a36de920)
 
 running 5 tests
 test every_quoted_js_name_is_accounted_for ... ok
@@ -54,157 +54,157 @@ test dom_type_names_are_pinned ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (/home/y901548/y901-target/debug/deps/y901_backend_win32-e0d773ad49e45c92)
+     Running unittests src/lib.rs (/home/<user>/y901-target/debug/deps/y901_backend_win32-e0d773ad49e45c92)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/backend_parity.rs (/home/y901548/y901-target/debug/deps/backend_parity-17d1574c119f30f9)
+     Running tests/backend_parity.rs (/home/<user>/y901-target/debug/deps/backend_parity-17d1574c119f30f9)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/black_screen_regression.rs (/home/y901548/y901-target/debug/deps/black_screen_regression-821057ee3cc789a1)
+     Running tests/black_screen_regression.rs (/home/<user>/y901-target/debug/deps/black_screen_regression-821057ee3cc789a1)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/d3d_image.rs (/home/y901548/y901-target/debug/deps/d3d_image-d1933d05bd9b7fed)
+     Running tests/d3d_image.rs (/home/<user>/y901-target/debug/deps/d3d_image-d1933d05bd9b7fed)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/d3d_text_scaling.rs (/home/y901548/y901-target/debug/deps/d3d_text_scaling-e7c1b3709fff4b91)
+     Running tests/d3d_text_scaling.rs (/home/<user>/y901-target/debug/deps/d3d_text_scaling-e7c1b3709fff4b91)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/font_3c_pixels.rs (/home/y901548/y901-target/debug/deps/font_3c_pixels-9ce338dd6fc3f1d8)
+     Running tests/font_3c_pixels.rs (/home/<user>/y901-target/debug/deps/font_3c_pixels-9ce338dd6fc3f1d8)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/font_m1.rs (/home/y901548/y901-target/debug/deps/font_m1-fa5f5d9b7f0d2bdc)
+     Running tests/font_m1.rs (/home/<user>/y901-target/debug/deps/font_m1-fa5f5d9b7f0d2bdc)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/font_m2.rs (/home/y901548/y901-target/debug/deps/font_m2-e517702201d7c77b)
+     Running tests/font_m2.rs (/home/<user>/y901-target/debug/deps/font_m2-e517702201d7c77b)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/font_m3_atlas.rs (/home/y901548/y901-target/debug/deps/font_m3_atlas-e70db53614d2a6b8)
+     Running tests/font_m3_atlas.rs (/home/<user>/y901-target/debug/deps/font_m3_atlas-e70db53614d2a6b8)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/font_m3_cjk.rs (/home/y901548/y901-target/debug/deps/font_m3_cjk-c9bf007d053a3feb)
+     Running tests/font_m3_cjk.rs (/home/<user>/y901-target/debug/deps/font_m3_cjk-c9bf007d053a3feb)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/font_m3_prefetch.rs (/home/y901548/y901-target/debug/deps/font_m3_prefetch-d488641815d4206d)
+     Running tests/font_m3_prefetch.rs (/home/<user>/y901-target/debug/deps/font_m3_prefetch-d488641815d4206d)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/grid_image_gpu.rs (/home/y901548/y901-target/debug/deps/grid_image_gpu-b5fb6d723c4af4c4)
+     Running tests/grid_image_gpu.rs (/home/<user>/y901-target/debug/deps/grid_image_gpu-b5fb6d723c4af4c4)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/input_events.rs (/home/y901548/y901-target/debug/deps/input_events-9c8192220580d8ab)
+     Running tests/input_events.rs (/home/<user>/y901-target/debug/deps/input_events-9c8192220580d8ab)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/opacity_parity.rs (/home/y901548/y901-target/debug/deps/opacity_parity-8b036661a390725e)
+     Running tests/opacity_parity.rs (/home/<user>/y901-target/debug/deps/opacity_parity-8b036661a390725e)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/options_wiring.rs (/home/y901548/y901-target/debug/deps/options_wiring-e0821dac243d4157)
+     Running tests/options_wiring.rs (/home/<user>/y901-target/debug/deps/options_wiring-e0821dac243d4157)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/perf_and_clip.rs (/home/y901548/y901-target/debug/deps/perf_and_clip-e8d732c9bb7915ef)
+     Running tests/perf_and_clip.rs (/home/<user>/y901-target/debug/deps/perf_and_clip-e8d732c9bb7915ef)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/perf_bench.rs (/home/y901548/y901-target/debug/deps/perf_bench-29d0e9d7b6737e78)
+     Running tests/perf_bench.rs (/home/<user>/y901-target/debug/deps/perf_bench-29d0e9d7b6737e78)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/popup_anim_d3d.rs (/home/y901548/y901-target/debug/deps/popup_anim_d3d-d009003986265ed5)
+     Running tests/popup_anim_d3d.rs (/home/<user>/y901-target/debug/deps/popup_anim_d3d-d009003986265ed5)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/present_bench.rs (/home/y901548/y901-target/debug/deps/present_bench-fde151fdda321d89)
+     Running tests/present_bench.rs (/home/<user>/y901-target/debug/deps/present_bench-fde151fdda321d89)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/render_ctx_parity.rs (/home/y901548/y901-target/debug/deps/render_ctx_parity-b307be76605827dd)
+     Running tests/render_ctx_parity.rs (/home/<user>/y901-target/debug/deps/render_ctx_parity-b307be76605827dd)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/runtime_theme_font.rs (/home/y901548/y901-target/debug/deps/runtime_theme_font-d40e7371899f39b1)
+     Running tests/runtime_theme_font.rs (/home/<user>/y901-target/debug/deps/runtime_theme_font-d40e7371899f39b1)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/snapshot_harness.rs (/home/y901548/y901-target/debug/deps/snapshot_harness-69e88aab31a400e7)
+     Running tests/snapshot_harness.rs (/home/<user>/y901-target/debug/deps/snapshot_harness-69e88aab31a400e7)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/soft_backend.rs (/home/y901548/y901-target/debug/deps/soft_backend-5a84779369f4fc45)
+     Running tests/soft_backend.rs (/home/<user>/y901-target/debug/deps/soft_backend-5a84779369f4fc45)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/stroke_round_parity.rs (/home/y901548/y901-target/debug/deps/stroke_round_parity-7d3b426519255d7a)
+     Running tests/stroke_round_parity.rs (/home/<user>/y901-target/debug/deps/stroke_round_parity-7d3b426519255d7a)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/tabs_transition_d3d.rs (/home/y901548/y901-target/debug/deps/tabs_transition_d3d-e7f9aeb8f3b630a4)
+     Running tests/tabs_transition_d3d.rs (/home/<user>/y901-target/debug/deps/tabs_transition_d3d-e7f9aeb8f3b630a4)
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (/home/y901548/y901-target/debug/deps/y901_backend_x11-05df79be04c00cd8)
+     Running unittests src/lib.rs (/home/<user>/y901-target/debug/deps/y901_backend_x11-05df79be04c00cd8)
 
 running 22 tests
 test ime::ibus::tests::empty_text_is_none ... ok
@@ -232,7 +232,7 @@ test conn::tests::poll_events_drains_reply_extra_data ... ok
 
 test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
 
-     Running tests/golden.rs (/home/y901548/y901-target/debug/deps/golden-f89a15975e67651d)
+     Running tests/golden.rs (/home/<user>/y901-target/debug/deps/golden-f89a15975e67651d)
 
 running 33 tests
 test change_property_format32_divides_bytes_to_items ... ok
@@ -271,7 +271,7 @@ test special_keysyms_map_to_function_keys ... ok
 
 test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/multi_window.rs (/home/y901548/y901-target/debug/deps/multi_window-6852f6692f4484e5)
+     Running tests/multi_window.rs (/home/<user>/y901-target/debug/deps/multi_window-6852f6692f4484e5)
 
 running 2 tests
 test two_windows_receive_their_own_events ... ignored, 需要 X server + xdotool（向指定窗口注入按键）
@@ -279,7 +279,7 @@ test fullscreen_state_is_per_window_not_process_wide ... ok
 
 test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/real_window.rs (/home/y901548/y901-target/debug/deps/real_window-f07ec21bdb64e5ef)
+     Running tests/real_window.rs (/home/<user>/y901-target/debug/deps/real_window-f07ec21bdb64e5ef)
 
 running 18 tests
 test concurrent_connections_probe ... ignored, 探针：实测 Xvfb 并发连接 4 个会 RST 1 个，此行为已记录（见下方数据）
@@ -303,7 +303,7 @@ test window_implements_event_source_and_presenter ... ok
 
 test result: ok. 16 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.57s
 
-     Running unittests src/lib.rs (/home/y901548/y901-target/debug/deps/y901_core-a35a50f3fec909d3)
+     Running unittests src/lib.rs (/home/<user>/y901-target/debug/deps/y901_core-a35a50f3fec909d3)
 
 running 31 tests
 test interval::tests::adjacent_spans_merge_into_one ... ok
@@ -340,7 +340,7 @@ test interval::tests::inserting_ten_thousand_cells_keeps_one_merged_span ... ok
 
 test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (/home/y901548/y901-target/debug/deps/y901_extras-876453264288d553)
+     Running unittests src/lib.rs (/home/<user>/y901-target/debug/deps/y901_extras-876453264288d553)
 
 running 33 tests
 test palette::tests::basic_colors ... ok
@@ -379,7 +379,7 @@ test vt::tests::sgr_truecolor_roundtrip ... ok
 
 test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/selection_reverse.rs (/home/y901548/y901-target/debug/deps/selection_reverse-3450ec9c3ef5ca80)
+     Running tests/selection_reverse.rs (/home/<user>/y901-target/debug/deps/selection_reverse-3450ec9c3ef5ca80)
 
 running 3 tests
 test single_row_selection_reverses_only_selected_cells ... ok
@@ -388,7 +388,7 @@ test cross_row_selection_reverses_first_middle_and_last_rows_correctly ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/sgr_reverse.rs (/home/y901548/y901-target/debug/deps/sgr_reverse-ff092b6056dc0e07)
+     Running tests/sgr_reverse.rs (/home/<user>/y901-target/debug/deps/sgr_reverse-ff092b6056dc0e07)
 
 running 3 tests
 test selection_on_top_of_sgr7_cancels_out ... ok
@@ -397,7 +397,7 @@ test sgr7_swaps_default_colours_with_exact_rgb ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/sgr_reverse_indexed.rs (/home/y901548/y901-target/debug/deps/sgr_reverse_indexed-51e0d6809cdda05f)
+     Running tests/sgr_reverse_indexed.rs (/home/<user>/y901-target/debug/deps/sgr_reverse_indexed-51e0d6809cdda05f)
 
 running 7 tests
 test indexed_colour_bounds_are_well_defined ... ok
@@ -410,14 +410,14 @@ test reverse_with_bold_still_swaps_colours_and_thickens_glyphs ... ok
 
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/terminal_render_alloc.rs (/home/y901548/y901-target/debug/deps/terminal_render_alloc-5282783b0720962a)
+     Running tests/terminal_render_alloc.rs (/home/<user>/y901-target/debug/deps/terminal_render_alloc-5282783b0720962a)
 
 running 1 test
 test terminal_render_has_no_to_string ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/terminal_widget.rs (/home/y901548/y901-target/debug/deps/terminal_widget-028f3d31abef8bc5)
+     Running tests/terminal_widget.rs (/home/<user>/y901-target/debug/deps/terminal_widget-028f3d31abef8bc5)
 
 running 8 tests
 test selection_after_arrange_maps_coordinates_correctly ... ok
@@ -431,7 +431,7 @@ test widget_crate_does_not_depend_on_pty ... ok
 
 test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (/home/y901548/y901-target/debug/deps/y901_render-32e80610aa77bd4c)
+     Running unittests src/lib.rs (/home/<user>/y901-target/debug/deps/y901_render-32e80610aa77bd4c)
 
 running 80 tests
 test atlas::tests::merge_adjacent_levels ... ok
@@ -517,7 +517,7 @@ test atlas::tests::lru_evicts_when_pressure_is_high ... ok
 
 test result: ok. 79 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.05s
 
-     Running tests/cell_span_semantics.rs (/home/y901548/y901-target/debug/deps/cell_span_semantics-e272977062eca7f4)
+     Running tests/cell_span_semantics.rs (/home/<user>/y901-target/debug/deps/cell_span_semantics-e272977062eca7f4)
 
 running 4 tests
 test combining_mark_adds_no_width ... ok
@@ -527,7 +527,7 @@ test zero_width_space_has_zero_width ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/cjk_cold_start.rs (/home/y901548/y901-target/debug/deps/cjk_cold_start-90dc310ac8c9d9c7)
+     Running tests/cjk_cold_start.rs (/home/<user>/y901-target/debug/deps/cjk_cold_start-90dc310ac8c9d9c7)
 
 running 3 tests
 test cjk_500_cold_start_first_frame ... ignored, 冷启动基准：--ignored --nocapture 手动跑
@@ -536,7 +536,7 @@ test no_scaling_means_zero_mip_generation ... ignored, 冷启动基准：--ignor
 
 test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/dirty_strategy_bench.rs (/home/y901548/y901-target/debug/deps/dirty_strategy_bench-e8091fd0c8936800)
+     Running tests/dirty_strategy_bench.rs (/home/<user>/y901-target/debug/deps/dirty_strategy_bench-e8091fd0c8936800)
 
 running 3 tests
 test strategy_matrix ... ok
@@ -545,7 +545,7 @@ test calibrate_c_pixel ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
 
-     Running tests/fill_rect_opaque.rs (/home/y901548/y901-target/debug/deps/fill_rect_opaque-c73cb515ea609b7f)
+     Running tests/fill_rect_opaque.rs (/home/<user>/y901-target/debug/deps/fill_rect_opaque-c73cb515ea609b7f)
 
 running 4 tests
 test fully_outside_fill_leaves_buffer_untouched ... ok
@@ -555,7 +555,7 @@ test opaque_fill_overwrites_exactly ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/font_fallback.rs (/home/y901548/y901-target/debug/deps/font_fallback-db4ff1ca5eb532d6)
+     Running tests/font_fallback.rs (/home/<user>/y901-target/debug/deps/font_fallback-db4ff1ca5eb532d6)
 
 running 2 tests
 test substitute_is_exhaustive_about_the_one_known_gap ... ok
@@ -563,14 +563,14 @@ test minus_sign_rasterizes_through_substitute ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/grid_clip.rs (/home/y901548/y901-target/debug/deps/grid_clip-30a6c51f8baf0940)
+     Running tests/grid_clip.rs (/home/<user>/y901-target/debug/deps/grid_clip-30a6c51f8baf0940)
 
 running 1 test
 test overflow_is_clipped_to_the_cell ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/image.rs (/home/y901548/y901-target/debug/deps/image-9e757f4d0f4adfa9)
+     Running tests/image.rs (/home/<user>/y901-target/debug/deps/image-9e757f4d0f4adfa9)
 
 running 6 tests
 test invalid_texture_draws_nothing ... ok
@@ -582,7 +582,7 @@ test cover_crops_sides_and_contain_letterboxes ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/image_mip_quality.rs (/home/y901548/y901-target/debug/deps/image_mip_quality-300e8860f9c6f4a3)
+     Running tests/image_mip_quality.rs (/home/<user>/y901-target/debug/deps/image_mip_quality-300e8860f9c6f4a3)
 
 running 8 tests
 test alpha_half_transparent_red_plus_blue_averages_channels ... ok
@@ -596,7 +596,7 @@ test y_stripes_shrunk_8x_do_not_alias ... ok
 
 test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/ink_bounds.rs (/home/y901548/y901-target/debug/deps/ink_bounds-7ec0b7d764b5fe16)
+     Running tests/ink_bounds.rs (/home/<user>/y901-target/debug/deps/ink_bounds-7ec0b7d764b5fe16)
 
 running 3 tests
 test ink_depth_scales_with_font_size ... ok
@@ -605,7 +605,7 @@ test report_app_font_metrics ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
-     Running tests/mip_latin.rs (/home/y901548/y901-target/debug/deps/mip_latin-95613a9c09b5998e)
+     Running tests/mip_latin.rs (/home/<user>/y901-target/debug/deps/mip_latin-95613a9c09b5998e)
 
 running 3 tests
 test latin_l1_rasterize_vs_box ... ignored, 质量对比基准：--ignored --nocapture 手动跑
@@ -614,21 +614,21 @@ test latin_l2_rasterize_vs_box ... ignored, 质量对比基准：--ignored --noc
 
 test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/mip_storage.rs (/home/y901548/y901-target/debug/deps/mip_storage-36d7f065b0648d52)
+     Running tests/mip_storage.rs (/home/<user>/y901-target/debug/deps/mip_storage-36d7f065b0648d52)
 
 running 1 test
 test latin_mip_storage_cost_and_fragmentation ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running tests/mip_target_size.rs (/home/y901548/y901-target/debug/deps/mip_target_size-8873444f11f7c2de)
+     Running tests/mip_target_size.rs (/home/<user>/y901-target/debug/deps/mip_target_size-8873444f11f7c2de)
 
 running 1 test
 test mip_level_draws_at_target_size_not_slot_size ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
-     Running tests/opacity_soft.rs (/home/y901548/y901-target/debug/deps/opacity_soft-2203987b23945e1f)
+     Running tests/opacity_soft.rs (/home/<user>/y901-target/debug/deps/opacity_soft-2203987b23945e1f)
 
 running 3 tests
 test opacity_halves_alpha ... ok
@@ -637,7 +637,7 @@ test opacity_one_is_noop ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/per_text_size_width.rs (/home/y901548/y901-target/debug/deps/per_text_size_width-74312f795ade3779)
+     Running tests/per_text_size_width.rs (/home/<user>/y901-target/debug/deps/per_text_size_width-74312f795ade3779)
 
 running 4 tests
 test default_size_equals_size_16_ignoring_dpi ... ok
@@ -647,7 +647,7 @@ test pixels::bigger_size_draws_a_taller_glyph ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/perf_texture_alloc.rs (/home/y901548/y901-target/debug/deps/perf_texture_alloc-6dd8b30e01eac0a5)
+     Running tests/perf_texture_alloc.rs (/home/<user>/y901-target/debug/deps/perf_texture_alloc-6dd8b30e01eac0a5)
 
 running 4 tests
 test first_upload_allocs ... ignored, 基准：--ignored --nocapture --test-threads=1
@@ -657,14 +657,14 @@ test texture_draw_is_zero_alloc_quick ... ok
 
 test result: ok. 1 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.23s
 
-     Running tests/popup_anim.rs (/home/y901548/y901-target/debug/deps/popup_anim-255f2d1e547885b8)
+     Running tests/popup_anim.rs (/home/<user>/y901-target/debug/deps/popup_anim-255f2d1e547885b8)
 
 running 1 test
 test popup_open_animation_shrinks_the_first_frame ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running tests/soft_glyphs.rs (/home/y901548/y901-target/debug/deps/soft_glyphs-26ef1fef91981f31)
+     Running tests/soft_glyphs.rs (/home/<user>/y901-target/debug/deps/soft_glyphs-26ef1fef91981f31)
 
 running 7 tests
 test latin_test_font_has_no_cjk_glyphs ... ok
@@ -677,14 +677,14 @@ test glyphs_of_different_heights_share_one_baseline ... ok
 
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
-     Running tests/stroke_round_aa.rs (/home/y901548/y901-target/debug/deps/stroke_round_aa-6d77c62ea0412b10)
+     Running tests/stroke_round_aa.rs (/home/<user>/y901-target/debug/deps/stroke_round_aa-6d77c62ea0412b10)
 
 running 1 test
 test rounded_stroke_is_antialiased_and_bounded ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/text_scale_pixels.rs (/home/y901548/y901-target/debug/deps/text_scale_pixels-ee7dcaed961cca93)
+     Running tests/text_scale_pixels.rs (/home/<user>/y901-target/debug/deps/text_scale_pixels-ee7dcaed961cca93)
 
 running 2 tests
 test scale_one_is_pixel_identical_to_the_unscaled_path ... ok
@@ -692,7 +692,7 @@ test half_scale_ink_is_about_a_quarter ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running tests/transform.rs (/home/y901548/y901-target/debug/deps/transform-035226da5dde8404)
+     Running tests/transform.rs (/home/<user>/y901-target/debug/deps/transform-035226da5dde8404)
 
 running 4 tests
 test degenerate_scale_is_ignored_not_crashing ... ok
@@ -702,7 +702,7 @@ test scaled_rect_lands_at_half_size_around_origin ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/ui_grid_span.rs (/home/y901548/y901-target/debug/deps/ui_grid_span-f89fe37781cfed4e)
+     Running tests/ui_grid_span.rs (/home/<user>/y901-target/debug/deps/ui_grid_span-f89fe37781cfed4e)
 
 running 4 tests
 test without_placements_layout_is_unchanged ... ok
@@ -712,14 +712,14 @@ test spanning_child_is_clipped_to_the_union_not_the_first_cell ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/ui_hover_snapshot.rs (/home/y901548/y901-target/debug/deps/ui_hover_snapshot-06a148d44537b9d6)
+     Running tests/ui_hover_snapshot.rs (/home/<user>/y901-target/debug/deps/ui_hover_snapshot-06a148d44537b9d6)
 
 running 1 test
 test hover_snapshot_reaches_render_ctx ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (/home/y901548/y901-target/debug/deps/y901_runtime-848e0ddd46126a0e)
+     Running unittests src/lib.rs (/home/<user>/y901-target/debug/deps/y901_runtime-848e0ddd46126a0e)
 
 running 10 tests
 test gfx::tests::empty_frame_still_reports_present ... ok
@@ -735,7 +735,7 @@ test tests::snapshot_hooks_are_host_contract ... ok
 
 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/run_many_contract.rs (/home/y901548/y901-target/debug/deps/run_many_contract-7544d10b2395f091)
+     Running tests/run_many_contract.rs (/home/<user>/y901-target/debug/deps/run_many_contract-7544d10b2395f091)
 
 running 6 tests
 test default_run_many_empty_list_is_ok_and_never_calls_factory ... ok
@@ -747,7 +747,7 @@ test default_run_many_short_circuits_after_first_error ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (/home/y901548/y901-target/debug/deps/y901_shell-7496240cc210f847)
+     Running unittests src/lib.rs (/home/<user>/y901-target/debug/deps/y901_shell-7496240cc210f847)
 
 running 8 tests
 test secret::tests::backend_name_is_never_empty ... ok
@@ -761,7 +761,7 @@ test widget_clipboard::tests::adapter_forwards_to_system_clipboard ... ok
 
 test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
 
-     Running tests/audit_fixes.rs (/home/y901548/y901-target/debug/deps/audit_fixes-dd53a83f6082f82f)
+     Running tests/audit_fixes.rs (/home/<user>/y901-target/debug/deps/audit_fixes-dd53a83f6082f82f)
 
 running 2 tests
 test ime_commit_becomes_text_not_compose ... ok
@@ -769,14 +769,14 @@ test host_handled_event_short_circuits_tree ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/no_c_deps.rs (/home/y901548/y901-target/debug/deps/no_c_deps-1b7f8f164ab20224)
+     Running tests/no_c_deps.rs (/home/<user>/y901-target/debug/deps/no_c_deps-1b7f8f164ab20224)
 
 running 1 test
 test no_c_or_cpp_toolchain_dependencies ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 35.77s
 
-     Running tests/render_cost.rs (/home/y901548/y901-target/debug/deps/render_cost-81a99a29a10b6547)
+     Running tests/render_cost.rs (/home/<user>/y901-target/debug/deps/render_cost-81a99a29a10b6547)
 
 running 2 tests
 test demo_page_full_render_cost ... ignored, 性能观测：手动 --ignored --nocapture 运行
@@ -784,7 +784,7 @@ test full_screen_fill_cost ... ignored, 性能观测：手动 --ignored --nocapt
 
 test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/typing_frames.rs (/home/y901548/y901-target/debug/deps/typing_frames-709013dccd4b3ea2)
+     Running tests/typing_frames.rs (/home/<user>/y901-target/debug/deps/typing_frames-709013dccd4b3ea2)
 
 running 3 tests
 test demo_page_keystroke_never_dirties_whole_window ... ok
@@ -793,7 +793,7 @@ test demo_page_typing_stays_partial_over_many_frames ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (/home/y901548/y901-target/debug/deps/y901_ui-13f1d2951ea8eccc)
+     Running unittests src/lib.rs (/home/<user>/y901-target/debug/deps/y901_ui-13f1d2951ea8eccc)
 
 running 105 tests
 test animation::tests::animate_interpolates_and_finishes ... ok
@@ -904,7 +904,7 @@ test widget::event_ctx_scale_tests::event_ctx_scale_is_settable ... ok
 
 test result: ok. 105 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running tests/animation_tick.rs (/home/y901548/y901-target/debug/deps/animation_tick-fbce612322c0831a)
+     Running tests/animation_tick.rs (/home/<user>/y901-target/debug/deps/animation_tick-fbce612322c0831a)
 
 running 3 tests
 test repeated_tick_is_safe_when_idle ... ok
@@ -913,7 +913,7 @@ test zero_dt_tick_is_safe ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/animation_tree.rs (/home/y901548/y901-target/debug/deps/animation_tree-b1591accf5223d69)
+     Running tests/animation_tree.rs (/home/<user>/y901-target/debug/deps/animation_tree-b1591accf5223d69)
 
 running 5 tests
 test animate_then_tick_runs_to_completion_and_clears ... ok
@@ -924,7 +924,7 @@ test same_key_interrupts_the_old_animation ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/broadcast_redraw.rs (/home/y901548/y901-target/debug/deps/broadcast_redraw-51ad85aa3c7c1459)
+     Running tests/broadcast_redraw.rs (/home/<user>/y901-target/debug/deps/broadcast_redraw-51ad85aa3c7c1459)
 
 running 2 tests
 test tick_redraw_marks_only_responding_node ... ok
@@ -932,7 +932,7 @@ test tick_without_responders_leaves_dirty_empty ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/cursor_layers.rs (/home/y901548/y901-target/debug/deps/cursor_layers-a17e6781d4be8302)
+     Running tests/cursor_layers.rs (/home/<user>/y901-target/debug/deps/cursor_layers-a17e6781d4be8302)
 
 running 6 tests
 test cursor_at_child_overrides_parent_same_layer ... ok
@@ -944,7 +944,7 @@ test cursor_at_still_works_for_simple_hover ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/dirty_and_popup.rs (/home/y901548/y901-target/debug/deps/dirty_and_popup-2deb326a30cbe450)
+     Running tests/dirty_and_popup.rs (/home/<user>/y901-target/debug/deps/dirty_and_popup-2deb326a30cbe450)
 
 running 9 tests
 test disjoint_rects_stay_separate ... ok
@@ -959,7 +959,7 @@ test popup_shifts_left_when_right_space_is_short ... ok
 
 test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/dirty_ink_margin.rs (/home/y901548/y901-target/debug/deps/dirty_ink_margin-4bbb4faf5590b95d)
+     Running tests/dirty_ink_margin.rs (/home/<user>/y901-target/debug/deps/dirty_ink_margin-4bbb4faf5590b95d)
 
 running 3 tests
 test dirty_rect_is_expanded_by_ink_overflow ... ok
@@ -968,7 +968,7 @@ test minimum_margin_applies_even_without_font_overflow ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/dirty_union_shrink.rs (/home/y901548/y901-target/debug/deps/dirty_union_shrink-93c17cfcae23693e)
+     Running tests/dirty_union_shrink.rs (/home/<user>/y901-target/debug/deps/dirty_union_shrink-93c17cfcae23693e)
 
 running 4 tests
 test clean_tree_render_draws_nothing ... ok
@@ -978,7 +978,7 @@ test unchanged_layout_marks_nothing ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/dpi_layout.rs (/home/y901548/y901-target/debug/deps/dpi_layout-b24557a78862b17f)
+     Running tests/dpi_layout.rs (/home/<user>/y901-target/debug/deps/dpi_layout-b24557a78862b17f)
 
 running 5 tests
 test all_gap_setter_orders_respect_last_call ... ok
@@ -989,7 +989,7 @@ test padding_and_gap_scale_with_dpi ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/draw_char.rs (/home/y901548/y901-target/debug/deps/draw_char-ddd6bc79c0dc28f7)
+     Running tests/draw_char.rs (/home/<user>/y901-target/debug/deps/draw_char-ddd6bc79c0dc28f7)
 
 running 2 tests
 test draw_char_matches_draw_text ... ok
@@ -997,7 +997,7 @@ test draw_char_returns_character_width ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/framework.rs (/home/y901548/y901-target/debug/deps/framework-e72eb016ff7db9df)
+     Running tests/framework.rs (/home/<user>/y901-target/debug/deps/framework-e72eb016ff7db9df)
 
 running 15 tests
 test flex_measure_is_cached_too ... ok
@@ -1018,7 +1018,7 @@ test changing_one_leaf_only_remeasures_its_path ... ok
 
 test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
 
-     Running tests/gap_scaled_precedence.rs (/home/y901548/y901-target/debug/deps/gap_scaled_precedence-1f8f269747fd95d2)
+     Running tests/gap_scaled_precedence.rs (/home/<user>/y901-target/debug/deps/gap_scaled_precedence-1f8f269747fd95d2)
 
 running 4 tests
 test gap_scaled_then_gap_uses_gap ... ok
@@ -1028,7 +1028,7 @@ test plain_gap_scales_with_dpi ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/grid_perf.rs (/home/y901548/y901-target/debug/deps/grid_perf-352ab8a1fcc0a72f)
+     Running tests/grid_perf.rs (/home/<user>/y901-target/debug/deps/grid_perf-352ab8a1fcc0a72f)
 
 running 2 tests
 test grid_place_10k_batch ... ok
@@ -1036,7 +1036,7 @@ test grid_layout_10k_with_spans ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
 
-     Running tests/hash_collision.rs (/home/y901548/y901-target/debug/deps/hash_collision-f4dbe39a79ba4c83)
+     Running tests/hash_collision.rs (/home/<user>/y901-target/debug/deps/hash_collision-f4dbe39a79ba4c83)
 
 running 2 tests
 test field_boundary_is_not_ambiguous ... ok
@@ -1044,7 +1044,7 @@ test one_million_semantic_surfaces_have_no_collisions ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
 
-     Running tests/hover.rs (/home/y901548/y901-target/debug/deps/hover-b4040151a83543fa)
+     Running tests/hover.rs (/home/<user>/y901-target/debug/deps/hover-b4040151a83543fa)
 
 running 5 tests
 test moving_inside_the_same_node_only_sends_moves ... ok
@@ -1055,7 +1055,7 @@ test removing_the_hovered_node_clears_it_without_panicking ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/invalidation_handle.rs (/home/y901548/y901-target/debug/deps/invalidation_handle-c78b229d2995dfdb)
+     Running tests/invalidation_handle.rs (/home/<user>/y901-target/debug/deps/invalidation_handle-c78b229d2995dfdb)
 
 running 6 tests
 test handle_after_tree_dropped_is_harmless ... ok
@@ -1067,14 +1067,14 @@ test multiple_background_invalidations_merge ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/layout_bench.rs (/home/y901548/y901-target/debug/deps/layout_bench-b0a074b01dad2923)
+     Running tests/layout_bench.rs (/home/<user>/y901-target/debug/deps/layout_bench-b0a074b01dad2923)
 
 running 1 test
 test layout_10k_full_relayout ... ignored, 基准测试：cargo test -p y901-ui --release --test layout_bench -- --ignored --nocapture
 
 test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/overlay.rs (/home/y901548/y901-target/debug/deps/overlay-d690cb5bf7200d69)
+     Running tests/overlay.rs (/home/<user>/y901-target/debug/deps/overlay-d690cb5bf7200d69)
 
 running 5 tests
 test popup_flips_when_no_space_below ... ok
@@ -1085,14 +1085,14 @@ test closing_popup_marks_its_area_dirty ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/perf_alloc.rs (/home/y901548/y901-target/debug/deps/perf_alloc-cbb7e68c94b84f0f)
+     Running tests/perf_alloc.rs (/home/<user>/y901-target/debug/deps/perf_alloc-cbb7e68c94b84f0f)
 
 running 1 test
 test bench_layout_allocations_10k ... ignored, 基准：--ignored --nocapture
 
 test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/perf_bench.rs (/home/y901548/y901-target/debug/deps/perf_bench-4a39d06eb08187b2)
+     Running tests/perf_bench.rs (/home/<user>/y901-target/debug/deps/perf_bench-4a39d06eb08187b2)
 
 running 6 tests
 test bench_dirty_region_streaming ... ignored, 基准：--ignored --nocapture
@@ -1104,7 +1104,7 @@ test bench_layout_id_length_sensitivity ... ignored, 基准：--ignored --nocapt
 
 test result: ok. 0 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/perf_dispatch_alloc.rs (/home/y901548/y901-target/debug/deps/perf_dispatch_alloc-2e4eeaf559afa373)
+     Running tests/perf_dispatch_alloc.rs (/home/<user>/y901-target/debug/deps/perf_dispatch_alloc-2e4eeaf559afa373)
 
 running 3 tests
 test dispatch_allocs_per_event ... ignored, 基准：--ignored --nocapture
@@ -1113,7 +1113,7 @@ test hover_blank_area_allocs_per_event ... ignored, 基准：--ignored --nocaptu
 
 test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/popup_and_hover.rs (/home/y901548/y901-target/debug/deps/popup_and_hover-c9c983bb78377326)
+     Running tests/popup_and_hover.rs (/home/<user>/y901-target/debug/deps/popup_and_hover-c9c983bb78377326)
 
 running 4 tests
 test closing_an_unknown_popup_is_harmless ... ok
@@ -1123,7 +1123,7 @@ test request_close_popup_closes_the_open_popup ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/popup_requests.rs (/home/y901548/y901-target/debug/deps/popup_requests-550f54bc8d99581c)
+     Running tests/popup_requests.rs (/home/<user>/y901-target/debug/deps/popup_requests-550f54bc8d99581c)
 
 running 8 tests
 test escape_closes_modal_popup ... ok
@@ -1137,7 +1137,7 @@ test requested_popup_closes_on_outside_click ... ok
 
 test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/primitives.rs (/home/y901548/y901-target/debug/deps/primitives-43154e8e77cde3f3)
+     Running tests/primitives.rs (/home/<user>/y901-target/debug/deps/primitives-43154e8e77cde3f3)
 
 running 10 tests
 test gradient_diagonal_follows_dominant_axis ... ok
@@ -1153,7 +1153,7 @@ test round_rect_zero_radius_is_plain_rect ... ok
 
 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/relayout.rs (/home/y901548/y901-target/debug/deps/relayout-f29777e6cee15978)
+     Running tests/relayout.rs (/home/<user>/y901-target/debug/deps/relayout-f29777e6cee15978)
 
 running 4 tests
 test non_relayout_event_does_not_dirty ... ok
@@ -1163,7 +1163,7 @@ test dirty_deep_parent_propagates_to_root ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/request_layout.rs (/home/y901548/y901-target/debug/deps/request_layout-cf7cc0de72f3c58f)
+     Running tests/request_layout.rs (/home/<user>/y901-target/debug/deps/request_layout-cf7cc0de72f3c58f)
 
 running 2 tests
 test request_layout_is_idempotent_within_one_frame ... ok
@@ -1171,7 +1171,7 @@ test request_layout_sets_flag_and_take_consumes_it ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/rev_snapshot.rs (/home/y901548/y901-target/debug/deps/rev_snapshot-25cd81dd1682e098)
+     Running tests/rev_snapshot.rs (/home/<user>/y901-target/debug/deps/rev_snapshot-25cd81dd1682e098)
 
 running 2 tests
 test rev_snapshot_is_linear_on_10k_nodes ... ignored, 性能测试：手动运行 cargo test -p y901-ui --test rev_snapshot -- --ignored --nocapture
@@ -1179,7 +1179,7 @@ test rev_snapshot_matches_effective_revision ... ok
 
 test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/revision.rs (/home/y901548/y901-target/debug/deps/revision-3038379bf6d5376e)
+     Running tests/revision.rs (/home/<user>/y901-target/debug/deps/revision-3038379bf6d5376e)
 
 running 6 tests
 test hover_does_not_bump_revision ... ok
@@ -1191,7 +1191,7 @@ test signal_changes_label_bumps_revision ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/state.rs (/home/y901548/y901-target/debug/deps/state-36f2aeb4e924b4e1)
+     Running tests/state.rs (/home/<user>/y901-target/debug/deps/state-36f2aeb4e924b4e1)
 
 running 4 tests
 test state_same_value_does_not_dirty ... ok
@@ -1201,7 +1201,7 @@ test state_update_in_place ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/subscriptions.rs (/home/y901548/y901-target/debug/deps/subscriptions-029ed4d7a1ec6d0d)
+     Running tests/subscriptions.rs (/home/<user>/y901-target/debug/deps/subscriptions-029ed4d7a1ec6d0d)
 
 running 2 tests
 test live_subscriptions_survive_poll ... ok
@@ -1209,7 +1209,7 @@ test subscription_of_removed_node_is_cleaned_up_on_next_poll ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running unittests src/lib.rs (/home/y901548/y901-target/debug/deps/y901_widgets-691b862b52ad0311)
+     Running unittests src/lib.rs (/home/<user>/y901-target/debug/deps/y901_widgets-691b862b52ad0311)
 
 running 90 tests
 test checkbox::tests::click_points_toggle_and_fire_the_callback ... ok
@@ -1305,7 +1305,7 @@ test tooltip::tests::quick_pass_does_not_open_a_tooltip ... ok
 
 test result: ok. 90 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
 
-     Running tests/audit.rs (/home/y901548/y901-target/debug/deps/audit-1f8f966760f97cd3)
+     Running tests/audit.rs (/home/<user>/y901-target/debug/deps/audit-1f8f966760f97cd3)
 
 running 5 tests
 test default_semantics_are_not_exposed ... ok
@@ -1316,7 +1316,7 @@ test render_pushes_clip_for_scrolling_container ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/button_selected.rs (/home/y901548/y901-target/debug/deps/button_selected-53618645b99f9803)
+     Running tests/button_selected.rs (/home/<user>/y901-target/debug/deps/button_selected-53618645b99f9803)
 
 running 7 tests
 test theme_selected_color_is_between_normal_and_pressed ... ok
@@ -1329,7 +1329,7 @@ test button_set_selected_does_not_auto_invalidate ... ok
 
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/clip_leak.rs (/home/y901548/y901-target/debug/deps/clip_leak-d6984014de360a75)
+     Running tests/clip_leak.rs (/home/<user>/y901-target/debug/deps/clip_leak-d6984014de360a75)
 
 running 6 tests
 test constraints_are_available ... ok
@@ -1341,7 +1341,7 @@ test focused_text_input_does_not_leak_clip ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running tests/component_audit.rs (/home/y901548/y901-target/debug/deps/component_audit-905d357f8e898a42)
+     Running tests/component_audit.rs (/home/<user>/y901-target/debug/deps/component_audit-905d357f8e898a42)
 
 running 19 tests
 test alert_dismiss_hit_region_and_command ... ok
@@ -1366,7 +1366,7 @@ test every_tick_user_declares_wants_tick ... ok
 
 test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
 
-     Running tests/contract.rs (/home/y901548/y901-target/debug/deps/contract-158c7a288149411e)
+     Running tests/contract.rs (/home/<user>/y901-target/debug/deps/contract-158c7a288149411e)
 
 running 6 tests
 test add_node_mounts_whole_subtree ... ok
@@ -1378,7 +1378,7 @@ test menu_select_out_of_range_is_ignored ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/cursor.rs (/home/y901548/y901-target/debug/deps/cursor-3acef591abc0a511)
+     Running tests/cursor.rs (/home/<user>/y901-target/debug/deps/cursor-3acef591abc0a511)
 
 running 4 tests
 test splitter_cursor_comes_from_position_not_state ... ok
@@ -1388,7 +1388,7 @@ test cursor_respects_clip_of_scroll_container ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/dialog_dynamic.rs (/home/y901548/y901-target/debug/deps/dialog_dynamic-7ae361d4c1023054)
+     Running tests/dialog_dynamic.rs (/home/<user>/y901-target/debug/deps/dialog_dynamic-7ae361d4c1023054)
 
 running 11 tests
 test dialog_set_open_opens_and_closes ... ok
@@ -1405,14 +1405,14 @@ test text_input_supports_downcast ... ok
 
 test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/dialog_residual.rs (/home/y901548/y901-target/debug/deps/dialog_residual-3714fd414fbff562)
+     Running tests/dialog_residual.rs (/home/<user>/y901-target/debug/deps/dialog_residual-3714fd414fbff562)
 
 running 1 test
 test closing_dialog_partial_redraw_matches_full_redraw ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
-     Running tests/downcast_audit.rs (/home/y901548/y901-target/debug/deps/downcast_audit-c6b3897e7026b7eb)
+     Running tests/downcast_audit.rs (/home/<user>/y901-target/debug/deps/downcast_audit-c6b3897e7026b7eb)
 
 running 6 tests
 test text_label_runtime_set_text_via_downcast ... ok
@@ -1424,7 +1424,7 @@ test list_view_runtime_set_items_via_downcast ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/dpi_components.rs (/home/y901548/y901-target/debug/deps/dpi_components-f5f245887836e261)
+     Running tests/dpi_components.rs (/home/<user>/y901-target/debug/deps/dpi_components-f5f245887836e261)
 
 running 2 tests
 test text_input_padding_follows_dpi ... ok
@@ -1432,7 +1432,7 @@ test text_input_render_does_not_panic_at_125 ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/edge_cases.rs (/home/y901548/y901-target/debug/deps/edge_cases-1aec54cf6a907943)
+     Running tests/edge_cases.rs (/home/<user>/y901-target/debug/deps/edge_cases-1aec54cf6a907943)
 
 running 6 tests
 test image_from_rgba_on_oversize_degrades_instead_of_panicking ... ok
@@ -1444,7 +1444,7 @@ test text_buffer_truncation_never_splits_a_multibyte_char ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running tests/file_drop.rs (/home/y901548/y901-target/debug/deps/file_drop-758b59c61737ec35)
+     Running tests/file_drop.rs (/home/<user>/y901-target/debug/deps/file_drop-758b59c61737ec35)
 
 running 3 tests
 test file_drop_outside_control_is_ignored ... ok
@@ -1453,14 +1453,14 @@ test file_drop_routes_to_control_under_cursor ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/finale.rs (/home/y901548/y901-target/debug/deps/finale-2e27af85ec84030e)
+     Running tests/finale.rs (/home/<user>/y901-target/debug/deps/finale-2e27af85ec84030e)
 
 running 1 test
 test scrollview_child_outside_viewport_is_not_clickable_until_scrolled ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/focus.rs (/home/y901548/y901-target/debug/deps/focus-1713c07a1a76f2bc)
+     Running tests/focus.rs (/home/<user>/y901-target/debug/deps/focus-1713c07a1a76f2bc)
 
 running 7 tests
 test focus_order_follows_tree_order ... ok
@@ -1473,7 +1473,7 @@ test tab_is_linear_in_number_of_nodes ... ok
 
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/focus_closed_subtree.rs (/home/y901548/y901-target/debug/deps/focus_closed_subtree-8c79a699cc088831)
+     Running tests/focus_closed_subtree.rs (/home/<user>/y901-target/debug/deps/focus_closed_subtree-8c79a699cc088831)
 
 running 5 tests
 test dialog_supports_downcast_for_runtime_updates ... ok
@@ -1484,7 +1484,7 @@ test open_close_dialog_updates_focus_order ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/focus_tab.rs (/home/y901548/y901-target/debug/deps/focus_tab-4ebc0b3b50201fde)
+     Running tests/focus_tab.rs (/home/<user>/y901-target/debug/deps/focus_tab-4ebc0b3b50201fde)
 
 running 2 tests
 test tab_cycles_between_textinput_and_button ... ok
@@ -1492,7 +1492,7 @@ test focused_button_redraws_and_uses_focused_style ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/image_widget.rs (/home/y901548/y901-target/debug/deps/image_widget-649b18ebe4b3277d)
+     Running tests/image_widget.rs (/home/<user>/y901-target/debug/deps/image_widget-649b18ebe4b3277d)
 
 running 6 tests
 test short_rgba_buffer_is_padded_instead_of_panicking ... ok
@@ -1504,7 +1504,7 @@ test decoded_png_renders_with_the_original_colour ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/keyboard_sequences.rs (/home/y901548/y901-target/debug/deps/keyboard_sequences-dd5dd5989de8b352)
+     Running tests/keyboard_sequences.rs (/home/<user>/y901-target/debug/deps/keyboard_sequences-dd5dd5989de8b352)
 
 running 8 tests
 test backspace_during_composition_does_not_eat_committed_text ... ok
@@ -1518,7 +1518,7 @@ test stress_twenty_rounds_type_and_delete ... ok
 
 test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/node_invalidate_ink_margin.rs (/home/y901548/y901-target/debug/deps/node_invalidate_ink_margin-41963c4fd585d439)
+     Running tests/node_invalidate_ink_margin.rs (/home/<user>/y901-target/debug/deps/node_invalidate_ink_margin-41963c4fd585d439)
 
 running 5 tests
 test rich_text_reports_the_largest_span_margin ... ok
@@ -1529,7 +1529,7 @@ test per_node_ink_margin_matches_each_font_size ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running tests/overlay_render.rs (/home/y901548/y901-target/debug/deps/overlay_render-1f32374ac0de55c2)
+     Running tests/overlay_render.rs (/home/<user>/y901-target/debug/deps/overlay_render-1f32374ac0de55c2)
 
 running 4 tests
 test closed_base_widget_is_not_painted ... ok
@@ -1539,7 +1539,7 @@ test closing_dialog_stops_painting_and_leaves_index ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/p0.rs (/home/y901548/y901-target/debug/deps/p0-3365ce1dd783fe44)
+     Running tests/p0.rs (/home/<user>/y901-target/debug/deps/p0-3365ce1dd783fe44)
 
 running 6 tests
 test insert_node_clamps_out_of_range_index ... ok
@@ -1551,7 +1551,7 @@ test click_selects_row_and_fires_callback ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/p1.rs (/home/y901548/y901-target/debug/deps/p1-001bac71c72707aa)
+     Running tests/p1.rs (/home/<user>/y901-target/debug/deps/p1-001bac71c72707aa)
 
 running 4 tests
 test menu_keyboard_navigation_moves_and_confirms ... ok
@@ -1561,7 +1561,7 @@ test listview_scrollbar_click_does_not_select_row ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/password_placeholder.rs (/home/y901548/y901-target/debug/deps/password_placeholder-cd56d3d3101f1d95)
+     Running tests/password_placeholder.rs (/home/<user>/y901-target/debug/deps/password_placeholder-cd56d3d3101f1d95)
 
 running 13 tests
 test dialog_close_still_works_after_set_size ... ok
@@ -1580,7 +1580,7 @@ test placeholder_renders_when_empty ... ok
 
 test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/reactive.rs (/home/y901548/y901-target/debug/deps/reactive-7d5d318f8c63f7dd)
+     Running tests/reactive.rs (/home/<user>/y901-target/debug/deps/reactive-7d5d318f8c63f7dd)
 
 running 7 tests
 test unrelated_color_helper_still_compiles ... ok
@@ -1593,7 +1593,7 @@ test add_then_remove_node_updates_tree_and_hit_test ... ok
 
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/rich_text.rs (/home/y901548/y901-target/debug/deps/rich_text-844e6a41f2303adb)
+     Running tests/rich_text.rs (/home/<user>/y901-target/debug/deps/rich_text-844e6a41f2303adb)
 
 running 4 tests
 test code_block_keeps_blank_lines ... ok
@@ -1603,7 +1603,7 @@ test update_then_partial_invalidate_stays_local ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/scroll_dirty.rs (/home/y901548/y901-target/debug/deps/scroll_dirty-9a4dc5aa72e80711)
+     Running tests/scroll_dirty.rs (/home/<user>/y901-target/debug/deps/scroll_dirty-9a4dc5aa72e80711)
 
 running 3 tests
 test no_scroll_no_dirty ... ok
@@ -1612,14 +1612,14 @@ test scroll_twice_keeps_viewport_dirty ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/scroll_partial_redraw.rs (/home/y901548/y901-target/debug/deps/scroll_partial_redraw-6b98f5f744129f47)
+     Running tests/scroll_partial_redraw.rs (/home/<user>/y901-target/debug/deps/scroll_partial_redraw-6b98f5f744129f47)
 
 running 1 test
 test scroll_partial_redraw_matches_full_redraw ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running tests/scroll_split.rs (/home/y901548/y901-target/debug/deps/scroll_split-2cd514619dddfd08)
+     Running tests/scroll_split.rs (/home/<user>/y901-target/debug/deps/scroll_split-2cd514619dddfd08)
 
 running 7 tests
 test theme_switch_changes_component_colors ... ok
@@ -1632,7 +1632,7 @@ test hit_test_respects_clip_after_scroll ... ok
 
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/set_focus_semantics.rs (/home/y901548/y901-target/debug/deps/set_focus_semantics-bc4d6aea4d17dfe7)
+     Running tests/set_focus_semantics.rs (/home/<user>/y901-target/debug/deps/set_focus_semantics-bc4d6aea4d17dfe7)
 
 running 6 tests
 test initial_focus_before_layout_works ... ok
@@ -1644,7 +1644,7 @@ test modal_focus_after_open_works ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/shared_texture.rs (/home/y901548/y901-target/debug/deps/shared_texture-ff6b50109431d5ab)
+     Running tests/shared_texture.rs (/home/<user>/y901-target/debug/deps/shared_texture-ff6b50109431d5ab)
 
 running 3 tests
 test adopting_an_invalid_texture_draws_nothing_and_retains_nothing ... ok
@@ -1653,7 +1653,7 @@ test two_images_share_one_texture_until_both_unmount ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/streaming_sticky_rows.rs (/home/y901548/y901-target/debug/deps/streaming_sticky_rows-ab4dcf5aae45e00b)
+     Running tests/streaming_sticky_rows.rs (/home/<user>/y901-target/debug/deps/streaming_sticky_rows-ab4dcf5aae45e00b)
 
 running 7 tests
 test invalidate_rect_clamps_and_ignores_empty ... ok
@@ -1666,7 +1666,7 @@ test stick_to_bottom_follows_content_growth ... ok
 
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/style_injection.rs (/home/y901548/y901-target/debug/deps/style_injection-5d67018a12a3b497)
+     Running tests/style_injection.rs (/home/<user>/y901-target/debug/deps/style_injection-5d67018a12a3b497)
 
 running 10 tests
 test dialog_runs_as_modal_popup ... ok
@@ -1682,7 +1682,7 @@ test scrollbar_style_is_applied ... ok
 
 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/tab_focus.rs (/home/y901548/y901-target/debug/deps/tab_focus-4f4abecfd8f3aaf4)
+     Running tests/tab_focus.rs (/home/<user>/y901-target/debug/deps/tab_focus-4f4abecfd8f3aaf4)
 
 running 2 tests
 test terminal_consumes_tab_instead_of_focus_switch ... ok
@@ -1690,7 +1690,7 @@ test tab_still_switches_focus_outside_terminal ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/tabs.rs (/home/y901548/y901-target/debug/deps/tabs-4c9204d988b1880c)
+     Running tests/tabs.rs (/home/<user>/y901-target/debug/deps/tabs-4c9204d988b1880c)
 
 running 4 tests
 test click_selects_the_tab_under_the_pointer ... ok
@@ -1700,7 +1700,7 @@ test switch_transition_is_visible_in_pixels ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
 
-     Running tests/tabs_layout.rs (/home/y901548/y901-target/debug/deps/tabs_layout-c2ffc90284e14403)
+     Running tests/tabs_layout.rs (/home/<user>/y901-target/debug/deps/tabs_layout-c2ffc90284e14403)
 
 running 3 tests
 test tabs_in_flex_with_fill_can_exceed_minimum ... ok
@@ -1709,7 +1709,7 @@ test tabs_without_any_setting_falls_back_to_minimum ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/texture_release.rs (/home/y901548/y901-target/debug/deps/texture_release-0b81dd8af9b4547c)
+     Running tests/texture_release.rs (/home/<user>/y901-target/debug/deps/texture_release-0b81dd8af9b4547c)
 
 running 6 tests
 test extra_release_of_unknown_texture_is_harmless ... ok
@@ -1721,7 +1721,7 @@ test unmounting_a_node_queues_its_texture_and_the_next_frame_releases_it ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/theme_injection.rs (/home/y901548/y901-target/debug/deps/theme_injection-367afce1a5f272d3)
+     Running tests/theme_injection.rs (/home/<user>/y901-target/debug/deps/theme_injection-367afce1a5f272d3)
 
 running 3 tests
 test default_theme_is_dark ... ok
@@ -1730,7 +1730,7 @@ test rendering_a_tree_does_not_require_a_theme ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/tick_consumers.rs (/home/y901548/y901-target/debug/deps/tick_consumers-4c17e313f0aea9b5)
+     Running tests/tick_consumers.rs (/home/<user>/y901-target/debug/deps/tick_consumers-4c17e313f0aea9b5)
 
 running 2 tests
 test tick_consumers_declare_wants_tick ... ok
@@ -1738,7 +1738,7 @@ test tick_consumers_really_use_tick_or_animation ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
-     Running tests/tick_pruning.rs (/home/y901548/y901-target/debug/deps/tick_pruning-b1fc55289e88438b)
+     Running tests/tick_pruning.rs (/home/<user>/y901-target/debug/deps/tick_pruning-b1fc55289e88438b)
 
 running 4 tests
 test non_tick_broadcasts_still_reach_everyone ... ok
@@ -1748,7 +1748,7 @@ test tick_reaches_all_subscribers ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/tree_view_keys.rs (/home/y901548/y901-target/debug/deps/tree_view_keys-57c93a71ec7cb9cf)
+     Running tests/tree_view_keys.rs (/home/<user>/y901-target/debug/deps/tree_view_keys-57c93a71ec7cb9cf)
 
 running 5 tests
 test arrow_up_moves_selection_back ... ok
@@ -1759,7 +1759,7 @@ test arrow_left_collapses_then_jumps_to_parent ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/typing_dirty_scope.rs (/home/y901548/y901-target/debug/deps/typing_dirty_scope-ee6b6535faff12e4)
+     Running tests/typing_dirty_scope.rs (/home/<user>/y901-target/debug/deps/typing_dirty_scope-ee6b6535faff12e4)
 
 running 3 tests
 test fixed_width_input_stays_local_too ... ok
@@ -1768,7 +1768,7 @@ test consecutive_keystrokes_stay_local ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/vertical_list_dpi.rs (/home/y901548/y901-target/debug/deps/vertical_list_dpi-e192b0a8922b2cb5)
+     Running tests/vertical_list_dpi.rs (/home/<user>/y901-target/debug/deps/vertical_list_dpi-e192b0a8922b2cb5)
 
 running 3 tests
 test fixed_padding_and_gap_do_not_scale ... ok
