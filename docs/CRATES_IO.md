@@ -39,7 +39,8 @@ cargo package -p y901-core --allow-dirty --offline
 
 ```powershell
 $order = 'y901-core','y901-ui','y901-render','y901-widgets','y901-runtime',
-         'y901-extras','y901-backend-win32','y901-backend-x11','y901-backend-web','y901-shell'
+         'y901-extras','y901-backend-win32','y901-backend-x11','y901-backend-web',
+         'y901-shell','y901'   # y901 是单一入口，必须最后发
 for ($i = 0; $i -lt $order.Count; $i++) {
     $lines = @('[patch.crates-io]')
     for ($j = 0; $j -lt $i; $j++) { $lines += "$($order[$j]) = { path = `"crates/$($order[$j])`" }" }
@@ -67,6 +68,9 @@ dependency `y901-backend-web` does not specify a version
 > 解析 path 依赖。这不是打包错误，按 §2 的顺序发布即可。
 
 ## 2. 首次发布顺序（**被依赖的先发**）
+
+> **y901 是单一入口，必须最后发**（它依赖其余全部 crate）。用户侧只需要 `cargo add y901`，
+> 其它 10 个是内部实现；保留多年仍可单独依赖（想裁剪依赖时才这么做）。
 
 一条命令（推荐）：[`scripts/publish-crates.ps1`](../scripts/publish-crates.ps1) 内置了
 依赖顺序、已发布版本跳过、索引等待与失败解释：

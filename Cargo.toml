@@ -1,14 +1,15 @@
 [workspace]
 resolver = "2"
-default-members = ["crates/y901-shell"]
+default-members = ["crates/y901"]
 members = [
+    "crates/y901",
     "crates/y901-core",
     "crates/y901-ui",
     "crates/y901-widgets",
     "crates/y901-extras",
     "crates/y901-runtime",
     "crates/y901-backend-win32",
-  "crates/y901-backend-web",
+    "crates/y901-backend-web",
     "crates/y901-shell",
     "crates/y901-backend-x11",
     "crates/y901-render",

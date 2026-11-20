@@ -61,4 +61,9 @@
 #   用例数不变：把 4 条 Grid 用例（ui/tests/grid_span.rs）与 1 条 hover 快照用例
 #   （ui/tests/hover.rs）迁到 render 侧（render/tests/ui_grid_span.rs、ui_hover_snapshot.rs），
 #   因此测试二进制从 135 个变成 137 个 —— 目标数（test result 行）150 → 151。
-989
+# Measured at 2026-11-20 (v0.2.5 + 单一入口 crate `y901`):
+#   default `cargo test --workspace --no-fail-fast`   passed 993, failed 0, ignored 61 / 153 个测试目标
+#   新增 `crates/y901`（单一入口：re-export 全部子 crate + prelude + create_runtime）：
+#   3 条入口契约用例（create_runtime 可构造可析构 / prelude 类型身份 / 模块别名同一 crate）
+#   + 1 条 doctest ⇒ 二进制 137 → 138，目标数 151 → 153（lib unittests 与 doctests 各算一条）。
+993

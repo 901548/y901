@@ -634,6 +634,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "y901"
+version = "0.2.5"
+dependencies = [
+ "y901-backend-web",
+ "y901-backend-win32",
+ "y901-backend-x11",
+ "y901-core",
+ "y901-extras",
+ "y901-render",
+ "y901-runtime",
+ "y901-shell",
+ "y901-ui",
+ "y901-widgets",
+]
+
+[[package]]
 name = "y901-backend-web"
 version = "0.2.5"
 dependencies = [

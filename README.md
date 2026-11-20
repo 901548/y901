@@ -3,6 +3,36 @@
 Rust 跨平台 GUI 框架，自带 Win32/D3D11 与 X11 后端。文本模型是**等宽 cell**
 （`0.5em × 1em`），适合终端、日志、文件管理等桌面工具类应用。
 
+## 安装：只需要一个 crate
+
+```toml
+[dependencies]
+y901 = "0.2.5"
+```
+
+`y901` 是**单一入口**，内部把下面 10 个子 crate 全部 re-export 好：
+
+```rust
+use y901::prelude::*;          // 启动应用与画界面必用的类型与基础控件
+
+fn main() -> Result<(), String> {
+    // 业务代码里不出现任何 `#[cfg(target_os)]`：平台分叉在 y901 内部完成。
+    let runtime = y901::create_runtime();
+    let _ = runtime;           // 真正启动需要窗口环境，见 examples/
+    Ok(())
+}
+```
+
+| 想做什么 | 用什么 |
+|---|---|
+| 画界面 | `use y901::widgets::*;`（Button / Table / TextInput / Alert …） |
+| 自定义控件 | 实现 `y901::ui::Widget` + 往里画 `y901::ui::RenderCtx` |
+| 直接开窗口跑循环 | `y901::create_runtime()` → `.run(host, build, options)` |
+| 只用布局/文本原语（不装平台后端） | 直接依赖 `y901-core` / `y901-ui` |
+
+> 子 crate 都是**实现细节**：保留它们是为了编译期并行、依赖裁剪与平台条件依赖，
+> 不是为了让你一个个装。需要更细控制时才直接依赖某个子 crate。
+
 ## 状态
 
 **实验性（experimental）**。Windows D3D11 路径经过完整验证（工作区测试、像素门禁）；
@@ -26,9 +56,10 @@ cargo run --example table           # 多列表格 + 选中行
 cargo run --example alert           # 四种 Alert
 ```
 
-## 仓库结构（9 个 crate）
+## 仓库结构（11 个 crate）
 
 ```
+y901                 单一入口：re-export 全部子 crate + prelude + create_runtime()
 y901-core            纯逻辑：终端 Grid / 格宽 / 区间
 y901-ui              框架：Widget / UiTree / 布局 / 事件 / 主题 / 动画 / 语义树
 y901-widgets         组件：Button / Table / Alert / Switch / ...
@@ -37,6 +68,7 @@ y901-render          软光栅器（SoftBackend）+ 自研 TTF 字形引擎 + �
 y901-runtime         平台无关契约：Host / PlatformRuntime / 帧 / 字体配置
 y901-backend-win32   Win32 + D3D11 + DirectWrite + IME + DPI
 y901-backend-x11     X11 后端（Xvfb 下验证）
+y901-backend-web     浏览器后端（wasm32，单 canvas）
 y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 ```
 
@@ -44,7 +76,7 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 
 ```bash
 cargo check --workspace --all-targets      # 0 warning
-cargo test --workspace                     # 989 passed / 0 failed / 61 ignored（151 个测试目标）
+cargo test --workspace                     # 993 passed / 0 failed / 61 ignored（153 个测试目标）
 powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0xF7455CCE7781A864，400x220）
 ```
 

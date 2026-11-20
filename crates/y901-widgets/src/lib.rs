@@ -97,3 +97,14 @@ pub use error_state::ErrorState;
 pub use spinner::Spinner;
 pub use switch::Switch;
 pub use table::{Table, TableColumn};
+/// 常用控件的 glob 导入入口：`use y901_widgets::prelude::*;`。
+///
+/// 为什么单独一个 prelude 而不是让用户 `use y901_widgets::*`：
+/// 后者会把 `Block` / `Span` / `RowPainter` 这类**只在特定场景用**的类型
+/// 也塞进作用域，容易与业务自己的同名类型撞车。这里只放"画界面几乎必用"的那批。
+pub mod prelude {
+    pub use crate::{
+        Badge, Button, Checkbox, ComboBox, Image, ProgressBar, RadioGroup, ScrollView, Slider,
+        Spinner, Switch, Tabs, TextInput, TextLabel, Tooltip, VerticalList,
+    };
+}

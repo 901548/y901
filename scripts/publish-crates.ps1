@@ -35,7 +35,9 @@ $order = @(
     'y901-backend-win32',
     'y901-backend-x11',
     'y901-backend-web',
-    'y901-shell'
+    'y901-shell',
+    # **单一入口**：依赖上面全部 crate，必须最后发（用户只需要依赖它）。
+    'y901'
 )
 
 function Get-Version {
