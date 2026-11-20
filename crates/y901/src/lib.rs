@@ -89,10 +89,24 @@ pub use y901_shell::create_runtime;
 /// 只放"每个应用都会用到"的东西；控件请 `use y901::widgets::*`，
 /// 特殊能力请直接用对应模块。**不要**把它扩成"全量 re-export"——
 /// 那会让 glob 导入变得不可预测。
+/// 启动应用与画界面**必用**的类型。
+///
+/// 只放"每个应用都会用到"的东西；控件请 `use y901::widgets::*`，
+/// 特殊能力请直接用对应模块。**不要**把它扩成"全量 re-export"——
+/// 那会让 glob 导入变得不可预测。
+///
+/// 注意这里**逐个列**控件，而不是 `pub use crate::widgets::prelude::*`：
+/// 已发布的 `y901-widgets 0.2.5` 里没有 `prelude` 模块（那是本版新加的），
+/// 而 `cargo publish` 的校验构建是**对着 registry 里已发布的依赖**编的 ——
+/// 引用它会让 `y901` 自己发不出去（实测报 `unresolved import crates::widgets::prelude`）。
+/// 逐项列只用各版本都有的根 re-export，更稳。
 pub mod prelude {
     pub use crate::runtime::{Host, Options, PlatformRuntime};
     pub use crate::ui::{Color, Constraints, Pos, Rect, Size, TextStyle, UiEvent, UiTree, Widget};
-    pub use crate::widgets::prelude::*;
+    pub use crate::widgets::{
+        Badge, Button, Checkbox, ComboBox, Image, ProgressBar, RadioGroup, ScrollView, Slider,
+        Spinner, Switch, Tabs, TextInput, TextLabel, Tooltip, VerticalList,
+    };
 }
 
 #[cfg(test)]
