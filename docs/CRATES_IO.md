@@ -36,6 +36,22 @@ cargo package -p y901-core --allow-dirty --offline
 
 ## 2. 首次发布顺序（**被依赖的先发**）
 
+一条命令（推荐）：[`scripts/publish-crates.ps1`](../scripts/publish-crates.ps1) 内置了
+依赖顺序、已发布版本跳过、索引等待与失败解释：
+
+```powershell
+# 先登录一次（token 落到 ~/.cargo/credentials.toml）
+cargo login
+
+# 演练（只打包 + 校验，不上传）
+powershell -NoProfile -File scripts/publish-crates.ps1 -DryRun
+
+# 真发（每发一个等 45s 让索引生效；-Proxy 用于需要代理的网络）
+powershell -NoProfile -File scripts/publish-crates.ps1 -Proxy http://127.0.0.1:7897
+```
+
+手工等价流程（脚本挂了时照这个来）：
+
 ```powershell
 # 顺序固定：core → ui → render → widgets → runtime → extras → 三个后端 → shell
 $order = @(
@@ -52,7 +68,7 @@ $order = @(
 )
 foreach ($c in $order) {
     Write-Host "=== $c ==="
-    cargo publish -p $c --dry-run --offline   # 首次会失败：上游还没发；先发上游即可
+    cargo publish -p $c --dry-run   # 首次会失败：上游还没发；先发上游即可
     if ($LASTEXITCODE -ne 0) { Write-Host "  （dry-run 失败正常：上游尚未发布）" }
     # 真发（确认 dry-run 或确认上游已发布后）：
     # cargo publish -p $c
