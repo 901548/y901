@@ -1,12 +1,7 @@
 
 === CHECK_X11 ===
 $ cargo check -p y901-backend-x11 --all-targets
-    Checking y901-core v0.2.2 (/root/Y901/crates/y901-core)
-    Checking y901-ui v0.2.2 (/root/Y901/crates/y901-ui)
-    Checking y901-runtime v0.2.2 (/root/Y901/crates/y901-runtime)
-    Checking y901-render v0.2.2 (/root/Y901/crates/y901-render)
-    Checking y901-backend-x11 v0.2.2 (/root/Y901/crates/y901-backend-x11)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.34s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
 EXIT_CHECK_X11=0
 
 === GOLDEN ===
@@ -35,7 +30,7 @@ EXIT_GOLDEN=0
 
 === REAL_WINDOW ===
 $ xvfb-run -a -s -screen 0 1280x800x24 cargo test -p y901-backend-x11 --test real_window
-     Running tests/real_window.rs (target/debug/deps/real_window-c39768aa4005cca4)
+     Running tests/real_window.rs (target/debug/deps/real_window-5e4740af39d1de46)
 
 running 14 tests
 test concurrent_connections_probe ... ignored, 探针：实测 Xvfb 并发连接 4 个会 RST 1 个，此行为已记录（见下方数据）
@@ -53,15 +48,14 @@ test keyboard_mapping_covers_ascii ... ok
 test shm_and_fallback_produce_identical_pixels ... ok
 test window_implements_event_source_and_presenter ... ok
 
-test result: ok. 12 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.63s
+test result: ok. 12 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.62s
 
 EXIT_REAL_WINDOW=0
 
 === STROKE ===
 $ cargo test -p y901-render --test stroke_round_aa
-   Compiling y901-render v0.2.2 (/root/Y901/crates/y901-render)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.39s
-     Running tests/stroke_round_aa.rs (target/debug/deps/stroke_round_aa-5af3813f93504764)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running tests/stroke_round_aa.rs (target/debug/deps/stroke_round_aa-5d53dad8c0e1a95f)
 
 running 1 test
 test rounded_stroke_is_antialiased_and_bounded ... ok
@@ -72,10 +66,8 @@ EXIT_STROKE=0
 
 === SGR_REVERSE ===
 $ cargo test -p y901-extras --test sgr_reverse
-   Compiling y901-extras v0.2.2 (/root/Y901/crates/y901-extras)
-   Compiling y901-widgets v0.2.2 (/root/Y901/crates/y901-widgets)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.60s
-     Running tests/sgr_reverse.rs (target/debug/deps/sgr_reverse-8f89028f8c0eef5f)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running tests/sgr_reverse.rs (target/debug/deps/sgr_reverse-3a8553536db04c9e)
 
 running 3 tests
 test selection_on_top_of_sgr7_cancels_out ... ok
@@ -106,7 +98,7 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 1 test
 test crates/y901-widgets/src/style.rs - style::WidgetStyle (line 15) ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
 
 EXIT_UI_WIDGETS=0
 
