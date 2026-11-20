@@ -28,6 +28,18 @@ $passed = $numbers['passed']
 $ignored = $numbers['ignored']
 $targets = $numbers['targets']
 
+# Linux 侧数字的独立数据源（由 scripts/linux-verify.sh 在 Linux 上生成）。
+$linuxNumbersPath = Join-Path $root 'docs\evidence\linux-numbers.txt'
+$linuxNumbers = @{}
+if (Test-Path $linuxNumbersPath) {
+    foreach ($line in [System.IO.File]::ReadAllLines($linuxNumbersPath, [System.Text.UTF8Encoding]::new($false))) {
+        if ($line -match '^\s*([a-z_]+)\s*=\s*(-?\d+)\s*$') { $linuxNumbers[$matches[1]] = [int]$matches[2] }
+    }
+}
+$linuxPassed = if ($linuxNumbers.ContainsKey('passed')) { $linuxNumbers['passed'] } else { -1 }
+$linuxIgnored = if ($linuxNumbers.ContainsKey('ignored')) { $linuxNumbers['ignored'] } else { -1 }
+$linuxTargets = if ($linuxNumbers.ContainsKey('targets')) { $linuxNumbers['targets'] } else { -1 }
+
 function Invoke-Check {
     $out = & powershell -NoProfile -File $sync -Check 2>&1 | Out-String
     return @{ Code = $LASTEXITCODE; Out = $out }
@@ -45,7 +57,10 @@ $cases = @(
     @{ File = 'README.md'; Old = '基线 0xF7455CCE7781A864'; New = "基线 **$passed**xF7455CCE7781A864"; Label = '十六进制基线被当成计数（0x 被吃）' },
     @{ File = 'docs\STATUS.md'; Old = 'vs win32 默认族'; New = "vs win**$passed** 默认族"; Label = '词内数字被当成计数（win32 → win**N**）' },
     # Linux 行不再整行豁免：它的数字由 docs/evidence/linux-numbers.txt 校验。
-    @{ File = 'docs\STATUS.md'; Old = 'Linux 全量（虚拟机）：**885 passed'; New = 'Linux 全量（虚拟机）：**884 passed'; Label = 'Linux 计数漂移（885 → 884）' }
+    # 锚点用 ACCEPTANCE 的**当前** Linux 行（未标"历史"）；STATUS 里那条是历史记录，
+    # 按文档规范带 `历史` 标记后由豁免规则跳过 —— 所以漂移用例必须打在活跃行上。
+    # 数字从 linux-numbers.txt 现读，避免文档数字变动后锚点失效。
+    @{ File = 'docs\ACCEPTANCE.md'; Old = "| **$linuxPassed passed / 0 failed / $linuxIgnored ignored**（$linuxTargets 个测试目标） |"; New = "| **$($linuxPassed - 1) passed / 0 failed / $linuxIgnored ignored**（$linuxTargets 个测试目标） |"; Label = "Linux 计数漂移（$linuxPassed → $($linuxPassed - 1)）" }
 )
 
 $failures = 0

@@ -3,16 +3,16 @@
 生成时间：2026-11-02
 命令：`cargo test --workspace -- --include-ignored`
 日志：见下文“双平台验证矩阵”一节引用的证据文件（历史日志已随旧口径清理）。
-当前实测口径（2026-11-19）：默认测试 **984 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1045 passed / 0 failed**。唯一数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。
+当前实测口径（2026-11-20）：默认测试 **989 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1050 passed / 0 failed**。唯一数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **984 passed / 0 failed / 61 ignored** |
-| `cargo test --workspace --offline -- --include-ignored` | **1043 passed / 0 failed** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **989 passed / 0 failed / 61 ignored** |
+| `cargo test --workspace --offline -- --include-ignored` | **1049 passed / 0 failed** |
 
-`include_ignored=1045`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
+`include_ignored=1050`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -44,7 +44,7 @@
 | `two_disjoint_dirty_rects_match_full_redraw` | 两块不相邻脏区 == 整窗重绘（逐字节 0 差异） |
 | `grid_with_images_is_not_blank_on_gpu` | Grid + 4 图片不再整帧空白（62 381 种颜色；四象限主色命中） |
 
-## 双平台验证矩阵（v0.2.3，2026-11-20）
+## 双平台验证矩阵（v0.2.4，2026-11-20）
 
 Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 Windows 上，
 `#[cfg(unix)]` 代码与 X11 运行时只能靠 `scripts/linux-verify.sh`（Xvfb）覆盖。
@@ -54,28 +54,31 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **984 passed / 0 failed / 61 ignored**（150 个测试目标） |
-| `--include-ignored` | **1043 passed / 0 failed** |
+| 默认测试 | **989 passed / 0 failed / 61 ignored**（150 个测试目标） |
+| `--include-ignored` | **1049 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
 | `cargo audit` | 0 漏洞 |
 
-### Linux（CentOS 7.9 + Xvfb，虚拟机；scripts/linux-verify.sh）
+### Linux（Ubuntu 22.04 / WSL2 + Xvfb；scripts/linux-verify.sh）
 
 | 检查 | 结果 |
 |---|---|
-| Linux 默认测试（`xvfb-run cargo test --workspace`） | **885 passed / 0 failed / 27 ignored**（150 个测试目标） |
+| Linux 默认测试（`xvfb-run cargo test --workspace`） | **906 passed / 0 failed / 27 ignored**（150 个测试目标） |
 | Linux x11 `check --all-targets` | exit 0 |
 | Linux x11 `golden` | 32 passed / 0 failed |
-| Linux `xvfb-run real_window` | 12 passed / 0 failed / 2 ignored |
-| Linux `render stroke_round_aa` / `extras sgr_reverse` / `ui+widgets` | 全部 exit 0（脚本汇总 6/6） |
+| Linux `xvfb-run real_window` | 16 passed / 0 failed / 2 ignored |
+| Linux x11 `clippy --all-targets -- -D warnings` | exit 0（补上 Windows 门禁看不到的 `#[cfg(unix)]` 代码） |
+| Linux `render stroke_round_aa` / `extras sgr_reverse` / `ui+widgets` / `full workspace` | 全部 exit 0（脚本汇总 8/8） |
 
 Linux 证据：
-[`linux-full-2026-11-19.log`](evidence/cross-platform/linux-full-2026-11-19.log)、
-[`linux-verify-2026-11-19.log`](evidence/cross-platform/linux-verify-2026-11-19.log)。
+[`linux-full-2026-11-20.log`](evidence/cross-platform/linux-full-2026-11-20.log)、
+[`linux-verify-2026-11-20.log`](evidence/cross-platform/linux-verify-2026-11-20.log)。
 命令：`xvfb-run -a -s '-screen 0 1280x800x24' cargo test --workspace --no-fail-fast`。
+更早的 CentOS 7.9 记录见 [`linux-verify-2026-11-19.log`](evidence/cross-platform/linux-verify-2026-11-19.log)
+（当时脚本还没有 clippy 步；`xvfb-run` 的认证路径在 Ubuntu 上暴露了 `HOSTNAME` 缺失的 bug，已修）。
 
-## Clippy## Clippy
+## Clippy
 
 `cargo clippy --workspace --all-targets --offline`：**0 error / 0 warning**
 

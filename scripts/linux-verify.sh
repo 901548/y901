@@ -48,6 +48,12 @@ else
     FAILED=1
 fi
 
+# 3b) clippy（Linux target）：Windows 门禁的 clippy 只 lint 宿主 target，
+#     `#[cfg(unix)]` 代码在那边**根本不参与编译**，因此可以带着 lint 债长期存在。
+#     v0.2.3 实测就积了 6 条（redundant_guards / needless_return / never_loop /
+#     manual_div_ceil / manual_contains / double_ended_iterator_last），已全部修掉。
+run CLIPPY_X11 cargo clippy -p y901-backend-x11 --all-targets $CARGO_FLAGS -- -D warnings
+
 # 4) Soft 描边：曾长期不在 Linux 验收范围内（STATUS.md 已记录该缺口）
 run STROKE cargo test -p y901-render --test stroke_round_aa $CARGO_FLAGS
 

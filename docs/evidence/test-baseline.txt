@@ -47,4 +47,12 @@
 #   default `cargo test --workspace --no-fail-fast`   passed 984, failed 0, ignored 61 / 150 个测试目标
 #   `--include-ignored`                               passed 1045, failed 0
 #   (新增：邻居越界墨迹不被局部刷新擦除的回归 1 条)
-984
+# Measured at 2026-11-20 (v0.2.3 review round 2: XSettings/live-scale + anisotropic quality):
+#   default `cargo test --workspace --no-fail-fast`   passed 989, failed 0, ignored 61 / 150 个测试目标
+#   `--include-ignored`                               passed 1050, failed 0
+#   Windows 侧新增 5 条：各向异性图片质量 4 条（强缩小轴不走样 / 低频轴结构保留 /
+#     比值>2 有界 / 近各向同性对照）+ golden 的 GetSelectionOwner 编码 1 条。
+#   Linux 侧另有 11 条只在 cfg(unix) 下编译的用例（8 条 XSettings 解析与优先级、
+#     2 条 X11 集成：XSettings selection 往返 / 运行期缩放重建，1 条 Xft.dpi 协议读取），
+#     以及 4 条 Xauthority 单测，因此 Linux 计数是 906 而不是 989。
+989

@@ -44,31 +44,43 @@ v0.2.2 为修"`StyledText` 自裁剪切掉大字号下伸笔画"而放宽了它�
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **984 passed / 0 failed / 61 ignored**（150 个测试目标） |
-| `--include-ignored` | **1045 passed / 0 failed** |
+| 默认测试 | **988 passed / 0 failed / 61 ignored**（150 个测试目标） |
+| `--include-ignored` | **1049 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
 | `cargo audit` | 0 漏洞 |
 
-### Linux（CentOS 7.9 + Xvfb，虚拟机）
+### Linux（Ubuntu 22.04 / WSL2 + Xvfb）
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试（`xvfb-run cargo test --workspace`） | **885 passed / 0 failed / 27 ignored**（150 targets） |
-| `scripts/linux-verify.sh` | **7 个步骤全 0**（check / golden / real_window / stroke / sgr_reverse / ui+widgets / full workspace），并写回 `linux-numbers.txt` |
+| 默认测试（`xvfb-run cargo test --workspace`） | **906 passed / 0 failed / 27 ignored**（150 targets） |
+| `scripts/linux-verify.sh` | **8 个步骤全 0**（check / golden / real_window / clippy / stroke / sgr_reverse / ui+widgets / full workspace），并写回 `linux-numbers.txt` |
 
-证据：[`linux-full-2026-11-19.log`](evidence/cross-platform/linux-full-2026-11-19.log)、
-[`linux-verify-2026-11-19.log`](evidence/cross-platform/linux-verify-2026-11-19.log)、
+证据：[`linux-full-2026-11-20.log`](evidence/cross-platform/linux-full-2026-11-20.log)、
+[`linux-verify-2026-11-20.log`](evidence/cross-platform/linux-verify-2026-11-20.log)、
 [`linux-numbers.txt`](evidence/linux-numbers.txt)。
+
+> 本轮 Linux 侧修了两个只在非 Windows 环境暴露的问题：
+> 1. `xvfb-run` 下测试进程没有 `HOSTNAME` → Xauthority `FamilyLocal` 条目匹配失败 → 连接被拒；
+>    现在回退读 `/etc/hostname`（`xauth::local_hostname`）。
+> 2. `#[cfg(unix)]` 代码从不进 Windows clippy，积了 6 条 lint；已修，并在
+>    `linux-verify.sh` 增加 `clippy --all-targets -D warnings` 步防回归。
+>
+> 同时补上了 X11 的两块 HiDPI 能力：**XSettings 读取**（`GetSelectionOwner(_XSETTINGS_S0)`
+> + `_XSETTINGS_SETTINGS` 二进制解析，零新依赖）与**运行期跟随缩放**（重建引擎/软后端 +
+> `ConfigureWindow`，≤1s 生效）。各向异性图片缩放补了 4 条解析质量用例并做了
+> `min→max` 变异验证。
 
 ## 4. 已知限制（未变）
 
 | # | 项 | 说明 |
 |---|---|---|
-| 1 | **X11 HiDPI 依赖 mm 报告** | 不准时用 `Y901_DPI` / `Y901_X11_SCALE` 覆盖 |
-| 2 | **干净 VM 的"只装 Rust"验证** | 本机装了 VS 2022，只能证明"不显式依赖 C 工具链" |
+| 1 | **X11 HiDPI 来源有限** | 已接 XSettings（`Xft/DPI` / `Gdk/WindowScalingFactor`）与根窗口 `Xft.dpi`，并支持**运行期跟随缩放**（≤1s 轮询后重建光栅器）。仍未覆盖每显示器 DPI（X11 协议无可靠 API）；不准时用 `Y901_DPI` / `Y901_X11_SCALE` 覆盖 |
+| 2 | **Windows 构建不需要 VS/SDK（已实测），但运行时默认要 VC 运行库** | 本机无 Win10/11 SDK、`link.exe`/`cl.exe` 不在 PATH，clean-env + `rust-lld` 构建通过（`scripts/win-clean-probe.ps1`）。默认产物导入 `VCRUNTIME140.dll`；要绿色版请用 `+crt-static`。Linux 相反：必须有系统 `cc` + libc/CRT |
 | 3 | **ClearType gamma / GDI 锐度 / 两后端字形引擎差异** | 设计取舍（v0.2.0 起记录） |
-| 4 | **各向异性图片缩放 / 多窗口 / macOS** | 长期项，需外部条件或独立提案 |
+| 4 | **各向异性图片缩放** | 布局支持 X/Y 独立缩放，但过滤器无各向异性路径：Soft 取 `min(scale_x,scale_y)` 选级（强缩小轴优先不糊），另一轴可能偏模糊；D3D 未启用专用 anisotropic sampler。已有 4 条解析用例 + `min→max` 变异验证锁住现状 |
+| 5 | **多窗口 / macOS** | 桌面独立窗口已实现（`run_many` + 示例）；不承诺跨窗共享状态/焦点/标签，WASM 单 page/canvas。macOS 无计划 |
 
 ## 5. 升级注意
 

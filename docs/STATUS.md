@@ -1,8 +1,8 @@
 # 项目状态
 
-- **HEAD**: 见 `git log -1`（v0.2.3；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收 + X11 DPI + 墨迹绘制裁剪修复）
-- **tags**: v0.1.0 ~ **v0.2.3**（v0.2.0 含破坏性变更；v0.2.1 ~ v0.2.3 均为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md` / `v0.2.2` / `v0.2.3`）
-- **测试**: `passed=984` / `ignored=61` / `include_ignored=1045`（唯一来源 `docs/evidence/numbers.txt`）
+- **HEAD**: 见 `git log -1`（v0.2.4；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收 + X11 DPI/XSettings + 墨迹绘制裁剪修复）
+- **tags**: v0.1.0 ~ **v0.2.4**（v0.2.0 含破坏性变更；v0.2.1 ~ v0.2.4 均为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md` / `v0.2.2` / `v0.2.3` / `v0.2.4`）
+- **测试**: `passed=989` / `ignored=61` / `include_ignored=1050`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -35,8 +35,9 @@
 - 新增版本化脚本 [scripts/linux-verify.sh](../scripts/linux-verify.sh)：x11 `check`
   （all-targets）/ `golden` / `xvfb-run real_window` + `stroke_round_aa` +
   `sgr_reverse` + `ui+widgets`，任一失败 exit 1。
-- Linux 全量（虚拟机）：**885 passed / 0 failed / 27 ignored**（150 个测试目标），
-  证据 [linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
+- Linux 全量（历史记录）：见 [linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)
+  （当时 885 通过 / 0 失败 / 27 忽略）。当前值见上方 2026-11-20 验收，
+  差异来自本轮新增的 X11 用例（Xft.dpi 协议读取、DPI 优先级）。
 - `cargo audit` 恢复**真实联网刷新**（不再 STALE）：0 漏洞。
 - 本机 git 全局配置里指向 `127.0.0.1:7897` 的死代理已清除（备份
   `~/.gitconfig.bak-20261119`），`main` 与全部 tag 已推送。
@@ -67,7 +68,7 @@
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***984** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***989** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -343,7 +344,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 4. **发布**：`0.2.0` 已提交并打 tag；**已推送成功**（`main` 与全部 tag 在 `origin`，
    曾阻断推送的是本机 git 里指向 `127.0.0.1:7897` 的死代理，已移除）。
    `v0.2.0` 之后累积 15 个提交（Grid+Image 修复、per-node 墨迹边距、Linux 双平台验收、
-   剪贴板确定性等）—— 已发布 v0.2.1；v0.2.2 收掉遗留（X11 DPI、StyledText 裁剪、Linux 计数校验）；v0.2.3 修复审发现的墨迹擦除并清理业务工程拆分后的痕迹。
+   剪贴板确定性等）—— 已发布 v0.2.1；v0.2.2 收掉遗留（X11 DPI、StyledText 裁剪、Linux 计数校验）；v0.2.3 修复审发现的墨迹擦除并清理业务工程拆分后的痕迹；v0.2.4 接 XSettings 与运行期缩放、补各向异性质量测试，并按实测改写零 C 边界。
 5. ~~**杂物**：根目录 `clippy.txt` / `todo.tsv` 是生成物，建议移出仓库或进 `.gitignore`~~ ——
    已完成：两者已进 `.gitignore` 且不再被跟踪。
 
@@ -364,7 +365,8 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 | 图片 mipmap LOD | **已完成**（解析真值验证，见下方 mip 小节） | — |
 | 真机 Present 数字 | 待做 | 物理显示器 + 独占全屏 |
 | X11 真机验证 | 已在 **Xvfb** 全绿；真机仍待做 | 真 Linux 机器 |
-| 多窗口支持 | 待做 | 无（大改动，3~5d） |
+| 桌面多窗口（独立 Host/UiTree） | 已实现（Win32/X11 `run_many` + 示例；X11 事件隔离测试通过） | 不承诺跨窗共享状态、焦点/标签策略；WASM 是单 page/canvas/runtime |
+| Web/WASM 多 canvas/window | 不支持（每页单 canvas/runtime） | 独立架构提案 |
 
 ## 图片 mipmap（步骤 1 完成：建链 + 坐标映射，选级强制 level=0）
 
@@ -401,10 +403,15 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 **验证**（当轮口径，非当前基线）：全量 816 全绿，像素哈希 **`0xDBB308DD1657EF9C` / 400×220 不变**。
 > 当前基线是 `0xF7455CCE7781A864` / 400×220 —— 后续文字清晰度修复改变了它，以 `docs/evidence/hash-baseline.txt` 为准。
 
-**未做（步骤 2）**：打开 `level = level_for_image(...)`，跑 `s=0.5` 与**超采样独立真值**的 MAD。
+**验证**：图片 mip 选级已启用；各向同性质量用例见 `crates/y901-render/tests/image_mip_quality.rs`。
 
-**已知限制**：各向异性（`max(scale_x,scale_y) / min(...) > 2`）第一版**不特殊处理**，
-只按 `min` 取级（宁可略模糊，不导致走样）。
+**已知限制**：布局支持分别缩放 X/Y 轴，但过滤器没有各向异性专用路径（`max(scale_x,scale_y) / min(...) > 2`）。Soft 取较小倍率选各向同性 mip 以降低强缩小轴走样风险，较少缩小轴可能偏模糊；改选较大倍率则会增加强缩小轴的走样，故目前不擅自改变策略。D3D 硬件 mip 路径未启用专用 anisotropic sampler。
+
+**定向图案测试（2026-11-20 补）**：`crates/y901-render/tests/image_mip_quality.rs` 新增 4 条
+各向异性解析用例 —— X/Y 两个方向各一条"强缩小轴不走样"（闭式解恒 127.5，实测 127..127）、
+比值 > 2 的有界性、以及近各向同性对照。**变异验证**：把 `draw_scale` 的 `min` 改成 `max` 后，
+两条强缩小轴用例立刻红（实测 R 0..255）；改回即绿。所以这组测试真的锁住了当前策略，
+不是"跑通即通过"。
 
 ## 图片 mipmap 步骤 2（本轮）
 
@@ -466,11 +473,11 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 | GPU timestamp query | 更深的驱动层改动 |
 | X11 真机验证 | 真 Linux 机器 |
 | macOS 后端 | Mac 或 CI runner |
-| 多窗口支持 | 3~5 天 |
+| Web/WASM 多 canvas/window | 需独立 runtime / canvas 生命周期设计（当前明确单 canvas） |
 
 ## 不阻塞的剩余小项
 
-- 各向异性图片缩放（第一版不做，已知限制：`max/min > 2` 时仍按 `min` 取级）
+- 各向异性图片过滤质量：几何 Fill 可独立缩放 X/Y；Soft 用较小倍率选各向同性 mip，D3D 使用硬件 mip/线性采样但无专门 anisotropic sampler。比例差大时缩小轴得到保守抗混叠、另一轴可能偏模糊；独立质量基准与定向过滤仍未实现。
 - 动态图片 mipmap（`upload_texture_dynamic` 已绕过）
 - dead_code 的 12 处"内部实现 / 编译见证"可进一步分类
 
@@ -520,24 +527,50 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - **不要用 `--exclude` 绕过** —— 那只是掩盖问题。
 - 四条测试基建债（22 个测试无门控 / lib 的 4 处 `#[link]` /
   `file_drop` 硬编码 `C:\` / supersample 阈值绑定字体）就是靠它首次暴露的。
-- 已验证（2026-11-19，CentOS 7.9 虚拟机 + rustc 1.92）：
-  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **885 passed / 0 failed / 27 ignored**
-  （150 个测试目标）。证据：[linux-full-2026-11-19.log](evidence/cross-platform/linux-full-2026-11-19.log)。
-  与 Windows 的 984/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+- 已验证（2026-11-20，Ubuntu 22.04 / WSL2 + rustc 1.92 + Xvfb）：
+  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **906 passed / 0 failed / 27 ignored**
+  （150 个测试目标）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
+  与 Windows 的 989/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
+  （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
+- **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，
+  旧的 Xauthority 匹配传空主机名 → `FamilyLocal` 条目全部匹配失败，服务端回
+  `Authorization required, but no authorization protocol specified`（现象像"没发认证"，
+  实际是"有 cookie 没匹配上"）。现在改用 `xauth::local_hostname()`（`$HOSTNAME` → `/etc/hostname` 兜底），
+  `xvfb-run -a cargo test ...` 直接可用。
 - **上一轮仅剩的两条红（已修）**：`y901-extras` 的 `sgr_reverse` 曾取"单元格右上角"像素
   断言精确 RGB，前提是 Windows 的 Segoe UI 字形不覆盖那个采样点；Linux 回退到
   DejaVuSans 后读到"前景 × 背景"的混合值（182,186,195 vs 期望 230,235,245）。
   现在改为**格内背景众数**断言：仍要求精确 RGB，但对字体覆盖范围不敏感，Windows/Linux 双绿。
-- **x11 专项验收（2026-11-19）全部通过**，且脚本已进仓库
+- **x11 专项验收（2026-11-20）全部通过**，且脚本已进仓库
   （[scripts/linux-verify.sh](../scripts/linux-verify.sh)）：
-  `check`（all-targets）、`golden 32/0`、`xvfb-run real_window 12/0`（2 ignored）、
-  `render stroke_round_aa`、`extras sgr_reverse`、`ui+widgets` —— 六项 `EXIT_*=0`。
-  证据：[linux-verify-2026-11-19.log](evidence/cross-platform/linux-verify-2026-11-19.log)。
+  `check`（all-targets）、`golden 32/0`、`xvfb-run real_window 14/0`（2 ignored）、
+  **`clippy --all-targets -D warnings`**、`render stroke_round_aa`、`extras sgr_reverse`、
+  `ui+widgets`、`full workspace` —— 八项 `EXIT_*=0`。
+  证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)。
+  新增的 clippy 步是补一个盲区：**Windows 门禁的 clippy 只 lint 宿主 target，
+  `#[cfg(unix)]` 代码根本不参与编译**，本轮因此积了 6 条 lint 债（已全修）。
 - 已知不稳定项：`y901-shell` 的剪贴板单测在 Xvfb 下有 X 选区 owner 竞争，可能偶发失败；
   本轮全量运行恰好 0 failed，但它不在发布门禁内（门禁在 Windows 宿主上跑）。
 
 ### X11 专项
 
+- **DPI 缩放来源（v0.2.4 更新）**：`Y901_X11_SCALE` → `Y901_DPI` → **XSettings**
+  （`Xft/DPI` / `Gdk/WindowScalingFactor`）→ 根窗口 `RESOURCE_MANAGER` 的 `Xft.dpi`
+  → setup 屏幕毫米估算（吸附 0.25 档位）。XSettings 与 `Xft.dpi` 是用户/桌面写下的
+  缩放意图，取 `72..=384` 且**不吸附**；都没有才回退毫米。
+  XSettings 走标准协议：`GetSelectionOwner(_XSETTINGS_S0)` → 该窗口的
+  `_XSETTINGS_SETTINGS` 属性 → 解析二进制块（整数 / 字符串 / 颜色三种类型，
+  字符串按 4 字节补齐，未知类型整块作废以防错位）。**零新依赖**（只加了
+  `GetSelectionOwner` 编码与解码，opcode 23）。
+- **运行期跟随缩放（v0.2.4 新增）**：桌面改缩放后，窗口在 ≤1 秒内发现并
+  **重建字形引擎 + 软后端**、按新物理尺寸 `ConfigureWindow`，随后照常重排重绘。
+  检测方式是轮询（`Y901_X11_DPI_POLL_MS` 可调，默认 1000ms；设为 0 每次事件都查），
+  **不是** `PropertyNotify` 订阅 —— 后者要给别人的窗口选 `PropertyChangeMask`
+  并新增事件解码，成本高且漏事件会永久停在旧缩放。重建失败时保留旧缩放并停用跟随，
+  不会每秒重试刷日志。
+- **仍未覆盖**：每显示器（per-monitor）DPI —— X11 协议层没有可靠 API；
+  多屏不同缩放只能靠显式环境变量。全屏状态下不主动改客户区尺寸（交给 WM）。
 - `DISPLAY=:99 cargo test -p y901-backend-x11`（需 Xvfb :99）
 - 平台中立 crate（`y901-core` / `y901-ui` / `y901-render` / `y901-widgets`）可单独 `-p` 跑
 - x11 全量：`DISPLAY=:99 cargo test -p y901-backend-x11 --test real_window -- --test-threads=1`
@@ -593,7 +626,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 | 平台 | 通过 | 失败 | ignored | 备注 |
 |---|---|---|---|---|
 | **Windows** | **751** | 0 | 58 | **当轮口径**（当前见 `numbers.txt`） |
-| **Linux** | **661** | 0 | 25 | **当轮口径**；当前 885/0/27，见上方 2026-11-19 验收 |
+| **Linux** | **661** | 0 | 25 | **当轮口径**；当前 906/0/27，见上方 2026-11-20 验收 |
 
 ### 审计
 
@@ -606,7 +639,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 |---|---|---|---|
 | 1 | **IME 两窗口同时组字不串** | 需真实 IME 环境 | 人工：两窗口各打一半中文，看组字条 |
 | 2 | **present 的设备丢失场景** | 真实设备丢失无法构造 | 已有 `Y901_SIMULATE_PRESENT_FAIL` 验证 **Err 传播路径**（非设备丢失本身） |
-| 3 | **多窗口支持** | 3~5 天大改动，需先定标签集/焦点语义 | 先写设计文档再动手 |
+| 3 | **多窗口集成语义/IME 双窗实测** | 独立 Host/UiTree + 桌面 `run_many` 已实现；共享应用状态、跨窗焦点/标签策略不属于现有契约，双窗 IME 需真机验证 | 有需求时另立协调层设计；IME 手工验收见 #1 |
 
 ### 测试开关清单（方便后来者）
 
@@ -617,6 +650,8 @@ cargo test --workspace --no-fail-fast 2>&1 \
 | `Y901_SIMULATE_RENDER_FAIL` | `WindowBackend::render` 立即 `Err`（验 `Drop` 兜底） | win32 `window.rs` |
 | `Y901_SIMULATE_PRESENT_FAIL` | `D3dBackend::present` 立即 `Err`（验 present 传播） | win32 `backend/mod.rs` |
 | `Y901_SUB_TRACE` | 打印订阅懒清理条数 | `y901-ui` `tree.rs` |
+| `Y901_X11_DPI_POLL_MS` | X11 检查桌面缩放变化的间隔（默认 1000；`0` = 每次 `wait_events` 都查） | x11 `window.rs` `wait_events` |
+| `Y901_NO_SHM` | X11 禁用 MIT-SHM（验 PutImage 回退路径） | x11 `window.rs` |
 | `Y901_PAINT_TRACE` | 按真实绘制顺序打印节点矩形/裁切 | `y901-ui` `tree.rs` |
 | `Y901_PROFILE` | 每次 `run_loop` 退出时打印帧耗时统计 | `backend-common` `runtime.rs` |
 | `Y901_IDLE_WAIT_MS` | 空闲等待上限 | `backend-common` `runtime.rs` |
@@ -632,6 +667,17 @@ cargo test --workspace --no-fail-fast 2>&1 \
   这是唯一不依赖后端常数即可确定净收益的改动。
 - **零 C 依赖守卫只覆盖本仓**：业务工程已拆分为独立仓库，它的依赖审计由该仓自己负责。
   本仓守卫（`crates/y901-shell/tests/no_c_deps.rs`）解析失败会**报错而不是静默绿**。
+- **Windows"只装 Rust 能否构建"已实测（v0.2.4 复核）**：本机**没有 Win10/11 SDK**
+  （`Windows Kits\10` 不存在）、`link.exe`/`cl.exe` 不在 PATH、`vswhere` 返回空，
+  而 clean-env（清空 `LIB`/`INCLUDE`/`VC*`）+ 工具链自带 `rust-lld` 的
+  `cargo build --release --workspace --examples` **exit 0**；链接输入里没有任何 SDK 库
+  （`windows-sys` 与 std 走 `raw-dylib`）。
+  **但默认产物运行时要 VC 运行库**（导入 `VCRUNTIME140.dll`），要"解压即用"得加
+  `-C target-feature=+crt-static`（实测产物零 CRT 导入）。
+  一键复现：[scripts/win-clean-probe.ps1](../scripts/win-clean-probe.ps1)。
+  以前文档写的"本机装了 VS 2022 所以证明不了"是**未测量就下的结论**，已按实测修正。
+- **Linux 相反**：去掉 `cc` 后 rust-lld 找不到 `-lc/-lm/-lgcc_s`，补 `-L` 也只会产出
+  没有 `PT_INTERP` 的二进制（运行即 `SIGSEGV`）—— GNU 目标必须有系统 C 工具链驱动。
 
 
 - **文档债：`docs/FRAMEWORK.md` 的"需要真机的测试"一节陈旧**（去 AI 阶段 4b 记录）。

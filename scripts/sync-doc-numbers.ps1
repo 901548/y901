@@ -227,10 +227,19 @@ foreach ($f in $docFiles) {
         # **Linux 行专项**：含 "Linux" 且谈计数的行，数字必须来自 `linux-numbers.txt`。
         # 之前这些行被整行豁免 —— 那等于"Linux 的数字永远正确"，
         # 而它恰恰是最容易只在另一台机器上漂移的一类。
+        #
+        # 但**显式标注为历史口径的行**必须豁免：保留上一台机器的真实记录是证据，
+        # 强行改成当前数字等于伪造历史。豁免标记与通用兜底同一套（可审计）。
+        #
+        # 注意 `$countKeywords` 必须在这里定义：下面按行过滤"是否在谈计数"，
+        # 而通用兜底段（更靠后）也要用同一个词表。
+        $countKeywords = '测试|passed|ignored|基线|项测试|include[-_ ]?ignored|含 ignore'
+        $linuxLineExempt = '历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
         if ($linuxAllowed.Count -gt 0) {
             foreach ($line in ($t -split "`n")) {
                 if ($line -notmatch 'Linux') { continue }
                 if ($line -notmatch $countKeywords) { continue }
+                if ($line -match $linuxLineExempt) { continue }
                 foreach ($m in [regex]::Matches($line, '(?<![\w.])(\d{3})(?![\w.])')) {
                     $n = [int]$m.Groups[1].Value
                     $suffix = $line.Substring($m.Index + $m.Length)
@@ -255,7 +264,6 @@ foreach ($f in $docFiles) {
         # 平台相关（Linux）与历史口径的行必须**在文档里写明标记**才豁免
         # （Linux / 历史 / 旧口径 / 当轮 / `<!-- counts-exempt -->`）——
         # 豁免规则本身也要可审计，不能藏在脚本里。
-        $countKeywords = '测试|passed|ignored|基线|项测试|include[-_ ]?ignored|含 ignore'
         $exemptMarkers = 'Linux|历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
         $allowed = @($passed, $ignored, $baseline, $targets, $includePassed) | Where-Object { $_ -ge 0 }
         foreach ($line in ($t -split "`n")) {

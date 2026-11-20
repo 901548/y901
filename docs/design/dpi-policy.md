@@ -147,7 +147,9 @@
 | 平台 | `Options` 语义 | 缩放来源 | 状态 |
 |---|---|---|---|
 | Windows（win32） | DIP，客户区 = `round(DIP × scale)` | `GetDpiForSystem` / `WM_DPICHANGED`；`Y901_TEST_DPI_SCALE` 可覆盖 | 已实现 |
-| Linux（x11） | **同样按 DIP 解释**，但当前 `scale` 恒为 1.0 | x11 后端尚未接 DPI（无 `dpi_scale` 字段、无 Xft 查询） | DIP 与物理像素相同，行为一致 |
+| Linux（x11） | **同样按 DIP 解释**；客户区 = `round(DIP × scale)` | `Y901_X11_SCALE` → `Y901_DPI` → XSettings（`Xft/DPI` / `Gdk/WindowScalingFactor`）→ 根窗口 `Xft.dpi` → setup 的屏幕毫米估算（吸附 0.25 档位） | 已实现（v0.2.2 起；v0.2.3 补 `Xft.dpi`、XSettings 与**运行期跟随缩放**） |
 
-结论：契约跨平台一致（"Options 是 DIP"），只是 x11 侧 scale 暂时恒等于 1.0；
-将来接 HiDPI 时只需在 x11 的窗口创建处补一个 `scale` 乘法，不需要再改语义。
+结论：契约跨平台一致（"Options 是 DIP"）。x11 侧没有每显示器 DPI API，
+优先级如上；运行期改缩放会在约 1 秒内被窗口发现（轮询 XSettings/Xft.dpi，不订阅
+`PropertyNotify`），随后重建光栅器并按新物理尺寸调整客户区。
+XSettings 与 `Xft.dpi` 都不做 0.25 吸附（它们是用户意图），只有毫米估算吸附。
