@@ -280,11 +280,31 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   从后端（`y901-backend-win32` / `-x11`）自动挂载并每帧 `push` —— 目前是库层已就绪、
   后端接线待做。
 
-### S4（下一步）：0.3.0 收敛
+### S4（2026-11-21）：后端接线完成；0.3.0 收敛未完成
 
-- 其余公开结构体批量 `#[non_exhaustive]`；
-- 后端接线（每帧 push 语义树 + 动作回派）；
-- 迁移指南定稿。
+已做：
+
+- **两个后端真的推树了**（此前只有库层）：
+  - `y901-backend-win32`（feature `a11y`）：`Window` 在 `CreateWindowExW` 之后、
+    `ShowWindow` **之前**建 `WindowsUia`（库的硬约束），`after_frame` 末尾每帧推树 +
+    轮询读屏器 `Click` 动作并回派；
+  - `y901-backend-x11`（feature `a11y`）：`X11Window::create` 建 `UnixAtspi`，
+    `render_tree` 结束（含"画面没变"的早退分支）推树 + 回派动作 + 同步焦点与根窗口 bounds。
+- 动作反查用 `nth_node_id`（前序遍历 + 与 `to_tree_update` 相同的跳过规则），
+  不长期持有会过期的 `NodeIdMap`。
+- 修复：`Cargo.toml` 被写入 BOM 导致零 C 守卫把本地 crate 当 registry crate
+  （报"源码缺失"假红）——已剥 BOM，并让守卫解析时剥掉。
+- 验证：gate GATE OK；Windows `--features a11y` 测试通过；
+  Linux Xvfb 下 `real_window` 17 passed / 2 ignored，a11y 21 条通过。
+
+**未做**（0.3.0 收敛的剩余项）：
+
+1. `Options` 等公开结构体的批量 `#[non_exhaustive]`：仓库内 30+ 处 `Options{}` 字面量
+   需逐个补 `..Default::default()`。本轮尝试后撤回（自动化脚本易改坏），
+   留作下一次单独提交（改动是机械的，但必须逐处核对）。
+2. 真机读屏器验收（Windows 讲述人 / Linux Orca 手工清单）。
+3. Web 的 DOM/ARIA 镜像。
+4. `MIGRATION_0.3.md` 定稿（等 non_exhaustive 批处理完再定）。
 
 - 新增 `crates/y901-render/src/text/`：
   - `GlyphKey { face, glyph }` —— 图集键的正确形状（`char` 作键会让不同上下文的
