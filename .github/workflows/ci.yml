@@ -227,7 +227,8 @@ jobs:
         run: |
           baseline="$(git describe --tags --abbrev=0 --match 'v[0-9]*')"
           echo "baseline=$baseline"
-          if cargo semver-checks check-release --workspace --baseline-rev "$baseline"; then
+          # **排除新增 crate**：它们在上一个 tag 里不存在，无从比较（会报 "crate not found"）。
+          if cargo semver-checks check-release --workspace --exclude y901-a11y --baseline-rev "$baseline"; then
             exit 0
           fi
           echo "::warning::semver-checks 报告破坏性变更，检查版本号是否已升 minor/major"

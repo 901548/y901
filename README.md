@@ -9,7 +9,7 @@ A pure-Rust cross-platform GUI framework with its own Win32/D3D11, X11 and Web (
 backends. Text uses a **monospace cell model** (`0.5em × 1em`), which makes it a good fit
 for terminal-style desktop tools, log viewers and file managers.
 
-> [中文说明](README.zh-CN.md) · [Roadmap](docs/ROADMAP.md) · [Platform support](docs/PLATFORMS.md)
+> [中文说明](README.zh-CN.md) · [Roadmap](docs/ROADMAP.md) · [Platform support](docs/PLATFORMS.md) · [v0.3.0 release notes (draft)](docs/RELEASE_NOTES_v0.3.0.md)
 
 ## Status
 

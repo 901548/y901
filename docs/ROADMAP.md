@@ -380,6 +380,15 @@ labelled-by/described-by 关系、live region、屏幕坐标。
 
 ### S4（2026-11-21）：后端接线完成；0.3.0 收敛未完成
 
+**发布候选已就绪（除授权项外）**：`docs/RELEASE_NOTES_v0.3.0.md` 已写好，
+记录破坏性变更、新能力、实测验证矩阵与"发布前仍缺"四项。
+`docs/RELEASE_NOTES_v0.2.6.md` 标记为**已作废**（并入 0.3.0，该版本号从未发布）。
+
+发布候选验证（本轮实测）：`check-semver-bump` 通过（v0.2.5 → 0.3.0 = minor）；
+`check-packaging` 12/12 crate 可打包；`cargo semver-checks --workspace
+--exclude y901-a11y --baseline-rev v0.2.5` 通过（新 crate 无基线，必须排除，
+否则报 "package not found in baseline"）；`cargo deny check` 四类全绿；gate GATE OK。
+
 **已验证的环境事实（写下来免得下次误判）**：本机 `F:` 盘会被 `target/` 撑满，
 表现为 `rustc-LLVM ERROR: IO failure on output stream` / `os error 5`，
 `linux-verify.sh` 的 `FULL_WORKSPACE` 与部分 rustc 链接会假红。
@@ -411,6 +420,8 @@ Windows `gate.ps1` **GATE OK**。所以之前的红是磁盘，不是代码。
    clippy `needless_update` 0 警告）；真正的解法是 0.4.0 把 `Options` 字段改私有 +
    `new()` + builder，那时再打属性才有意义。
 2. 真机读屏器验收（Windows 讲述人 / Linux Orca 手工清单）—— 需要人操作，机器做不了。
+3. **发布阻塞项**：crates.io 凭据（本机无 `~/.cargo/credentials.toml` / `CARGO_REGISTRY_TOKEN`）、
+   上传与打 `v0.3.0` tag 的授权、推送 GitHub 的授权 —— 这三项**只能由用户决定**。
 3. Web 的 DOM/ARIA 镜像 —— 属 Tier 3 升级项，不在 0.3 关键路径。
 
 - 新增 `crates/y901-render/src/text/`：
