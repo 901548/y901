@@ -473,24 +473,41 @@ impl SoftBackend {
         let (cell_w, cell_h) = crate::font::cell_metrics_for(px_final);
         let ascent = ascent_at_size(self.text.ascent(), self.text.size_px(), px_final);
 
-        // **选面**：优先用第一个"主字体没有该字形"的字符所命中的回退面。
-        // 整段用一个面是刻意的简化（逐 run 切面属于后续切片）；但至少这样
-        // "主字体缺阿拉伯/印度语系"时能真的画出来，而不是一整片 .notdef。
-        let face = text
-            .chars()
-            .find_map(|ch| self.text.face_for(ch).filter(|f| *f > 0))
-            .unwrap_or(0);
-        // 没有字体字节就没法 shaping：退回 cell 路径（并保持同一坐标系）。
-        let Some(font_data) = self.text.font_data_for(face).map(<[u8]>::to_vec) else {
-            return self.draw_text_sized(origin, text, style, base_px);
-        };
+        // **按字体面切段**：一句话里可能既主字体有、又有只有回退字体才有的字符。
+        // 整段用一个面会让"主字体本来就有的部分"也用回退字体，字宽与字形都不对。
+        let segments = crate::text::face_segments(text, |ch| self.text.face_for(ch));
+        // 先确认每一段都有字节可用，任何一段没有就整体退回 cell 路径（不做半截渲染）。
+        let mut planned: Vec<(u16, std::ops::Range<usize>, Vec<u8>)> = Vec::new();
+        for seg in &segments {
+            let Some(data) = self.text.font_data_for(seg.face).map(<[u8]>::to_vec) else {
+                return self.draw_text_sized(origin, text, style, base_px);
+            };
+            planned.push((seg.face, seg.range.clone(), data));
+        }
         let rtl = crate::text::paragraph_level(text);
-        let Ok(run) = crate::text::shape_run(&font_data, text, px_final, face) else {
-            return self.draw_text_sized(origin, text, style, base_px);
-        };
-        // RTL 段落从行右边界往左排；LTR 从行首往右。
-        let base_x = if rtl { origin.x + run.width } else { origin.x };
-        let (laid, width) = crate::text::place_run(&run, base_x);
+
+        // 逐段 shape 并铺到行上。RTL 时从行右边界往左推进，LTR 从左往右。
+        let mut laid: Vec<crate::text::LaidGlyph> = Vec::new();
+        let mut pen = 0.0f32; // 已排布宽度（相对行首）
+        let mut total = 0.0f32;
+        for (face, range, data) in &planned {
+            let slice = &text[range.clone()];
+            let Ok(run) = crate::text::shape_run(data, slice, px_final, *face) else {
+                return self.draw_text_sized(origin, text, style, base_px);
+            };
+            // 段内字形已按该段的赋值方向排好；跨段顺序由 `rtl` 决定。
+            let pen_x = if rtl { -pen } else { pen };
+            let (mut seg_glyphs, width) = crate::text::place_run(&run, pen_x);
+            laid.append(&mut seg_glyphs);
+            pen += width;
+            total += width;
+        }
+        // 把相对偏移平移到绝对坐标。
+        let base_x = if rtl { origin.x + total } else { origin.x };
+        for g in &mut laid {
+            g.x += base_x;
+        }
+        let width = total;
 
         if style.bg.a > 0.0 {
             // 背景按**行盒**刷（含 haw 的整行高度），与 cell 路径一致。
@@ -1397,6 +1414,29 @@ mod shaped_text_tests {
         assert!(ink_count(&b) > 0, "带组合记号也要能画出来");
     }
 
+    #[test]
+    fn mixed_faces_in_one_string_both_land_ink() {
+        // 主字体（Segoe UI / DejaVu）有拉丁、没有 CJK；这里不注册回退面，
+        // 但**分段逻辑**必须把两种字符都交给 shaping，且不 panic、宽度为正。
+        let mut b = backend(300, 40);
+        let style = TextStyle::fg(y901_ui::Color::rgba(1.0, 1.0, 1.0, 1.0));
+        let w = b.draw_text(
+            y901_ui::Pos::new(2.0, 4.0),
+            "abc\u{0645}\u{0631}xyz",
+            &style,
+        );
+        assert!(w > 0.0);
+        assert!(ink_count(&b) > 0, "混排（拉丁+阿拉伯）应当有像素");
+    }
+
+    #[test]
+    fn segments_cover_the_whole_string_once() {
+        // 分段必须无重叠地覆盖整串（否则会有字符被画两次或漏画）。
+        let text = "abمرcd";
+        let segs = crate::text::face_segments(text, |_| Some(0));
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].range, 0..text.len());
+    }
     #[test]
     fn ascii_still_goes_through_the_cell_path() {
         assert!(!crate::text::needs_shaping("Hello"));

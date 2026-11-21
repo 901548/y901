@@ -69,6 +69,39 @@ pub fn needs_shaping(text: &str) -> bool {
     })
 }
 
+/// 一段**同字体面**的连续文字（字节区间）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FaceSegment {
+    /// 出图的字体面；`0` = 主字体（含"整条链都没有该字形"的情况）。
+    pub face: u16,
+    /// 在原始字符串里的字节区间。
+    pub range: std::ops::Range<usize>,
+}
+
+/// 把一段文字按**字体面**切成连续段。
+///
+/// 为什么必须切：一句话里常常同时有主字体有的字符（拉丁）和只有回退字体才有的字符
+/// （阿拉伯/印度语系）。整段用一个面会让"主字体有的部分"也去用回退字体，字宽与字形都不对。
+///
+/// `face_of` 返回 `None` 的字符归到 face 0（主字体）：由它去画 .notdef，
+/// 比塞给回退面更符合"主字体说了算"。
+///
+/// 相邻同面合并成一段，因此纯文本只会产生一段（调用方不用特判）。
+pub fn face_segments(text: &str, face_of: impl Fn(char) -> Option<u16>) -> Vec<FaceSegment> {
+    let mut out: Vec<FaceSegment> = Vec::new();
+    for (start, ch) in text.char_indices() {
+        let face = face_of(ch).unwrap_or(0);
+        let end = start + ch.len_utf8();
+        match out.last_mut() {
+            Some(seg) if seg.face == face => seg.range.end = end,
+            _ => out.push(FaceSegment {
+                face,
+                range: start..end,
+            }),
+        }
+    }
+    out
+}
 /// 把一段 `ShapedRun` 铺到行上，返回带绝对偏移的字形列表与总宽度。
 ///
 /// `rtl_base` = 段落是 RTL 时的**行右边界** x（RTL 从右往左排）；
@@ -122,6 +155,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn face_segments_group_consecutive_same_face() {
+        // 'a','b' 主字体；'م','ر' 回退面 1；'c' 又回主字体。
+        let segs = face_segments("abمرc", |ch| match ch {
+            'م' | 'ر' => Some(1),
+            _ => Some(0),
+        });
+        assert_eq!(segs.len(), 3, "应按面切成三段，实得 {segs:?}");
+        assert_eq!(segs[0].face, 0);
+        assert_eq!(segs[1].face, 1);
+        assert_eq!(segs[2].face, 0);
+        assert_eq!(&"abمرc"[segs[1].range.clone()], "مر");
+    }
+
+    #[test]
+    fn unknown_face_chars_go_to_the_primary_font() {
+        // face_of 返回 None 的字符归主字体（由它画 .notdef），不塞给回退面。
+        let segs = face_segments("a中b", |ch| if ch == '中' { None } else { Some(0) });
+        assert_eq!(segs.len(), 1, "全归主字体 → 合并成一段，实得 {segs:?}");
+        assert_eq!(segs[0].face, 0);
+        assert_eq!(segs[0].range, 0.."a中b".len());
+    }
+
+    #[test]
+    fn plain_text_is_a_single_segment() {
+        let segs = face_segments("hello", |_| Some(0));
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].range, 0..5);
+    }
+
+    #[test]
+    fn empty_text_has_no_segments() {
+        assert!(face_segments("", |_| Some(0)).is_empty());
+    }
     #[test]
     fn ascii_does_not_need_shaping() {
         assert!(!needs_shaping("hello world"));
