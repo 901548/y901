@@ -247,8 +247,26 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   集群切分、`shaping` feature 下的 rustybuzz shaping（详见 §3 与代码注释）。
 - 依赖全纯 Rust；`shaping` 是可选 feature，**默认构建与像素基线完全不变**。
 - CI 新增 `text-shaping` job（编译 + 跑 feature 测试 + 复核依赖树无 C/C++ 构建依赖）。
-- **未做**：图集键真正切到 `GlyphKey`；`measure_with(avail_width)`；
+- **未做**：`measure_with(avail_width)`；
   Label/RichText/TextInput 接入 shaped 路径；字体回退链。
+
+### S2 续（2026-11-21）：图集/缓存键切到 `GlyphKey`（已完成）
+
+这是控件接入 shaped 路径的**前置阻塞点**：只要键还是 `char`，同一字符在不同上下文
+（`fi` 连字、阿拉伯词首/词中/词尾形）就会共用同一张位图。
+
+- `atlas::Atlas` 的槽位表 `HashMap<char, Slot>` → `HashMap<GlyphKey, Slot>`，
+  `slot/touch/place/write/read` 全部改收 `GlyphKey`；
+- 引擎字形缓存键 `(char, phase, px)` → `(GlyphKey, phase, px)`；
+- 新增 `MyFontEngine::glyph_keyed(GlyphKey, phase)`：**按 glyph id 光栅化，不经 cmap**；
+- 抽出 `font_engine::rasterize_gid_phased` / `glyph_id_of`，与 `rasterize_glyph_phased`
+  共用 `rasterize_resolved` 主体，保证两条路径**逐像素一致**（有测试钉住）；
+- **cell 路径统一走 glyph 键**：`glyph_phased` 先解析 glyph id（带 `char → gid` 记忆表），
+  因此按字符与按字形命中**同一条缓存**，不会重复光栅化、不会多占图集区域；实体光栅化
+  也改走 `rasterize_gid_phased`。
+- 验证：`cargo test -p y901-render --lib` **100 passed**（新增 5 条：
+  两条路径位图一致 / 按 id 而非 cmap / 不同 id 不共用槽位 / face 维度隔离 / 越界 id 不 panic）；
+  **像素哈希基线未变**（`0xF7455CCE7781A864`），证明重构对现有渲染零影响。
 
 ### S3（2026-11-21）：无障碍桥 —— 映射层 + 两个平台适配器已落地
 

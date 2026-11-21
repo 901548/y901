@@ -15,6 +15,8 @@ use y901_ui::Size;
 use super::{rasterize_glyph_phased, GlyphBitmap};
 use crate::atlas::SkylinePacker;
 use crate::font::{DirtyRect, FontEngine, GlyphInfo, MipSlot};
+use crate::font_engine::rasterize_gid_phased;
+use crate::text::GlyphKey;
 
 /// 一次 "按缩放选级" 的结果：实际用的级、字形信息、对应的图集坐标。
 ///
@@ -58,13 +60,22 @@ pub struct MyFontEngine {
     atlas: Vec<u8>,
     atlas_size: u32,
     packer: SkylinePacker,
-    /// `(char, phase)` → 字形信息。
-    /// `(char, phase, px)` → 字形信息。
+    /// 字形缓存：`(GlyphKey, phase, px)` → 字形信息。
+    ///
+    /// **键用 [`GlyphKey`] 而不是 `char`**：shaping 之后同一字符在不同上下文会对应
+    /// 不同字形（连字、阿拉伯连写形），用 `char` 作键会让它们共用同一张位图。
+    /// cell 路径用 `GlyphKey::from_char` 生成键，行为与以前完全一致。
     ///
     /// **第三个维度是字号**（px，取整）：同一个字在不同字号下是**不同的位图**，
     /// 必须分开存（否则 18px 的字会拿到 16px 的字形）。
     /// 默认字号用 `px_key()`（= 引擎 `size` 取整），**与加该维度前的行为一致**。
-    cache: HashMap<(char, u8, u32), GlyphInfo>,
+    cache: HashMap<(GlyphKey, u8, u32), GlyphInfo>,
+    /// `char → glyph id` 的记忆表。
+    ///
+    /// 为什么要它：把字符键统一成 **glyph 键**之后，cell 路径与 shaping 路径才能
+    /// 命中同一条缓存（否则同一个字形会被光栅化两次、占两块图集区域）。
+    /// 解析 cmap 要过一遍 `ttf_parser::Face`，所以按字符记忆，避免每次取字形都解析。
+    gid_cache: HashMap<char, Option<u16>>,
     /// 当前帧号（LRU 用）。
     frame: u64,
     /// 待上传的脏区。
@@ -123,6 +134,7 @@ impl MyFontEngine {
             atlas_size: ATLAS_SIZE,
             packer: SkylinePacker::new(ATLAS_SIZE),
             cache: HashMap::new(),
+            gid_cache: HashMap::new(),
             frame: 0,
             dirty: Vec::new(),
             reset_pending: true,
@@ -167,8 +179,10 @@ impl MyFontEngine {
     pub fn prefetch(&mut self, chars: &[char]) -> usize {
         let mut added = 0usize;
         for ch in chars {
-            if self.cache.contains_key(&(*ch, 0, self.px_key())) {
-                continue;
+            if let Some(gk) = self.key_of(*ch) {
+                if self.cache.contains_key(&(gk, 0, self.px_key())) {
+                    continue;
+                }
             }
             if self.glyph_phased(*ch, 0).is_some() {
                 added += 1;
@@ -178,6 +192,29 @@ impl MyFontEngine {
     }
 
     /// **引擎基准字号**的整数 key（默认路径用）。
+    /// 解析字符的字形 id 并记忆（缺字时走替身表，仍无则记 `None`）。
+    fn gid_of(&mut self, ch: char) -> Option<u16> {
+        if let Some(hit) = self.gid_cache.get(&ch) {
+            return *hit;
+        }
+        let gid = crate::font_engine::glyph_id_of(&self.data, ch);
+        self.gid_cache.insert(ch, gid);
+        gid
+    }
+
+    /// 字符 → 缓存/图集键（解析到字形 id；缺字返回 `None`）。
+    fn key_of(&mut self, ch: char) -> Option<GlyphKey> {
+        self.gid_of(ch).map(|gid| GlyphKey::new(0, u32::from(gid)))
+    }
+
+    /// 只读版：拿字符的缓存键（`&self`，用于 `glyph_at_scale` 等只读路径）。
+    ///
+    /// 与 [`Self::key_of`] 的区别：不写记忆表，因此缺字时**每次都重新解析**；
+    /// 只读路径的调用频次低于取字形，换取 `&self` 可用性。
+    fn cache_key_of(&self, ch: char) -> Option<GlyphKey> {
+        crate::font_engine::glyph_id_of(&self.data, ch).map(|gid| GlyphKey::new(0, u32::from(gid)))
+    }
+
     fn px_key(&self) -> u32 {
         self.size.round().max(1.0) as u32
     }
@@ -205,11 +242,13 @@ impl MyFontEngine {
         if k == self.px_key() {
             return self.glyph(ch);
         }
-        let key = (ch, 0u8, k);
+        let gk = self.key_of(ch)?;
+        let key = (gk, 0u8, k);
         if !self.cache.contains_key(&key) {
             // 按目标字号光栅化；**不生成 mip**（mip 按基准字号算的级尺寸不适用）。
-            let bitmap = rasterize_glyph_phased(&self.data, ch, k as f32, 0)?;
-            let info = self.insert_into_atlas(ch, &bitmap)?;
+            let gid = u16::try_from(gk.glyph).ok()?;
+            let bitmap = rasterize_gid_phased(&self.data, gid, k as f32, 0)?;
+            let info = self.insert_into_atlas(gk, &bitmap)?;
             self.cache.insert(key, info);
         }
         if let Some(g) = self.cache.get_mut(&key) {
@@ -220,12 +259,16 @@ impl MyFontEngine {
 
     /// 带亚像素相位取字形（`phase` ∈ 0..=3）。
     ///
-    /// 缓存 key 是 `(char, phase)`——同一字的 4 个相位是 4 张不同位图。
+    /// 缓存 key 是 `(GlyphKey, phase, px)`——同一字的 4 个相位是 4 张不同位图。
+    /// **键里的 glyph 来自 cmap 解析**（带记忆表），因此与 [`Self::glyph_keyed`]
+    /// 走 shaping 时命中同一条缓存：同一个字形不会被光栅化两次。
     pub fn glyph_phased(&mut self, ch: char, phase: u8) -> Option<&GlyphInfo> {
-        let key = (ch, phase & 3, self.px_key());
+        let gk = self.key_of(ch)?;
+        let key = (gk, phase & 3, self.px_key());
         if !self.cache.contains_key(&key) {
-            let bitmap = rasterize_glyph_phased(&self.data, ch, self.size, phase)?;
-            let info = self.insert_into_atlas(ch, &bitmap)?;
+            let gid = u16::try_from(gk.glyph).ok()?;
+            let bitmap = rasterize_gid_phased(&self.data, gid, self.size, phase)?;
+            let info = self.insert_into_atlas(gk, &bitmap)?;
             self.cache.insert(key, info);
         }
         if let Some(g) = self.cache.get_mut(&key) {
@@ -234,8 +277,33 @@ impl MyFontEngine {
         self.cache.get(&key)
     }
 
+    /// **按字形键取字形**（shaping 路径）。
+    ///
+    /// 与 [`Self::glyph_phased`] 的区别：`key.glyph` 直接当作 glyph id 光栅化，
+    /// **不经 cmap**。连字（`fi` → 单字形）和阿拉伯连写形只有这样才画得对——
+    /// 拿字符再查一次 cmap 会退回"每字符一个字形"。
+    ///
+    /// `key.face` 目前只有 0（单字体）；将来的回退链会用到它，键里已经带了。
+    pub fn glyph_keyed(&mut self, key: GlyphKey, phase: u8) -> Option<&GlyphInfo> {
+        let cache_key = (key, phase & 3, self.px_key());
+        if !self.cache.contains_key(&cache_key) {
+            let bitmap = rasterize_gid_phased(
+                &self.data,
+                u16::try_from(key.glyph).unwrap_or(0),
+                self.size,
+                phase,
+            )?;
+            let info = self.insert_into_atlas(key, &bitmap)?;
+            self.cache.insert(cache_key, info);
+        }
+        if let Some(g) = self.cache.get_mut(&cache_key) {
+            g.last_used = self.frame;
+        }
+        self.cache.get(&cache_key)
+    }
+
     /// 把一张覆盖度位图写进图集，返回字形信息。
-    fn insert_into_atlas(&mut self, _ch: char, bmp: &GlyphBitmap) -> Option<GlyphInfo> {
+    fn insert_into_atlas(&mut self, _key: GlyphKey, bmp: &GlyphBitmap) -> Option<GlyphInfo> {
         let (w, h) = (bmp.width.max(1), bmp.height.max(1));
         let mut pos = self.packer.insert(w + PADDING, h + PADDING);
         if pos.is_none() {
@@ -369,7 +437,8 @@ impl MyFontEngine {
         // 不缩放 / 非法值 / 放大：直接 L0，不生成 mip
         if !(scale.is_finite() && scale > 0.0 && scale < 1.0) {
             self.glyph(ch)?;
-            let g = self.cache.get(&(ch, 0u8, self.px_key()))?;
+            let gk = self.cache_key_of(ch)?;
+            let g = self.cache.get(&(gk, 0u8, self.px_key()))?;
             return Some(MipSelection {
                 level: 0,
                 glyph: g,
@@ -387,13 +456,15 @@ impl MyFontEngine {
         // 先取 L0（它是 mip 的源，也提供缓存的 ink）
         self.glyph(ch)?;
         let wanted = {
-            let g = self.cache.get(&(ch, 0u8, self.px_key()))?;
+            let gk = self.cache_key_of(ch)?;
+            let g = self.cache.get(&(gk, 0u8, self.px_key()))?;
             crate::mip::level_for(scale, g.ink, 2)
         };
         // level 0 就是 L0：**不要生成 mip**。否则 0.75 这类"基础级为 0"的调用
         // 会白白付 14µs 并产生脏区，而画面与不生成时完全一致。
         if wanted == 0 {
-            let g = self.cache.get(&(ch, 0u8, self.px_key()))?;
+            let gk = self.cache_key_of(ch)?;
+            let g = self.cache.get(&(gk, 0u8, self.px_key()))?;
             return Some(MipSelection {
                 level: 0,
                 glyph: g,
@@ -409,7 +480,8 @@ impl MyFontEngine {
         }
         let _ = self.ensure_mips(ch);
 
-        let g = self.cache.get(&(ch, 0u8, self.px_key()))?;
+        let gk = self.cache_key_of(ch)?;
+        let g = self.cache.get(&(gk, 0u8, self.px_key()))?;
         // 回退：从 wanted 往下找第一个真正存在的级
         for level in (1..=wanted).rev() {
             if let Some(slot) = g.mip_at(level) {
@@ -459,7 +531,10 @@ impl MyFontEngine {
     /// 需要 L1，把 L2 也一并生成是白付 20% 的时间。
     /// 将来若冷启动超预算，可以改成"首次需要 L2 时才生成 L2"。
     pub fn ensure_mips_upto(&mut self, ch: char, max_level: usize) -> bool {
-        let key = (ch, 0u8, self.px_key());
+        let Some(gk) = self.key_of(ch) else {
+            return false;
+        };
+        let key = (gk, 0u8, self.px_key());
         let Some(info) = self.cache.get(&key) else {
             return false;
         };
@@ -671,6 +746,101 @@ impl FontEngine for MyFontEngine {
     }
     fn cell_height(&self) -> f32 {
         self.cell.h
+    }
+}
+
+#[cfg(test)]
+mod glyph_key_tests {
+    //! 图集键换成 [`GlyphKey`] 之后的两条硬约束：
+    //! 1. cell 路径（按字符）必须与改造前逐像素一致；
+    //! 2. shaping 路径（按 glyph id）必须能画出「同一字符的另一个字形」，
+    //!    且不与按字符的条目共用缓存槽位。
+
+    use super::*;
+
+    fn engine() -> MyFontEngine {
+        let (cw, ch) = crate::cell_metrics_for(16.0);
+        MyFontEngine::new(
+            crate::load_font(&crate::default_test_font_path()).expect("font"),
+            16.0,
+            y901_ui::Size::new(cw, ch),
+        )
+        .expect("engine")
+    }
+
+    fn font() -> Vec<u8> {
+        crate::load_font(&crate::default_test_font_path()).expect("font")
+    }
+
+    #[test]
+    fn char_path_and_glyph_id_path_produce_identical_bitmaps() {
+        let data = font();
+        let gid = super::super::glyph_id_of(&data, 'A').expect("A 应有字形");
+        let by_char = super::super::rasterize_glyph_phased(&data, 'A', 16.0, 0).expect("char");
+        let by_gid = super::super::rasterize_gid_phased(&data, gid, 16.0, 0).expect("gid");
+        assert_eq!(by_char.width, by_gid.width);
+        assert_eq!(by_char.height, by_gid.height);
+        assert_eq!(by_char.bearing_x, by_gid.bearing_x);
+        assert_eq!(by_char.bearing_y, by_gid.bearing_y);
+        assert_eq!(by_char.coverage, by_gid.coverage, "两条路径必须逐像素一致");
+    }
+
+    #[test]
+    fn glyph_keyed_rasterizes_by_glyph_id_not_by_cmap() {
+        let mut e = engine();
+        let data = font();
+        let gid_a = super::super::glyph_id_of(&data, 'A').expect("A");
+        let expected = e.glyph_phased('A', 0).expect("glyph(A)").clone();
+        let got = e
+            .glyph_keyed(GlyphKey::new(0, gid_a as u32), 0)
+            .expect("keyed");
+        assert_eq!((got.width, got.height), (expected.width, expected.height));
+        assert_eq!(
+            (got.atlas_x, got.atlas_y),
+            (expected.atlas_x, expected.atlas_y),
+            "同一字形应命中同一槽位（键等价）"
+        );
+    }
+
+    #[test]
+    fn different_glyph_ids_do_not_share_a_slot() {
+        let mut e = engine();
+        let data = font();
+        let a = super::super::glyph_id_of(&data, 'A').expect("A") as u32;
+        let b = super::super::glyph_id_of(&data, 'B').expect("B") as u32;
+        let pa = {
+            let g = e.glyph_keyed(GlyphKey::new(0, a), 0).expect("A");
+            (g.atlas_x, g.atlas_y)
+        };
+        let pb = {
+            let g = e.glyph_keyed(GlyphKey::new(0, b), 0).expect("B");
+            (g.atlas_x, g.atlas_y)
+        };
+        assert_ne!(pa, pb, "不同 glyph id 不能共用槽位");
+    }
+
+    #[test]
+    fn face_dimension_separates_the_same_glyph_id() {
+        let mut e = engine();
+        let data = font();
+        let gid = super::super::glyph_id_of(&data, 'A').expect("A") as u32;
+        let p0 = {
+            let g = e.glyph_keyed(GlyphKey::new(0, gid), 0).expect("face 0");
+            (g.atlas_x, g.atlas_y)
+        };
+        let p1 = {
+            let g = e.glyph_keyed(GlyphKey::new(1, gid), 0).expect("face 1");
+            (g.atlas_x, g.atlas_y)
+        };
+        assert_ne!(p0, p1, "不同 face 的同号字形必须分开缓存");
+    }
+
+    #[test]
+    fn out_of_range_glyph_id_does_not_panic() {
+        let mut e = engine();
+        // u32 → u16 截断 + 必定不存在的 glyph id：允许失败，但不能 panic。
+        let key = GlyphKey::new(0, u32::from(u16::MAX));
+        let _ = e.glyph_keyed(key, 0);
     }
 }
 

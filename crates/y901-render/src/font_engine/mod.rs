@@ -140,6 +140,42 @@ pub fn glyph_advance_px(font_data: &[u8], ch: char, size_px: f32) -> Option<f32>
     Some(adv * size_px / units)
 }
 
+/// **按字形 id 光栅化**（带亚像素相位）——shaping 路径用。
+///
+/// 与 [`rasterize_glyph_phased`] 的唯一区别是**跳过 cmap 查表**：
+/// shaping 之后一个字符可能对应不同字形（连字/连写形），此时必须按 glyph id 光栅化，
+/// 不能再拿字符重新查一遍 cmap（那会退回"每字符一个字形"的老行为）。
+///
+/// 返回：`None` = 字形没有轮廓（如空格）、尺寸超上限，或字体解析失败。
+pub fn rasterize_gid_phased(
+    font_data: &[u8],
+    gid: u16,
+    size_px: f32,
+    phase: u8,
+) -> Option<GlyphBitmap> {
+    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
+    let units = face.units_per_em() as f32;
+    if units <= 0.0 || size_px <= 0.0 {
+        return None;
+    }
+    let scale = size_px / units;
+    rasterize_resolved(&face, ttf_parser::GlyphId(gid), scale, phase)
+}
+
+/// **字符 → 字形 id**（含缺字替身），供调用方把字符键升级成 glyph 键。
+pub fn glyph_id_of(font_data: &[u8], ch: char) -> Option<u16> {
+    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
+    resolve_gid(&face, ch).map(|g| g.0)
+}
+
+/// 解析字符对应的字形 id（缺字时走替身表）。
+fn resolve_gid(face: &ttf_parser::Face<'_>, ch: char) -> Option<ttf_parser::GlyphId> {
+    match face.glyph_index(ch) {
+        Some(g) => Some(g),
+        None => crate::font_fallback::substitute(ch).and_then(|sub| face.glyph_index(sub)),
+    }
+}
+
 /// **光栅化一个字形**（带亚像素相位），返回覆盖度位图。
 ///
 /// 返回：`None` = 字体里没有该字形（且替身字符也没有），或尺寸超安全上限。
@@ -150,22 +186,25 @@ pub fn rasterize_glyph_phased(
     phase: u8,
 ) -> Option<GlyphBitmap> {
     let face = ttf_parser::Face::parse(font_data, 0).ok()?;
-    // 缺字时先试替身字符（当前只有 U+2212 → '-' 一条）。
-    let gid = match face.glyph_index(ch) {
-        Some(g) => g,
-        None => match crate::font_fallback::substitute(ch) {
-            Some(sub) => face.glyph_index(sub)?,
-            None => return None,
-        },
-    };
+    let gid = resolve_gid(&face, ch)?;
     let units = face.units_per_em() as f32;
     if units <= 0.0 || size_px <= 0.0 {
         return None;
     }
     let scale = size_px / units;
+    rasterize_resolved(&face, gid, scale, phase)
+}
 
+/// 已解析字形 id 之后的光栅化主体（`rasterize_glyph_phased` 与
+/// `rasterize_gid_phased` 共用，保证两者**逐像素一致**）。
+fn rasterize_resolved(
+    face: &ttf_parser::Face<'_>,
+    gid: ttf_parser::GlyphId,
+    scale: f32,
+    phase: u8,
+) -> Option<GlyphBitmap> {
     // 26.6：先用 f32 算到像素，再转 i32 定点（四舍五入，避免截断偏差）
-    let (lines, advance) = flatten::flatten_glyph(&face, gid, scale)?;
+    let (lines, advance) = flatten::flatten_glyph(face, gid, scale)?;
     if lines.is_empty() {
         return None;
     }

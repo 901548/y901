@@ -11,6 +11,8 @@
 
 use std::collections::HashMap;
 
+use crate::text::GlyphKey;
+
 /// 图集里一个字形的位置。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Slot {
@@ -224,7 +226,9 @@ pub struct Atlas {
     size: u32,
     data: Vec<u8>,
     packer: SkylinePacker,
-    slots: HashMap<char, Slot>,
+    /// 槽位表。**键是 [`GlyphKey`]**（不是 `char`）：shaping 之后同一字符在不同上下文
+    /// 会对应不同字形，用字符作键会让它们共用同一块图集区域。
+    slots: HashMap<GlyphKey, Slot>,
     frame: u64,
     /// 需要上传的脏矩形 (x, y, w, h)
     dirty: Vec<(u32, u32, u32, u32)>,
@@ -288,8 +292,8 @@ impl Atlas {
     }
 
     /// 查某个字符的占位（没打包过返回 `None`）。
-    pub fn slot(&self, ch: char) -> Option<&Slot> {
-        self.slots.get(&ch)
+    pub fn slot(&self, key: GlyphKey) -> Option<&Slot> {
+        self.slots.get(&key)
     }
 
     /// 已打包的字符数（诊断与内存估算用）。
@@ -314,8 +318,8 @@ impl Atlas {
     }
 
     /// 标记使用，用于 LRU。
-    pub fn touch(&mut self, ch: char) {
-        if let Some(slot) = self.slots.get_mut(&ch) {
+    pub fn touch(&mut self, key: GlyphKey) {
+        if let Some(slot) = self.slots.get_mut(&key) {
             slot.last_used = self.frame;
         }
     }
@@ -324,11 +328,11 @@ impl Atlas {
     ///
     /// 放不下时依次尝试：**升到 85% 以上就 LRU 淘汰 → 压缩搬移 → 再试一次**。
     /// 全过程不重画任何一个字形，只做一次搬移 + 一次全量上传。
-    pub fn place(&mut self, ch: char, w: u32, h: u32) -> Option<Placement> {
-        if let Some(slot) = self.slots.get(&ch) {
+    pub fn place(&mut self, key: GlyphKey, w: u32, h: u32) -> Option<Placement> {
+        if let Some(slot) = self.slots.get(&key) {
             self.hits += 1;
             let (x, y, w, h) = (slot.x, slot.y, slot.w, slot.h);
-            if let Some(slot) = self.slots.get_mut(&ch) {
+            if let Some(slot) = self.slots.get_mut(&key) {
                 slot.last_used = self.frame;
             }
             return Some(Placement { x, y, w, h });
@@ -359,13 +363,13 @@ impl Atlas {
             h,
             last_used: self.frame,
         };
-        self.slots.insert(ch, slot);
+        self.slots.insert(key, slot);
         Some(Placement { x, y, w, h })
     }
 
     /// 把字形像素写进图集。`src` 长度必须是 `w*h`。
-    pub fn write(&mut self, ch: char, src: &[u8]) {
-        let Some(slot) = self.slots.get(&ch).copied() else {
+    pub fn write(&mut self, key: GlyphKey, src: &[u8]) {
+        let Some(slot) = self.slots.get(&key).copied() else {
             return;
         };
         if src.len() < (slot.w * slot.h) as usize {
@@ -381,8 +385,8 @@ impl Atlas {
     }
 
     /// 读取某个字形的像素（测试与调试用）。
-    pub fn read(&self, ch: char) -> Option<Vec<u8>> {
-        let slot = self.slots.get(&ch)?;
+    pub fn read(&self, key: GlyphKey) -> Option<Vec<u8>> {
+        let slot = self.slots.get(&key)?;
         let mut out = Vec::with_capacity((slot.w * slot.h) as usize);
         for row in 0..slot.h {
             let src = ((slot.y + row) * self.size + slot.x) as usize;
@@ -421,13 +425,13 @@ impl Atlas {
         }
 
         // 按 (y, x) 排序，保持空间局部性，减少搬移后的碎片
-        let mut entries: Vec<(char, Slot)> = self.slots.iter().map(|(k, v)| (*k, *v)).collect();
+        let mut entries: Vec<(GlyphKey, Slot)> = self.slots.iter().map(|(k, v)| (*k, *v)).collect();
         entries.sort_by_key(|(_, s)| (s.y, s.x));
 
         let mut fresh = vec![0u8; (self.size * self.size) as usize];
         self.packer.reset();
 
-        for (ch, old) in entries {
+        for (key, old) in entries {
             let Some((x, y)) = self.packer.insert(old.padded_w(), old.padded_h()) else {
                 // 理论上不会发生（内容总量没变），保守起见保留原槽位
                 continue;
@@ -440,7 +444,7 @@ impl Atlas {
                     .copy_from_slice(&self.data[src..src + old.w as usize]);
             }
             self.slots.insert(
-                ch,
+                key,
                 Slot {
                     x,
                     y,
@@ -527,19 +531,19 @@ mod tests {
             let ch = char::from_u32(0x4E00 + i).unwrap();
             let w = 6 + (i % 5);
             let h = 8 + (i % 7);
-            let Some(_p) = atlas.place(ch, w, h) else {
+            let Some(_p) = atlas.place(GlyphKey::from_char(ch), w, h) else {
                 break;
             };
             let fill = (i % 251 + 1) as u8;
             let pixels = vec![fill; (w * h) as usize];
-            atlas.write(ch, &pixels);
+            atlas.write(GlyphKey::from_char(ch), &pixels);
             expected.push((ch, w, h, pixels));
         }
 
         let before: Vec<(char, u32, u32)> = expected
             .iter()
             .map(|(ch, _, _, _)| {
-                let s = atlas.slot(*ch).unwrap();
+                let s = atlas.slot(GlyphKey::from_char(*ch)).unwrap();
                 (*ch, s.x, s.y)
             })
             .collect();
@@ -551,12 +555,12 @@ mod tests {
         // 每个字形都必须还在，且内容一模一样
         for (ch, w, h, pixels) in &expected {
             let slot = atlas
-                .slot(*ch)
+                .slot(GlyphKey::from_char(*ch))
                 .unwrap_or_else(|| panic!("compact 之后字形 {ch:?} 丢失"));
             assert_eq!(slot.w, *w);
             assert_eq!(slot.h, *h);
 
-            let got = atlas.read(*ch).expect("read");
+            let got = atlas.read(GlyphKey::from_char(*ch)).expect("read");
             assert_eq!(&got, pixels, "字形 {ch:?} 的内容在搬移后损坏");
 
             // UV 通过 slot 坐标导出，必须指向正确的像素
@@ -567,7 +571,7 @@ mod tests {
 
         // 坐标确实变了（说明真的重排过，而不是什么都没做）
         let moved = expected.iter().any(|(ch, _, _, _)| {
-            let s = atlas.slot(*ch).unwrap();
+            let s = atlas.slot(GlyphKey::from_char(*ch)).unwrap();
             before
                 .iter()
                 .any(|(bch, bx, by)| bch == ch && (*bx != s.x || *by != s.y))
@@ -588,8 +592,8 @@ mod tests {
         let mut placed = 0;
         for i in 0..400u32 {
             let ch = char::from_u32(0x4E00 + i).unwrap();
-            if atlas.place(ch, 12, 12).is_some() {
-                atlas.write(ch, &[1u8; 144]);
+            if atlas.place(GlyphKey::from_char(ch), 12, 12).is_some() {
+                atlas.write(GlyphKey::from_char(ch), &[1u8; 144]);
                 placed += 1;
             }
         }
@@ -601,8 +605,8 @@ mod tests {
         atlas.begin_frame();
         for i in 0..400u32 {
             let ch = char::from_u32(0x9000 + i).unwrap();
-            if atlas.place(ch, 12, 12).is_some() {
-                atlas.write(ch, &[2u8; 144]);
+            if atlas.place(GlyphKey::from_char(ch), 12, 12).is_some() {
+                atlas.write(GlyphKey::from_char(ch), &[2u8; 144]);
             }
         }
 
@@ -625,10 +629,10 @@ mod tests {
     fn padding_is_only_right_and_bottom() {
         let mut atlas = Atlas::new(64);
         atlas.begin_frame();
-        let a = atlas.place('a', 8, 8).unwrap();
+        let a = atlas.place(GlyphKey::from_char('a'), 8, 8).unwrap();
         assert_eq!((a.x, a.y), (0, 0));
         // 下一块紧贴 (8+1, 0) = (9, 0)，证明只留了右边 1px
-        let b = atlas.place('b', 8, 8).unwrap();
+        let b = atlas.place(GlyphKey::from_char('b'), 8, 8).unwrap();
         assert_eq!(b.x, 9, "右 padding 应为 1px");
         assert_eq!(b.y, 0);
     }
