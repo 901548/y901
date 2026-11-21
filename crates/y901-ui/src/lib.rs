@@ -33,6 +33,8 @@
 
 #![deny(missing_docs)]
 pub mod animation;
+/// 字形集群边界与光标吸附（复杂文本编辑的正确性基础）。
+pub mod cluster;
 pub mod color;
 pub mod command;
 pub mod event;
@@ -52,6 +54,7 @@ pub mod widget;
 /// 折行（按可用宽度把一段文字切成多行）。
 pub mod wrap;
 
+pub use cluster::{cluster_boundaries, is_combining_mark, next_boundary, prev_boundary, snap};
 pub use color::{Color, TextStyle};
 pub use command::Command;
 pub use event::{EventPhase, EventResult, Key, Modifiers, MouseButton, PointerCapture, UiEvent};

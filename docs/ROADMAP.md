@@ -332,6 +332,22 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   `TextLabel` 5 条（默认不折、行数增高、短文本不受影响、无限宽不折、显式换行计数）；
   默认构建像素基线未变，gate GATE OK。
 
+### S2 六续（2026-11-21）：集群簇光标（编辑复杂文本不出错）
+
+- 新增 [`crates/y901-ui/src/cluster.rs`](../crates/y901-ui/src/cluster.rs)：
+  `cluster_boundaries` / `snap` / `prev_boundary` / `next_boundary` / `is_combining_mark`。
+  规则按**字素簇**而非单词：每个字符都成界，除非它是组合记号 / ZWJ / ZWNJ
+  或前一个字符是 ZWJ。于是 `कि`（辅音+元音符号）、`e◌́`（基字母+重音）是一簇，
+  阿拉伯语仍是"每个字母一簇"（符合编辑器惯例）。
+- `TextBuffer` 的 `snap` / `prev_boundary` / `next_boundary` 全部改走集群边界：
+  光标**不再能落在簇中间**，Backspace 一次删整簇（以前会留下半个音节）。
+- **单一事实来源**：渲染层 `text::cluster::is_combining_mark` 改为转发
+  `y901_ui::cluster`，不再各维护一份区间表（两处漂移会出现"UI 认为能放光标、渲染认为不能"）。
+- 修正一处早先的设计错误：集群最初按"同一脚本归一群"切分，会让 `abc` 整体成一簇、
+  ←/→ 跳过整个词；已改为字素簇规则并补测试钉住。
+- 测试：集群逻辑 9 条 + `TextBuffer` 4 条（光标不落簇中、整簇删除、重音随基字母删除、
+  阿拉伯每字母一簇）；像素基线未变，gate GATE OK。
+
 ### S3（2026-11-21）：无障碍桥 —— 映射层 + 两个平台适配器已落地
 
 - 新 crate **`crates/y901-a11y`**（第 12 个）：

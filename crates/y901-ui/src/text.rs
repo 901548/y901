@@ -105,11 +105,9 @@ impl TextBuffer {
 
     /// 把任意字节偏移吸附到最近的合法 char 边界（向下取整）。
     fn snap(&self, byte: usize) -> usize {
-        let mut pos = byte.min(self.text.len());
-        while pos > 0 && !self.text.is_char_boundary(pos) {
-            pos -= 1;
-        }
-        pos
+        // **吸附到字素簇边界**（不只是 char 边界）：否则光标会落在 `कि` 的辅音与
+        // 元音符号之间、或 `e` 与它的组合重音之间，接着打字就会把字素拆成两个孤立字符。
+        crate::cluster::snap(&self.text, byte)
     }
 
     /// 设置光标；越界或落在字符中间会自动吸附。返回是否真的移动了。
@@ -140,11 +138,17 @@ impl TextBuffer {
 
     /// 上一个 char 的起始偏移。
     fn prev_boundary(&self, pos: usize) -> usize {
+        // **按集群簇退格**：`कि` 要一次删掉整个音节；阿拉伯语则一个字母一簇
+        // （见 `crate::cluster` 的规则说明）。
+        crate::cluster::prev_boundary(&self.text, pos).unwrap_or(0)
+    }
+
+    #[allow(dead_code)]
+    fn prev_boundary_chars(&self, pos: usize) -> usize {
         if pos == 0 {
             return 0;
         }
         let mut p = pos.min(self.text.len());
-        // 跳过当前位置（如果它本身不是边界）
         while p > 0 && !self.text.is_char_boundary(p) {
             p -= 1;
         }
@@ -160,11 +164,8 @@ impl TextBuffer {
 
     /// 下一个 char 的结束偏移。
     fn next_boundary(&self, pos: usize) -> usize {
-        let p = self.snap(pos);
-        match self.text[p..].chars().next() {
-            Some(ch) => p + ch.len_utf8(),
-            None => self.text.len(),
-        }
+        // 与 `prev_boundary` 对称：同样按集群簇。
+        crate::cluster::next_boundary(&self.text, pos).unwrap_or(self.text.len())
     }
 
     /// 左移一个字符。`extend = true` 时扩展选区（Shift+←）。
@@ -493,6 +494,51 @@ mod tests {
 
     // ---------- 光标吸附 ----------
 
+    #[test]
+    fn cursor_snaps_out_of_a_cluster_middle() {
+        // "कि" = 辅音 + 元音符号：中间没有合法光标位。
+        let mut b = TextBuffer::from_text("कि");
+        for i in 0..=b.len_bytes() {
+            b.set_cursor(i);
+            let cur = b.cursor();
+            assert!(
+                cur == 0 || cur == b.len_bytes(),
+                "光标落在集群中间：set_cursor({i}) -> {cur}"
+            );
+        }
+    }
+
+    #[test]
+    fn backspace_deletes_a_whole_cluster_not_half_a_syllable() {
+        // "कि" 后按一次 Backspace 应整簇删除（留下空串），而不是只删掉元音符号。
+        let mut b = TextBuffer::from_text("कि");
+        b.set_cursor(b.len_bytes());
+        assert!(b.backspace());
+        assert_eq!(b.text(), "", "整簇被删掉，实得 {:?}", b.text());
+    }
+
+    #[test]
+    fn combining_accent_is_deleted_with_its_base_letter() {
+        let text = "e\u{0301}";
+        let mut b = TextBuffer::from_text(text);
+        b.set_cursor(b.len_bytes());
+        assert!(b.backspace());
+        assert_eq!(b.text(), "", "重音应与基字母一起删除");
+    }
+
+    #[test]
+    fn arabic_letters_delete_one_at_a_time() {
+        // 与编辑器惯例一致：阿拉伯语每个字母是一簇。
+        let text = "مرحبا";
+        let mut b = TextBuffer::from_text(text);
+        b.set_cursor(b.len_bytes());
+        assert!(b.backspace());
+        assert_eq!(
+            b.text().chars().count(),
+            text.chars().count() - 1,
+            "只应删掉最后一个字母"
+        );
+    }
     #[test]
     fn cursor_snaps_to_char_boundary() {
         let mut buf = TextBuffer::from_text("中");

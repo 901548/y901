@@ -57,30 +57,9 @@ pub fn visual_to_logical(text: &str, cluster_index: usize) -> usize {
 /// 这里按 Unicode 的 Mn/Me/Mc 主要区块判断，覆盖阿拉伯语变音符、天城文元音符号、
 /// 泰文声调符等 shaping 必需场景。漏判的后果只是"集群切得细一点"，不会画错。
 pub fn is_combining_mark(ch: char) -> bool {
-    let c = ch as u32;
-    matches!(c,
-        0x0300..=0x036F   // Combining Diacritical Marks
-        | 0x0483..=0x0489 // Cyrillic combining
-        | 0x0591..=0x05BD // Hebrew points
-        | 0x0610..=0x061A // Arabic marks
-        | 0x064B..=0x065F // Arabic vowel marks
-        | 0x0670
-        | 0x06D6..=0x06DC
-        | 0x06DF..=0x06E4
-        | 0x06E7..=0x06E8
-        | 0x06EA..=0x06ED
-        | 0x0900..=0x0903 // Devanagari signs
-        | 0x093A..=0x094F // Devanagari vowel signs (incl. virama)
-        | 0x0951..=0x0957
-        | 0x0962..=0x0963
-        | 0x0E31 | 0x0E34..=0x0E3A // Thai
-        | 0x0E47..=0x0E4E
-        | 0x1AB0..=0x1AFF // Combining Diacritical Marks Extended
-        | 0x20D0..=0x20F0 // Combining Diacritical Marks for Symbols
-        | 0xFE00..=0xFE0F // Variation Selectors
-        | 0xFE20..=0xFE2F // Combining Half Marks
-    ) || ch == '\u{200D}' // ZWJ
-        || ch == '\u{200C}' // ZWNJ
+    // **单一事实来源**：实现在 `y901_ui::cluster`（文本层），渲染层只转发。
+    // 否则两处区间表迟早漂移，出现"UI 认为能放光标、渲染认为不能"的怪 bug。
+    y901_ui::cluster::is_combining_mark(ch)
 }
 
 #[cfg(test)]

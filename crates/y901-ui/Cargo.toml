@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/901548/y901"
 description = "Widget tree, layout, events and theming for Y901."
