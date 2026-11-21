@@ -374,6 +374,13 @@ extern "C" {
     #[wasm_bindgen(method, getter, js_name = "tagName")]
     pub fn tag_name(this: &Element) -> String;
 
+    /// `element.textContent = value`。
+    ///
+    /// 用 `structural`：ARIA 镜像容器是 `Element`，删子节点最省事的方式是清空文本内容
+    /// （会把所有子元素一起移除）。这里只用于"清空"，不做富文本。
+    #[wasm_bindgen(method, structural, js_name = "textContent", setter)]
+    pub fn set_text_content(this: &Element, value: &str);
+
     /// `element.id`。
     #[wasm_bindgen(method, getter)]
     pub fn id(this: &Element) -> String;

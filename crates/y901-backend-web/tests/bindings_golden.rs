@@ -103,6 +103,7 @@ const EXPECTED_JS_NAMES: &[&str] = &[
     "shiftKey",
     "style",
     "tagName",
+    "textContent",
     "window",
 ];
 
@@ -158,7 +159,8 @@ fn binding_attribute_counts_are_stable() {
     // 注意：`JsObject::set_prop` 与 `Uint8ClampedArray::set_index` 已删除，
     // 所以 indexing_setter 现在为 0（若未来重新引入，这里会提醒你更新）。
     assert_eq!(count("indexing_setter"), 0, "indexing_setter 数量变了");
-    assert_eq!(count("structural"), 4, "structural 数量变了");
+    // 5 = appendChild / remove / textContent(setter) + 2 个 window 级监听目标（见下）。
+    assert_eq!(count("structural"), 5, "structural 数量变了");
     // setProperty 有两个重载（带 priority / 不带），都要保留。
     assert_eq!(
         count("js_name = \"setProperty\""),

@@ -17,6 +17,9 @@ use y901_runtime::window::{RenderOutcome, WindowBackend};
 use y901_runtime::{Host, RawEvent};
 use y901_ui::{Size, UiTree};
 
+#[cfg(feature = "a11y")]
+/// 隐藏 DOM 的 ARIA 镜像（feature `a11y`）。
+pub mod aria;
 pub mod bindings;
 pub mod font_engine;
 pub mod frame;

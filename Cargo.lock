@@ -1579,6 +1579,7 @@ name = "y901-backend-web"
 version = "0.3.0"
 dependencies = [
  "wasm-bindgen",
+ "y901-a11y",
  "y901-core",
  "y901-render",
  "y901-runtime",

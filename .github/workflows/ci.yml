@@ -190,6 +190,21 @@ jobs:
             exit 1
           fi
           echo "无障碍依赖树无 C/C++ 构建依赖"
+  web-aria:
+    name: web ARIA mirror (wasm32 + a11y feature)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.92 + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # Web 的无障碍是"隐藏 DOM 镜像"，不在 AccessKit 那条路上；
+      # 只在 wasm32 下编译，所以必须有独立 job 真编一遍。
+      - name: cargo check -p y901-backend-web --features a11y
+        run: cargo check -p y901-backend-web --features a11y --target wasm32-unknown-unknown
   semver-guard:
     name: semver guard (breaking `!` commits require minor/major bump)
     runs-on: ubuntu-latest

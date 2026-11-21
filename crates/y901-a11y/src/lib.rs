@@ -33,6 +33,7 @@
 
 #![deny(missing_docs)]
 
+pub mod aria;
 pub mod platform;
 
 /// 重新导出 `accesskit`：调用方（各后端）不必自己依赖它，
@@ -42,6 +43,7 @@ pub use accesskit;
 use std::collections::HashMap;
 
 use accesskit::{Action, Node, NodeId, Role, Toggled, TreeInfo, TreeUpdate};
+pub use aria::{aria_role, to_aria_tree, AriaNode};
 pub use platform::{NodeIdMap, PlatformBridge};
 use y901_ui::{LiveRegion, NodeInfo, Semantics};
 

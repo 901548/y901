@@ -387,9 +387,34 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   CI 新增 `a11y-bridge` job（Windows 编 UIA、Linux 编 AT-SPI，并复核依赖树无 C/C++ 构建依赖）。
 - 测试：19 条（角色映射 / 未暴露子树跳过 / checked+expanded / 数值范围 / live region /
   动作映射 / 焦点 / bounds / 空树 / 队列上限 / 初始树单次取用）。
-- **未做**：真机验收（讲述人 / Orca 手工清单）；Web 的 DOM/ARIA 镜像；
+- **未做**：真机验收（讲述人 / Orca 手工清单）；
   从后端（`y901-backend-win32` / `-x11`）自动挂载并每帧 `push` —— 目前是库层已就绪、
   后端接线待做。
+
+### S3 续（2026-11-21）：Web 的 ARIA 镜像（平台无关映射 + wasm 落 DOM）
+
+Web 不能走 AccessKit（读屏器只认 DOM），所以另开一条路：
+
+- `y901-a11y::aria`（**跨平台纯映射，可单测**）：`aria_role` 把 Y901 角色翻成 WAI-ARIA
+  角色（`text_input` → `textbox`、`window` → `application`、未知 → `generic`），
+  `to_aria_tree` 把 `Semantics` 翻成 `aria-label` / `aria-description` / `aria-valuetext` /
+  `aria-valuemin`+`aria-valuemax` / `aria-checked`+`aria-expanded`+`aria-selected` /
+  `aria-level` / `aria-live`；**不设的状态不写属性**（"没设"与 `false` 是两种语义）。
+  未暴露节点连同子树跳过，与 AccessKit 路径同规则。
+- `y901-backend-web::aria`（feature `a11y`，wasm-only）：把映射结果写成
+  `<div id="y901-a11y" role="application">` 下的隐藏 DOM 树。
+  **用 `clip:rect` + 1px 隐藏，不用 `display:none`** —— 后者会把节点移出无障碍树，等于没做。
+- 每帧整棵重建（不做增量 diff）：节点量级几十~几百，重建是毫秒级，
+  宁可慢一点也不要"DOM 与画面不一致"。
+- 测试：ARIA 映射 11 条（角色、属性、缺省不写、范围、隐藏子树、深度统计、敏感标记）；
+  DOM 侧 2 条（容器 id 稳定、样式必须"视觉隐藏但对 AT 可见"）。
+- CI 新增 `web-aria` job（装 wasm32 target 后真编译）。
+- **踩坑记录**：wasm-bindgen 的 `extern` 函数带 `this` 参数时**只能以方法调用**
+  （`doc.create_element(..)`），写成 `bindings::create_element(doc, ..)` 会报
+  "not found in module"——类型（`Document`/`Element`）能解析、函数不能，很容易误判成
+  模块不可见。新增绑定后必须同步 `bindings_golden` 的 `EXPECTED_JS_NAMES` 与
+  `structural` 计数。
+- **仍未做**：真机读屏器验收（讲述人 / Orca / NVDA+浏览器）；焦点代理。
 
 ### S4（2026-11-21）：后端接线完成；0.3.0 收敛未完成
 
