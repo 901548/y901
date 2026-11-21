@@ -362,6 +362,48 @@ pub fn resolve_font_path(family: &str) -> String {
 ///
 /// 为什么不写死一个路径：这个函数之前返回 `C:\Windows\Fonts\simsun.ttc`，
 /// 一到 Linux 就报 `No such file or directory`——这是"平台无关层"里唯一该分平台的地方（资源路径）。
+/// **平台默认回退字体链**（按优先级排序的候选路径，只返回**存在**的文件）。
+///
+/// 为什么需要它：主字体（NSimSun / Segoe UI / DejaVu）只覆盖拉丁+CJK，
+/// 阿拉伯语、印度语系、希腊/西里尔扩展很可能一个字都没有。`shaping` 路径已经支持
+/// 回退面（`push_fallback` + `GlyphKey.face`），缺的只是"去哪找这些字体"。
+///
+/// 这里刻意**不引入 fontconfig**：那是 C 库，会破零 C 守卫。取而代之是一张
+/// 按平台列出的候选表 —— 覆盖 Windows 自带的多语言字体与主流 Linux 发行版的
+/// 常见路径。找不到就返回空表（调用方按"没有回退"处理，不报错）。
+///
+/// 顺序即优先级：先覆盖面最广的（Segoe UI / Noto Sans），再补 CJK 与阿拉伯语专用面。
+pub fn platform_fallback_paths() -> Vec<String> {
+    const CANDIDATES: &[&str] = &[
+        // ---- Windows：系统自带的多语言字体 ----
+        "C:\\Windows\\Fonts\\segoeui.ttf",  // 拉丁/希腊/西里尔
+        "C:\\Windows\\Fonts\\tahoma.ttf",   // 阿拉伯语（较早但覆盖面广）
+        "C:\\Windows\\Fonts\\seguisym.ttf", // 符号
+        "C:\\Windows\\Fonts\\msyh.ttc",     // 微软雅黑（CJK）
+        "C:\\Windows\\Fonts\\simsun.ttc",   // 宋体（CJK）
+        "C:\\Windows\\Fonts\\Nirmala.ttf",  // 印度语系
+        // ---- Linux：Debian/Ubuntu 与 Fedora 的常见路径 ----
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    ];
+    CANDIDATES
+        .iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .map(|p| (*p).to_string())
+        .collect()
+}
+
+/// 测试/默认路径：按平台候选表返回**第一个存在**的字体文件。
+///
+/// 全部不存在时返回候选表第一项，让调用方的错误信息里带上路径，
+/// 而不是报一个看不出原因的"找不到字体"。
 pub fn default_test_font_path() -> String {
     const CANDIDATES: &[&str] = &[
         // Windows（与旧行为一致：一直用 Segoe UI）

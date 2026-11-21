@@ -897,6 +897,28 @@ mod glyph_key_tests {
     }
 
     #[test]
+    fn platform_fallbacks_actually_prepare_faces() {
+        // 平台候选表里至少有一个字体（Windows: Segoe UI 等；Linux: DejaVu）。
+        let paths = crate::font_engine::platform_fallback_paths();
+        assert!(!paths.is_empty(), "平台默认回退字体链不应为空");
+        let mut e = engine();
+        let mut added = 0;
+        for path in &paths {
+            if let Ok(bytes) = crate::load_font(path) {
+                if e.push_fallback(bytes) {
+                    added += 1;
+                }
+            }
+        }
+        assert_eq!(
+            e.fallback_count(),
+            added,
+            "fallback_count 应与实际注册数一致"
+        );
+        // 任一平台至少能注册一个回退面（否则说明候选表与真实环境脱节）。
+        assert!(added >= 1, "候选表里的字体一个都没注册上，实得 {added}");
+    }
+    #[test]
     fn face_dimension_separates_the_same_glyph_id() {
         let mut e = engine();
         let data = font();

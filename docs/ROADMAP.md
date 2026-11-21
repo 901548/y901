@@ -305,6 +305,19 @@ labelled-by/described-by 关系、live region、屏幕坐标。
 - **仍缺**：平台默认回退链（fontconfig 等价物）；
   `measure_with(avail_width)` 与折行；TextInput 的 cluster 光标映射。
 
+### S2 七续（2026-11-21）：平台默认回退字体链（S2 收尾）
+
+- `y901_render::platform_fallback_paths()`：按平台列出候选字体（Windows：Segoe UI /
+  Tahoma / Microsoft YaHei / SimSun / Nirmala；Linux：DejaVu / Noto Sans /
+  Noto Sans Arabic / Noto Sans Devanagari / Noto CJK / WQY），只返回**存在**的文件。
+  **刻意不引入 fontconfig**（C 库，会破零 C 守卫）。
+- 两个后端在构造自研引擎时逐个 `push_fallback`：`y901-backend-x11` 的 `build_soft`
+  与 `y901-backend-win32` 的 `build_soft_font_engine`；找不到不算错误，
+  只是复杂文本退化成 .notdef。
+- 测试：`platform_fallbacks_actually_prepare_faces`（候选表非空、至少能注册一个面、
+  `fallback_count` 与实际注册数一致），Windows 与 Linux 双平台通过。
+- **S2 至此收尾**。剩余（属 S3/S4 范畴）：Web DOM-ARIA 镜像、真机读屏器验收。
+
 ### S2 四续（2026-11-21）：按字体面分段渲染（一段里混排多字体）
 
 上一轮"整段用一个面"是妥协：句子以拉丁开头、含阿拉伯词时，会把拉丁也交给回退字体，

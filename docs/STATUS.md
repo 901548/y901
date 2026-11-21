@@ -528,8 +528,8 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - 四条测试基建债（22 个测试无门控 / lib 的 4 处 `#[link]` /
   `file_drop` 硬编码 `C:\` / supersample 阈值绑定字体）就是靠它首次暴露的。
 - 已验证（2026-11-20，Ubuntu 22.04 / WSL2 + rustc 1.92 + Xvfb）：
-  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **906 passed / 0 failed / 27 ignored**
-  （151 个测试目标）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
+  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **1019 passed / 0 failed / 27 ignored**
+  （155 个测试目标）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
   与 Windows 的 1053/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。

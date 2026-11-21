@@ -64,7 +64,7 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| Linux 默认测试（`xvfb-run cargo test --workspace`） | **906 passed / 0 failed / 27 ignored**（151 个测试目标） |
+| Linux 默认测试（`xvfb-run cargo test --workspace`） | **1019 passed / 0 failed / 27 ignored**（155 个测试目标） |
 | Linux x11 `check --all-targets` | exit 0 |
 | Linux x11 `golden` | 32 passed / 0 failed |
 | Linux `xvfb-run real_window` | 16 passed / 0 failed / 2 ignored |

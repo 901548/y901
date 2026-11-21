@@ -53,8 +53,9 @@ pub mod text;
 
 pub use font::{cell_metrics_for, DirtyRect, FontEngine, GlyphInfo};
 pub use font_engine::{
-    debug_ascii, default_test_font_path, glyph_geometry, load_font, polygon_area, rasterize_glyph,
-    rasterize_glyph_phased, resolve_font_path, GlyphBitmap, GlyphGeometry, Line, MyFontEngine,
+    debug_ascii, default_test_font_path, glyph_geometry, load_font, platform_fallback_paths,
+    polygon_area, rasterize_glyph, rasterize_glyph_phased, resolve_font_path, GlyphBitmap,
+    GlyphGeometry, Line, MyFontEngine,
 };
 pub use soft::SoftBackend;
 pub use text::{GlyphKey, ShapedGlyph, ShapedRun};

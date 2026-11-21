@@ -47,11 +47,30 @@ fn build_soft(
     let physical_font = (font.size * dpi_scale).max(1.0);
     let (cw, ch) = y901_render::cell_metrics_for(physical_font);
     let cell = Size::new(cw, ch);
-    let engine: Box<dyn y901_render::FontEngine> = Box::new(MyFontEngine::new(
+    // **注册平台默认回退面**：主字体常常缺阿拉伯/印度语系字形，
+    // 由 `GlyphKey.face` 指向的第二个字体出图（见渲染层的回退链说明）。
+    // 找不到任何回退字体不算错误：只是复杂文本会退化成 .notdef。
+    let mut engine = MyFontEngine::new(
         y901_render::load_font(&y901_render::resolve_font_path(&font.family))?,
         physical_font,
         cell,
-    )?);
+    )?;
+    let primary = y901_render::resolve_font_path(&font.family);
+    let mut registered = 0usize;
+    for path in y901_render::platform_fallback_paths() {
+        if path == primary {
+            continue; // 主字体自己不用当回退面
+        }
+        if let Ok(bytes) = y901_render::load_font(&path) {
+            if engine.push_fallback(bytes) {
+                registered += 1;
+            }
+        }
+    }
+    if registered > 0 {
+        eprintln!("[y901] 已注册 {registered} 个回退字体面（复杂文本用）");
+    }
+    let engine: Box<dyn y901_render::FontEngine> = Box::new(engine);
     let mut soft = SoftBackend::new(width.max(1), height.max(1), engine, cell, theme)?;
     // 把缩放注入软后端：`TextMetrics::scale()` 与 per-text 字号都靠它。
     soft.set_dpi_scale(dpi_scale);

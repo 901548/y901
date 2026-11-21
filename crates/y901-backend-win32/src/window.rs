@@ -534,14 +534,24 @@ fn build_soft_font_engine(
         .map(|v| v == "self")
         .unwrap_or(false)
     {
-        Box::new(
-            y901_render::MyFontEngine::new(
-                y901_render::load_font(&y901_render::resolve_font_path(family)).unwrap_or_default(),
-                size,
-                cell,
-            )
-            .map_err(|e| format!("MyFontEngine init failed: {e}"))?,
+        // **注册平台默认回退面**：自研引擎的主字体常常缺阿拉伯/印度语系字形，
+        // 由 `GlyphKey.face` 指向的回退字体出图。找不到回退字体不算错误。
+        let mut self_engine = y901_render::MyFontEngine::new(
+            y901_render::load_font(&y901_render::resolve_font_path(family)).unwrap_or_default(),
+            size,
+            cell,
         )
+        .map_err(|e| format!("MyFontEngine init failed: {e}"))?;
+        let primary = y901_render::resolve_font_path(family);
+        for path in y901_render::platform_fallback_paths() {
+            if path == primary {
+                continue;
+            }
+            if let Ok(bytes) = y901_render::load_font(&path) {
+                self_engine.push_fallback(bytes);
+            }
+        }
+        Box::new(self_engine)
     } else {
         Box::new(crate::backend::font::TextEngine::new(family, size, cw, ch)?)
     };
