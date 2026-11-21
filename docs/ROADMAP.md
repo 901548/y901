@@ -282,6 +282,13 @@ labelled-by/described-by 关系、live region、屏幕坐标。
 
 ### S4（2026-11-21）：后端接线完成；0.3.0 收敛未完成
 
+**已验证的环境事实（写下来免得下次误判）**：本机 `F:` 盘会被 `target/` 撑满，
+表现为 `rustc-LLVM ERROR: IO failure on output stream` / `os error 5`，
+`linux-verify.sh` 的 `FULL_WORKSPACE` 与部分 rustc 链接会假红。
+处置：删 `target/debug`（39.8 GB）并 `CARGO_INCREMENTAL=0` 重跑。
+**干净重跑的结果**：Linux 全 workspace `155` 个测试二进制 **全部 ok、0 failed**；
+Windows `gate.ps1` **GATE OK**。所以之前的红是磁盘，不是代码。
+
 已做：
 
 - **两个后端真的推树了**（此前只有库层）：
