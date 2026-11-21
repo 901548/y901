@@ -148,7 +148,11 @@ fn find_workspace_crate(name: &str, version: &str, workspace_root: &Path) -> Opt
         };
         let (mut in_package, mut package_name, mut package_version) = (false, None, None);
         for line in text.lines() {
-            let line = line.trim();
+            // **去掉 BOM**：编辑器加过 BOM 的 manifest 首行是 `\u{FEFF}[package]`，
+            // 不剥掉会让 `starts_with('[')` 判假 → 找不到本地 crate → 误报"源码缺失"。
+            let line = line
+                .trim()
+                .trim_start_matches(char::from_u32(0xFEFF).unwrap());
             if line.starts_with('[') {
                 in_package = line == "[package]";
             } else if in_package {

@@ -18,8 +18,14 @@ y901-ui = { path = "../y901-ui", version = "0.3.0" }
 # 事件要汇成 `RawEvent`，`Presenter` 要实现 runtime 的 trait
 y901-runtime = { path = "../y901-runtime", version = "0.3.0" }
 y901-render = { path = "../y901-render", version = "0.3.0" }
+# 无障碍桥（AT-SPI）。可选：默认不拉 zbus。
+y901-a11y = { path = "../y901-a11y", version = "0.3.0", optional = true }
 
 [target."cfg(unix)".dependencies]
 # 纯 Rust D-Bus 实现（容忍 IBus 不合规的 sender 字段；zbus 会直接 panic）
 rustbus = "0.19"
 # 事件循环骨架与窗口抽象（与 Win32 共用的部分）
+
+[features]
+# 给窗口挂 AT-SPI 无障碍树（Orca 等读屏器可读）。
+a11y = ["y901-a11y/unix-atspi"]

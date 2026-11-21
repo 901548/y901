@@ -821,6 +821,12 @@ pub struct Window {
     /// 否则“启动时乘、运行期改字号不乘”会让 125% 下的字号突然变小。
     /// 由 `create_inner` 初始化，**仅 `WM_DPICHANGED` 处理中更新**。
     dpi_scale: f32,
+    /// **UIA 无障碍桥**（feature `a11y`）。
+    ///
+    /// 必须在 `ShowWindow` **之前**建立（`accesskit_windows` 的硬约束），
+    /// 所以它在 `create_inner` 里紧跟建窗之后创建。
+    #[cfg(feature = "a11y")]
+    a11y: Option<y901_a11y::platform::windows_uia::WindowsUia>,
 }
 
 impl Window {
@@ -1053,6 +1059,14 @@ impl Window {
                 })
             };
 
+            // **UIA 桥必须在 ShowWindow 之前挂上**：窗口已可见时 `SubclassingAdapter::new` 会 panic。
+            // 进来就建，避免漏掉"用户开着读屏器启动应用"的场景。
+            #[cfg(feature = "a11y")]
+            let a11y = Some(y901_a11y::platform::windows_uia::WindowsUia::new(
+                // windows-sys 的 HWND 是裸指针；accesskit_windows 用 windows crate 的 newtype。
+                y901_a11y::platform::windows_uia::AccessKitHwnd(hwnd),
+            ));
+
             ShowWindow(hwnd, SW_SHOW);
 
             let mut win = Self {
@@ -1067,6 +1081,8 @@ impl Window {
                 base_font_size,
                 font_family,
                 dpi_scale,
+                #[cfg(feature = "a11y")]
+                a11y,
             };
             // 此时窗口已以普通样式存在，`set_fullscreen` 能保存到真实原状态。
             if fullscreen {
@@ -2265,14 +2281,67 @@ impl y901_runtime::window::WindowBackend for Window {
             tree.invalidate_all();
             self.request_snapshot();
         }
+        // ---- **无障碍树推送**（feature `a11y`）----
+        //
+        // 每帧推整棵树：`snapshot()` 本来就要遍历一次，而 AccessKit 的
+        // `update_if_active` 在**没有 UIA 客户端时是空操作**，所以代价只有一次快照，
+        // 换来的是永远不会出现"无障碍树与界面不一致"。
+        #[cfg(feature = "a11y")]
+        self.pump_a11y(tree);
     }
 
-    /// 渲染后：回读快照。
     fn after_present(&mut self, _tree: &mut UiTree, host: &mut dyn y901_runtime::Host) {
         if let Some((pixels, w, h)) = self.take_snapshot() {
             host.on_snapshot(&pixels, w, h);
         }
     }
+}
+
+#[cfg(feature = "a11y")]
+impl Window {
+    /// 推无障碍树 + 回派读屏器动作。
+    ///
+    /// 动作回派只处理 `Click`：AccessKit 的 u64 id 用**前序遍历序号**反查成
+    /// Y901 的节点 id（与 `to_tree_update` 的分配规则一致），再投一条 `Action{name:"click"}`。
+    fn pump_a11y(&mut self, tree: &mut UiTree) {
+        let Some(bridge) = self.a11y.as_mut() else {
+            return;
+        };
+        bridge.push(y901_a11y::to_tree_update(tree.snapshot()));
+        while let Some(req) = bridge.poll_action() {
+            if !matches!(req.action, y901_a11y::accesskit::Action::Click) {
+                continue;
+            }
+            if let Some(id) = nth_node_id(tree, req.target_node.0 as usize) {
+                tree.dispatch_to(
+                    &id,
+                    &y901_ui::UiEvent::Action {
+                        name: "click".to_string(),
+                        args: y901_ui::json::Json::obj(),
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// 按**前序遍历序号**取节点 id（与 `to_tree_update` 的分配顺序一致）。
+///
+/// `to_tree_update` 会跳过未暴露的子树，前序遍历 + 同一跳过规则即可对上序号，
+/// 比让后端长期持有一份会过期的 `NodeIdMap` 简单。
+#[cfg(feature = "a11y")]
+fn nth_node_id(tree: &UiTree, wanted: usize) -> Option<String> {
+    fn walk(node: &y901_ui::NodeInfo, seen: &mut usize, wanted: usize) -> Option<String> {
+        if !node.semantics.exposed_to_ai {
+            return None;
+        }
+        if *seen == wanted {
+            return Some(node.id.clone());
+        }
+        *seen += 1;
+        node.children.iter().find_map(|c| walk(c, seen, wanted))
+    }
+    walk(&tree.snapshot(), &mut 0, wanted)
 }
 
 #[cfg(test)]

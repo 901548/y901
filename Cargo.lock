@@ -1590,6 +1590,7 @@ name = "y901-backend-win32"
 version = "0.3.0"
 dependencies = [
  "windows-sys 0.59.0",
+ "y901-a11y",
  "y901-core",
  "y901-render",
  "y901-runtime",
@@ -1602,6 +1603,7 @@ name = "y901-backend-x11"
 version = "0.3.0"
 dependencies = [
  "rustbus",
+ "y901-a11y",
  "y901-render",
  "y901-runtime",
  "y901-ui",

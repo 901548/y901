@@ -26,6 +26,12 @@ use std::sync::{Arc, Mutex};
 use accesskit::{ActionRequest, ActivationHandler, TreeUpdate};
 use accesskit_windows::{SubclassingAdapter, HWND};
 
+/// 重新导出 `windows::Win32::Foundation::HWND`（newtype）。
+///
+/// 后端用的是 `windows-sys` 的 `HWND`（裸指针 `*mut c_void`），两者**不是同一个类型**。
+/// 把这个 newtype 导出，后端显式构造出来，而不是在类型边界上猜。
+pub use accesskit_windows::HWND as AccessKitHwnd;
+
 /// 待处理动作队列（`do_action` 写入，应用线程读出）。
 ///
 /// 用 `Arc<Mutex<..>>` 而不是 `RefCell`：`ActionHandler` 要求 `Send`，

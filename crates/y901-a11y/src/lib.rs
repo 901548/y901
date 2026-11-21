@@ -35,6 +35,10 @@
 
 pub mod platform;
 
+/// 重新导出 `accesskit`：调用方（各后端）不必自己依赖它，
+/// 也就不会出现"两个 accesskit 版本"的版本分裂。
+pub use accesskit;
+
 use std::collections::HashMap;
 
 use accesskit::{Action, Node, NodeId, Role, Toggled, TreeInfo, TreeUpdate};

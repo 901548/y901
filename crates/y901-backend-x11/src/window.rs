@@ -54,6 +54,12 @@ pub struct X11Window {
     ime: Box<dyn crate::ime::ImeClient>,
     /// 是否已经向 IME 声明过焦点（避免每个按键都发 `FocusIn`）。
     ime_focused: bool,
+    /// **AT-SPI 无障碍桥**（feature `a11y`）。
+    ///
+    /// X11 下没有 HWND 这类句柄，AT-SPI 也不绑窗口，所以直接在 `create` 里建，
+    /// 没有"必须在显示之前"的时序约束。
+    #[cfg(feature = "a11y")]
+    a11y: Option<y901_a11y::platform::unix_atspi::UnixAtspi>,
     /// 全屏下按 Esc：`translate`（`&self`）置位，`wait_events`（`&mut self`）消费。
     ///
     /// **为何不用进程级 `static`**：`static` 它会让两个窗口共享同一个标志 ——
@@ -614,6 +620,8 @@ impl X11Window {
             shm_slot: SHM_SLOT_FIRST + 1,
             ime: Box::new(crate::ime::NoIme),
             ime_focused: false,
+            #[cfg(feature = "a11y")]
+            a11y: Some(y901_a11y::platform::unix_atspi::UnixAtspi::new()),
         })
     }
 
@@ -769,6 +777,9 @@ impl X11Window {
     /// 两条渲染路径都必须有这个守卫，否则空帧也会推一帧 PutImage。
     pub fn render_tree(&mut self, tree: &mut UiTree) -> Result<(), String> {
         if tree.dirty().is_empty() {
+            // 画面没变，但读屏器可能刚连上来或发了动作：无障碍这一侧照常推进。
+            #[cfg(feature = "a11y")]
+            self.pump_a11y(tree);
             return Ok(());
         }
         // 纯 CPU 路径：整窗重绘（与 Windows 的 --force-soft 一致）
@@ -782,7 +793,37 @@ impl X11Window {
         let frame = std::mem::take(&mut self.frame);
         let result = self.present(&frame, w, h);
         self.frame = frame;
+        #[cfg(feature = "a11y")]
+        self.pump_a11y(tree);
         result
+    }
+
+    /// **推无障碍树 + 回派读屏器动作**（feature `a11y`）。
+    ///
+    /// 为什么每帧全推：`snapshot()` 本来就要遍历整棵树，而 AccessKit 的
+    /// `update_if_active` 在**没有读屏器连接时是空操作**，所以代价只有一次快照；
+    /// 换来的是永远不会出现"无障碍树与画面不一致"。
+    #[cfg(feature = "a11y")]
+    fn pump_a11y(&mut self, tree: &mut UiTree) {
+        let Some(bridge) = self.a11y.as_mut() else {
+            return;
+        };
+        bridge.set_window_focused(self.ime_focused);
+        bridge.push(y901_a11y::to_tree_update(tree.snapshot()));
+        while let Some(req) = bridge.poll_action() {
+            if matches!(req.action, y901_a11y::accesskit::Action::Click) {
+                // 前序遍历序号 → Y901 节点 id（与 `to_tree_update` 的分配规则一致）。
+                if let Some(id) = nth_node_id(tree, req.target_node.0 as usize) {
+                    tree.dispatch_to(
+                        &id,
+                        &y901_ui::UiEvent::Action {
+                            name: "click".to_string(),
+                            args: y901_ui::json::Json::obj(),
+                        },
+                    );
+                }
+            }
+        }
     }
 
     /// 窗口尺寸（逻辑像素）。
@@ -1332,6 +1373,24 @@ fn fullscreen_atoms(conn: &mut Connection, wid: u32, root: u32, add: bool) -> Re
     Ok(())
 }
 
+/// 按**前序遍历序号**取节点 id（与 `to_tree_update` 的分配顺序一致）。
+///
+/// `to_tree_update` 会跳过未暴露的子树，前序遍历 + 同一跳过规则即可对上序号，
+/// 比让后端长期持有一份会过期的 `NodeIdMap` 简单。
+#[cfg(feature = "a11y")]
+fn nth_node_id(tree: &UiTree, wanted: usize) -> Option<String> {
+    fn walk(node: &y901_ui::NodeInfo, seen: &mut usize, wanted: usize) -> Option<String> {
+        if !node.semantics.exposed_to_ai {
+            return None;
+        }
+        if *seen == wanted {
+            return Some(node.id.clone());
+        }
+        *seen += 1;
+        node.children.iter().find_map(|c| walk(c, seen, wanted))
+    }
+    walk(&tree.snapshot(), &mut 0, wanted)
+}
 #[cfg(test)]
 mod dpi_scale_tests {
     use super::{dpi_scale, snap_scale, xft_dpi_from_resource_manager};
