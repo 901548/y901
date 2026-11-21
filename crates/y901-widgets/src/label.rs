@@ -30,6 +30,11 @@ pub struct TextLabel {
     size: Option<f32>,
     item: FlexItem,
     rect: Rect,
+    /// **是否按可用宽度折行**。
+    ///
+    /// 默认关闭：原有行为是「一行画到底，溢出由父容器裁」。开启后 `measure` 的高度
+    /// 变为「行数 × 行高」，`render` 用与 `measure` 相同的公式逐行绘制。
+    wrap: bool,
 }
 
 impl TextLabel {
@@ -51,6 +56,7 @@ impl TextLabel {
             size: None,
             item: FlexItem::default(),
             rect: Rect::ZERO,
+            wrap: false,
         }
     }
 
@@ -94,6 +100,15 @@ impl TextLabel {
     /// 字号变大会使 `measure()` 返回的宽高都变大。
     pub fn size(mut self, px: f32) -> Self {
         self.size = Some(px);
+        self
+    }
+
+    /// **按可用宽度折行**（默认关）。
+    ///
+    /// 开启后 `measure` 的高度 = 行数 × 行高，`render` 逐行绘制；
+    /// 关闭时保持「一行画到底，溢出由父容器裁」的老行为。
+    pub fn wrap(mut self, on: bool) -> Self {
+        self.wrap = on;
         self
     }
 
@@ -175,10 +190,21 @@ impl Widget for TextLabel {
         //
         // 墨迹外溢的正确落点是脏区扩张（`TextMetrics::ink_bounds` 已提供该数据，
         // 见 STATUS.md 的 P1-5 记录）；`UiTree` 的全部局部标脏路径已按墨迹外扩。
-        c.constrain(Size::new(
-            metrics.measure_text(&self.current_text(), &style).w,
-            metrics.line_height(&style),
-        ))
+        let text = self.current_text();
+        let line_h = metrics.line_height(&style);
+        let full_w = metrics.measure_text(&text, &style).w;
+        // **折行**：开启后**总是**走折行管线 —— 显式 `\n` 也要被尊重（多行文本的
+        // 高度必须是行数 × 行高），而不是"只有超宽才折"。未开启时行为与以前逐像素相同
+        // （一行画到底，溢出交给父容器裁）。
+        if self.wrap {
+            let lines = y901_ui::wrap(&text, c.max.w, |s| metrics.measure_text(s, &style).w);
+            let w = lines
+                .iter()
+                .map(|l| metrics.measure_text(&l.text, &style).w)
+                .fold(0.0f32, f32::max);
+            return c.constrain(Size::new(w, line_h * lines.len() as f32));
+        }
+        c.constrain(Size::new(full_w, line_h))
     }
 
     /// 向下转型：Host 运行时调 `set_text` 的唯一路径（UiTree 不暴露具体类型）。
@@ -235,12 +261,24 @@ impl Widget for TextLabel {
         // 按"行框高 vs 容器高"的差值下移一半；容器比行框矮时保持贴顶（不上溢）。
         let style = self.to_text_style();
         let line_h = ctx.line_height(&style);
+        let text = self.current_text();
+        if self.wrap && self.rect.w > 0.0 {
+            let lines = y901_ui::wrap(&text, self.rect.w, |s| ctx.measure_text(s, &style).w);
+            if lines.len() > 1 {
+                let block_h = line_h * lines.len() as f32;
+                let top = self.rect.y + ((self.rect.h - block_h) * 0.5).max(0.0);
+                for (i, line) in lines.iter().enumerate() {
+                    ctx.draw_text(
+                        Pos::new(self.rect.x, top + line_h * i as f32),
+                        &line.text,
+                        &style,
+                    );
+                }
+                return;
+            }
+        }
         let dy = ((self.rect.h - line_h) * 0.5).max(0.0);
-        ctx.draw_text(
-            Pos::new(self.rect.x, self.rect.y + dy),
-            &self.current_text(),
-            &style,
-        );
+        ctx.draw_text(Pos::new(self.rect.x, self.rect.y + dy), &text, &style);
     }
 
     fn semantics(&self) -> Semantics {
@@ -309,5 +347,75 @@ pub fn parse_color(raw: &str) -> Result<Color, String> {
             byte(6)? as f32 / 255.0,
         )),
         _ => Err(err()),
+    }
+}
+
+#[cfg(test)]
+mod wrap_tests {
+    use super::*;
+    use y901_ui::layout::LayoutCache;
+
+    struct Mono;
+    impl TextMetrics for Mono {
+        fn measure_text(&self, t: &str, _s: &TextStyle) -> Size {
+            Size::new(t.chars().count() as f32 * 10.0, 16.0)
+        }
+        fn line_height(&self, _s: &TextStyle) -> f32 {
+            16.0
+        }
+        fn scale(&self) -> f32 {
+            1.0
+        }
+    }
+
+    fn measure(label: &mut TextLabel, max_w: f32) -> Size {
+        let mut cache = LayoutCache::new();
+        label.measure(
+            &Mono,
+            Constraints::loose(Size::new(max_w, 400.0)),
+            &mut cache,
+        )
+    }
+
+    #[test]
+    fn wrapping_is_off_by_default() {
+        let mut l = TextLabel::new("a", "aaaaa bbbbb ccccc");
+        let s = measure(&mut l, 60.0);
+        assert_eq!(s.h, 16.0, "默认不折行：高度仍是单行");
+    }
+
+    #[test]
+    fn wrap_grows_height_by_line_count() {
+        // 每词 5 字符 = 50px；宽度 60 → 3 行。
+        let mut l = TextLabel::new("a", "aaaaa bbbbb ccccc").wrap(true);
+        let s = measure(&mut l, 60.0);
+        assert_eq!(s.h, 48.0, "3 行 × 16px");
+        assert!(s.w <= 60.0, "宽度不应超过可用宽度，实得 {}", s.w);
+    }
+
+    #[test]
+    fn short_text_is_unaffected_by_wrap_flag() {
+        let mut l = TextLabel::new("a", "hi").wrap(true);
+        let s = measure(&mut l, 200.0);
+        assert_eq!((s.w, s.h), (20.0, 16.0), "放得下就不折");
+    }
+
+    #[test]
+    fn infinite_width_never_wraps_even_when_enabled() {
+        let mut l = TextLabel::new("a", "aaaaa bbbbb ccccc").wrap(true);
+        let mut cache = LayoutCache::new();
+        let s = l.measure(
+            &Mono,
+            Constraints::loose(Size::new(f32::INFINITY, 400.0)),
+            &mut cache,
+        );
+        assert_eq!(s.h, 16.0, "无限宽 = 不折（滚动内容常用）");
+    }
+
+    #[test]
+    fn explicit_newlines_count_as_lines_when_wrapping() {
+        let mut l = TextLabel::new("a", "ab\ncd\nef").wrap(true);
+        let s = measure(&mut l, 200.0);
+        assert_eq!(s.h, 48.0, "3 个显式行");
     }
 }

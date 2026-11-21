@@ -49,6 +49,8 @@ pub mod text;
 pub mod theme;
 pub mod tree;
 pub mod widget;
+/// 折行（按可用宽度把一段文字切成多行）。
+pub mod wrap;
 
 pub use color::{Color, TextStyle};
 pub use command::Command;
@@ -68,3 +70,4 @@ pub use widget::{
     FlexItem, InputKind, Justify, LiveRegion, RenderCtx, Role, Semantics, TextMetrics, Widget,
     AA_SAMPLES, GRADIENT_STEPS,
 };
+pub use wrap::{wrap, WrappedLine};

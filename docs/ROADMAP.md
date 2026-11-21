@@ -318,6 +318,20 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   端到端 2 条（拉丁+阿拉伯混排有像素、分段无重叠覆盖整串）；
   `shaping` 下 render lib **125 passed**，默认构建像素基线未变。
 
+### S2 五续（2026-11-21）：文本折行 + `TextLabel::wrap()`
+
+- 新增 [`crates/y901-ui/src/wrap.rs`](../crates/y901-ui/src/wrap.rs)：`wrap(text, max_w, measure)` →
+  `Vec<WrappedLine>`。规则都写进注释：优先空格断行（拉丁词不被劈开）、无空格按字符断
+  （CJK/长 URL）、单字符超宽时单独成行（不死循环、不丢字）、**显式 `\n` 永远优先**、
+  行尾空格裁掉。非正数/`INFINITY`/`NaN` 宽度 = 不折行（滚动内容常用）。
+- `TextLabel::wrap(bool)`（默认关）：开启后 `measure` 总走折行管线
+  （**显式换行也算行**，高度 = 行数 × 行高），`render` 用同一公式逐行绘制并垂直居中；
+  关闭时与以前逐像素一致。
+- 不做：连字符断词（hyphenation）、两端对齐、避头尾标点 —— 需要语言数据，后续切片。
+- 测试：`wrap` 10 条（空格断行/无空格断行/超宽单字符/显式换行/宽度禁用/无损性等）、
+  `TextLabel` 5 条（默认不折、行数增高、短文本不受影响、无限宽不折、显式换行计数）；
+  默认构建像素基线未变，gate GATE OK。
+
 ### S3（2026-11-21）：无障碍桥 —— 映射层 + 两个平台适配器已落地
 
 - 新 crate **`crates/y901-a11y`**（第 12 个）：
