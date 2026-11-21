@@ -12,7 +12,7 @@ Rust 跨平台 GUI 框架，自带 Win32/D3D11 与 X11 后端。文本模型是*
 
 ```toml
 [dependencies]
-y901 = "0.2.5"
+y901 = "0.2.6"
 ```
 
 `y901` 是**单一入口**，内部把下面 10 个子 crate 全部 re-export 好：
@@ -57,7 +57,7 @@ X11 后端可在 Xvfb 下跑通，**未做真机验收**；macOS 无后端。
 
 ```bash
 # 只看单一入口怎么写（只依赖 y901 一个 crate）
-cargo run --example hello
+cargo run --example hello -p y901
 
 # 组件画廊（在 y901-shell 里，所以要 -p）
 cargo run -p y901-shell --example static_page     # 一屏静态页面：排版/颜色/圆角

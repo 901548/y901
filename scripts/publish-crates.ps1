@@ -1,4 +1,4 @@
-﻿# 按依赖顺序把 workspace 里的 y901-* crate 发到 crates.io。
+# 按依赖顺序把 workspace 里的 y901-* crate 发到 crates.io。
 #
 # 为什么必须按顺序：cargo 在打包/发布时会去 registry 解析**包括 path 依赖在内**的
 # 全部依赖（连 dev-dependencies 也是）。所以"被依赖的先发"是硬约束；发 ui 之前
@@ -13,6 +13,7 @@
 #
 # 前置：先 `cargo login`（token 写进 ~/.cargo/credentials.toml），或设 CARGO_REGISTRY_TOKEN。
 param(
+    [string]$TargetVersion = '',
     [switch]$DryRun,
     [switch]$SkipChecks,
     [switch]$SkipSleep,
@@ -53,12 +54,22 @@ function Get-PublishedVersion([string]$crate) {
         return $resp.crate.max_version
     }
     catch {
-        # 404 = 还没发布过（crates.io 对不存在的 crate 返回 404）
-        return ''
+        $status = 0
+        if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+        if ($status -eq 404) { return '' }
+        throw "查询 crates.io $crate 版本失败（HTTP $status）：$($_.Exception.Message)"
     }
 }
 
 $version = Get-Version
+if ($TargetVersion -and $TargetVersion -ne $version) {
+    Write-Host "[publish] FAIL: 请求发布 $TargetVersion，但 workspace 实际为 $version；拒绝发布"
+    exit 1
+}
+if ($version -notmatch '^\d+\.\d+\.\d+$') {
+    Write-Host "[publish] FAIL: workspace version 非稳定 SemVer：$version"
+    exit 1
+}
 Write-Host "[publish] workspace version = $version；模式 = $(if ($DryRun) { 'DRY-RUN' } else { '真发' })"
 if ($Proxy) {
     $env:HTTPS_PROXY = $Proxy

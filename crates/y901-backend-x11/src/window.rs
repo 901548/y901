@@ -159,11 +159,12 @@ pub type RescaleFactory = Box<dyn FnMut(f32) -> Result<SoftBackend, String>>;
 
 /// 选择 X11 的 DPI 缩放（物理 / 逻辑）。
 ///
-/// **限制**：X11 setup 提供的是 screen-wide 像素与毫米尺寸，不是可靠的每显示器
-/// DPI API；当前只解析第一块屏（screen 0）。桌面缩放可以从两处读到：
-/// **XSettings**（`Xft/DPI`、`Gdk/WindowScalingFactor`，活的设置服务）与
-/// 根窗口 Xresource `Xft.dpi`（会话启动时的静态快照）。两处都没有时退回毫米估算。
-/// 无任何配置时坏/缺失 EDID 尺寸仍可能导致偏差，因此真实桌面可用显式环境变量覆盖。
+/// **限制**：X11 setup 提供的是 screen-wide 像素与毫米尺寸；真正的每显示器几何/DPI
+/// 需要 XRandR（见 [`crate::randr`]）。当前只解析第一块屏（screen 0）。桌面缩放可以从三处读：
+/// **XSettings**（`Xft/DPI`、`Gdk/WindowScalingFactor`，活的设置服务）、
+/// 根窗口 Xresource `Xft.dpi`（会话启动时的静态快照）与 XRandR 输出的物理 DPI。
+/// 都没有时退回整屏毫米估算。无任何配置时坏/缺失 EDID 尺寸仍可能导致偏差，
+/// 因此真实桌面可用显式环境变量覆盖。
 ///
 /// 优先级（高 → 低）：
 /// 1. `Y901_X11_SCALE`：直接指定缩放（如 `1.5`），clamp 到 `1.0..=4.0`；
@@ -171,8 +172,10 @@ pub type RescaleFactory = Box<dyn FnMut(f32) -> Result<SoftBackend, String>>;
 /// 3. XSettings：`max(Xft/DPI ÷ 96, Gdk/WindowScalingFactor)`（见
 ///    [`XSettingsValues::scale`]），**不吸附**；
 /// 4. Xresource `Xft.dpi`（由 [`read_xft_dpi`] 读取），**不吸附**；仅接受 `72..=384`；
-/// 5. `info` 的毫米尺寸估算（**吸附到 1.0 / ≥1.25 的 0.25 档位**）；
-/// 6. 兜底 `1.0`。
+/// 5. **单一** XRandR 活动输出的物理 DPI（见
+///    [`dpi_scale_with_xsettings_and_outputs`]；多输出时跳过，避免猜错屏）；
+/// 6. `info` 的毫米尺寸估算（**吸附到 1.0 / ≥1.25 的 0.25 档位**）；
+/// 7. 兜底 `1.0`。
 ///
 /// 为什么 XSettings 排在 `Xft.dpi` 前面：XSettings 由设置管理器实时维护
 /// （GNOME/KDE 改缩放会立即更新），而 `RESOURCE_MANAGER` 是 `xrdb` 在会话启动时
@@ -204,6 +207,27 @@ pub fn dpi_scale_with_xsettings(
     xsettings: Option<XSettingsValues>,
     xft_dpi: Option<f32>,
 ) -> f32 {
+    dpi_scale_with_xsettings_and_outputs(info, xsettings, xft_dpi, None)
+}
+
+/// 同 [`dpi_scale_with_xsettings`]，但把 XRandR 的输出物理 DPI 纳入**毫米估算之前**。
+///
+/// ## 为什么只对"单个活动输出"生效
+///
+/// X11 没有"每窗口 DPI"的概念；全局缩放只能在建窗前确定一次，而此时还不知道窗口
+/// 会落在哪块屏。多显示器 DPI 不同时，任一全局选择都会让另一块屏的字号偏。
+/// 因此本函数只在 **恰好一个** XRandR 输出可用时用它（此时它等价于更精确的屏幕毫米
+/// 估算），多输出时**保持原来的整屏毫米估算**，并把"按位置选显示器"留给调用方用
+/// [`crate::randr::dpi_at`]——那是每显示器 DPI 唯一不会猜错的做法。
+///
+/// 优先级（高 → 低）：环境变量 → XSettings → `Xft.dpi` → **单一 XRandR 输出物理 DPI**
+/// → 屏幕毫米估算 → 1.0。前三级不吸附；后两级吸附到 1.0 / ≥1.25 的 0.25 档位。
+pub fn dpi_scale_with_xsettings_and_outputs(
+    info: &crate::conn::ServerInfo,
+    xsettings: Option<XSettingsValues>,
+    xft_dpi: Option<f32>,
+    outputs: Option<&[crate::randr::OutputDpi]>,
+) -> f32 {
     if let Ok(raw) = std::env::var("Y901_X11_SCALE") {
         if let Ok(v) = raw.trim().parse::<f32>() {
             if v.is_finite() && v > 0.0 {
@@ -224,11 +248,22 @@ pub fn dpi_scale_with_xsettings(
     if let Some(dpi) = xft_dpi.filter(|dpi| dpi.is_finite() && (72.0..=384.0).contains(dpi)) {
         return (dpi / 96.0).clamp(1.0, 4.0);
     }
+    if let Some(scale) = single_output_scale(outputs) {
+        return scale;
+    }
     if info.width_mm == 0 {
         return 1.0;
     }
     let dpi = info.width as f32 * 25.4 / info.width_mm as f32;
     snap_scale(dpi / 96.0)
+}
+
+/// 只有一个活动输出时，用它自己的物理 DPI 推出缩放；否则 `None`。
+fn single_output_scale(outputs: Option<&[crate::randr::OutputDpi]>) -> Option<f32> {
+    let [output] = outputs? else {
+        return None;
+    };
+    (output.dpi_x.is_finite() && output.dpi_x > 0.0).then(|| snap_scale(output.dpi_x / 96.0))
 }
 
 /// 从根窗口 `RESOURCE_MANAGER` 属性中读取 Xresources 的最后一个 `Xft.dpi` 数值。
@@ -1522,5 +1557,67 @@ mod dpi_scale_tests {
         );
         // 两者都没有 → mm 估算
         assert_eq!(dpi_scale_with_xsettings(&screen(217), None, None), 1.5);
+    }
+
+    #[test]
+    fn single_randr_output_refines_mm_estimate_but_multi_output_does_not_guess() {
+        if !env_clean() {
+            eprintln!("[dpi-test] 跳过：Y901_X11_SCALE / Y901_DPI 已设置");
+            return;
+        }
+        use super::dpi_scale_with_xsettings_and_outputs;
+        use crate::randr::OutputDpi;
+        let laptop = OutputDpi {
+            output: 1,
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1440,
+            dpi_x: 144.0,
+            dpi_y: 144.0,
+        };
+        // 325mm 的整屏毫米估算本来得到 1.0；单个活动输出 144 DPI 修正为 1.5。
+        assert_eq!(
+            dpi_scale_with_xsettings_and_outputs(&screen(325), None, None, Some(&[laptop])),
+            1.5
+        );
+        // Xft.dpi 是用户明确意图，仍然优先于 RandR。
+        assert_eq!(
+            dpi_scale_with_xsettings_and_outputs(&screen(325), None, Some(192.0), Some(&[laptop])),
+            2.0
+        );
+        // 多输出（例如笔记本 144 DPI + 外接 96 DPI）不猜屏：回退到整屏毫米估算。
+        let external = OutputDpi {
+            output: 2,
+            x: 2560,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            dpi_x: 96.0,
+            dpi_y: 96.0,
+        };
+        assert_eq!(
+            dpi_scale_with_xsettings_and_outputs(
+                &screen(217),
+                None,
+                None,
+                Some(&[laptop, external])
+            ),
+            1.5
+        );
+        // 空输出列表（无 XRandR / 老服务器）= 与旧行为完全一致。
+        assert_eq!(
+            dpi_scale_with_xsettings_and_outputs(&screen(325), None, None, Some(&[])),
+            1.0
+        );
+        // NaN DPI 被忽略，不污染缩放。
+        let broken = OutputDpi {
+            dpi_x: f32::NAN,
+            ..laptop
+        };
+        assert_eq!(
+            dpi_scale_with_xsettings_and_outputs(&screen(325), None, None, Some(&[broken])),
+            1.0
+        );
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! 运行：
 //! ```text
-//! cargo run --example hello -p y901-app
+//! cargo run --example shell_hello -p y901-shell
 //! ```
 //!
 //! 展示的是**用户会怎么写**：建树 → 声明交互（`Button::on_click` → 应用命令）→ 交给运行时。

@@ -222,6 +222,18 @@ fn handshake_reports_screen_and_visual() {
 }
 
 #[test]
+fn randr_active_output_dpi_query_is_safe_on_xvfb() {
+    let (_g, mut c) = connect();
+    // Xvfb commonly exposes no active RandR outputs; an empty list is valid.
+    // If output data is present, it must be finite and plausibly physical.
+    let dpis = c.active_output_dpis().expect("XRandR output DPI query");
+    for dpi in dpis {
+        assert!(dpi.dpi_x.is_finite() && (20.0..=1000.0).contains(&dpi.dpi_x));
+        assert!(dpi.dpi_y.is_finite() && (20.0..=1000.0).contains(&dpi.dpi_y));
+    }
+}
+
+#[test]
 fn create_map_and_paint_a_solid_red_window() {
     let (_g, mut c) = connect();
     let info = c.info().clone();

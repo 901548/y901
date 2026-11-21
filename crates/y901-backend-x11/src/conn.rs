@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use crate::decode::{decode_event, X11Event};
 use crate::encode::{encode_get_input_focus, encode_put_image, encode_setup_request, PutImageArgs};
+use crate::randr::{OutputDpi, EXTENSION_NAME, REQUIRED_MAJOR, REQUIRED_MINOR};
 
 /// `PutImage` 单包数据上限（字节）：`length` 是 u16，单位 4 字节，去掉 6 个单位的头。
 pub const PUT_IMAGE_MAX_BYTES: usize = (u16::MAX as usize - 6) * 4;
@@ -473,6 +474,81 @@ impl Connection {
         // QueryExtension 响应布局（X11 规范）：
         //   byte8 = present，byte9 = major-opcode，byte10 = first-event，byte11 = first-error
         Ok(if head[8] != 0 { Some(head[9]) } else { None })
+    }
+
+    /// Discover physical geometry and DPI for currently active XRandR outputs.
+    ///
+    /// This is an opt-in query only: callers must not use the result to change
+    /// global scaling without knowing where a window will be placed. Use
+    /// [`crate::randr::dpi_at`] to resolve the output containing a window's
+    /// position. Missing XRandR or an older server returns an empty list;
+    /// malformed protocol replies are returned as errors. Outputs with
+    /// implausible physical sizes or inactive CRTCs are conservatively omitted.
+    pub fn active_output_dpis(&mut self) -> Result<Vec<OutputDpi>, String> {
+        let Some(opcode) = self.query_extension(EXTENSION_NAME)? else {
+            return Ok(Vec::new());
+        };
+        self.send(&crate::randr::encode_query_version(opcode))?;
+        self.flush()?;
+        let (head, _) = self.read_reply_packet()?;
+        let version = crate::randr::parse_version_reply(&head)?;
+        if (version.major, version.minor) < (REQUIRED_MAJOR, REQUIRED_MINOR) {
+            return Ok(Vec::new());
+        }
+
+        self.send(&crate::randr::encode_get_screen_resources_current(
+            opcode,
+            self.info.root,
+        ))?;
+        self.flush()?;
+        let (head, extra) = self.read_reply_packet()?;
+        let resources = crate::randr::parse_screen_resources_reply(&head, &extra)?;
+        let mut values = Vec::new();
+        for output in resources.outputs {
+            self.send(&crate::randr::encode_get_output_info(
+                opcode,
+                output,
+                resources.config_timestamp,
+            ))?;
+            self.flush()?;
+            let (head, _) = self.read_reply_packet()?;
+            let info = match crate::randr::parse_output_info_reply(&head) {
+                Ok(info) => info,
+                // Resource changes can race enumeration; skip only that output.
+                Err(_) => continue,
+            };
+            if !info.connected || info.crtc == 0 || info.width_mm == 0 || info.height_mm == 0 {
+                continue;
+            }
+            self.send(&crate::randr::encode_get_crtc_info(
+                opcode,
+                info.crtc,
+                resources.config_timestamp,
+            ))?;
+            self.flush()?;
+            let (head, extra) = self.read_reply_packet()?;
+            let crtc = match crate::randr::parse_crtc_info_reply(&head, &extra) {
+                Ok(crtc) => crtc,
+                Err(_) => continue,
+            };
+            if crtc.width == 0 || crtc.height == 0 || !crtc.outputs.contains(&output) {
+                continue;
+            }
+            let dpi_x = crtc.width as f32 * 25.4 / info.width_mm as f32;
+            let dpi_y = crtc.height as f32 * 25.4 / info.height_mm as f32;
+            if (20.0..=1000.0).contains(&dpi_x) && (20.0..=1000.0).contains(&dpi_y) {
+                values.push(OutputDpi {
+                    output,
+                    x: crtc.x,
+                    y: crtc.y,
+                    width: crtc.width,
+                    height: crtc.height,
+                    dpi_x,
+                    dpi_y,
+                });
+            }
+        }
+        Ok(values)
     }
 
     /// `MIT-SHM` 的 `QueryVersion`：返回 `(major, minor)`。

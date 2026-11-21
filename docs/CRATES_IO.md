@@ -25,12 +25,13 @@
 cargo fmt --all -- --check
 powershell -NoProfile -File scripts/gate.ps1          # 必须 GATE OK
 powershell -NoProfile -File scripts/check-version-consistency.ps1
+cargo deny check                                      # deny.toml：公告/许可/来源/重复版本
 
 # 叶子 crate 的打包冒烟（会被依赖的都要能打包）
 cargo package -p y901-core --allow-dirty --offline
 ```
 
-### 1b. 首发前把**全部 10 个 crate** 都打包验证一遍（不发布）
+### 1b. 首发前把**全部 11 个 crate** 都打包验证一遍（不发布）
 
 首次发布时下游 crate 的 `cargo package` 必然报
 `no matching package named 'y901-xxx' found` —— 因为 cargo 会去 registry 解析依赖。
@@ -50,7 +51,7 @@ for ($i = 0; $i -lt $order.Count; $i++) {
 }
 ```
 
-2026-11-20 实测：**10/10 全部打包成功**（7–78 个文件，18–179 KiB 压缩后）。
+2026-11-20 实测：当时的 **10 个 crate** 全部打包成功（7–78 个文件，18–179 KiB 压缩后）。截至 0.2.6，workspace 已增至 **11 个 crate**；新增 crate 的打包验证记录需另行补充。
 这一步抓到过一个真问题：`y901-shell` 的 wasm 依赖 `y901-backend-web` **没写
 `version`**，导致 `cargo publish -p y901-shell` 会直接失败：
 
@@ -76,7 +77,7 @@ dependency `y901-backend-web` does not specify a version
 ## 2. 首次发布顺序（**被依赖的先发**）
 
 > **y901 是单一入口，必须最后发**（它依赖其余全部 crate）。用户侧只需要 `cargo add y901`，
-> 其它 10 个是内部实现；保留多年仍可单独依赖（想裁剪依赖时才这么做）。
+> 其它 10 个 crate 是内部实现；截至 0.2.6 共 11 个 crate，仍可单独依赖（需要裁剪依赖时才这么做）。
 
 一条命令（推荐）：[`scripts/publish-crates.ps1`](../scripts/publish-crates.ps1) 内置了
 依赖顺序、已发布版本跳过、索引等待与失败解释：
@@ -132,7 +133,7 @@ foreach ($c in $order) {
 | 检查 | 做法 |
 |---|---|
 | crate 页出现且 README 正常 | 打开 `https://crates.io/crates/<name>` |
-| docs.rs 构建成功 | `https://docs.rs/<name>/0.2.5/`；`backend-win32` / `backend-web` 走 `default-target`，Linux 默认目标不应再出现空文档 |
+| docs.rs 构建成功 | `https://docs.rs/<name>/<version>/`；`backend-win32` / `backend-web` 走 `default-target`，Linux 默认目标不应再出现空文档 |
 | 下游能拉 | 空目录里 `cargo add y901-core && cargo build` |
 | 版本号已占用 | 发布后**不能重发同一版本**；修复必须升版（0.2.6…） |
 
@@ -143,7 +144,7 @@ foreach ($c in $order) {
 | `no matching package named 'y901-xxx' found` | 上游还没发或索引未生效：确认上游 crate 页存在，等 1 分钟重试 |
 | `crate version already uploaded` | 这个版本号已用掉，**升版本**；不要试图重发 |
 | 发布后发现严重问题 | `cargo yank --version 0.2.5 y901-core`（yank 只是不再被新依赖选中，已依赖的项目不受影响），随后发修复版 |
-| docs.rs 构建失败 | 看 `https://docs.rs/crate/<name>/0.2.5/builds`；平台专属 crate 检查 `[package.metadata.docs.rs] default-target` |
+| docs.rs 构建失败 | 看 `https://docs.rs/crate/<name>/<version>/builds`；平台专属 crate 检查 `[package.metadata.docs.rs] default-target` |
 
 ## 5. 与 crates.io 无关、但发货前要确认的事
 

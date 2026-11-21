@@ -35,6 +35,8 @@ pub mod encode;
 pub mod ime;
 /// keycode → keysym → 平台无关 `Key` 的映射。
 pub mod keys;
+/// Minimal raw XRandR protocol for per-output physical DPI discovery.
+pub mod randr;
 #[cfg(unix)]
 /// X11 后端的 `run_loop` 接线。
 pub mod runtime;

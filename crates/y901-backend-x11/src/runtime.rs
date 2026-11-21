@@ -6,10 +6,11 @@
 //!
 //! ## DPI 与运行期缩放
 //!
-//! 启动时按 `XSettings → Xft.dpi → 屏幕毫米` 的优先级选缩放（见
-//! [`crate::window::dpi_scale_with_xsettings`]），并用**物理**尺寸/字号建软后端；
+//! 启动时按 `XSettings → Xft.dpi → 单一 XRandR 输出物理 DPI → 屏幕毫米` 的优先级选缩放
+//! （见 [`crate::window::dpi_scale_with_xsettings_and_outputs`]），并用**物理**尺寸/字号建软后端；
 //! 同时把"按新缩放重建软后端"的配方交给窗口（[`crate::window::X11Window::set_rescale_factory`]）。
 //! 桌面改缩放后窗口会在下一次 `wait_events` 里自己发现并重建 —— 不需要重启应用。
+//! 多显示器时全局缩放不猜屏：按窗口位置查每显示器 DPI 用 [`crate::randr::dpi_at`]。
 //!
 //! ## 为什么没有 GPU 路径
 //!
@@ -72,7 +73,7 @@ impl PlatformRuntime for X11Runtime {
         let started = std::time::Instant::now();
 
         // **DPI 缩放**：先连一次服务器，读 **XSettings**（桌面设置服务）→ 根窗口
-        // `Xft.dpi`（Xresources）→ 屏幕毫米尺寸，按优先级推 `scale`。
+        // `Xft.dpi`（Xresources）→ XRandR 活动输出物理 DPI → 屏幕毫米尺寸，按优先级推 `scale`。
         // 为什么先探再建窗：软后端要用**物理**尺寸分配缓冲、字形引擎要用**物理**字号；
         // 这两者都得在 `X11Window::create` 之前就定下来（它只接收已建好的 soft）。
         let dpi_scale = match crate::conn::Connection::connect(&display) {
@@ -80,10 +81,23 @@ impl PlatformRuntime for X11Runtime {
                 let info = conn.info().clone();
                 let xsettings = crate::window::read_xsettings(&mut conn, 0);
                 let xft_dpi = crate::window::read_xft_dpi(&mut conn, info.root);
+                // 只是**查询**：没有 XRandR / 老版本 / 无活动输出都返回空，不影响旧路径。
+                let outputs = conn.active_output_dpis().unwrap_or_default();
                 if let Some(x) = xsettings {
                     eprintln!("[y901] XSettings：{x:?}");
                 }
-                crate::window::dpi_scale_with_xsettings(&info, xsettings, xft_dpi)
+                if !outputs.is_empty() {
+                    eprintln!(
+                        "[y901] XRandR 活动输出 {} 个（物理 DPI 仅作单屏回退；多屏按位置查询见 randr::dpi_at）",
+                        outputs.len()
+                    );
+                }
+                crate::window::dpi_scale_with_xsettings_and_outputs(
+                    &info,
+                    xsettings,
+                    xft_dpi,
+                    Some(&outputs),
+                )
             }
             Err(e) => {
                 eprintln!("[y901] 读取 X11 屏幕信息失败（{e}），DPI 按 1.0 处理");

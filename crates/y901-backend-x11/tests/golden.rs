@@ -10,6 +10,11 @@ use y901_backend_x11::encode::{
     CreateWindowArgs, ImageFormat, PropMode, PutImageArgs, ValueMask, WindowClass,
 };
 use y901_backend_x11::keys::{keysym_to_char, keysym_to_key, modifiers_from_state, Keymap};
+use y901_backend_x11::randr::{
+    encode_get_crtc_info, encode_get_output_info, encode_get_screen_resources_current,
+    encode_query_version, parse_crtc_info_reply, parse_output_info_reply,
+    parse_screen_resources_reply, parse_version_reply,
+};
 use y901_backend_x11::{
     decode_event, encode_change_property, encode_create_window, encode_get_input_focus,
     encode_get_selection_owner, encode_intern_atom, encode_map_window, encode_no_operation,
@@ -37,6 +42,125 @@ fn assert_bytes(got: &[u8], want: &[u8], what: &str) {
         got.len(),
         want.len()
     );
+}
+
+// ---------------------------------------------------------------- XRandR
+
+#[test]
+fn randr_request_encoders_match_wire_layout() {
+    assert_bytes(
+        &encode_query_version(0x89),
+        &[0x89, 0, 3, 0, 1, 0, 0, 0, 3, 0, 0, 0],
+        "XRandR QueryVersion",
+    );
+    assert_bytes(
+        &encode_get_screen_resources_current(0x89, 0x1234_5678),
+        &[0x89, 25, 2, 0, 0x78, 0x56, 0x34, 0x12],
+        "XRandR GetScreenResourcesCurrent",
+    );
+    assert_bytes(
+        &encode_get_output_info(0x89, 0x1122_3344, 0x5566_7788),
+        &[
+            0x89, 9, 3, 0, 0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55,
+        ],
+        "XRandR GetOutputInfo",
+    );
+    assert_bytes(
+        &encode_get_crtc_info(0x89, 0x1122_3344, 0x5566_7788),
+        &[
+            0x89, 20, 3, 0, 0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55,
+        ],
+        "XRandR GetCrtcInfo",
+    );
+}
+
+#[test]
+fn randr_reply_parsers_decode_physical_output_data() {
+    let mut reply = [0u8; 32];
+    reply[0] = 1;
+    reply[8..12].copy_from_slice(&1u32.to_le_bytes());
+    reply[12..16].copy_from_slice(&5u32.to_le_bytes());
+    assert_eq!(
+        parse_version_reply(&reply).unwrap(),
+        y901_backend_x11::randr::VersionReply { major: 1, minor: 5 }
+    );
+
+    let mut resources = [0u8; 32];
+    resources[0] = 1;
+    resources[12..16].copy_from_slice(&0x1234u32.to_le_bytes());
+    resources[16..18].copy_from_slice(&1u16.to_le_bytes());
+    resources[18..20].copy_from_slice(&1u16.to_le_bytes());
+    let parsed = parse_screen_resources_reply(
+        &resources,
+        &[0xBC, 0x9A, 0x78, 0x56, 0x78, 0x56, 0x34, 0x12],
+    )
+    .unwrap();
+    assert_eq!(parsed.config_timestamp, 0x1234);
+    assert_eq!(parsed.outputs, vec![0x1234_5678]);
+
+    let mut output = [0u8; 32];
+    output[0] = 1;
+    output[12..16].copy_from_slice(&0xAABB_CCDDu32.to_le_bytes());
+    output[16..20].copy_from_slice(&530u32.to_le_bytes());
+    output[20..24].copy_from_slice(&300u32.to_le_bytes());
+    output[24] = 0;
+    assert_eq!(
+        parse_output_info_reply(&output).unwrap(),
+        y901_backend_x11::randr::OutputInfoReply {
+            connected: true,
+            crtc: 0xAABB_CCDD,
+            width_mm: 530,
+            height_mm: 300,
+        }
+    );
+
+    let mut crtc = [0u8; 32];
+    crtc[0] = 1;
+    crtc[12..14].copy_from_slice(&100i16.to_le_bytes());
+    crtc[14..16].copy_from_slice(&200i16.to_le_bytes());
+    crtc[16..18].copy_from_slice(&1920u16.to_le_bytes());
+    crtc[18..20].copy_from_slice(&1080u16.to_le_bytes());
+    crtc[28..30].copy_from_slice(&1u16.to_le_bytes());
+    assert_eq!(
+        parse_crtc_info_reply(&crtc, &0x1234_5678u32.to_le_bytes()).unwrap(),
+        y901_backend_x11::randr::CrtcInfoReply {
+            x: 100,
+            y: 200,
+            width: 1920,
+            height: 1080,
+            outputs: vec![0x1234_5678],
+        }
+    );
+}
+
+#[test]
+fn randr_output_geometry_selects_the_containing_monitor() {
+    use y901_backend_x11::randr::{dpi_at, OutputDpi};
+    let left = OutputDpi {
+        output: 1,
+        x: 0,
+        y: 0,
+        width: 1920,
+        height: 1080,
+        dpi_x: 96.0,
+        dpi_y: 96.0,
+    };
+    let right = OutputDpi {
+        output: 2,
+        x: 1920,
+        y: 0,
+        width: 2560,
+        height: 1440,
+        dpi_x: 144.0,
+        dpi_y: 144.0,
+    };
+    let outputs = [left, right];
+    assert_eq!(dpi_at(&outputs, 10, 10), Some((96.0, 96.0)));
+    assert_eq!(dpi_at(&outputs, 2000, 700), Some((144.0, 144.0)));
+    // 右边界是开的：1920 属于右屏，1919 属于左屏。
+    assert_eq!(dpi_at(&outputs, 1919, 0), Some((96.0, 96.0)));
+    assert_eq!(dpi_at(&outputs, 1920, 0), Some((144.0, 144.0)));
+    assert_eq!(dpi_at(&outputs, 5000, 5000), None);
 }
 
 // ---------------------------------------------------------------- Setup

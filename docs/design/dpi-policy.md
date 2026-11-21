@@ -147,9 +147,21 @@
 | 平台 | `Options` 语义 | 缩放来源 | 状态 |
 |---|---|---|---|
 | Windows（win32） | DIP，客户区 = `round(DIP × scale)` | `GetDpiForSystem` / `WM_DPICHANGED`；`Y901_TEST_DPI_SCALE` 可覆盖 | 已实现 |
-| Linux（x11） | **同样按 DIP 解释**；客户区 = `round(DIP × scale)` | `Y901_X11_SCALE` → `Y901_DPI` → XSettings（`Xft/DPI` / `Gdk/WindowScalingFactor`）→ 根窗口 `Xft.dpi` → setup 的屏幕毫米估算（吸附 0.25 档位） | 已实现（v0.2.2 起；v0.2.3 补 `Xft.dpi`、XSettings 与**运行期跟随缩放**） |
+| Linux（x11） | **同样按 DIP 解释**；客户区 = `round(DIP × scale)` | `Y901_X11_SCALE` → `Y901_DPI` → XSettings（`Xft/DPI` / `Gdk/WindowScalingFactor`）→ 根窗口 `Xft.dpi` → **单一 XRandR 活动输出的物理 DPI** → setup 的屏幕毫米估算（吸附 0.25 档位） | 已实现（v0.2.2 起；v0.2.3 补 `Xft.dpi`、XSettings 与**运行期跟随缩放**；v0.2.6 补 XRandR 输出几何/物理 DPI 查询） |
 
-结论：契约跨平台一致（"Options 是 DIP"）。x11 侧没有每显示器 DPI API，
-优先级如上；运行期改缩放会在约 1 秒内被窗口发现（轮询 XSettings/Xft.dpi，不订阅
-`PropertyNotify`），随后重建光栅器并按新物理尺寸调整客户区。
-XSettings 与 `Xft.dpi` 都不做 0.25 吸附（它们是用户意图），只有毫米估算吸附。
+结论：契约跨平台一致（"Options 是 DIP"）。运行期改缩放会在约 1 秒内被窗口发现
+（轮询 XSettings/Xft.dpi，不订阅 `PropertyNotify`），随后重建光栅器并按新物理尺寸调整客户区。
+XSettings 与 `Xft.dpi` 都不做 0.25 吸附（它们是用户意图），只有毫米估算与 XRandR DPI 吸附。
+
+### 7.1 每显示器 DPI（v0.2.6）
+
+X11 没有"每窗口 DPI"窗口属性；全局缩放只能在建窗前定一次，而那一刻还不知道窗口会落在哪块屏。
+因此 v0.2.6 的处理是**分开两件事**：
+
+1. **全局缩放（建窗前）**：只有**恰好一个** XRandR 活动输出时，用它的物理 DPI 代替整屏毫米估算
+   （单屏下更准，多屏时整屏毫米会把几块屏的物理尺寸加在一起）。多输出时**不猜屏**，保持原毫米估算。
+2. **按位置查询（每显示器）**：`Connection::active_output_dpis()` 返回各输出的 CRTC 位置/尺寸与
+   物理 DPI；窗口位置确定后用 `randr::dpi_at(&outputs, x, y)` 取所在屏的 DPI。这是唯一不猜的做法。
+
+已知边界：镜像模式（两个 output 共用同一 CRTC）会返回两条记录，`dpi_at` 取先匹配的一条；
+两者 DPI 相同，结果一致。热插拔导致的资源变化会让单次输出查询被跳过，而不是整体报错。
