@@ -13,6 +13,9 @@
 3. **API 0.x**：破坏性变更集中在 minor（0.3.0），patch 只修 bug；已发布版本号不复用。
 4. **保留等宽格契约**：终端/Grid 路径不能为了“世界文字”而改坏；复杂排版走**并行管线**。
 5. **门禁是唯一事实来源**：每个阶段都要能进 `gate.ps1` / `linux-verify.sh`，不靠人肉记忆。
+6. **必要时从零用纯 Rust 重写**（已获用户授权）：当现成 crate 或现有抽象与目标冲突时，
+   允许重写我们自己的实现（例如图集从 `char` 键改为 `GlyphKey`、Web 呈现从 `putImageData`
+   改为纹理上传），而不是硬套；但“重写”必须服从零 C 依赖、MSRV 1.92 与门禁，不能为重写而重写。
 
 ## 1. 七项差距的处置结论
 
@@ -200,3 +203,25 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   Windows UIA；集中破坏性变更与迁移指南。
 - **M2（约 16–20 周）**：0.4.0——TextInput cluster 编辑、字体回退链、Linux AT-SPI、变量字体；
   Web 决定“升级或维持 Tier 3”。
+
+## 9. 进度记录
+
+### S0（2026-11-21）：定位与入口 —— 已完成主体
+
+- 英文 `README.md`（公开门面）+ 中文 `README.zh-CN.md`（互链）；英文 `docs/QUICKSTART.md`
+  （5 分钟：建工程 → 依赖 → 25 行 hello → 运行 → 排错）。
+- 英文 `docs/PLATFORMS.md`：T1 Windows / T2 X11 / T3 Web / macOS+Wayland 出范围；
+  `docs/WASM.md` 顶部标注 Tier 3 与非目标；`CONTRIBUTING.md` 同步平台分层与双语策略。
+- `scripts/check-semver-bump.ps1`：`!` 破坏性提交必须相对最近 tag 升 minor/major；
+  已在本地验证“历史 v0.2.1 场景会被判红”。
+- CI 新增 `semver-guard` 与 `semver-checks`（`cargo-semver-checks 0.49`，基线=最近 tag）；
+  本地对 11 个 crate 跑 `--baseline-rev v0.2.5`：196 项检查全过。
+- `scripts/check-consumer.ps1` + `.github/workflows/consumer.yml`：从 crates.io 拉**已发布版**
+  编译下游工程（不用 path）；本地用 `y901 0.2.5` 实测通过，定时任务每周一跑。
+- 待补（S0 尾部）：示例截图/GIF 与 `examples/README.md`（需要实际截图，不能伪造）。
+
+### S1（下一步）：组件与语义地基
+
+- Table v2（排序 / 虚拟滚动 / 键盘导航 / 列宽）、MenuBar、NumberInput；
+- `Semantics` 扩展（accessible name/description/value 范围/关系/live region），为 S3 的
+  AccessKit 映射打地基。

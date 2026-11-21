@@ -1,0 +1,50 @@
+name: Consumer smoke
+
+# 用 **crates.io 上已发布** 的 y901 编译一个下游工程。
+#
+# 为什么单开一个 workflow：仓库内测试全是 path 依赖，本地全绿不代表发布包可用。
+# 历史上出现过“workspace 能编、发布版 prelude 引用不存在路径”的问题；只有从 registry
+# 拉包才能复现。这个 job 故意不用 workspace，也不读本地 Cargo.lock。
+#
+# 默认测 crates.io 的最新已发布版本；手动触发可以指定版本。
+# 发布 0.2.6 之后，定时任务会自动覆盖到新版本。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Published y901 version to test (empty = latest on crates.io)"
+        required: false
+        default: ""
+  schedule:
+    # 每周一 03:17 UTC 检查已发布版本是否仍可被下游编译。
+    - cron: "17 3 * * 1"
+
+concurrency:
+  group: consumer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  consumer:
+    name: consumer (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # 两个 Tier 1/2 平台的 facade 都要能从 registry 编译。
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - name: check-consumer.ps1
+        shell: pwsh
+        run: |
+          $v = '${{ github.event.inputs.version }}'
+          if ($v) {
+            ./scripts/check-consumer.ps1 -Version $v
+          } else {
+            ./scripts/check-consumer.ps1
+          }

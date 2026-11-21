@@ -49,12 +49,12 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 
 # 每条用例：(文件, 原文, 改成, 说明)
 $cases = @(
-    @{ File = 'README.md'; Old = "$passed passed / 0 failed / $ignored ignored"; New = "$($passed - 1) passed / 0 failed / $ignored ignored"; Label = '非加粗的 passed 漂移（README 构建块）' },
-    @{ File = 'README.md'; Old = "（$targets 个测试目标）"; New = "（$($targets - 1) 个测试目标）"; Label = '测试目标数漂移' },
+    @{ File = 'README.zh-CN.md'; Old = "$passed passed / 0 failed / $ignored ignored"; New = "$($passed - 1) passed / 0 failed / $ignored ignored"; Label = '非加粗的 passed 漂移（README 构建块）' },
+    @{ File = 'README.zh-CN.md'; Old = "（$targets 个测试目标）"; New = "（$($targets - 1) 个测试目标）"; Label = '测试目标数漂移' },
     @{ File = 'docs\ACCEPTANCE.md'; Old = "| **$passed passed / 0 failed / $ignored ignored** |"; New = "| **$($passed - 1) passed / 0 failed / $ignored ignored** |"; Label = '表格内的 passed 漂移' },
     @{ File = 'docs\FRAMEWORK.md'; Old = "$passed 项通过、$ignored 项忽略（$targets 个测试目标）"; New = "$passed 项通过、$ignored 项忽略（$($targets - 1) 个测试目标）"; Label = 'FRAMEWORK 目标数漂移' },
     # 反自伤：这两类"脚本改坏文档"的指纹必须被抓到（A-2）。
-    @{ File = 'README.md'; Old = '基线 0xF7455CCE7781A864'; New = "基线 **$passed**xF7455CCE7781A864"; Label = '十六进制基线被当成计数（0x 被吃）' },
+    @{ File = 'README.zh-CN.md'; Old = '基线 0xF7455CCE7781A864'; New = "基线 **$passed**xF7455CCE7781A864"; Label = '十六进制基线被当成计数（0x 被吃）' },
     @{ File = 'docs\STATUS.md'; Old = 'vs win32 默认族'; New = "vs win**$passed** 默认族"; Label = '词内数字被当成计数（win32 → win**N**）' },
     # Linux 行不再整行豁免：它的数字由 docs/evidence/linux-numbers.txt 校验。
     # 锚点用 ACCEPTANCE 的**当前** Linux 行（未标"历史"）；STATUS 里那条是历史记录，
@@ -90,7 +90,7 @@ foreach ($c in $cases) {
 }
 
 # 额外一条：整行新增一个无标记的假计数（不是"改已有数字"，而是"多写一个"）。
-$readme = Join-Path $root 'README.md'
+$readme = Join-Path $root 'README.zh-CN.md'
 $origReadme = [System.IO.File]::ReadAllText($readme)
 try {
     [System.IO.File]::WriteAllText($readme, $origReadme.TrimEnd() + "`n`n本轮 $($passed - 2) 项测试全绿。`n", $utf8)

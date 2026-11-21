@@ -25,7 +25,9 @@
 cargo fmt --all -- --check
 powershell -NoProfile -File scripts/gate.ps1          # 必须 GATE OK
 powershell -NoProfile -File scripts/check-version-consistency.ps1
+powershell -NoProfile -File scripts/check-semver-bump.ps1   # 破坏性提交必须升 minor
 cargo deny check                                      # deny.toml：公告/许可/来源/重复版本
+cargo semver-checks check-release --workspace --baseline-rev (git describe --tags --abbrev=0 --match 'v[0-9]*')
 
 # 叶子 crate 的打包冒烟（会被依赖的都要能打包）
 cargo package -p y901-core --allow-dirty --offline
@@ -134,7 +136,8 @@ foreach ($c in $order) {
 |---|---|
 | crate 页出现且 README 正常 | 打开 `https://crates.io/crates/<name>` |
 | docs.rs 构建成功 | `https://docs.rs/<name>/<version>/`；`backend-win32` / `backend-web` 走 `default-target`，Linux 默认目标不应再出现空文档 |
-| 下游能拉 | 空目录里 `cargo add y901-core && cargo build` |
+| 下游能拉 | `powershell -NoProfile -File scripts/check-consumer.ps1 -Version <新版本>`（从 crates.io 拉包编译，不用 path） |
+| 签名级兼容 | CI 的 `semver-checks` job（`cargo-semver-checks --baseline-rev <上一 tag>`）应为绿；发布后新 tag 成为下一轮基线 |
 | 版本号已占用 | 发布后**不能重发同一版本**；修复必须升版（0.2.6…） |
 
 ## 4. 出错怎么办

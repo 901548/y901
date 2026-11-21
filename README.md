@@ -3,124 +3,123 @@
 [![crates.io](https://img.shields.io/crates/v/y901.svg)](https://crates.io/crates/y901)
 [![docs.rs](https://img.shields.io/docsrs/y901)](https://docs.rs/y901)
 [![CI](https://github.com/901548/y901/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/901548/y901/actions/workflows/ci.yml)
-[![license](https://img.shields.io/crates/l/y901.svg)](#许可)
+[![license](https://img.shields.io/crates/l/y901.svg)](#license)
 
-Rust 跨平台 GUI 框架，自带 Win32/D3D11 与 X11 后端。文本模型是**等宽 cell**
-（`0.5em × 1em`），适合终端、日志、文件管理等桌面工具类应用。
+A pure-Rust cross-platform GUI framework with its own Win32/D3D11, X11 and Web (wasm)
+backends. Text uses a **monospace cell model** (`0.5em × 1em`), which makes it a good fit
+for terminal-style desktop tools, log viewers and file managers.
 
-## 安装：只需要一个 crate
+> [中文说明](README.zh-CN.md) · [Roadmap](docs/ROADMAP.md) · [Platform support](docs/PLATFORMS.md)
+
+## Status
+
+**Experimental (0.x).** Windows/D3D11 is the reference platform (Tier 1). Linux/X11 is
+supported on a best-effort basis (Tier 2). The browser backend is a **demo/reach** tier
+(Tier 3), not production-ready. macOS and Wayland have no backend. See
+[docs/PLATFORMS.md](docs/PLATFORMS.md) for the exact support matrix and what is out of scope.
+
+## Install
 
 ```toml
 [dependencies]
 y901 = "0.2.6"
 ```
 
-`y901` 是**单一入口**，内部把下面 10 个子 crate 全部 re-export 好：
+`y901` is the **single entry point**: it re-exports the ten `y901-*` implementation crates.
 
 ```rust
-use y901::prelude::*;          // 启动应用与画界面必用的类型与基础控件
+use y901::prelude::*;
 
 fn main() -> Result<(), String> {
-    // 业务代码里不出现任何 `#[cfg(target_os)]`：平台分叉在 y901 内部完成。
+    // No `#[cfg(target_os)]` in application code: platform selection happens inside y901.
     let runtime = y901::create_runtime();
-    let _ = runtime;           // 真正启动需要窗口环境，见 examples/
+    let _ = runtime; // Starting a window requires a display; see examples/
     Ok(())
 }
 ```
 
-| 想做什么 | 用什么 |
-|---|---|
-| 画界面 | `use y901::widgets::*;`（Button / Table / TextInput / Alert …） |
-| 自定义控件 | 实现 `y901::ui::Widget` + 往里画 `y901::ui::RenderCtx` |
-| 直接开窗口跑循环 | `y901::create_runtime()` → `.run(host, build, options)` |
-| 只用布局/文本原语（不装平台后端） | 直接依赖 `y901-core` / `y901-ui` |
+## Quick start
 
-> 子 crate 都是**实现细节**：保留它们是为了编译期并行、依赖裁剪与平台条件依赖，
-> 不是为了让你一个个装。需要更细控制时才直接依赖某个子 crate。
-
-## 状态
-
-**实验性（experimental）**。Windows D3D11 路径经过完整验证（工作区测试、像素门禁）；
-X11 后端可在 Xvfb 下跑通，**未做真机验收**；macOS 无后端。
-
-## 组件
-
-| 类别 | 组件 |
-|---|---|
-| 基础输入 | `Button` `TextInput` `Checkbox` `RadioGroup` `Switch` `Slider` |
-| 容器/布局 | `Flex`（含 `radius`/`border`）`Grid` `Stack` `ScrollView` `SplitView` `Tabs` |
-| 数据展示 | `Table` `ListView` `TreeView` `Image` `RichText` `TextLabel` |
-| 反馈/状态 | `Spinner` `ProgressBar` `EmptyState` `ErrorState` `Alert` |
-| 导航/浮层 | `Menu` `Dialog` `ContextMenu` `Tooltip` |
-
-## 快速开始
+The five-minute path (new project → running window) is in
+[docs/QUICKSTART.md](docs/QUICKSTART.md).
 
 ```bash
-# 只看单一入口怎么写（只依赖 y901 一个 crate）
+# Minimal facade example (depends on `y901` only)
 cargo run --example hello -p y901
 
-# 组件画廊（在 y901-shell 里，所以要 -p）
-cargo run -p y901-shell --example static_page     # 一屏静态页面：排版/颜色/圆角
-cargo run -p y901-shell --example table           # 多列表格 + 选中行
-cargo run -p y901-shell --example alert           # 四种 Alert
+# Component gallery (lives in y901-shell, hence -p)
+cargo run -p y901-shell --example static_page   # layout / colours / rounded corners
+cargo run -p y901-shell --example table         # multi-column table with row selection
+cargo run -p y901-shell --example alert         # four alert variants
 ```
 
-> 为什么画廊要 `-p y901-shell`：workspace 默认成员是单一入口 `y901`，而 18 个示例
-> 都在应用壳 crate 里（`crates/y901-shell/examples/`）。`cargo run --example static_page`
-> 不带 `-p` 只会找 `y901` 自己的 examples。
+## Components
 
-## 仓库结构（11 个 crate）
+| Category | Widgets |
+|---|---|
+| Input | `Button` `TextInput` `Checkbox` `RadioGroup` `Switch` `Slider` |
+| Layout | `Flex` (with `radius`/`border`) `Grid` `Stack` `ScrollView` `SplitView` `Tabs` |
+| Data | `Table` `ListView` `TreeView` `Image` `RichText` `TextLabel` |
+| Feedback | `Spinner` `ProgressBar` `EmptyState` `ErrorState` `Alert` |
+| Navigation | `Menu` `Dialog` `ContextMenu` `Tooltip` |
+
+## Known limitations
+
+- **International text and complex layout: not supported (hard boundary).** The text
+  pipeline looks up one cmap glyph per character and lays it out on the monospace cell
+  grid. There is **no HarfBuzz-equivalent shaping engine**: Arabic/Hebrew joining and RTL,
+  Indic reordering, complex ligatures (GSUB/GPOS), kerning, variable fonts
+  (`fvar`/named instances), font fallback chains and bidirectional text are **not
+  implemented**. CJK renders because Han/Kana/Hangul mostly fit the "one wide glyph per
+  two cells" contract — that is not complex-text support. Applications that need those
+  features should not use Y901.
+- **Accessibility: semantics tree only.** `Widget::semantics` exposes roles, labels,
+  values, actions and state, but there is **no OS bridge** (UIA / AT-SPI) yet.
+- **Monospace-only text model.** `cell_metrics_for` always derives cells at
+  `0.5em × 1em`; the default font is `NSimSun`. `FontConfig::modern()` switches to
+  `Microsoft YaHei UI`, but proportional fonts are visual experiments only.
+- **macOS and Wayland are out of scope.** Wayland users run through XWayland.
+- **Browser backend (Tier 3).** Single canvas, full-frame `putImageData`, hidden-input IME
+  with no candidate-window positioning, no accessibility tree, no multi-window/FileDrop.
+- **0.x API.** Breaking changes bump the minor version (0.3.0, 0.4.0 …) and ship migration
+  notes in `docs/RELEASE_NOTES_v*.md`; published version numbers are never reused.
+
+## Repository layout (11 crates)
 
 ```
-y901                 单一入口：re-export 全部子 crate + prelude + create_runtime()
-y901-core            纯逻辑：终端 Grid / 格宽 / 区间
-y901-ui              框架：Widget / UiTree / 布局 / 事件 / 主题 / 动画 / 语义树
-y901-widgets         组件：Button / Table / Alert / Switch / ...
-y901-extras          扩展：TerminalWidget（Grid + VT + PTY）
-y901-render          软光栅器（SoftBackend）+ 自研 TTF 字形引擎 + 图集
-y901-runtime         平台无关契约：Host / PlatformRuntime / 帧 / 字体配置
+y901                 single entry point: re-exports + prelude + create_runtime()
+y901-core            pure logic: terminal grid / cell widths / intervals
+y901-ui              framework: Widget / UiTree / layout / events / theme / animation / semantics
+y901-widgets         widgets: Button / Table / Alert / Switch / ...
+y901-extras          subsystem widgets: TerminalWidget (grid + VT + PTY)
+y901-render          software rasterizer + in-house TTF engine + atlas
+y901-runtime         platform-agnostic contracts: Host / PlatformRuntime / frames / fonts
 y901-backend-win32   Win32 + D3D11 + DirectWrite + IME + DPI
-y901-backend-x11     X11 后端（Xvfb 下验证）
-y901-backend-web     浏览器后端（wasm32，单 canvas）
-y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
+y901-backend-x11     X11 backend (Xvfb + real-server spot checks)
+y901-backend-web     browser backend (wasm32, single canvas)
+y901-shell           app shell: create_runtime() + clipboard + secrets + screenshots
 ```
 
-## 构建与测试
+## Documentation
 
-```bash
-cargo check --workspace --all-targets      # 0 warning
-cargo test --workspace                     # 993 passed / 0 failed / 61 ignored（153 个测试目标）
-powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0xF7455CCE7781A864，400x220）
-```
+- [docs/QUICKSTART.md](docs/QUICKSTART.md) — install, first window, next steps
+- [docs/PLATFORMS.md](docs/PLATFORMS.md) — support tiers and out-of-scope platforms
+- [docs/ROADMAP.md](docs/ROADMAP.md) — plan for shaping, accessibility, API stability, components
+- [docs/STATUS.md](docs/STATUS.md) — current state, gates and evidence (Chinese)
+- [docs/FRAMEWORK.md](docs/FRAMEWORK.md) — architecture, component model, rendering contract (Chinese)
+- [docs/CRATES_IO.md](docs/CRATES_IO.md) — release process and pitfalls (Chinese)
+- [docs/WASM.md](docs/WASM.md) — browser backend design and gaps (Chinese)
 
-## 已知限制
+Internal design documents are written in Chinese; public entry points (README, quick start,
+platform matrix) are in English.
 
-- **Linux 输入法（IME）**：已接线 IBus（`3737df5`），可在 X11 下输入中文；浏览器端走隐藏 `<input>` 承接组字。
-- **macOS 后端未实现**。
-- **无障碍只有语义树**（`Widget::semantics`），**没有 OS 桥接**（UIA / AT-SPI）。
-- ~~**Grid + Image 组合在 D3D cached-RT 路径下整帧空白**~~ —— 已修复（`draw_instances` 把批次起点
-  当成 `StartVertexLocation` 而非 `StartInstanceLocation`，详见 `docs/FRAMEWORK.md` §16）；回归用例
-  `crates/y901-backend-win32/tests/grid_image_gpu.rs`。
-- **组件内无法启动动画**：`UiTree::animate(..)` 在树侧，`EventCtx` 没有入口；
-  因此 `Switch` 的滑块是即时移动（滚动/弹层动画不受影响）。
-- **国际文字与复杂排版：明确不支持（边界声明）**。文本管线是"逐字符查 cmap 字形 + 等宽 cell"，
-  **没有 HarfBuzz 等价的 shaping 引擎**：阿拉伯语/希伯来语的连写与 RTL、印度语系的字形重组与
-  重排序、复杂连字（GSUB/GPOS）、kerning、可变字体（`fvar`/命名实例）、字体回退链、双向文本
-  （bidi）均**未实现**。CJK 能正常显示，是因为汉字/假名/谚文大多能落进"整字 2 格、宽 1 em"
-  的等宽格契约，**不代表支持复杂排版**。依赖上述能力的应用不应选用 Y901。
-- **文本模型要求等宽字体**：`cell_metrics_for` 固定按 `0.5em × 1em` 出 cell。
-  默认字体 `NSimSun`（等宽、中英文齐全）。`FontConfig::modern()` 可切到
-  `Microsoft YaHei UI`，但**只建议做视觉试验**——比例字体按固定步进排布会字距不均。
-- **API 仍是 0.x 语义**：破坏性变更会升 minor（0.3.0…）并在
-  `docs/RELEASE_NOTES_v*.md` 里给迁移说明；已发布的版本号不会被复用。
+## Contributing
 
-## 文档
+See [CONTRIBUTING.md](CONTRIBUTING.md) (Chinese). CI enforces the full gate; PRs must also
+keep `cargo deny check` green. The repository favours pure-Rust implementations: the
+zero-C-dependency guard in `crates/y901-shell/tests/no_c_deps.rs` rejects `-sys` crates and
+C/C++ build scripts.
 
-- `docs/CRATES_IO.md`：发布流程与踩过的坑（path 依赖必须写 version、categories 必须是固定 slug、re-export 只能引用已发布版本里存在的路径）
-- `docs/FRAMEWORK.md`：架构、组件模型、坐标系与裁剪、已知限制
-- `docs/CROSS_PLATFORM_PLAN.md`：X11 / macOS 路线
-- `docs/evidence/hash-baseline.txt`：像素门禁基线
+## License
 
-## 许可
-
-双许可，任选其一：[MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)。
+Dual-licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.

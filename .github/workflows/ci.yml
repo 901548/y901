@@ -1,14 +1,19 @@
 name: CI
 
-# 五块门禁，任一红都不算通过：
+# 七块门禁，任一红都不算通过：
 #   windows-gate : 完整 scripts/gate.ps1（MSRV/fmt/计数/inventory/clippy/像素哈希/
 #                  missing_docs/版本一致/doc 数字/audit）—— 与本地发布前跑的是同一份脚本
 #   linux-x11    : scripts/linux-verify.sh 八步（Xvfb 真窗口 + cfg(unix) 代码 + Linux clippy）
 #   packaging    : scripts/check-packaging.ps1（11 个 crate 逐个 `cargo package`，不发布）
 #   dependency-policy : cargo-deny 校验 deny.toml（安全公告 / 许可 / 来源 / 重复版本）
+#   semver-guard : `!` 破坏性提交必须对应 minor/major 升级（scripts/check-semver-bump.ps1）
+#   semver-checks: 公开 API 与最近 tag 的签名级兼容性（cargo-semver-checks）
 #
 # 为什么 CI 要联网：本机脚本默认加 `--offline`（依赖已在缓存）；runner 是干净环境。
 # scripts/*.ps1 统一读 `Y901_ONLINE=1` / `gate.ps1 -Online` 来去掉 `--offline`。
+#
+# 另有 `.github/workflows/consumer.yml`：用 crates.io 上已发布的 y901 编译一个下游工程，
+# 专门抓“本地 workspace 全绿、发布版不可用”的问题。
 
 on:
   push:
@@ -124,3 +129,39 @@ jobs:
       # 新增漏洞/许可/来源问题必须在这里变红，而不是靠人肉 review。
       - name: cargo deny check
         run: cargo deny check
+
+  semver-guard:
+    name: semver guard (breaking `!` commits require minor/major bump)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 脚本要读最近 tag 到 HEAD 的提交，浅 clone 拿不到 tag 历史。
+          fetch-depth: 0
+      - name: check-semver-bump.ps1
+        shell: pwsh
+        run: ./scripts/check-semver-bump.ps1
+
+  semver-checks:
+    name: cargo-semver-checks (public API vs latest tag)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - uses: Swatinem/rust-cache@v2
+      # 0.50+ 要求 rustc 1.93；0.49 支持 1.91，匹配本仓库 MSRV 1.92。
+      - name: Install cargo-semver-checks 0.49.0
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks@0.49.0
+      # 基线是最近 tag（分支保护里 tag 与发布内容一致）。
+      - name: cargo semver-checks
+        run: |
+          baseline="$(git describe --tags --abbrev=0 --match 'v[0-9]*')"
+          echo "baseline=$baseline"
+          cargo semver-checks check-release --workspace --baseline-rev "$baseline"

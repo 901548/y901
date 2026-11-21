@@ -4,8 +4,13 @@
 
 1. **这是 0.x 实验性框架**，API 会变。大改动先开 issue 说清动机与影响面，
    别直接提几百行的 PR。
-2. **门禁是硬要求**：PR 必须让 CI 四个 job 全绿（Windows 门禁 / Linux Xvfb / 打包校验 / 依赖策略）。
+2. **门禁是硬要求**：PR 必须让 CI 五个 job 全绿（Windows 门禁 / Linux Xvfb / 打包校验 / 依赖策略 / semver）。
    "CI 红了但本地能跑"不算过 —— 那通常意味着你改了 `#[cfg(unix)]` 或平台专属代码。
+
+> 平台承诺分三层（见 [`docs/PLATFORMS.md`](docs/PLATFORMS.md)）：Windows 是 T1（发布阻断），
+> Linux/X11 是 T2（尽力支持），Web 是 T3（演示级，不承诺兼容）。macOS 与 Wayland 明确出范围。
+> **公开入口文档用英文**（`README.md`、`docs/QUICKSTART.md`、`docs/PLATFORMS.md`）；
+> 内部设计文档保持中文（`docs/FRAMEWORK.md`、`docs/STATUS.md` 等）。
 
 ## 开发环境
 

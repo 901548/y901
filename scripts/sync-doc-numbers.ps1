@@ -133,7 +133,7 @@ $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 # 把工具输出和运行日志混在一起。时间戳改写到 target/（已被 gitignore）。
 # **必须在 `if (-not $Check)` 之外**：否则 -Check 模式下 $docFiles 为 $null，
 # 文档校验循环根本不执行 —— -Check 会恒返回 ok（已发生）。
-$docFiles = @('README.md','docs\STATUS.md','docs\FRAMEWORK.md','docs\PERFORMANCE.md','docs\ACCEPTANCE.md')
+$docFiles = @('README.zh-CN.md','docs\STATUS.md','docs\FRAMEWORK.md','docs\PERFORMANCE.md','docs\ACCEPTANCE.md')
 
 if (-not $Check) {
 $logPath = Join-Path $root 'target\doc-numbers-last-sync.txt'

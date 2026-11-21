@@ -1,6 +1,10 @@
 # Y901 WASM 后端实现说明
 
 > **本文件描述当前实现状态（截至 HEAD `2b1a0cd`）。** 未来计划见 issue tracker，不在本文档里写。
+>
+> **平台定位：Tier 3（演示/触达），不是产品级。** 明确的非目标：整帧 `putImageData`
+> 上传、无 DOM 无障碍树、IME 候选窗不可钉位、单 canvas 无多窗口/FileDrop。需要产品级
+> Web 能力的项目不应选这个后端。分层说明见 [`docs/PLATFORMS.md`](PLATFORMS.md)。
 
 ## 1. 方案概述
 
