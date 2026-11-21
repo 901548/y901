@@ -24,6 +24,25 @@
 `TableColumn::fixed(..)` / `TableColumn::flex(..)` 的返回值不受影响；
 用结构体字面量构造列的代码需要改为 builder，需要禁止排序时加 `.not_sortable()`。
 
+### 2b. `Options` 标记 `#[non_exhaustive]`
+
+窗口选项只会增加（新后端能力、新配置项），不设这个属性则每加一个字段都是破坏性变更。
+
+**怎么改**：用 `..Default::default()` 兜底：
+
+```rust
+let options = Options {
+    title: "My app".into(),
+    width: 640,
+    height: 480,
+    ..Default::default()
+};
+```
+
+全字段都显式写时 Rust 也接受（此时 `..Default::default()` 可省，
+但 clippy 的 `needless_update` 会提示；建议干脆保留），
+仓库内 46 处字面量已按这个约定统一。
+
 ### 3. `Table` 换成虚拟滚动实现（行为变化）
 
 - 表头**固定**在顶部，行区域独立滚动（滚轮 / 拖拽滚动条 / 键盘都支持）；

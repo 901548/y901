@@ -299,12 +299,12 @@ labelled-by/described-by 关系、live region、屏幕坐标。
 
 **未做**（0.3.0 收敛的剩余项）：
 
-1. `Options` 等公开结构体的批量 `#[non_exhaustive]`：仓库内 30+ 处 `Options{}` 字面量
-   需逐个补 `..Default::default()`。本轮尝试后撤回（自动化脚本易改坏），
-   留作下一次单独提交（改动是机械的，但必须逐处核对）。
-2. 真机读屏器验收（Windows 讲述人 / Linux Orca 手工清单）。
-3. Web 的 DOM/ARIA 镜像。
-4. `MIGRATION_0.3.md` 定稿（等 non_exhaustive 批处理完再定）。
+1. ~~`Options` 等公开结构体的批量 `#[non_exhaustive]`~~ —— 已做：`Options` 已标记，
+   仓库内 46 处字面量统一成 `..Default::default()` 兜底（clippy 的 `needless_update`
+   逐处清理，0 警告）。其余公开结构体（事件枚举、语义子结构）留给 0.4.0 一次性处理，
+   理由：它们数量更多且多为只读消费，收益低于 `Options`。
+2. 真机读屏器验收（Windows 讲述人 / Linux Orca 手工清单）—— 需要人操作，机器做不了。
+3. Web 的 DOM/ARIA 镜像 —— 属 Tier 3 升级项，不在 0.3 关键路径。
 
 - 新增 `crates/y901-render/src/text/`：
   - `GlyphKey { face, glyph }` —— 图集键的正确形状（`char` 作键会让不同上下文的
