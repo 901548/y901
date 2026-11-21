@@ -3,7 +3,7 @@
 - **HEAD**: 见 `git log -1`（v0.2.5；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收 + X11 DPI/XSettings + 墨迹绘制裁剪修复 + crates.io 首发准备）
 - **tags**: v0.1.0 ~ **v0.2.5**（v0.2.0 含破坏性变更；v0.2.1 ~ v0.2.5 均为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`）；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**
 - **测试**: `passed=993` / `ignored=61` / `include_ignored=1054`（唯一来源 `docs/evidence/numbers.txt`）
-- **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）
+- **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
@@ -500,7 +500,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 - **P2 = 1**：`serial` lock 残留（需联网）；其余已修（ignore 计数同步、Guide 编号）或接受（miniz_oxide 上游约束）
 - **P3 = 4**（设计取舍 / 旧项失效）
 - 数字由 `scripts/sync-doc-numbers.ps1` 生成，并由 gate 的 `-Check` 步骤拦截漂移
-- 最新审查报告：`docs/audit-v0.1.15.md`
+- 历史审查报告：[`docs/archive/reviews/audit-v0.1.15.md`](archive/reviews/audit-v0.1.15.md)；后续 v0.1.17 档案见 [`docs/archive/reviews/audit-v0.1.17-final.md`](archive/reviews/audit-v0.1.17-final.md)。这些报告仅供历史追溯，不代表当前项目状态。
 
 ### v0.1.17 前的两项核实（本轮）
 

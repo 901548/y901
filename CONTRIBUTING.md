@@ -4,7 +4,7 @@
 
 1. **这是 0.x 实验性框架**，API 会变。大改动先开 issue 说清动机与影响面，
    别直接提几百行的 PR。
-2. **门禁是硬要求**：PR 必须让 CI 三个 job 全绿（Windows 门禁 / Linux Xvfb / 打包校验）。
+2. **门禁是硬要求**：PR 必须让 CI 四个 job 全绿（Windows 门禁 / Linux Xvfb / 打包校验 / 依赖策略）。
    "CI 红了但本地能跑"不算过 —— 那通常意味着你改了 `#[cfg(unix)]` 或平台专属代码。
 
 ## 开发环境
@@ -15,6 +15,7 @@
 | Windows | 主开发平台。D3D11 测试需要真 GPU（无 GPU 的机器上这些测试会 SKIP） |
 | Linux | 只用于 `#[cfg(unix)]` / X11 验证：`sudo apt install xvfb xauth xdotool` |
 | 可选 | `cargo-audit`（`cargo install cargo-audit`），否则门禁里审计会被跳过 |
+| 可选 | `cargo-deny` 0.21（`cargo install cargo-deny --version 0.21.0 --locked`），用于验证 `deny.toml` 的许可与来源策略 |
 
 ## 提交前自查（与 CI 同一份脚本）
 
@@ -28,6 +29,15 @@ bash scripts/linux-verify.sh                 # 期望 LINUX VERIFY: OK（八步�
 
 两条都过了再推。**不要**只跑 `cargo test` —— 门禁还包含像素哈希、测试计数基线、
 test-inventory 指纹、doc 数字一致性、版本一致性。
+
+依赖策略单独校验（`deny.toml`：安全公告、许可、来源、重复版本）：
+
+```powershell
+cargo deny check                 # 需要 cargo-deny 0.21（更高版本要求 rustc 1.95+）
+```
+
+`deny.toml` 里的 `ignore` 不是"已修复"：`RUSTSEC-2017-0008`（`serial`）和
+`RUSTSEC-2026-0192`（`ttf-parser`）的理由与再评估条件见 [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)。
 
 ## 代码约定
 

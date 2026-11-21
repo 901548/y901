@@ -102,3 +102,27 @@ portable-pty 0.8.1 的 Cargo.toml：
 
 **结论**：不是“残留”，而是**传递依赖**；不能靠 `cargo update` 或手删 lock 清掉。
 RUSTSEC-2017-0008 仍会在审计里出现，直到 `portable-pty` 升级。
+
+## `pin-utils 0.1.1` —— unmaintained
+
+**状态**：`RUSTSEC-2026-0441`（2026-10-01，上游仓库归档后发布 0.1.1）。**不是漏洞**：
+`cargo audit` / `cargo deny check` 只报维护性警告，没有安全公告。
+
+**为什么在依赖图里**：两条传递路径都会带上它 ——
+
+```
+pin-utils v0.1.1
+├── nix v0.25.1 <- portable-pty v0.8.1 <- y901-extras
+└── nix v0.26.4 <- rustbus v0.19.3    <- y901-backend-x11
+```
+
+**攻击面**：`pin-utils` 只提供 `pin_mut!` / `unsafe_pinned!` 等宏，是纯宏 crate，
+不存在运行时解析或网络输入路径；我们**没有**直接调用它的宏（用 `core::pin::pin!` 即可替代）。
+
+**重新评估的条件**：
+
+1. `nix` 或 `rustbus` 升级到不再依赖 `pin-utils` 的版本（升级时顺手删 `deny.toml` 的 ignore）；
+2. `pin-utils` 出现实际 CVE（不只是 unmaintained）；
+3. 我们开始直接使用 `pin_utils` 的宏。
+
+**当前结论：接受**（与 `serial` / `ttf-parser` 同口径），在 `deny.toml` 里显式 ignore 并在本节留痕。

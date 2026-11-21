@@ -1,10 +1,11 @@
 name: CI
 
-# 四块门禁，任一红都不算通过：
+# 五块门禁，任一红都不算通过：
 #   windows-gate : 完整 scripts/gate.ps1（MSRV/fmt/计数/inventory/clippy/像素哈希/
 #                  missing_docs/版本一致/doc 数字/audit）—— 与本地发布前跑的是同一份脚本
 #   linux-x11    : scripts/linux-verify.sh 八步（Xvfb 真窗口 + cfg(unix) 代码 + Linux clippy）
 #   packaging    : scripts/check-packaging.ps1（11 个 crate 逐个 `cargo package`，不发布）
+#   dependency-policy : cargo-deny 校验 deny.toml（安全公告 / 许可 / 来源 / 重复版本）
 #
 # 为什么 CI 要联网：本机脚本默认加 `--offline`（依赖已在缓存）；runner 是干净环境。
 # scripts/*.ps1 统一读 `Y901_ONLINE=1` / `gate.ps1 -Online` 来去掉 `--offline`。
@@ -108,3 +109,18 @@ jobs:
       - name: check-packaging.ps1
         shell: pwsh
         run: ./scripts/check-packaging.ps1 -Online
+
+  dependency-policy:
+    name: cargo-deny (advisories / licenses / bans / sources)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 版本固定成 0.21.0：0.22+ 要求 rustc 1.95，与本仓库 MSRV 1.92 不符。
+      - name: Install cargo-deny 0.21.0
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.21.0
+      # deny.toml 的 ignore 只覆盖 docs/DEPENDENCIES.md 里已决策的维护性公告；
+      # 新增漏洞/许可/来源问题必须在这里变红，而不是靠人肉 review。
+      - name: cargo deny check
+        run: cargo deny check

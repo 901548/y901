@@ -1,0 +1,36 @@
+# cargo-deny policy for the current Y901 workspace dependency tree.
+# Use `cargo deny check` to evaluate advisories, licenses, bans, and sources.
+[advisories]
+# Do not fail on these known, documented maintenance advisories. They are
+# accepted warnings under the current policy, not claims that the crates are
+# safe or advisories are resolved. Re-evaluate before removing either ignore.
+# RUSTSEC-2017-0008: serial 0.4.0, required by portable-pty 0.8.1; see
+# docs/DEPENDENCIES.md (upgrade portable-pty and validate its PTY API first).
+# RUSTSEC-2026-0192: ttf-parser 0.25.1 is unmaintained, not a known vuln;
+# see docs/DEPENDENCIES.md for attack surface and re-evaluation conditions.
+# RUSTSEC-2026-0441: pin-utils 0.1.1 is a macro-only transitive dependency of
+# nix (via portable-pty and rustbus), not a known vuln; see docs/DEPENDENCIES.md.
+ignore = ["RUSTSEC-2017-0008", "RUSTSEC-2026-0192", "RUSTSEC-2026-0441"]
+
+[licenses]
+# Licenses actually encountered in the current dependency tree: Apache-2.0,
+# 0BSD, MIT, Unicode-3.0, Zlib. cargo-deny warns about allowances that match
+# nothing, so add a license here only when a dependency really needs it.
+allow = [
+    "Apache-2.0",
+    "0BSD",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Multiple semver-compatible versions are currently present in the lockfile;
+# keep them visible without blocking existing CI until explicitly reviewed.
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
