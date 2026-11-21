@@ -1,0 +1,59 @@
+name: Perf gate
+
+# 性能断言默认**不强制**（共享机器/CI runner 的墙钟时间不可靠，见
+# crates/y901-ui/tests/grid_perf.rs 的注释）。这个 workflow 才是"强制模式"：
+# 在专用、空闲的 runner 上设 `Y901_PERF_GATE=1`，让那些 assert 真的生效。
+#
+# 为什么不放进 push 门禁：push 门禁要的是确定性；性能是趋势指标，
+# 放在定时/手动触发里更合适（红了先怀疑机器，再怀疑代码）。
+
+on:
+  schedule:
+    # 每天 03:17 UTC（避开整点拥堵）
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # 强制性能断言：超过预算即失败（这就是本 workflow 唯一的意义）
+  Y901_PERF_GATE: "1"
+
+jobs:
+  perf:
+    name: Perf (Y901_PERF_GATE=1)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - uses: Swatinem/rust-cache@v2
+
+      # release 构建才有意义（debug 阈值留了 10~20 倍余量，只能挡"数量级退化"）
+      - name: grid_perf（10k 网格布局 + 10k place）
+        shell: pwsh
+        run: cargo test -p y901-ui --test grid_perf --release
+
+      - name: layout_bench（保留数字，不设阈值）
+        shell: pwsh
+        run: cargo test -p y901-ui --test layout_bench --release -- --nocapture
+
+      - name: dirty_strategy_bench（保留数字）
+        shell: pwsh
+        run: cargo test -p y901-render --test dirty_strategy_bench --release -- --nocapture
+
+      # 结果汇总到 job summary，方便看趋势（不用点开每条 log）
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "### Perf gate" >> $env:GITHUB_STEP_SUMMARY
+          Write-Host "" >> $env:GITHUB_STEP_SUMMARY
+          Write-Host "- 强制阈值：\`grid_perf\`（release 6ms / debug 60ms）" >> $env:GITHUB_STEP_SUMMARY
+          Write-Host "- 其余 bench 只打印数字，不做断言" >> $env:GITHUB_STEP_SUMMARY
+          Write-Host "- 结论：${{ job.status }}" >> $env:GITHUB_STEP_SUMMARY

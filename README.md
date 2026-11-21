@@ -1,5 +1,10 @@
 # Y901
 
+[![crates.io](https://img.shields.io/crates/v/y901.svg)](https://crates.io/crates/y901)
+[![docs.rs](https://img.shields.io/docsrs/y901)](https://docs.rs/y901)
+[![CI](https://github.com/901548/y901/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/901548/y901/actions/workflows/ci.yml)
+[![license](https://img.shields.io/crates/l/y901.svg)](#许可)
+
 Rust 跨平台 GUI 框架，自带 Win32/D3D11 与 X11 后端。文本模型是**等宽 cell**
 （`0.5em × 1em`），适合终端、日志、文件管理等桌面工具类应用。
 
@@ -51,10 +56,18 @@ X11 后端可在 Xvfb 下跑通，**未做真机验收**；macOS 无后端。
 ## 快速开始
 
 ```bash
-cargo run --example static_page     # 一屏静态页面：排版/颜色/圆角
-cargo run --example table           # 多列表格 + 选中行
-cargo run --example alert           # 四种 Alert
+# 只看单一入口怎么写（只依赖 y901 一个 crate）
+cargo run --example hello
+
+# 组件画廊（在 y901-shell 里，所以要 -p）
+cargo run -p y901-shell --example static_page     # 一屏静态页面：排版/颜色/圆角
+cargo run -p y901-shell --example table           # 多列表格 + 选中行
+cargo run -p y901-shell --example alert           # 四种 Alert
 ```
+
+> 为什么画廊要 `-p y901-shell`：workspace 默认成员是单一入口 `y901`，而 18 个示例
+> 都在应用壳 crate 里（`crates/y901-shell/examples/`）。`cargo run --example static_page`
+> 不带 `-p` 只会找 `y901` 自己的 examples。
 
 ## 仓库结构（11 个 crate）
 
@@ -93,10 +106,16 @@ powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0xF7455CCE778
 - **文本模型要求等宽字体**：`cell_metrics_for` 固定按 `0.5em × 1em` 出 cell。
   默认字体 `NSimSun`（等宽、中英文齐全）。`FontConfig::modern()` 可切到
   `Microsoft YaHei UI`，但**只建议做视觉试验**——比例字体按固定步进排布会字距不均。
-- 组件库**未发布到 crates.io**（当前只支持 `path` 依赖）。
+- **API 仍是 0.x 语义**：破坏性变更会升 minor（0.3.0…）并在
+  `docs/RELEASE_NOTES_v*.md` 里给迁移说明；已发布的版本号不会被复用。
 
 ## 文档
 
+- `docs/CRATES_IO.md`：发布流程与踩过的坑（path 依赖必须写 version、categories 必须是固定 slug、re-export 只能引用已发布版本里存在的路径）
 - `docs/FRAMEWORK.md`：架构、组件模型、坐标系与裁剪、已知限制
 - `docs/CROSS_PLATFORM_PLAN.md`：X11 / macOS 路线
 - `docs/evidence/hash-baseline.txt`：像素门禁基线
+
+## 许可
+
+双许可，任选其一：[MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)。
