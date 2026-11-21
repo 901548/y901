@@ -34,11 +34,16 @@
 
 mod bidi;
 mod cluster;
+pub mod layout;
 #[cfg(feature = "shaping")]
 mod shape;
 
 pub use bidi::{paragraph_level, reorder_visual};
 pub use cluster::{cluster_boundaries, visual_to_logical};
+
+/// 组合记号判定（布局层用它识别必须 shaping 的文字）。
+pub use cluster::is_combining_mark as is_combining_mark_char;
+pub use layout::{needs_shaping, place_run, LaidGlyph};
 #[cfg(feature = "shaping")]
 pub use shape::{shape_run, ShaperError};
 

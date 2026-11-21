@@ -453,6 +453,108 @@ impl SoftBackend {
     ///
     /// 基线：ascent 随目标字号按基准引擎字号同比缩放，且 `px_final` 已包括
     /// DPI 与变换缩放。不要复用固定 ascent，否则不同字号会共用一条基线。
+    /// **shaped 绘制**（feature `shaping`）：按字形 id 从图集取位图，按 shaping 给出的
+    /// 偏移/推移落笔。与 `draw_text_sized` 共用同一套裁剪、加粗、混色逻辑。
+    ///
+    /// 返回：本行推进的宽度（像素）。
+    #[cfg(feature = "shaping")]
+    fn draw_text_shaped(
+        &mut self,
+        origin: Pos,
+        text: &str,
+        style: &TextStyle,
+        style_px: Option<f32>,
+    ) -> f32 {
+        let mapped = self.map_point(origin);
+        let origin = Pos::new(mapped.x, mapped.y);
+        let scale = self.map_scale();
+        let base_px = style_px.unwrap_or(self.text.size_px());
+        let px_final = (base_px * self.dpi_scale * scale).max(1.0);
+        let (cell_w, cell_h) = crate::font::cell_metrics_for(px_final);
+        let ascent = ascent_at_size(self.text.ascent(), self.text.size_px(), px_final);
+
+        // 没有字体字节就没法 shaping：退回 cell 路径（并保持同一坐标系）。
+        let Some(font_data) = self.text.font_data().map(<[u8]>::to_vec) else {
+            return self.draw_text_sized(origin, text, style, base_px);
+        };
+        let rtl = crate::text::paragraph_level(text);
+        let Ok(run) = crate::text::shape_run(&font_data, text, px_final, 0) else {
+            return self.draw_text_sized(origin, text, style, base_px);
+        };
+        // RTL 段落从行右边界往左排；LTR 从行首往右。
+        let base_x = if rtl { origin.x + run.width } else { origin.x };
+        let (laid, width) = crate::text::place_run(&run, base_x);
+
+        if style.bg.a > 0.0 {
+            // 背景按**行盒**刷（含 haw 的整行高度），与 cell 路径一致。
+            // 背景总是从行首原点开始铺（RTL 也一样：origin.x 已是行左边界）。
+            let bg_x = origin.x;
+            self.fill_rect(
+                Rect::new(bg_x, origin.y, width.max(cell_w), cell_h),
+                style.bg,
+            );
+        }
+
+        let atlas_size = self.text.atlas_size() as usize;
+        for g in &laid {
+            let glyph = self
+                .text
+                .glyph_keyed(crate::text::GlyphKey::new(g.face, g.glyph), 0)
+                .cloned();
+            let Some(gi) = glyph else { continue };
+            if gi.width == 0 || gi.height == 0 {
+                continue;
+            }
+            let bx = (g.x + gi.bearing_x as f32).floor() as i32;
+            let by = glyph_top(
+                origin.y + g.y,
+                ascent,
+                gi.bearing_y as f32,
+                gi.height as f32,
+            ) as i32;
+            for gy in 0..gi.height as i32 {
+                let dy = by + gy;
+                if dy < 0 || dy >= self.height as i32 {
+                    continue;
+                }
+                for gx in 0..gi.width as i32 {
+                    let dx = bx + gx;
+                    if dx < 0 || dx >= self.width as i32 {
+                        continue;
+                    }
+                    if let Some(clip) = self.state.current_clip() {
+                        if !clip.contains(Pos::new(dx as f32 + 0.5, dy as f32 + 0.5)) {
+                            continue;
+                        }
+                    }
+                    let ax = gi.atlas_x as usize + gx as usize;
+                    let ay = gi.atlas_y as usize + gy as usize;
+                    let si = (ay * atlas_size + ax) * 4;
+                    let mut cov = self.text.atlas().get(si).copied().unwrap_or(0) as f32 / 255.0;
+                    if style.bold {
+                        let right = if (gx as u32) + 1 < gi.width {
+                            self.text.atlas().get(si + 4).copied().unwrap_or(0) as f32 / 255.0
+                        } else {
+                            0.0
+                        };
+                        cov = cov.max(right);
+                    }
+                    if cov > 0.0 {
+                        let px_src = pack(style.fg, cov, self.state.current_opacity());
+                        let di = dy as u32 * self.width + dx as u32;
+                        if let Some(dst) = self.buf.get_mut(di as usize) {
+                            *dst = blend(*dst, px_src);
+                        }
+                    }
+                }
+            }
+        }
+        if rtl {
+            origin.x + width - origin.x
+        } else {
+            width
+        }
+    }
     fn draw_text_sized(&mut self, origin: Pos, text: &str, style: &TextStyle, px: f32) -> f32 {
         let mapped = self.map_point(origin);
         let origin = Pos::new(mapped.x, mapped.y);
@@ -858,6 +960,16 @@ impl RenderCtx for SoftBackend {
     }
 
     fn draw_text(&mut self, origin: Pos, text: &str, style: &TextStyle) -> f32 {
+        // **复杂文本走 shaping 路径**（feature `shaping`）。
+        //
+        // 触发条件刻意收窄：只有 [`needs_shaping`] 判定为复杂脚本（阿拉伯/希伯来/
+        // 印度语系/组合记号）才走这里。纯 ASCII 与 CJK 继续走下面的逐字符 cell 路径——
+        // 那是等宽契约的地盘，换路径只会白白改变像素基线。
+        #[cfg(feature = "shaping")]
+        if crate::text::needs_shaping(text) {
+            let px = style.size.filter(|p| p.is_finite() && *p > 0.0);
+            return self.draw_text_shaped(origin, text, style, px);
+        }
         // **per-text 字号路径**：字号 × 变换缩放 = 最终像素字号，按该字号**光栅化**（不拉伸位图）。
         // 这是新分支；**下面的旧路径逐字未动**，`size` 为 `None` 时行为与改前逐像素相同。
         if let Some(px) = style.size {
@@ -1235,6 +1347,58 @@ fn box_levels_rgba(base: &[u8], w: u32, h: u32, levels: usize) -> Vec<(u32, u32,
         ch = nh;
     }
     out
+}
+
+#[cfg(all(test, feature = "shaping"))]
+mod shaped_text_tests {
+    //! shaped 路径的端到端验证（软光栅器层）。
+    //!
+    //! 用仓库测试字体（拉丁、缺阿拉伯/组合字形）也能验证**控制流**：复杂脚本必须走
+    //! shaped 分支、不能 panic、并且真的落像素（缺字走 .notdef 也应当画出东西）。
+
+    use super::*;
+
+    fn backend(w: u32, h: u32) -> SoftBackend {
+        let path = crate::default_test_font_path();
+        let engine = crate::MyFontEngine::new(
+            crate::load_font(&path).expect("font"),
+            16.0,
+            y901_ui::Size::new(8.0, 16.0),
+        )
+        .expect("engine");
+        SoftBackend::new(w, h, Box::new(engine), y901_ui::Size::new(8.0, 16.0), None).expect("soft")
+    }
+
+    fn ink_count(b: &SoftBackend) -> usize {
+        b.pixels().chunks_exact(4).filter(|p| p[0] > 8).count()
+    }
+
+    #[test]
+    fn complex_script_through_draw_text_lands_ink_without_panicking() {
+        let mut b = backend(240, 40);
+        let style = TextStyle::fg(y901_ui::Color::rgba(1.0, 1.0, 1.0, 1.0));
+        let w = b.draw_text(y901_ui::Pos::new(2.0, 4.0), "مرحبا", &style);
+        assert!(w > 0.0, "RTL 的行推进宽度必须为正，实得 {w}");
+        assert!(ink_count(&b) > 0, "shaped 路径应当真的画上像素");
+    }
+
+    #[test]
+    fn combining_mark_text_renders_via_shaping() {
+        let mut b = backend(160, 40);
+        let style = TextStyle::fg(y901_ui::Color::rgba(1.0, 1.0, 1.0, 1.0));
+        let _ = b.draw_text(y901_ui::Pos::new(2.0, 4.0), "e\u{0301}", &style);
+        assert!(ink_count(&b) > 0, "带组合记号也要能画出来");
+    }
+
+    #[test]
+    fn ascii_still_goes_through_the_cell_path() {
+        assert!(!crate::text::needs_shaping("Hello"));
+        let mut b = backend(160, 40);
+        let style = TextStyle::fg(y901_ui::Color::rgba(1.0, 1.0, 1.0, 1.0));
+        let w = b.draw_text(y901_ui::Pos::new(2.0, 4.0), "Hello", &style);
+        assert!(w > 0.0);
+        assert!(ink_count(&b) > 0);
+    }
 }
 
 #[cfg(test)]

@@ -268,6 +268,25 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   两条路径位图一致 / 按 id 而非 cmap / 不同 id 不共用槽位 / face 维度隔离 / 越界 id 不 panic）；
   **像素哈希基线未变**（`0xF7455CCE7781A864`），证明重构对现有渲染零影响。
 
+### S2 再续（2026-11-21）：复杂文本真正上屏（`shaping` feature）
+
+图集键切完之后，复杂文本终于能画出来：
+
+- 新增 `text::layout`：`needs_shaping(text)` 判定是否复杂脚本（阿拉伯/希伯来/印度语系/
+  泰文/组合记号），`place_run(run, rtl_base)` 把 `ShapedRun` 铺成绝对坐标的
+  `LaidGlyph{face, glyph, x, y, cluster}`（RTL 从行右边界往左排）；本模块不碰像素，可单测。
+- `FontEngine` 增两个可选方法：`glyph_keyed(GlyphKey, phase)`（按 glyph id 取字形）
+  与 `font_data()`（shaping 需要原始字节）。默认实现返回 `None`，
+  因此测试替身/不支持 shape 的实现会**自动退回**逐字符 cell 路径。
+- `SoftBackend::draw_text` 在 `shaping` feature 下先判 `needs_shaping`：
+  复杂脚本走新的 `draw_text_shaped`（按 glyph id 取位图 + shaping 给出的偏移/推进，
+  复用同一套裁剪/加粗/混色），**纯 ASCII 与 CJK 完全不变**。
+- 测试：`text::layout` 7 条（哪些文字需要 shaping、LTR/RTL 落位、cluster/y 保留），
+  软光栅器端到端 3 条（阿拉伯语真的落像素、组合记号可画、ASCII 仍走 cell 路径）。
+  默认构建 **像素哈希基线未变**（`0xF7455CCE7781A864`）；`shaping` 下 render lib **116 passed**。
+- **仍缺**：`measure_with(avail_width)` 与折行（复杂文本**不做折行**，只有行内 shaping）；
+  字体回退链（缺阿拉伯字形的字体只会画 .notdef）；TextInput 的 cluster 光标映射。
+
 ### S3（2026-11-21）：无障碍桥 —— 映射层 + 两个平台适配器已落地
 
 - 新 crate **`crates/y901-a11y`**（第 12 个）：

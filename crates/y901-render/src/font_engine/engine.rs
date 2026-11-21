@@ -638,6 +638,11 @@ impl MyFontEngine {
         &self.atlas
     }
 
+    /// **字体原始字节**（shaping 需要它重新解析 OpenType 表）。
+    pub fn font_data(&self) -> Option<&[u8]> {
+        Some(&self.data)
+    }
+
     /// 图集边长。
     pub fn atlas_size(&self) -> u32 {
         self.atlas_size

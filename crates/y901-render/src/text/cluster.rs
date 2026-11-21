@@ -56,7 +56,7 @@ pub fn visual_to_logical(text: &str, cluster_index: usize) -> usize {
 /// 为什么不用 `char::is_combining_mark`：标准库没有稳定 API；
 /// 这里按 Unicode 的 Mn/Me/Mc 主要区块判断，覆盖阿拉伯语变音符、天城文元音符号、
 /// 泰文声调符等 shaping 必需场景。漏判的后果只是"集群切得细一点"，不会画错。
-fn is_combining_mark(ch: char) -> bool {
+pub fn is_combining_mark(ch: char) -> bool {
     let c = ch as u32;
     matches!(c,
         0x0300..=0x036F   // Combining Diacritical Marks

@@ -178,6 +178,22 @@ pub trait FontEngine {
     fn atlas(&self) -> &[u8];
     /// 图集边长。
     fn atlas_size(&self) -> u32;
+    /// **按字形键取字形**（shaping 路径）。
+    ///
+    /// 默认 `None` = 该实现不支持按字形 id 取（调用方会自动退回逐字符路径）。
+    fn glyph_keyed(
+        &mut self,
+        _key: crate::text::GlyphKey,
+        _phase: u8,
+    ) -> Option<&crate::font::GlyphInfo> {
+        None
+    }
+    /// **字体原始字节**（shaping 用）。
+    ///
+    /// 默认 `None`：不提供字体字节的实现会自动跳过 shaped 路径，退回逐字符 cell 排版。
+    fn font_data(&self) -> Option<&[u8]> {
+        None
+    }
     /// 取走脏区（消耗式协议）。
     fn take_dirty(&mut self) -> (bool, Vec<DirtyRect>);
     /// 开始一帧。
