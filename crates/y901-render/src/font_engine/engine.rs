@@ -45,6 +45,11 @@ const PIN_LAST: usize = 512;
 pub struct MyFontEngine {
     /// 字体字节常驻（`Face` 每次临时构造）。
     data: Vec<u8>,
+    /// **回退字体**（face 1..N 的字节）。
+    ///
+    /// 为什么要它们：主字体缺阿拉伯/印度语系字形时，`GlyphKey.face` 指向这里的某一项，
+    /// 由该字体出图；图集键里已经带了 face 维度，所以不会与主字体互相覆盖。
+    fallbacks: Vec<Vec<u8>>,
     /// 逻辑字号（像素）。
     size: f32,
     /// 格尺寸（与 legacy 一致）。
@@ -126,6 +131,7 @@ impl MyFontEngine {
         let descent = (-desc_units) * size_px / units.max(1.0);
         Ok(Self {
             data,
+            fallbacks: Vec::new(),
             size: size_px,
             cell,
             ascent,
@@ -191,20 +197,74 @@ impl MyFontEngine {
         added
     }
 
-    /// **引擎基准字号**的整数 key（默认路径用）。
-    /// 解析字符的字形 id 并记忆（缺字时走替身表，仍无则记 `None`）。
+    /// 解析字符的字形 id 并记忆（仅主字体；缺字时走替身表，仍无则记 `None`）。
+    ///
+    /// 保留它是为了记住"主字体有没有这个字"，`face_for` 用它做快速判定。
+    #[allow(dead_code)]
     fn gid_of(&mut self, ch: char) -> Option<u16> {
         if let Some(hit) = self.gid_cache.get(&ch) {
             return *hit;
         }
-        let gid = crate::font_engine::glyph_id_of(&self.data, ch);
+        let gid = self.gid_of_in(0, ch);
         self.gid_cache.insert(ch, gid);
         gid
     }
 
-    /// 字符 → 缓存/图集键（解析到字形 id；缺字返回 `None`）。
+    /// **指定字体面**的字形 id（face 0 = 主字体，1.. = 回退链）。
+    ///
+    /// 与 [`Self::gid_of`] 的差别：不做记忆（回退链查询量小，记忆表的键还要加 face，
+    /// 收益不如保持简单）。
+    fn gid_of_in(&self, face: u16, ch: char) -> Option<u16> {
+        let data = self.face_data(face)?;
+        crate::font_engine::glyph_id_of(data, ch)
+    }
+
+    /// 取某个面的字体字节（越界返回 `None`）。
+    fn face_data(&self, face: u16) -> Option<&[u8]> {
+        if face == 0 {
+            return Some(&self.data);
+        }
+        self.fallbacks.get(face as usize - 1).map(Vec::as_slice)
+    }
+
+    /// **覆盖 `ch` 的第一个字体面**（0 = 主字体，1.. = 回退链）。
+    ///
+    /// 返回 `None` = 整条链都没有这个字形（调用方应画 .notdef 或跳过）。
+    pub fn face_for(&self, ch: char) -> Option<u16> {
+        if self.gid_of_in(0, ch).is_some() {
+            return Some(0);
+        }
+        (1..=self.fallbacks.len())
+            .map(|i| i as u16)
+            .find(|f| self.gid_of_in(*f, ch).is_some())
+    }
+
+    /// 回退链长度（不含主字体）。
+    pub fn fallback_count(&self) -> usize {
+        self.fallbacks.len()
+    }
+
+    /// 追加一个**回退字体**（face 编号 = 追加顺序 + 1）。
+    ///
+    /// 为什么按字符覆盖判断而不是"整段用一个面"：真实文档一句话里可能同时有
+    /// 拉丁、阿拉伯、CJK，必须逐字符决定谁出图 —— 这正是 `GlyphKey.face` 的用途。
+    ///
+    /// 解析失败的字节会被忽略（返回 `false`），不影响已有链。
+    pub fn push_fallback(&mut self, data: Vec<u8>) -> bool {
+        if ttf_parser::Face::parse(&data, 0).is_err() {
+            return false;
+        }
+        self.fallbacks.push(data);
+        // 新面可能覆盖旧缺字：清掉记忆表，让查询重新判定。
+        self.gid_cache.clear();
+        true
+    }
+
+    /// 字符 → 缓存/图集键（**沿回退链**解析到第一个有该字形的面；都没有返回 `None`）。
     fn key_of(&mut self, ch: char) -> Option<GlyphKey> {
-        self.gid_of(ch).map(|gid| GlyphKey::new(0, u32::from(gid)))
+        let face = self.face_for(ch)?;
+        let gid = self.gid_of_in(face, ch)?;
+        Some(GlyphKey::new(face, u32::from(gid)))
     }
 
     /// 只读版：拿字符的缓存键（`&self`，用于 `glyph_at_scale` 等只读路径）。
@@ -212,6 +272,10 @@ impl MyFontEngine {
     /// 与 [`Self::key_of`] 的区别：不写记忆表，因此缺字时**每次都重新解析**；
     /// 只读路径的调用频次低于取字形，换取 `&self` 可用性。
     fn cache_key_of(&self, ch: char) -> Option<GlyphKey> {
+        let face = self.face_for(ch)?;
+        let gid = self.gid_of_in(face, ch)?;
+        return Some(GlyphKey::new(face, u32::from(gid)));
+        #[allow(unreachable_code)]
         crate::font_engine::glyph_id_of(&self.data, ch).map(|gid| GlyphKey::new(0, u32::from(gid)))
     }
 
@@ -247,7 +311,8 @@ impl MyFontEngine {
         if !self.cache.contains_key(&key) {
             // 按目标字号光栅化；**不生成 mip**（mip 按基准字号算的级尺寸不适用）。
             let gid = u16::try_from(gk.glyph).ok()?;
-            let bitmap = rasterize_gid_phased(&self.data, gid, k as f32, 0)?;
+            let face_data = self.face_data(gk.face).unwrap_or(&self.data).to_vec();
+            let bitmap = rasterize_gid_phased(&face_data, gid, k as f32, 0)?;
             let info = self.insert_into_atlas(gk, &bitmap)?;
             self.cache.insert(key, info);
         }
@@ -267,7 +332,8 @@ impl MyFontEngine {
         let key = (gk, phase & 3, self.px_key());
         if !self.cache.contains_key(&key) {
             let gid = u16::try_from(gk.glyph).ok()?;
-            let bitmap = rasterize_gid_phased(&self.data, gid, self.size, phase)?;
+            let face_data = self.face_data(gk.face).unwrap_or(&self.data).to_vec();
+            let bitmap = rasterize_gid_phased(&face_data, gid, self.size, phase)?;
             let info = self.insert_into_atlas(gk, &bitmap)?;
             self.cache.insert(key, info);
         }
@@ -288,7 +354,8 @@ impl MyFontEngine {
         let cache_key = (key, phase & 3, self.px_key());
         if !self.cache.contains_key(&cache_key) {
             let bitmap = rasterize_gid_phased(
-                &self.data,
+                // 面号未知时退回主字体（shaping 可能先于 `push_fallback` 给出面号）。
+                self.face_data(key.face).unwrap_or(&self.data),
                 u16::try_from(key.glyph).unwrap_or(0),
                 self.size,
                 phase,
@@ -638,6 +705,11 @@ impl MyFontEngine {
         &self.atlas
     }
 
+    /// 指定面的字体原始字节。
+    pub fn font_data_for(&self, face: u16) -> Option<&[u8]> {
+        self.face_data(face)
+    }
+
     /// **字体原始字节**（shaping 需要它重新解析 OpenType 表）。
     pub fn font_data(&self) -> Option<&[u8]> {
         Some(&self.data)
@@ -829,6 +901,9 @@ mod glyph_key_tests {
         let mut e = engine();
         let data = font();
         let gid = super::super::glyph_id_of(&data, 'A').expect("A") as u32;
+        // 注册一个真实回退面：face 1 = 同一份字体字节（内容相同也算**不同面**）。
+        assert!(e.push_fallback(data.clone()), "回退面应可注册");
+        assert_eq!(e.fallback_count(), 1);
         let p0 = {
             let g = e.glyph_keyed(GlyphKey::new(0, gid), 0).expect("face 0");
             (g.atlas_x, g.atlas_y)
@@ -838,6 +913,47 @@ mod glyph_key_tests {
             (g.atlas_x, g.atlas_y)
         };
         assert_ne!(p0, p1, "不同 face 的同号字形必须分开缓存");
+    }
+
+    #[test]
+    fn unknown_face_falls_back_to_the_primary_font() {
+        // shaping 可能先给出面号、之后才注册回退字体：此时应退回主字体而不是失败。
+        let mut e = engine();
+        let data = font();
+        let gid = super::super::glyph_id_of(&data, 'A').expect("A") as u32;
+        let info = e
+            .glyph_keyed(GlyphKey::new(7, gid), 0)
+            .expect("面号未知时应退回主字体");
+        assert!(info.width > 0);
+    }
+
+    #[test]
+    fn fallback_chain_reports_coverage_per_char() {
+        let mut e = engine();
+        let data = font();
+        // 主字体（Windows: Segoe UI / Linux: DejaVu）有拉丁、**没有 CJK**。
+        assert_eq!(e.face_for('A'), Some(0), "拉丁应命中主字体");
+        assert_eq!(
+            e.face_for('中'),
+            None,
+            "主字体没有 CJK 字形（两个平台的默认测试字体都没有）"
+        );
+        // 注册同一个字体当回退面：它同样没有 CJK，链上仍找不到。
+        assert!(e.push_fallback(data));
+        assert_eq!(
+            e.face_for('中'),
+            None,
+            "回退面也没有该字形时必须诚实返回 None"
+        );
+        // 拉丁仍然命中主字体（顺序优先，不会被回退面抢走）。
+        assert_eq!(e.face_for('B'), Some(0));
+    }
+
+    #[test]
+    fn invalid_fallback_bytes_are_rejected_without_touching_the_chain() {
+        let mut e = engine();
+        assert!(!e.push_fallback(vec![0u8; 16]), "坏字体应被拒绝");
+        assert_eq!(e.fallback_count(), 0);
     }
 
     #[test]

@@ -287,6 +287,24 @@ labelled-by/described-by 关系、live region、屏幕坐标。
 - **仍缺**：`measure_with(avail_width)` 与折行（复杂文本**不做折行**，只有行内 shaping）；
   字体回退链（缺阿拉伯字形的字体只会画 .notdef）；TextInput 的 cluster 光标映射。
 
+### S2 三续（2026-11-21）：字体回退链（`GlyphKey.face` 真正被用上）
+
+- 引擎新增 `fallbacks: Vec<Vec<u8>>`（face 1..N 的字体字节）与
+  `push_fallback(data) -> bool`（坏字体被拒、不入链）；
+- `face_for(ch)`：沿"主字体 → 回退链"找第一个覆盖该字符的面，返回 `Some(face)`；
+  都没有返回 `None`（**不猜**，调用方自己决定画 .notdef 还是跳过）；
+- `key_of` / `cache_key_of` 都走 `face_for`，因此图集键里的 `face` 真正反映"谁出的图"；
+  光栅化按 `face_data(face)` 取字节 —— 同一个 glyph id 在不同面不再互相覆盖；
+- 面号未知（shaping 先给面号、后注册回退）时**退回主字体**而不是失败；
+- `FontEngine` trait 增 `face_for()` / `font_data_for(face)`（默认只有主字体），
+  因此测试替身/单字体实现行为不变；
+- `SoftBackend::draw_text_shaped` 选面规则：取第一个"主字体缺字"的字符命中的回退面，
+  整段用一个面（逐 run 切面留后续），这样主字体缺阿拉伯/印度语系时**能真的画出来**。
+- 测试：新增 4 条（face 维度隔离、未知面退回主字体、逐字符覆盖判定、坏回退字体被拒），
+  render lib 默认 **110 passed** / `shaping` **119 passed**；像素哈希基线未变。
+- **仍缺**：按 run 切面（一段里主字体与回退字体混排）；平台默认回退链（fontconfig 等价物）；
+  `measure_with(avail_width)` 与折行；TextInput 的 cluster 光标映射。
+
 ### S3（2026-11-21）：无障碍桥 —— 映射层 + 两个平台适配器已落地
 
 - 新 crate **`crates/y901-a11y`**（第 12 个）：

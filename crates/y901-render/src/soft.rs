@@ -473,12 +473,19 @@ impl SoftBackend {
         let (cell_w, cell_h) = crate::font::cell_metrics_for(px_final);
         let ascent = ascent_at_size(self.text.ascent(), self.text.size_px(), px_final);
 
+        // **选面**：优先用第一个"主字体没有该字形"的字符所命中的回退面。
+        // 整段用一个面是刻意的简化（逐 run 切面属于后续切片）；但至少这样
+        // "主字体缺阿拉伯/印度语系"时能真的画出来，而不是一整片 .notdef。
+        let face = text
+            .chars()
+            .find_map(|ch| self.text.face_for(ch).filter(|f| *f > 0))
+            .unwrap_or(0);
         // 没有字体字节就没法 shaping：退回 cell 路径（并保持同一坐标系）。
-        let Some(font_data) = self.text.font_data().map(<[u8]>::to_vec) else {
+        let Some(font_data) = self.text.font_data_for(face).map(<[u8]>::to_vec) else {
             return self.draw_text_sized(origin, text, style, base_px);
         };
         let rtl = crate::text::paragraph_level(text);
-        let Ok(run) = crate::text::shape_run(&font_data, text, px_final, 0) else {
+        let Ok(run) = crate::text::shape_run(&font_data, text, px_final, face) else {
             return self.draw_text_sized(origin, text, style, base_px);
         };
         // RTL 段落从行右边界往左排；LTR 从行首往右。

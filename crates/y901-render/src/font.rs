@@ -188,6 +188,22 @@ pub trait FontEngine {
     ) -> Option<&crate::font::GlyphInfo> {
         None
     }
+    /// **覆盖该字符的第一个字体面**（0 = 主字体，>0 = 回退链）。
+    ///
+    /// 默认 `Some(0)` = 只有主字体：不支持回退的实现据此永远走主字体。
+    fn face_for(&self, _ch: char) -> Option<u16> {
+        Some(0)
+    }
+    /// **指定面的字体原始字节**（shaping 用）。
+    ///
+    /// 默认退化为 [`Self::font_data`]。
+    fn font_data_for(&self, face: u16) -> Option<&[u8]> {
+        if face == 0 {
+            self.font_data()
+        } else {
+            None
+        }
+    }
     /// **字体原始字节**（shaping 用）。
     ///
     /// 默认 `None`：不提供字体字节的实现会自动跳过 shaped 路径，退回逐字符 cell 排版。
