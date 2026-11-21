@@ -45,6 +45,11 @@ pub mod render_state;
 pub mod soft;
 #[cfg(test)]
 mod supersample;
+/// **文本 shaping / 双向文本 / 集群**（复杂文本的基础设施，S2）。
+///
+/// 默认构建只编译方向判定与集群切分；`shaping` feature 打开后才编译 rustybuzz 路径
+/// （见 `crates/y901-render/Cargo.toml` 的注释：默认不改变 cell 路径的像素基线）。
+pub mod text;
 
 pub use font::{cell_metrics_for, DirtyRect, FontEngine, GlyphInfo};
 pub use font_engine::{
@@ -52,3 +57,4 @@ pub use font_engine::{
     rasterize_glyph_phased, resolve_font_path, GlyphBitmap, GlyphGeometry, Line, MyFontEngine,
 };
 pub use soft::SoftBackend;
+pub use text::{GlyphKey, ShapedGlyph, ShapedRun};

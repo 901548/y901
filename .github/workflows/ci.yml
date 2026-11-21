@@ -130,6 +130,32 @@ jobs:
       - name: cargo deny check
         run: cargo deny check
 
+  text-shaping:
+    name: text shaping (rustybuzz + bidi + clusters)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - uses: Swatinem/rust-cache@v2
+      # `shaping` 是可选 feature（默认构建仍走 cell 路径，像素基线不变），
+      # 所以必须有独立 job 真正编译并跑它，否则"支持复杂文本"只是注释里的承诺。
+      - name: cargo test -p y901-render --features shaping
+        run: cargo test -p y901-render --features shaping --lib
+      # 零 C 守卫在 feature 打开时也要成立：rustybuzz 是纯 Rust，但它的依赖树必须复核。
+      - name: zero-C guard under shaping feature
+        run: |
+          cargo tree -p y901-render --features shaping --prefix none --no-dedupe \
+            | sort -u > /tmp/shaping-tree.txt
+          if grep -Eq '(^|[[:space:]])(cc|cmake|bindgen|ring|openssl-sys|harfbuzz-sys|freetype-sys)([[:space:]]|$)' /tmp/shaping-tree.txt; then
+            echo "::error::shaping 依赖树里出现 C/C++ 构建依赖"
+            grep -E '(^|[[:space:]])(cc|cmake|bindgen)([[:space:]]|$)' /tmp/shaping-tree.txt
+            exit 1
+          fi
+          echo "shaping 依赖树无 C/C++ 构建依赖"
+
   semver-guard:
     name: semver guard (breaking `!` commits require minor/major bump)
     runs-on: ubuntu-latest

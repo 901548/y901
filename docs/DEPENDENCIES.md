@@ -56,6 +56,34 @@
 **当前结论**：`serial` 只是审计输出里的噪声，**不属于任何会被编译的 crate**；
 本轮**不强行清除**，因为 `cargo update` 会顺带升级 3 个依赖且需要联网下载，与"离线可复现"冲突。
 
+## `rustybuzz 0.20.1` —— unmaintained（shaping feature 才引入）
+
+**状态**：`RUSTSEC-2026-0206`（2026-07-11，上游停止维护）。**不是漏洞**：
+`cargo audit` / `cargo deny check` 只报维护性警告。
+
+**为什么仍然选它**：复杂文本（阿拉伯语连写、印度语系重组、连字/kerning）必须有
+shaping 引擎。可选项只有三条路：
+
+1. `harfbuzz-sys`：C++ 实现，直接破"零 C 依赖"守卫（黑名单里就有它）；
+2. 自研 shaping：等于重写 HarfBuzz 的 OpenType 状态机，数月级工程且几乎必然更差；
+3. `rustybuzz`：HarfBuzz 的**纯 Rust 移植**，复用我们已钉死的 `ttf-parser 0.25`，
+   MIT 许可，API 与 HarfBuzz 对齐。
+
+选 3。**攻击面**：字体字节来自本机（`Options.font` 或平台默认），不接远程字体；
+shaping 只做字形映射，不执行字体里的 hinting 程序（`ttf-parser` 也不会）。
+
+**它只影响启用了 `shaping` feature 的构建**：默认构建的依赖树里没有 `rustybuzz`，
+`cargo audit` 的这条警告也只在开启该 feature 后才出现。
+
+**重新评估的条件**（任一条成立）：
+
+1. `rustybuzz` 出现实际 CVE（不只是 unmaintained）；
+2. 出现维护中的纯 Rust 替代（例如上游恢复维护或社区接手的新 fork）；
+3. 我们接入远程字体下载 / 用户上传字体（攻击面从"本机"变成"不可信输入"）。
+
+**当前结论：接受**（与 `serial` / `ttf-parser` / `pin-utils` 同口径），
+在 `deny.toml` 里显式 ignore 并在本节留痕。
+
 ## 审计基线
 
 ```

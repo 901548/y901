@@ -379,8 +379,11 @@ foreach ($f in $docFiles) {
         # 只按**明确短语**替换，避免把同一行的 Windows 计数误改成 include-ignored 口径。
         $x = [regex]::Replace($x, '(完整运行[^\n]{0,30}?\*\*)(\d{3,})(\s+)passed', { param($m) "$($m.Groups[1].Value)$includePassed$($m.Groups[3].Value)passed" })
         $x = [regex]::Replace($x, '(默认测试[^\n]{0,20}?\*\*)(\d{3,})(\s+)passed', { param($m) "$($m.Groups[1].Value)$passed$($m.Groups[3].Value)passed" })
-        $x = [regex]::Replace($x, '(\|\s*\cargo test --workspace --offline -- --include-ignored\[^|]*\|\s*\*\*)(\d{3,})(\s+passed)', { param($m) "$($m.Groups[1].Value)$includePassed$($m.Groups[3].Value)" })
-        $x = [regex]::Replace($x, '(\|\s*\--include-ignored\[^|]*\|\s*\*\*)(\d{3,})(\s+passed)', { param($m) "$($m.Groups[1].Value)$includePassed$($m.Groups[3].Value)" })
+        # 表格里的两种口径：include-ignored 行只认 include 口径，默认行只认 passed。
+        # **注意反引号**：Markdown 行内代码用的是 `` ` ``，在 PowerShell 单引号里是普通字符，
+        # 但若用双引号拼接会被当转义符吃掉（本行曾因此变成 `\cargo`，正则永远匹配不到）。
+        $x = [regex]::Replace($x, '(\|\s*`cargo test --workspace --offline -- --include-ignored`[^|]*\|\s*\*\*)(\d{3,})(\s+passed)', { param($m) "$($m.Groups[1].Value)$includePassed$($m.Groups[3].Value)" })
+        $x = [regex]::Replace($x, '(\|\s*`--include-ignored`[^|]*\|\s*\*\*)(\d{3,})(\s+passed)', { param($m) "$($m.Groups[1].Value)$includePassed$($m.Groups[3].Value)" })
         $x
     })
     $t = [regex]::Replace($t, '\*\*(\d{3,})\*\*\s*项测试', { param($m) "**$passed** 项测试" })

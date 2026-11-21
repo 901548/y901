@@ -241,7 +241,19 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   已补回、加"解析到 0 就失败"保护、把计数规则从 `\d{3}` 放宽到 `\d{3,}`
   （通过数已过 1000），并排除四位年份与端口号避免误报。
 
-### S2（下一步）：文本管线
+### S2（2026-11-21）：文本管线 —— 已落地基础设施，控件接入未开始
 
-- 图集键从 `char` 改为 `GlyphKey{face, glyph_id}`（shaping 的前置阻塞点）；
-- 引入 rustybuzz + unicode-bidi + 脚本切分 + 字体回退链；Label/RichText 先接，TextInput 后接。
+- 新增 `crates/y901-render/src/text/`：
+  - `GlyphKey { face, glyph }` —— 图集键的正确形状（`char` 作键会让不同上下文的
+    同一字符共用位图）；`GlyphKey::from_char` 保留 cell 路径兼容；
+  - `bidi`：段落方向判定（Unicode P2/P3）与视觉重排（`unicode-bidi`，
+    数字在 RTL 段落里保持 123、RTL run 内部反转）；
+  - `cluster`：字形集群边界与视觉→逻辑映射（组合记号不单独成界、脚本切换成界）；
+  - `shape`（`shaping` feature）：`rustybuzz` 真 shaping，产出
+    `ShapedRun { range, rtl, glyphs{x,y,advance,cluster}, width }`。
+- 依赖全部纯 Rust（`rustybuzz 0.20` 复用已钉的 `ttf-parser 0.25` + `unicode-bidi` +
+  `unicode-script`），`shaping` 是可选 feature：**默认构建与像素基线完全不变**。
+- CI 新增 `text-shaping` job：编译并跑 feature 下的测试，同时复核依赖树无 C/C++ 构建依赖。
+- 测试：22 条（方向判定 / 视觉重排 / 集群 / 拉丁 shaping / 阿拉伯 RTL / 坏字体报错 / face 键）。
+- **未做**（下一步）：图集键真正切到 `GlyphKey`；`Widget::measure` 增加可用宽度重载；
+  Label/RichText/TextInput 接入 shaped 路径；字体回退链。
