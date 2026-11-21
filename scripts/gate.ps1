@@ -18,8 +18,15 @@ param(
     [switch]$SkipTest,
     [switch]$SkipAudit,
     [switch]$SkipGpu,
-    [switch]$AllowStaleAudit
+    [switch]$AllowStaleAudit,
+    # CI / 首次构建没有本地 cargo 缓存时用 -Online：去掉所有 --offline。
+    [switch]$Online
 )
+
+# 本机默认离线（依赖已在缓存里）。CI 上必须 -Online，否则 cargo 解析不到 registry。
+# 子脚本（inventory / hash / sync）也读这个环境变量，一处设置全局生效。
+if ($Online) { $script:cargoOffline = @() } else { $script:cargoOffline = @('--offline') }
+if ($Online) { $env:Y901_ONLINE = '1' }
 
 # cargo writes progress to stderr; 'Stop' would turn that into a fatal NativeCommandError.
 $ErrorActionPreference = 'Continue'
@@ -65,7 +72,8 @@ if (-not $SkipTest) {
     Remove-Item $skipLog -ErrorAction SilentlyContinue
     # --no-fail-fast：不得因一条失败就停调度后续二进制，否则 passed 数会变成“半截值”
     # （曾出现 passed=335 而实际应为 746），且只能看到第一个失败。
-    $testOut = & cargo test --workspace --offline --no-fail-fast 2>&1 | Out-String
+    $testArgs = @('test', '--workspace', '--no-fail-fast') + $cargoOffline
+    $testOut = & cargo @testArgs 2>&1 | Out-String
     # 保存完整输出：否则失败用例名丢掉，下次只能重跑猜。
     $testOut | Out-File -FilePath (Join-Path $root 'target\gate-test.log') -Encoding utf8
     $skipCount = 0
@@ -108,7 +116,8 @@ if ($LASTEXITCODE -ne 0) { Fail "test inventory mismatch (see [inv] lines above)
 Write-Host "[gate] ok: test inventory matches"
 
 Step "cargo clippy (exit code must be 0 AND warnings must be 0)"
-$clippyJson = & cargo clippy --workspace --all-targets --offline --message-format=json 2>&1 | Out-String
+$clippyArgs = @('clippy', '--workspace', '--all-targets', '--message-format=json') + $cargoOffline
+$clippyJson = & cargo @clippyArgs 2>&1 | Out-String
 $clippyCode = $LASTEXITCODE
 if ($clippyCode -ne 0) {
     Write-Host $clippyJson
@@ -123,7 +132,9 @@ Write-Host "[gate] ok: exit 0, 0 warnings"
 
 # ---------------------------------------------------------------- 4. pixel hash (committed baseline)
 Step "pixel hash gate (baseline is committed; missing baseline is a failure)"
-& powershell -NoProfile -File (Join-Path $PSScriptRoot 'hash-gate.ps1') | Out-Host
+$hashGateArgs = @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'hash-gate.ps1'))
+if ($SkipGpu) { $hashGateArgs += '-AllowNoGpu' }
+& powershell @hashGateArgs | Out-Host
 $hashCode = $LASTEXITCODE
 if ($hashCode -ne 0) {
     Fail "hash gate exit $hashCode (1 = render regression, 2 = client area changed, 3 = baseline missing)"
@@ -133,7 +144,8 @@ Write-Host "[gate] ok: hash matches committed baseline"
 # ---------------------------------------------------------------- 5. docs
 Step "missing_docs (must be 0)"
 $env:RUSTFLAGS = '-W missing_docs'
-$docOut = & cargo build --workspace --offline 2>&1 | Out-String
+$docArgs = @('build', '--workspace') + $cargoOffline
+$docOut = & cargo @docArgs 2>&1 | Out-String
 $docCode = $LASTEXITCODE
 Remove-Item Env:\RUSTFLAGS -ErrorAction SilentlyContinue
 if ($docCode -ne 0) {

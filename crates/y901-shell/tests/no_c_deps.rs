@@ -81,16 +81,17 @@ fn resolve_crate_versions(manifest_dir: &Path) -> BTreeMap<String, BTreeSet<Stri
 fn try_resolve_crate_versions(
     manifest_dir: &Path,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    // `--target all` 会列出**所有平台**的依赖（这正是守卫要的覆盖面），但 CI 的干净
+    // runner 只下载了本机 target 的 crate —— 加 `--offline` 会直接失败：
+    //   failed to download `futures-core v0.3.34` / attempting to make an HTTP request…
+    // 所以离线与否跟其它脚本统一：本机默认离线，`Y901_ONLINE=1` 时允许联网拉取。
+    let offline = std::env::var_os("Y901_ONLINE").is_none();
+    let mut args = vec!["tree", "--workspace", "--target", "all", "--prefix", "none"];
+    if offline {
+        args.push("--offline");
+    }
     let out = Command::new(env!("CARGO"))
-        .args([
-            "tree",
-            "--workspace",
-            "--target",
-            "all",
-            "--prefix",
-            "none",
-            "--offline",
-        ])
+        .args(&args)
         .current_dir(manifest_dir)
         .output()
         .expect("需要 cargo 在 PATH 里");

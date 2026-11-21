@@ -5,6 +5,9 @@
 param([switch]$Check)
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
+# 离线/在线：CI 上必须联网（`$env:Y901_ONLINE=1` 由 scripts/gate.ps1 -Online 设置），
+# 本机默认离线（依赖已在缓存里，避免每次跑都摸网络）。
+if ($env:Y901_ONLINE -eq '1') { $script:cargoOffline = @() } else { $script:cargoOffline = @('--offline') }
 $numbersPath = Join-Path $root 'docs\evidence\numbers.txt'
 
 function Get-Count([string]$pattern, [string]$text) {
@@ -84,7 +87,7 @@ if ($Check) {
         exit 1
     }
 } else {
-    $defaultOut = & cargo test --workspace --offline 2>&1 | Out-String
+    $defaultArgs = @('test', '--workspace') + $cargoOffline
     $passed = 0; $failed = 0; $ignored = 0
     foreach ($m in [regex]::Matches($defaultOut, 'test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored')) {
         $passed += [int]$m.Groups[1].Value; $failed += [int]$m.Groups[2].Value; $ignored += [int]$m.Groups[3].Value
@@ -92,7 +95,7 @@ if ($Check) {
     # include-ignored 跑的是**全部**用例（含并行基准），而部分 `#[ignore]` 基准依赖**进程内全局计数器**，
     # 并行时会把别的用例的分配记到自己头上（实测：每帧应 0 却测到 4）。
     # 所以这个口径**只在全部通过时**才记录，否则写 n/a —— 不拿一个失真的数字去充数。
-    $includeOut = & cargo test --workspace --offline -- --include-ignored 2>&1 | Out-String
+    $includeArgs = @('test', '--workspace') + $cargoOffline + @('--', '--include-ignored')
     $includeCode = $LASTEXITCODE
     $includePassed = 0
     foreach ($m in [regex]::Matches($includeOut, 'test result: \w+\. (\d+) passed')) { $includePassed += [int]$m.Groups[1].Value }

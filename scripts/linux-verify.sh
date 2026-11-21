@@ -16,6 +16,13 @@ cd "$(dirname "$0")/.." || exit 1
 if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi
 
 CARGO_FLAGS="${CARGO_FLAGS:-}"
+# 把"是否离线"传给 Rust 测试里自己调 cargo 的地方（`no_c_deps` 守卫会跑
+# `cargo tree --target all`：离线时若本机没缓存全平台 crate 就会失败）。
+# 约定与 PowerShell 脚本一致：有 --offline 才算离线，否则联网。
+case "$CARGO_FLAGS" in
+    *--offline*) : ;;
+    *) export Y901_ONLINE=1 ;;
+esac
 SLOW="${SKIP_SLOW:-0}"
 FAILED=0
 declare -a RESULTS=()

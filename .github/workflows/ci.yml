@@ -1,0 +1,110 @@
+name: CI
+
+# 四块门禁，任一红都不算通过：
+#   windows-gate : 完整 scripts/gate.ps1（MSRV/fmt/计数/inventory/clippy/像素哈希/
+#                  missing_docs/版本一致/doc 数字/audit）—— 与本地发布前跑的是同一份脚本
+#   linux-x11    : scripts/linux-verify.sh 八步（Xvfb 真窗口 + cfg(unix) 代码 + Linux clippy）
+#   packaging    : scripts/check-packaging.ps1（11 个 crate 逐个 `cargo package`，不发布）
+#
+# 为什么 CI 要联网：本机脚本默认加 `--offline`（依赖已在缓存）；runner 是干净环境。
+# scripts/*.ps1 统一读 `Y901_ONLINE=1` / `gate.ps1 -Online` 来去掉 `--offline`。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-gate:
+    name: Windows gate (fmt / clippy / tests / pixel hash / doc numbers / audit)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # -SkipGpu：GitHub 的 windows runner 是虚拟机、没有 GPU，D3D 探针会 SKIP。
+      # gate 默认不容忍 SKIP（"没跑"不能算"通过"），所以这里显式放行，并在日志里留痕。
+      # 退出码：0 = GATE OK；2 = 「通过但不可发布」（这里有 SKIP，属 CI 的预期上限）。
+      # 其它非 0 一律视为失败 —— 不能把"门禁红了"读成"环境限制"。
+      - name: gate.ps1
+        shell: pwsh
+        run: |
+          ./scripts/gate.ps1 -Online -SkipGpu
+          $code = $LASTEXITCODE
+          if ($code -eq 2) {
+            Write-Host "::notice::gate: 通过但不可发布（无 GPU 导致的 SKIP）；CI 判定成功"
+            exit 0
+          }
+          exit $code
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-logs
+          path: |
+            target/gate-test.log
+            target/gate.log
+            target/audit.log
+          if-no-files-found: ignore
+
+  linux-x11:
+    name: Linux Xvfb (X11 backend + cross-platform crates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install X11 test deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth xdotool
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: linux-verify.sh
+        run: bash scripts/linux-verify.sh
+        env:
+          # 空 = 联网（CI 没有本地 cargo 缓存）
+          CARGO_FLAGS: ""
+      - name: Upload log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-verify-log
+          path: |
+            /tmp/y901-linux-full.log
+            docs/evidence/cross-platform/
+          if-no-files-found: ignore
+
+  packaging:
+    name: cargo package (11 crates, no publish)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+      - uses: Swatinem/rust-cache@v2
+      # 这条能在"合并前"抓到只在发布时才暴露的三类错误：
+      #   path 依赖漏写 version / categories slug 非法 / re-export 指向未发布路径。
+      - name: check-packaging.ps1
+        shell: pwsh
+        run: ./scripts/check-packaging.ps1 -Online

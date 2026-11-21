@@ -251,6 +251,23 @@ fn write_png(path: &str, rgba: &[u8], w: u32, h: u32) -> Result<(), String> {
     std::fs::write(path, &out).map_err(|e| format!("{e}"))
 }
 
+/// 没有可用 D3D11 设备时**留痕跳过**（写 `y901-test-skips.txt` + stderr），不 panic。
+///
+/// 为什么要留痕：`scripts/hash-gate.ps1` 靠 stdout 里的 `hash=…` 取基线，拿不到时要能
+/// 区分"这台机器没 GPU"（→ 允许 SKIP）与"渲染坏了"（→ 失败）。
+fn skip_no_d3d(reason: &str) {
+    let path = std::env::temp_dir().join("y901-test-skips.txt");
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "SKIP: font_3c_pixels {reason}");
+    }
+    eprintln!("SKIP: font_3c_pixels {reason}");
+}
+
 #[test]
 #[ignore = "需要 GPU（回读像素）"]
 fn pixel_statistics_and_png_baseline() {
@@ -273,7 +290,25 @@ fn pixel_statistics_and_png_baseline() {
     // 边框尺寸随 DPI / 主题 / DWM 状态变化，所以像素哈希**不能当跨会话常量**：
     // 项目早期观测到 382x173 / 0xF38B9C1AB8A877E2，本轮观测到 378x164 / 0xF4C92C36969FEC48。
     // 门禁脚本 `scripts/hash-gate.ps1` 改为"同会话前后对比 + 记录客户区尺寸"，不再硬编码常量。
-    let mut window = Window::create(&options).expect("需要 D3D11");
+    // CI 的 windows runner 是虚拟机、没有 GPU：这时**留痕跳过**而不是 panic。
+    // 为什么要留痕：hash-gate 靠 stdout 里的 `hash=…` 取基线，拿不到就说明"这条没跑"，
+    // 必须让它能区分"没有 GPU"和"渲染真的坏了"。
+    let mut window = match Window::create(&options) {
+        Ok(w) => w,
+        Err(e) => {
+            let path = std::env::temp_dir().join("y901-test-skips.txt");
+            use std::io::Write as _;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
+                let _ = writeln!(f, "SKIP: font_3c_pixels 建窗失败（{e}）");
+            }
+            eprintln!("SKIP: font_3c_pixels 建窗失败（{e}）—— 无可用 D3D11 设备");
+            return;
+        }
+    };
     let mut tree = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
         bar: gate_bar(),
@@ -282,7 +317,19 @@ fn pixel_statistics_and_png_baseline() {
     tree.invalidate_all();
     window.request_snapshot();
     window.render(&mut tree);
-    let (px, w, h) = window.take_snapshot().expect("快照失败");
+    let Some((px, w, h)) = window.take_snapshot() else {
+        let path = std::env::temp_dir().join("y901-test-skips.txt");
+        use std::io::Write as _;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = writeln!(f, "SKIP: font_3c_pixels 快照失败（无可用 D3D11 设备）");
+        }
+        eprintln!("SKIP: font_3c_pixels 快照失败（无可用 D3D11 设备）");
+        return;
+    };
     let first_frame = t0.elapsed().as_secs_f64() * 1e3;
 
     // 统计
@@ -359,7 +406,13 @@ fn probe_orientation_and_channels() {
 
         fullscreen: false,
     };
-    let mut window = Window::create(&options).expect("d3d");
+    let mut window = match Window::create(&options) {
+        Ok(w) => w,
+        Err(e) => {
+            skip_no_d3d(&format!("probe_orientation_and_channels 建窗失败（{e}）"));
+            return;
+        }
+    };
     let mut tree = UiTree::new(Box::new(Scene {
         rect: Rect::ZERO,
         bar: gate_bar(),
@@ -368,7 +421,10 @@ fn probe_orientation_and_channels() {
     tree.invalidate_all();
     window.request_snapshot();
     window.render(&mut tree);
-    let (px, w, h) = window.take_snapshot().expect("snap");
+    let Some((px, w, h)) = window.take_snapshot() else {
+        skip_no_d3d("probe_orientation_and_channels 快照返回 None");
+        return;
+    };
 
     // 每行的亮像素数（luma>180）—— 文字行会突出
     let mut rows: Vec<(u32, usize)> = Vec::new();

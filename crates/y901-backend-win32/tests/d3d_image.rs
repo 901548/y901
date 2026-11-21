@@ -92,12 +92,30 @@ fn window(title: &str, w: u32, h: u32) -> Option<Window> {
 }
 
 /// 渲染一帧并回读 BGRA 像素。
-fn render_scene(win: &mut Window, tree: &mut UiTree) -> (Vec<u8>, u32, u32) {
+///
+/// 返回 `None` = 这台机器上 D3D11 出不了图（设备创建/丢失后重建失败）。
+/// 调用方据此**留痕并跳过**，而不是 panic —— CI 的 windows runner 是虚拟机、没有 GPU。
+fn render_scene(win: &mut Window, tree: &mut UiTree) -> Option<(Vec<u8>, u32, u32)> {
     win.resize(tree);
     tree.invalidate_all();
     win.request_snapshot();
     win.render(tree);
-    win.take_snapshot().expect("快照失败")
+    win.take_snapshot()
+}
+
+/// 没有可用 D3D11 设备时留痕并跳过（不能静默 return：gate 只认写进
+/// `y901-test-skips.txt` 的 SKIP，并要求 `-SkipGpu` 才容忍）。
+fn skip_no_d3d(reason: &str) {
+    let path = std::env::temp_dir().join("y901-test-skips.txt");
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "SKIP: d3d_image {reason}");
+    }
+    eprintln!("SKIP: d3d_image {reason}");
 }
 
 /// 取 BGRA 像素的 RGB。
@@ -125,7 +143,10 @@ fn image_quadrants_sample_correctly_on_gpu() {
         let mut cache = LayoutCache::new();
         let _ = &mut cache;
     }
-    let (px, w, h) = render_scene(&mut win, &mut tree);
+    let Some((px, w, h)) = render_scene(&mut win, &mut tree) else {
+        skip_no_d3d("渲染/回读失败（无可用 D3D11 设备）");
+        return;
+    };
 
     // 2x2 纹理被拉到 200x200：测试最靠近四角的点（双线性在那里接近原色），
     // 教训：拿"四象限中心"断言纯色是错的——中心正好是四色混合区。
@@ -187,7 +208,10 @@ fn image_tint_and_contain_on_gpu() {
         rect: Rect::ZERO,
         child: Some(img),
     }));
-    let (px, w, h) = render_scene(&mut win, &mut tree);
+    let Some((px, w, h)) = render_scene(&mut win, &mut tree) else {
+        skip_no_d3d("渲染/回读失败（无可用 D3D11 设备）");
+        return;
+    };
 
     // 中上部应留白（Contain 垂直居中），中部应是红色
     let (r_top, g_top, b_top) = rgb(&px, w, 100, 10);

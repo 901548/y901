@@ -16,6 +16,9 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
+
+# 离线/在线：CI 上必须联网（$env:Y901_ONLINE=1），本机默认离线。
+if ($env:Y901_ONLINE -eq '1') { $script:cargoOffline = @() } else { $script:cargoOffline = @('--offline') }
 $evidenceDir = Join-Path $root 'docs\evidence'
 $stamp = Get-Date -Format 'yyyy-MM-dd'
 $logPath = Join-Path $evidenceDir "hw-smoke-$stamp.log"
@@ -60,7 +63,8 @@ Remove-Item $skipLog -ErrorAction SilentlyContinue
 
 Write-Host '[hw-smoke] 运行 #[ignore] 用例（需要真实 GPU / 窗口）...'
 $t0 = Get-Date
-$out = & cargo test --workspace --offline --no-fail-fast -- --ignored 2>&1 | Out-String
+$ignoredArgs = @('test', '--workspace', '--no-fail-fast') + $cargoOffline + @('--', '--ignored')
+$out = & cargo @ignoredArgs 2>&1 | Out-String
 $code = $LASTEXITCODE
 $elapsed = [int]((Get-Date) - $t0).TotalSeconds
 

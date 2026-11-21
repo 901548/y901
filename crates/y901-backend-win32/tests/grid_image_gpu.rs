@@ -138,7 +138,25 @@ fn grid_with_images_is_not_blank_on_gpu() {
     tree.invalidate_all();
     win.request_snapshot();
     win.render(&mut tree);
-    let (px, w, h) = win.take_snapshot().expect("快照失败");
+    let (px, w, h) = match win.take_snapshot() {
+        Some(v) => v,
+        None => {
+            let e = "take_snapshot 返回 None";
+            // CI 的 windows runner 没有 GPU：D3D11 出不了图时**留痕跳过**（不是 panic，
+            // 也不是静默 return —— gate 只认写进 y901-test-skips.txt 的 SKIP）。
+            let path = std::env::temp_dir().join("y901-test-skips.txt");
+            use std::io::Write as _;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
+                let _ = writeln!(f, "SKIP: grid_image_gpu 快照失败（{e}）");
+            }
+            eprintln!("SKIP: grid_image_gpu 快照失败（{e}）");
+            return;
+        }
+    };
 
     // 颜色直方图：整帧空白时只会有 1~2 种颜色（清屏色 + 可能残留）。
     let mut hist: HashMap<(u8, u8, u8), usize> = HashMap::new();

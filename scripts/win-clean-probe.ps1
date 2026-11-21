@@ -21,6 +21,9 @@ param(
 )
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
+# 离线/在线：CI 上必须联网（`$env:Y901_ONLINE=1` 由 scripts/gate.ps1 -Online 设置），
+# 本机默认离线（依赖已在缓存里，避免每次跑都摸网络）。
+if ($env:Y901_ONLINE -eq '1') { $script:cargoOffline = @() } else { $script:cargoOffline = @('--offline') }
 Push-Location $root
 $failed = $false
 try {
@@ -53,7 +56,8 @@ try {
     $env:LIB = ''; $env:INCLUDE = ''
     $env:VCINSTALLDIR = ''; $env:VCToolsInstallDir = ''; $env:WindowsSdkDir = ''; $env:VSINSTALLDIR = ''
     $env:RUSTFLAGS = '-C linker=rust-lld'
-    $log = & cargo build --release --workspace --examples --offline --target-dir $Target 2>&1 | Out-String
+    $buildArgs = @('build', '--release', '--workspace', '--examples', '--target-dir', $Target) + $cargoOffline
+$log = & cargo @buildArgs 2>&1 | Out-String
     $code = $LASTEXITCODE
     Write-Host "    build exit=$code"
     if ($code -ne 0) {
@@ -124,7 +128,8 @@ try {
         Write-Host "=== 4. +crt-static 对照 ==="
         $env:RUSTFLAGS = '-C linker=rust-lld -C target-feature=+crt-static'
         $staticTarget = "$Target-static"
-        $slog = & cargo build -p y901-shell --example hello --release --offline --target-dir $staticTarget 2>&1 | Out-String
+        $staticArgs = @('build', '-p', 'y901-shell', '--example', 'hello', '--release', '--target-dir', $staticTarget) + $cargoOffline
+$slog = & cargo @staticArgs 2>&1 | Out-String
         $scode = $LASTEXITCODE
         Write-Host "    静态 CRT build exit=$scode"
         if ($scode -ne 0) {

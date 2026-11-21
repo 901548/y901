@@ -32,12 +32,17 @@
 #   不能作为跨会话的绝对常量。基线文件里同时记录客户区尺寸，尺寸不同就直接说明原因。
 
 param(
-    [switch]$Update
+    [switch]$Update,
+    # 允许'没有 GPU'时跳过（只由 gate.ps1 -SkipGpu 传入；单独跑时默认不允许）。
+    [switch]$AllowNoGpu
 )
 
 # cargo 会向 stderr 写进度信息，`Stop` 会把它当成致命错误 → 这里必须放宽。
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
+# 离线/在线：CI 上必须联网（`$env:Y901_ONLINE=1` 由 scripts/gate.ps1 -Online 设置），
+# 本机默认离线（依赖已在缓存里，避免每次跑都摸网络）。
+if ($env:Y901_ONLINE -eq '1') { $script:cargoOffline = @() } else { $script:cargoOffline = @('--offline') }
 # 基线**必须入库**（`target/` 被 gitignore），否则换一个 checkout 就“没有基线”而静默通过。
 $baseline = Join-Path $root 'docs\evidence\hash-baseline.txt'
 
@@ -45,12 +50,22 @@ Write-Host '[hash-gate] 运行 font_3c_pixels ...'
 # **固定 DPI 缩放 = 1.0**：门禁只应报渲染回归，不应因显示器 DPI 不同而变。
 # 字号自 75af5b1 起乘 DPI 缩放，而该场景画的就是文字 —— 不固定就不可复现。
 $env:Y901_TEST_DPI_SCALE = '1.0'
-$out = & cargo test -p y901-backend-win32 --offline --test font_3c_pixels -- --ignored --nocapture 2>&1 | Out-String
+$hashArgs = @('test', '-p', 'y901-backend-win32', '--test', 'font_3c_pixels') + $cargoOffline + @('--', '--ignored', '--nocapture')
+$out = & cargo @hashArgs 2>&1 | Out-String
 
 $hashLine = ($out -split "`n" | Where-Object { $_ -match 'FNV 哈希 = (0x[0-9A-Fa-f]+)' } | Select-Object -First 1)
 $sceneLine = ($out -split "`n" | Where-Object { $_ -match '场景 (\d+)x(\d+)' } | Select-Object -First 1)
 
 if (-not $hashLine -or -not $sceneLine) {
+    # 没有 GPU 时 font_3c_pixels 会打 `SKIP: …` 并返回（而不是 panic）。
+    # 必须区分"这台机器没设备"和"渲染坏了"：
+    #   传了 -AllowNoGpu（gate.ps1 在 -SkipGpu 时透传）→ 报 SKIP、退出 0，且明确说没校验；
+    #   否则 → 仍然失败（"没跑"绝不能冒充"通过"）。
+    $skipLine = ($out -split "`n" | Where-Object { $_ -match 'SKIP:' } | Select-Object -First 1)
+    if ($skipLine -and $AllowNoGpu) {
+        Write-Host "[hash-gate] SKIP：$($skipLine.Trim())（无 GPU，本轮**没有**校验像素哈希）"
+        exit 0
+    }
     Write-Host '[hash-gate] 失败：未从输出中解析到哈希/尺寸'
     Write-Host $out
     exit 1

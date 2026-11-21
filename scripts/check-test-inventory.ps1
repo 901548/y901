@@ -7,6 +7,9 @@ param([switch]$Update)
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 $inv = Join-Path $root 'docs\evidence\test-inventory.txt'
+# 离线/在线：CI 上必须联网（`$env:Y901_ONLINE=1` 由 scripts/gate.ps1 -Online 设置），
+# 本机默认离线（依赖已在缓存里，避免每次跑都摸网络）。
+if ($env:Y901_ONLINE -eq '1') { $script:cargoOffline = @() } else { $script:cargoOffline = @('--offline') }
 
 function Invoke-ListWithTimeout {
     param([string]$exePath, [int]$timeoutSec = 10)
@@ -33,7 +36,8 @@ function Invoke-ListWithTimeout {
 # 只取**测试**二进制：`cargo test --no-run` 会把 example 也编出来（hello.exe / y901.exe …），
 # 它们不认识 `--list`，会直接运行应用并卡住——这正是上一版“挂起”的真正原因。
 # 每条 JSON 一行，只取 `"test":true` 的那些。
-$raw = & cargo test --workspace --offline --no-run --message-format json 2>&1 | Out-String
+$rawArgs = @('test', '--workspace', '--no-run', '--message-format', 'json') + $cargoOffline
+$raw = & cargo @rawArgs 2>&1 | Out-String
 $exes = @()
 foreach ($line in ($raw -split "`n")) {
     if ($line -notmatch '"executable":"([^"]+)"') { continue }
