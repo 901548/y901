@@ -61,6 +61,9 @@
 
 ## 4. 本次验证（Windows 本地实测）
 
+**一条命令复核**：[`scripts/check-release-readiness.ps1`](../scripts/check-release-readiness.ps1)
+（自动项全绿，并列出 6 项 `BLOCKED` 的人工/授权项）。
+
 | 检查 | 结果 |
 |---|---|
 | `scripts/gate.ps1` | **GATE OK**（MSRV / fmt / 1053 tests / inventory 139 二进制 1156 用例 / clippy 0 警告 / 像素哈希 / missing_docs / 版本一致 / doc 数字 + 自测 / audit 0 漏洞 7 条已记录警告） |

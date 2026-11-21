@@ -21,6 +21,20 @@
 
 ## 1. 发布前自检（每次都做）
 
+**一条命令**（推荐）：[`scripts/check-release-readiness.ps1`](../scripts/check-release-readiness.ps1)
+把下面这些检查串起来，并**明确分出"能自动检查的"与"只能由人/凭据决定的"**：
+
+```powershell
+powershell -NoProfile -File scripts/check-release-readiness.ps1
+# 快速版（跳过全量门禁与打包）：
+powershell -NoProfile -File scripts/check-release-readiness.ps1 -SkipGate -SkipPackaging
+```
+
+它**不发布任何东西**、不打 tag、不推送；退出码 0 = 自动项全绿，
+`BLOCKED` 项会原样列出（凭据 / tag / 工作区 / 真机验收），不会假装通过。
+
+手工等价步骤：
+
 ```powershell
 cargo fmt --all -- --check
 powershell -NoProfile -File scripts/gate.ps1          # 必须 GATE OK
