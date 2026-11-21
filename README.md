@@ -103,6 +103,11 @@ powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0xF7455CCE778
   `crates/y901-backend-win32/tests/grid_image_gpu.rs`。
 - **组件内无法启动动画**：`UiTree::animate(..)` 在树侧，`EventCtx` 没有入口；
   因此 `Switch` 的滑块是即时移动（滚动/弹层动画不受影响）。
+- **国际文字与复杂排版：明确不支持（边界声明）**。文本管线是"逐字符查 cmap 字形 + 等宽 cell"，
+  **没有 HarfBuzz 等价的 shaping 引擎**：阿拉伯语/希伯来语的连写与 RTL、印度语系的字形重组与
+  重排序、复杂连字（GSUB/GPOS）、kerning、可变字体（`fvar`/命名实例）、字体回退链、双向文本
+  （bidi）均**未实现**。CJK 能正常显示，是因为汉字/假名/谚文大多能落进"整字 2 格、宽 1 em"
+  的等宽格契约，**不代表支持复杂排版**。依赖上述能力的应用不应选用 Y901。
 - **文本模型要求等宽字体**：`cell_metrics_for` 固定按 `0.5em × 1em` 出 cell。
   默认字体 `NSimSun`（等宽、中英文齐全）。`FontConfig::modern()` 可切到
   `Microsoft YaHei UI`，但**只建议做视觉试验**——比例字体按固定步进排布会字距不均。

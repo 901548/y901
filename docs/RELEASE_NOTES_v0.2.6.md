@@ -11,6 +11,7 @@
 - crates.io 运维文档中的 docs.rs 构建链接改为版本占位符。
 - `y901-shell` 的 `hello` 示例改用唯一 target 名 `shell_hello`，避免与 facade crate 中的同名示例在 workspace 测试时争用输出文件。
 - 发布脚本增加目标版本检查，并避免把 crates.io API 网络/服务错误误判成 crate 尚未发布。
+- README 增加**复杂文本边界声明**：无 shaping 引擎（阿拉伯/印度语系、连字、kerning、bidi、可变字体、字体回退链均未实现），CJK 仅靠等宽格契约工作。
 - X11 后端新增 `randr` 模块与 `Connection::active_output_dpis()`：用原始协议查询 XRandR 1.3+，返回各活动输出的 CRTC 位置/尺寸与物理 DPI。`randr::dpi_at()` 可按窗口位置取所在显示器的 DPI；全局缩放仅在**恰好一个**活动输出时用其物理 DPI 替代整屏毫米估算，多输出时不猜屏（详见 [docs/design/dpi-policy.md](design/dpi-policy.md) §7.1）。
 - 构建治理：新增 Dependabot、cargo-deny 策略（`deny.toml`，CI 新增 `dependency-policy` job）、issue/PR 模板；历史审查报告归档到 `docs/archive/reviews/`。
 
