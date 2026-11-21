@@ -28,10 +28,12 @@ use y901_ui::{
     Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
 
-use crate::scroll::Scrollbar;
-
 /// 一列的定义。
+///
+/// #[non_exhaustive]：列的可选属性（排序开关、未来可能出现的列宽拖拽）只会增加，
+/// 不设这个属性的话每加一项都是破坏性变更。
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct TableColumn {
     /// 列标题。
     pub title: String,
@@ -143,7 +145,14 @@ pub struct Table {
     offset: f32,
     /// 是否显示滚动条（内容高于行区域时）。
     show_bar: bool,
-    bar: Scrollbar,
+    /// 滚动条几何（自持，不用 `Scrollbar`）—— 后者内含 `Box<dyn FnMut>`，
+    /// 会把 `Table` 从 `Send + Sync` 变成 `!Send + !Sync`（实测被 cargo-semver-checks 抓到）。
+    bar_rect: Rect,
+    bar_visible: bool,
+    bar_thumb_ratio: f32,
+    bar_start_ratio: f32,
+    bar_dragging: bool,
+    bar_style: Option<crate::style::WidgetStyle>,
     /// 最近一次安排时可见的整行数（PageUp/PageDown 用）。
     page_rows: usize,
 }
@@ -154,7 +163,6 @@ impl Table {
         let id = id.into();
         let key = y901_ui::layout::id_key(&id);
         Self {
-            bar: Scrollbar::new(format!("{id}.bar"), id.clone()),
             id,
             key,
             columns: Vec::new(),
@@ -174,6 +182,12 @@ impl Table {
             hovered_header: None,
             offset: 0.0,
             show_bar: false,
+            bar_rect: Rect::ZERO,
+            bar_visible: false,
+            bar_thumb_ratio: 1.0,
+            bar_start_ratio: 0.0,
+            bar_dragging: false,
+            bar_style: None,
             page_rows: 1,
         }
     }
@@ -266,7 +280,7 @@ impl Table {
 
     /// 注入滚动条样式。
     pub fn bar_style(mut self, style: crate::style::WidgetStyle) -> Self {
-        self.bar.set_style(Some(style));
+        self.bar_style = Some(style);
         self
     }
 
@@ -380,6 +394,67 @@ impl Table {
         let first = first.min(n);
         let end = (first + count).min(n);
         first..end
+    }
+
+    /// 滚动条轨道内的比例（0 = 顶部，1 = 底部）。
+    fn bar_ratio_at(&self, y: f32) -> f32 {
+        if self.bar_rect.h <= 0.0 {
+            return 0.0;
+        }
+        ((y - self.bar_rect.y) / self.bar_rect.h).clamp(0.0, 1.0)
+    }
+
+    /// 滑块矩形（与 `Scrollbar` 的几何保持一致：最小 24px 高、左右留 2px）。
+    fn bar_thumb(&self) -> Rect {
+        let h = (self.bar_rect.h * self.bar_thumb_ratio).max(24.0);
+        let y = self.bar_rect.y + (self.bar_rect.h - h) * self.bar_start_ratio;
+        Rect::new(
+            self.bar_rect.x + 2.0,
+            y,
+            (self.bar_rect.w - 4.0).max(2.0),
+            h,
+        )
+    }
+
+    /// 画滚动条（轨道 + 滑块）。
+    fn render_bar(&self, ctx: &mut dyn RenderCtx) {
+        if !self.bar_visible {
+            return;
+        }
+        let (track, thumb) = {
+            let theme = ctx.theme();
+            let state = if self.bar_dragging {
+                State::Pressed
+            } else {
+                State::Normal
+            };
+            (
+                theme.style(Role("scrollbar"), State::Disabled).bg,
+                theme.style(Role("scrollbar"), state).bg,
+            )
+        };
+        match self.bar_style {
+            Some(s) => {
+                let w = if s.bar_width > 0.0 {
+                    s.bar_width.min(self.bar_rect.w)
+                } else {
+                    self.bar_rect.w
+                };
+                let x = self.bar_rect.right() - w;
+                let track_rect = Rect::new(x, self.bar_rect.y, w, self.bar_rect.h);
+                ctx.fill_round_rect(track_rect, s.bar_track.unwrap_or(track), s.bar_radius);
+                let t = self.bar_thumb();
+                ctx.fill_round_rect(
+                    Rect::new(x, t.y, w, t.h),
+                    s.bar_thumb.unwrap_or(thumb),
+                    s.bar_radius,
+                );
+            }
+            None => {
+                ctx.fill_rect(self.bar_rect, track);
+                ctx.fill_rect(self.bar_thumb(), thumb);
+            }
+        }
     }
 
     /// 命中测试：返回表头列号（`pos` 在表头内且该列可排序）。
@@ -539,20 +614,19 @@ impl Widget for Table {
         self.page_rows = ((rows_h / self.row_h()).floor() as usize).max(1);
 
         let content = self.rows_height();
-        self.bar.arrange_at(
-            Rect::new(rect.right() - BAR_W, rect.y + header_h, BAR_W, rows_h),
-            if content > 0.0 {
-                (rows_h / content).min(1.0)
-            } else {
-                1.0
-            },
-            if self.max_offset() > 0.0 {
-                self.offset / self.max_offset()
-            } else {
-                0.0
-            },
-            self.show_bar,
-        );
+        self.bar_visible = self.show_bar;
+        self.bar_rect = Rect::new(rect.right() - BAR_W, rect.y + header_h, BAR_W, rows_h);
+        self.bar_thumb_ratio = if content > 0.0 {
+            (rows_h / content).clamp(0.05, 1.0)
+        } else {
+            1.0
+        };
+        let start = if self.max_offset() > 0.0 {
+            self.offset / self.max_offset()
+        } else {
+            0.0
+        };
+        self.bar_start_ratio = start.clamp(0.0, 1.0 - self.bar_thumb_ratio);
     }
 
     fn flex(&self) -> FlexItem {
@@ -573,26 +647,26 @@ impl Widget for Table {
         }
         // 顺序即优先级：滚动条 → 表头 → 行。
         match event {
-            UiEvent::MouseDown { pos, .. } if self.show_bar && self.bar.rect.contains(*pos) => {
+            UiEvent::MouseDown { pos, .. } if self.bar_visible && self.bar_rect.contains(*pos) => {
                 ctx.set_pointer_capture(self.id.clone());
-                self.bar.dragging = true;
-                let ratio = self.bar.ratio_at(pos.y) - self.bar.thumb_ratio * 0.5;
+                self.bar_dragging = true;
+                let ratio = self.bar_ratio_at(pos.y) - self.bar_thumb_ratio * 0.5;
                 if self.set_offset(ratio * self.max_offset()) {
                     EventResult::Relayout
                 } else {
                     EventResult::Handled
                 }
             }
-            UiEvent::MouseMove { pos } if self.bar.dragging => {
-                let ratio = self.bar.ratio_at(pos.y) - self.bar.thumb_ratio * 0.5;
+            UiEvent::MouseMove { pos } if self.bar_dragging => {
+                let ratio = self.bar_ratio_at(pos.y) - self.bar_thumb_ratio * 0.5;
                 if self.set_offset(ratio * self.max_offset()) {
                     EventResult::Relayout
                 } else {
                     EventResult::Handled
                 }
             }
-            UiEvent::MouseUp { .. } if self.bar.dragging => {
-                self.bar.dragging = false;
+            UiEvent::MouseUp { .. } if self.bar_dragging => {
+                self.bar_dragging = false;
                 ctx.release_pointer_capture();
                 EventResult::Redraw
             }
@@ -801,7 +875,7 @@ impl Widget for Table {
         }
 
         ctx.pop_clip();
-        self.bar.render_bar(ctx);
+        self.render_bar(ctx);
     }
 
     fn semantics(&self) -> Semantics {

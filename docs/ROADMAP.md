@@ -220,8 +220,28 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   编译下游工程（不用 path）；本地用 `y901 0.2.5` 实测通过，定时任务每周一跑。
 - 待补（S0 尾部）：示例截图/GIF 与 `examples/README.md`（需要实际截图，不能伪造）。
 
-### S1（下一步）：组件与语义地基
+### S1（2026-11-21）：组件与语义地基 —— 已完成主体
 
-- Table v2（排序 / 虚拟滚动 / 键盘导航 / 列宽）、MenuBar、NumberInput；
-- `Semantics` 扩展（accessible name/description/value 范围/关系/live region），为 S3 的
-  AccessKit 映射打地基。
+- **Table 重写为虚拟滚动**（`crates/y901-widgets/src/table.rs`）：表头固定、独立滚动条、
+  只画可见行（5000 行时只画 ~7 行）；三态排序（数字按数值、文本忽略大小写）；
+  ↑↓/Home/End/PageUp/PageDown；选中按**数据下标**，排序不漂移；`set_rows/select/sort_by/sort_command`。
+- **NumberInput**（新）：数字/单点/前导负号、Enter 或失焦提交并规范化、Esc 放弃、
+  ↑↓ 步进（Shift ×10）、min/max 钳制、小数位。
+- **MenuBar**（新）：标题布局 + 命中测试，点击经 `ctx.request_popup` 弹 `Menu`；
+  ←/→ 移动、Enter/↓ 打开、Esc 关闭；Alt 助记键明确不做（后端不提供）。
+- **无障碍语义地基**：`Semantics` 新增 description/expanded/checked/selected/level/
+  value_range/value_step/labelled_by/described_by/live，并标记 `#[non_exhaustive]`；
+  `hash_semantics` 纳入新字段（否则状态变化不触发语义失效）；checkbox/switch/slider/
+  tabs/alert/error_state/progress/number_input 全部接线。
+- **破坏性变更集中在 0.3.0 起步**：workspace 版本 `0.2.6 → 0.3.0`，迁移说明见
+  [`MIGRATION_0.3.md`](MIGRATION_0.3.md)；CI 的 semver-checks 允许"升了 minor 的破坏性变更"，
+  但版本仍是 patch 时报破坏性变更必红。
+- **顺手修掉的真 bug**：`sync-doc-numbers.ps1` 里 `cargo test` 的赋值语句早已丢失
+  （`$defaultOut` 恒空 → 实测 always 0），导致文档数字**永远不会更新**且门禁不会红。
+  已补回、加"解析到 0 就失败"保护、把计数规则从 `\d{3}` 放宽到 `\d{3,}`
+  （通过数已过 1000），并排除四位年份与端口号避免误报。
+
+### S2（下一步）：文本管线
+
+- 图集键从 `char` 改为 `GlyphKey{face, glyph_id}`（shaping 的前置阻塞点）；
+- 引入 rustybuzz + unicode-bidi + 脚本切分 + 字体回退链；Label/RichText 先接，TextInput 后接。

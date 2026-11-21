@@ -22,7 +22,7 @@ supported on a best-effort basis (Tier 2). The browser backend is a **demo/reach
 
 ```toml
 [dependencies]
-y901 = "0.2.6"
+y901 = "0.3.0"
 ```
 
 `y901` is the **single entry point**: it re-exports the ten `y901-*` implementation crates.

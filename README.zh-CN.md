@@ -9,7 +9,7 @@ Rust 跨平台 GUI 框架，自带 Win32/D3D11、X11 与 Web（wasm）后端。�
 
 ```toml
 [dependencies]
-y901 = "0.2.6"
+y901 = "0.3.0"
 ```
 
 `y901` 是**单一入口**，内部把下面 10 个子 crate 全部 re-export 好：

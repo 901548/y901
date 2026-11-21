@@ -160,8 +160,15 @@ jobs:
         with:
           tool: cargo-semver-checks@0.49.0
       # 基线是最近 tag（分支保护里 tag 与发布内容一致）。
+      # 0.x 的约定是"破坏性变更升 minor"，所以 semver-checks 失败时再跑一次
+      # check-semver-bump：只要版本确实升了 minor/major，本 job 判为预期失败（记 notice）。
+      # 版本仍是 patch 却报破坏性变更 → 真正失败（这正是历史上 v0.2.1 踩过的坑）。
       - name: cargo semver-checks
         run: |
           baseline="$(git describe --tags --abbrev=0 --match 'v[0-9]*')"
           echo "baseline=$baseline"
-          cargo semver-checks check-release --workspace --baseline-rev "$baseline"
+          if cargo semver-checks check-release --workspace --baseline-rev "$baseline"; then
+            exit 0
+          fi
+          echo "::warning::semver-checks 报告破坏性变更，检查版本号是否已升 minor/major"
+          pwsh -NoProfile -File ./scripts/check-semver-bump.ps1

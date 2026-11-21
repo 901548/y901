@@ -1222,8 +1222,12 @@ impl ActionSpec {
         }
     }
 }
-/// 语义描述：给外部工具读的节点信息。
+/// 语义描述：给外部工具与**无障碍桥**读的节点信息。
+///
+/// `#[non_exhaustive]`：语义字段只会增加（a11y 需求会陆续补），
+/// 不允许下游用结构体字面量构造，否则每加一个字段都是破坏性变更。
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Semantics {
     /// 给人和外部工具看的文字标签。
     pub label: String,
