@@ -1,4 +1,4 @@
-# 按依赖顺序把 workspace 里的 y901-* crate 发到 crates.io。
+﻿# 按依赖顺序把 workspace 里的 y901-* crate 发到 crates.io。
 #
 # 为什么必须按顺序：cargo 在打包/发布时会去 registry 解析**包括 path 依赖在内**的
 # 全部依赖（连 dev-dependencies 也是）。所以"被依赖的先发"是硬约束；发 ui 之前
@@ -30,6 +30,7 @@ $order = @(
     'y901-core',
     'y901-ui',
     'y901-render',
+    'y901-a11y',
     'y901-widgets',
     'y901-runtime',
     'y901-extras',

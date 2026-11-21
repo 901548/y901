@@ -84,6 +84,31 @@ shaping 只做字形映射，不执行字体里的 hinting 程序（`ttf-parser`
 **当前结论：接受**（与 `serial` / `ttf-parser` / `pin-utils` 同口径），
 在 `deny.toml` 里显式 ignore 并在本节留痕。
 
+## `zvariant` / `zbus_names` / `zvariant_derive` —— unmaintained（仅 `unix-atspi` feature）
+
+**状态**：`RUSTSEC-2026-0370` / `-0371` / `-0372`（均 2026-10-16，上游停止维护）。
+**都不是漏洞**，只是维护性警告。
+
+**为什么在依赖树里**：无障碍桥的 Linux 实现走 AT-SPI，而 `accesskit_unix` 用 `zbus`
+（纯 Rust D-Bus）。这三个 crate 是 `zbus` 的**类型/名字编解码层**，属于必然传递依赖。
+
+**为什么接受**（而不是自己写 AT-SPI）：
+
+1. AT-SPI 是一整套 D-Bus 接口（数十个接口、事件签名、对象树约定），
+   手写等于重做一个 `accesskit_unix`；
+2. 三者都是纯 Rust、无 C 依赖，不破零 C 守卫；
+3. 它们只在**启用 `unix-atspi`** 的 Linux 构建里出现，默认构建的 `Cargo.lock` 与二进制不受影响。
+
+**攻击面**：D-Bus 会话总线（本机），不是网络。
+
+**重新评估的条件**：
+
+1. `zbus` 迁到不再依赖被归档 `zvariant` 的版本（升级后顺手删 ignore）；
+2. 任一 crate 出现实际 CVE；
+3. 需要接远程/系统级 D-Bus（攻击面从会话总线扩大）。
+
+**当前结论：接受**，已在 `deny.toml` 显式 ignore 并在本节留痕。
+
 ## 审计基线
 
 ```

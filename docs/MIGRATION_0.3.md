@@ -51,3 +51,25 @@
 - 文本 API 的 `measure_with(avail_width)`（S2 并行文本管线的前置）；
 - 其余公开结构体的 `#[non_exhaustive]` 批处理（`Options`、`Theme`、事件结构等）；
 - 复杂文本（shaping）、无障碍 OS 桥（AccessKit）、Linux AT-SPI —— 见路线图 S2/S3。
+
+### 5. 新增 `y901-a11y` crate（第 12 个 workspace 成员）
+
+无障碍桥是**独立 crate**，不进默认依赖树：
+
+```toml
+[dependencies]
+y901 = { version = "0.3.0", features = ["a11y"] }   # 或直接依赖 y901-a11y
+```
+
+```rust
+let update = y901::a11y::to_tree_update(tree.snapshot());
+```
+
+平台适配器再加一层 feature：Windows `y901-a11y/windows-uia`、
+Linux `y901-a11y/unix-atspi`。**默认关**是刻意的：不需要 a11y 的应用不拉
+`accesskit` / `zbus`。
+
+### 6. 发布顺序多了一步
+
+`y901-a11y` 依赖 `y901-ui`，必须排在 `y901-widgets` 之前发布
+（`scripts/publish-crates.ps1` 与 `check-packaging.ps1` 的依赖序已同步，共 12 个 crate）。

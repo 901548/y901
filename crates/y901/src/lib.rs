@@ -48,6 +48,11 @@
 
 #![deny(missing_docs)]
 
+/// **无障碍桥**：语义树 → AccessKit（Windows UIA / Linux AT-SPI 的共同底座）。
+///
+/// 只有启用 `a11y` feature 时才存在：它会把 accesskit 拉进依赖树。
+#[cfg(feature = "a11y")]
+pub use y901_a11y as a11y;
 /// 终端网格、重排与列宽等**纯数据**原语。
 pub use y901_core as core;
 /// 面向具体子系统的扩展控件。

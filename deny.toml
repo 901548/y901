@@ -1,4 +1,4 @@
-﻿# cargo-deny policy for the current Y901 workspace dependency tree.
+# cargo-deny policy for the current Y901 workspace dependency tree.
 # Use `cargo deny check` to evaluate advisories, licenses, bans, and sources.
 # **按全部 feature 建图**：shaping 是可选 feature，默认图里没有 rustybuzz，
 # 于是它的许可/公告/来源策略根本不会被检查（cargo-deny 会报 advisory-not-detected）。
@@ -20,10 +20,18 @@ all-features = true
 # optional `shaping` feature (pure-Rust HarfBuzz port); the alternatives are a
 # C++ dependency (harfbuzz-sys, breaks the zero-C guard) or reimplementing
 # OpenType shaping. Not a known vuln; see docs/DEPENDENCIES.md.
+# RUSTSEC-2026-0370 / -0371 / -0372: zvariant, zbus_names, zvariant_derive.
+# These are the D-Bus type/name layer under zbus, pulled in only by the
+# optional `unix-atspi` bridge (accesskit_unix). No C dependency, no known vuln;
+# the alternative is hand-writing AT-SPI over our own D-Bus client. Re-evaluate
+# when zbus moves off the archived zvariant. See docs/DEPENDENCIES.md.
 ignore = [
     "RUSTSEC-2017-0008",
     "RUSTSEC-2026-0192",
     "RUSTSEC-2026-0206",
+    "RUSTSEC-2026-0370",
+    "RUSTSEC-2026-0371",
+    "RUSTSEC-2026-0372",
     "RUSTSEC-2026-0441",
 ]
 

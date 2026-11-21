@@ -243,6 +243,49 @@ labelled-by/described-by 关系、live region、屏幕坐标。
 
 ### S2（2026-11-21）：文本管线 —— 已落地基础设施，控件接入未开始
 
+- 新增 `crates/y901-render/src/text/`：`GlyphKey`、bidi 方向判定与视觉重排、
+  集群切分、`shaping` feature 下的 rustybuzz shaping（详见 §3 与代码注释）。
+- 依赖全纯 Rust；`shaping` 是可选 feature，**默认构建与像素基线完全不变**。
+- CI 新增 `text-shaping` job（编译 + 跑 feature 测试 + 复核依赖树无 C/C++ 构建依赖）。
+- **未做**：图集键真正切到 `GlyphKey`；`measure_with(avail_width)`；
+  Label/RichText/TextInput 接入 shaped 路径；字体回退链。
+
+### S3（2026-11-21）：无障碍桥 —— 映射层 + 两个平台适配器已落地
+
+- 新 crate **`crates/y901-a11y`**（第 12 个）：
+  - `map_role`：Y901 角色名 → AccessKit `Role`（**布局容器映射成 `GenericContainer`
+    而不是 `Group`**，否则读屏器会多念一层"分组"；未知角色落到 `Unknown`，不猜）；
+  - `to_tree_update`：`UiTree::snapshot()` → AccessKit `TreeUpdate`，含 label / description /
+    value / 数值范围与步进 / checked（`Toggled`）/ expanded / selected / level / live /
+    动作（click / toggle / focus / set_value / scroll / expand / collapse）/ bounds / focus；
+  - **未暴露节点（`exposed_to_ai == false`）整棵子树跳过**，与外部工具网关同一规则；
+  - `platform::PlatformBridge` trait + `NodeIdMap`（AccessKit u64 ↔ Y901 字符串 id 双向映射，
+    防止动作打到上一帧的节点上）。
+- **Windows UIA**（feature `windows-uia`）：`accesskit_windows::SubclassingAdapter`
+  挂在 HWND 上；`ActionHandler::do_action` **只入队不处理**（回调可能在工作线程），
+  应用线程用 `poll_action` 取；队列上限 256 条防刷爆。**必须在 `ShowWindow` 之前挂载**
+  （库的硬约束，已在文档与注释里标明）。
+- **Linux AT-SPI**（feature `unix-atspi`）：`accesskit_unix::Adapter`（zbus 纯 Rust D-Bus），
+  支持根窗口 bounds、焦点状态、动作队列。
+- 依赖：`accesskit 0.25`（映射层，纯 Rust）；平台适配器按目标平台 feature 门控。
+  `accesskit_windows` 只依赖 `windows` 纯绑定，`accesskit_unix` 走 `zbus` —— 两者都不破零 C。
+  新增 3 条 `zvariant`/`zbus_names` 维护性公告已在 `deny.toml` 与
+  [DEPENDENCIES.md](DEPENDENCIES.md) 记明理由。
+- 门禁：facade 增加 `a11y` feature（`pub use y901_a11y as a11y`），默认关；
+  `check-packaging.ps1` / `publish-crates.ps1` 的依赖序已加 `y901-a11y`（**12 个 crate 全部可打包**）；
+  CI 新增 `a11y-bridge` job（Windows 编 UIA、Linux 编 AT-SPI，并复核依赖树无 C/C++ 构建依赖）。
+- 测试：19 条（角色映射 / 未暴露子树跳过 / checked+expanded / 数值范围 / live region /
+  动作映射 / 焦点 / bounds / 空树 / 队列上限 / 初始树单次取用）。
+- **未做**：真机验收（讲述人 / Orca 手工清单）；Web 的 DOM/ARIA 镜像；
+  从后端（`y901-backend-win32` / `-x11`）自动挂载并每帧 `push` —— 目前是库层已就绪、
+  后端接线待做。
+
+### S4（下一步）：0.3.0 收敛
+
+- 其余公开结构体批量 `#[non_exhaustive]`；
+- 后端接线（每帧 push 语义树 + 动作回派）；
+- 迁移指南定稿。
+
 - 新增 `crates/y901-render/src/text/`：
   - `GlyphKey { face, glyph }` —— 图集键的正确形状（`char` 作键会让不同上下文的
     同一字符共用位图）；`GlyphKey::from_char` 保留 cell 路径兼容；

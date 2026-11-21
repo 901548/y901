@@ -72,4 +72,7 @@
 # Measured at 2026-11-21 (S2: 文本 shaping 基础设施 text/ 模块):
 #   default cargo test --workspace --no-fail-fast   passed 1034, failed 0, ignored 61
 #   (新增 16 条：方向判定/视觉重排/集群切分/GlyphKey；shape.rs 的 6 条在 shaping feature 下)
-1034
+# Measured at 2026-11-21 (S3: 无障碍桥 y901-a11y：角色/状态/动作/几何映射 + UIA/AT-SPI 适配):
+#   default cargo test --workspace --no-fail-fast   passed 1053, failed 0, ignored 61
+#   (新增 19 条：角色映射、未暴露子树跳过、checked/expanded/数值/实时区域、焦点、动作映射、NodeIdMap)
+1053

@@ -23,6 +23,7 @@ $order = @(
     'y901-core',
     'y901-ui',
     'y901-render',
+    'y901-a11y',
     'y901-widgets',
     'y901-runtime',
     'y901-extras',

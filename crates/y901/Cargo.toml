@@ -19,6 +19,7 @@ categories = ["gui"]
 # - 版本可独立演进（但本仓目前统一版本，简化发布）。
 [dependencies]
 y901-core = { path = "../y901-core", version = "0.3.0" }
+y901-a11y = { path = "../y901-a11y", version = "0.3.0", optional = true }
 y901-ui = { path = "../y901-ui", version = "0.3.0" }
 y901-render = { path = "../y901-render", version = "0.3.0" }
 y901-widgets = { path = "../y901-widgets", version = "0.3.0" }
@@ -39,3 +40,8 @@ y901-backend-web = { path = "../y901-backend-web", version = "0.3.0" }
 [dependencies.y901-shell]
 path = "../y901-shell"
 version = "0.3.0"
+
+[features]
+# 无障碍桥（AccessKit 映射层）。默认关：不需要 a11y 的应用不拉 accesskit 依赖。
+# 打开后可直接用 y901::a11y::to_tree_update(tree.snapshot())。
+a11y = ["dep:y901-a11y"]

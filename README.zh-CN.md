@@ -97,7 +97,7 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
   重排序、复杂连字（GSUB/GPOS）、kerning、可变字体（`fvar`/命名实例）、字体回退链、双向文本
   （bidi）均**未实现**。CJK 能正常显示，是因为汉字/假名/谚文大多能落进“整字 2 格、宽 1 em”
   的等宽格契约，**不代表支持复杂排版**。依赖上述能力的应用不应选用 Y901。
-- **无障碍只有语义树**（`Widget::semantics`），**没有 OS 桥接**（UIA / AT-SPI）。
+- **无障碍：语义树 + AccessKit 桥**。`Widget::semantics` 已是完整语义模型，另有可选的 `y901-a11y` crate（facade 的 `a11y` feature）把它映射成 AccessKit，平台适配器 Windows UIA / Linux AT-SPI 都在 feature 后。**尚未做**：后端自动接线与读屏器验收。
 - **macOS 与 Wayland 后端未实现**；Wayland 用户走 XWayland。
 - **Web 后端是 Tier 3**：单 canvas、整帧 `putImageData`、隐藏 `<input>` 承接 IME（候选窗不可钉位）、
   无无障碍树、无多窗口/FileDrop。
@@ -117,7 +117,7 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 
 ```bash
 cargo check --workspace --all-targets      # 0 warning
-cargo test --workspace                     # 1034 passed / 0 failed / 61 ignored（153 个测试目标）
+cargo test --workspace                     # 1053 passed / 0 failed / 61 ignored（155 个测试目标）
 powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0xF7455CCE7781A864，400x220）
 powershell -File scripts/gate.ps1          # 完整门禁（发布前必跑）
 ```

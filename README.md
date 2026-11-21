@@ -73,8 +73,10 @@ cargo run -p y901-shell --example alert         # four alert variants
   implemented**. CJK renders because Han/Kana/Hangul mostly fit the "one wide glyph per
   two cells" contract — that is not complex-text support. Applications that need those
   features should not use Y901.
-- **Accessibility: semantics tree only.** `Widget::semantics` exposes roles, labels,
-  values, actions and state, but there is **no OS bridge** (UIA / AT-SPI) yet.
+- **Accessibility: semantics tree + AccessKit bridge.** `Widget::semantics` exposes roles,
+  labels, values, actions and state; the optional `y901-a11y` crate (facade feature `a11y`)
+  maps that to AccessKit, with Windows UIA and Linux AT-SPI adapters behind features.
+  Backend auto-wiring and screen-reader acceptance runs are **not** done yet.
 - **Monospace-only text model.** `cell_metrics_for` always derives cells at
   `0.5em × 1em`; the default font is `NSimSun`. `FontConfig::modern()` switches to
   `Microsoft YaHei UI`, but proportional fonts are visual experiments only.
