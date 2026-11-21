@@ -416,7 +416,14 @@ Web 不能走 AccessKit（读屏器只认 DOM），所以另开一条路：
   `structural` 计数。
 - **仍未做**：真机读屏器验收（讲述人 / Orca / NVDA+浏览器）；焦点代理。
 
-### S4（2026-11-21）：后端接线完成；0.3.0 收敛未完成
+### S4（2026-11-21）：0.3.0 收敛完成（除授权项）
+
+**一条命令复核**：[`scripts/check-release-readiness.ps1`](../scripts/check-release-readiness.ps1)
+把发布前检查串起来，并**严格区分**自动项与人工/授权项。最终实测：
+自动项 **9/9 PASS**（fmt / 版本一致性 / semver 纪律 / gate / packaging 12 crate /
+cargo deny / semver-checks / 工作区干净 / Linux 证据 7 天内），
+**4 项 BLOCKED**（crates.io 凭据、`v0.3.0` tag、crates.io 上该版本、真机读屏器验收）——
+这四项按任务约束（不发布/不打 tag/不推送，除非明确授权）刻意留给用户决定。
 
 **发布候选已就绪（除授权项外）**：`docs/RELEASE_NOTES_v0.3.0.md` 已写好，
 记录破坏性变更、新能力、实测验证矩阵与"发布前仍缺"四项。
