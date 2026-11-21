@@ -299,10 +299,12 @@ labelled-by/described-by 关系、live region、屏幕坐标。
 
 **未做**（0.3.0 收敛的剩余项）：
 
-1. ~~`Options` 等公开结构体的批量 `#[non_exhaustive]`~~ —— 已做：`Options` 已标记，
-   仓库内 46 处字面量统一成 `..Default::default()` 兜底（clippy 的 `needless_update`
-   逐处清理，0 警告）。其余公开结构体（事件枚举、语义子结构）留给 0.4.0 一次性处理，
-   理由：它们数量更多且多为只读消费，收益低于 `Options`。
+1. `Options` 的"加字段零破坏"没做成——本轮实测发现 `#[non_exhaustive]`
+   **会禁止跨 crate 的结构体字面量（连 `..Default::default()` 一起禁）**，
+   最小复现与结论记在 [MIGRATION_0.3.md](MIGRATION_0.3.md) §2b。
+   现在采用的是"所有字面量加 `..Default::default()`"的约定（仓库内 44 处已统一，
+   clippy `needless_update` 0 警告）；真正的解法是 0.4.0 把 `Options` 字段改私有 +
+   `new()` + builder，那时再打属性才有意义。
 2. 真机读屏器验收（Windows 讲述人 / Linux Orca 手工清单）—— 需要人操作，机器做不了。
 3. Web 的 DOM/ARIA 镜像 —— 属 Tier 3 升级项，不在 0.3 关键路径。
 

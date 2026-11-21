@@ -24,11 +24,10 @@
 `TableColumn::fixed(..)` / `TableColumn::flex(..)` 的返回值不受影响；
 用结构体字面量构造列的代码需要改为 builder，需要禁止排序时加 `.not_sortable()`。
 
-### 2b. `Options` 标记 `#[non_exhaustive]`
+### 2b. `Options` 的构造约定改成 `..Default::default()` 兜底
 
-窗口选项只会增加（新后端能力、新配置项），不设这个属性则每加一个字段都是破坏性变更。
-
-**怎么改**：用 `..Default::default()` 兜底：
+窗口选项只会增加（新后端能力、新配置项）。为了以后加字段不破坏下游，仓库内所有
+`Options {}` 字面量统一加 `..Default::default()`：
 
 ```rust
 let options = Options {
@@ -39,9 +38,23 @@ let options = Options {
 };
 ```
 
-全字段都显式写时 Rust 也接受（此时 `..Default::default()` 可省，
-但 clippy 的 `needless_update` 会提示；建议干脆保留），
-仓库内 46 处字面量已按这个约定统一。
+**实测更正（值得记一笔）**：本轮原计划给 `Options` 打 `#[non_exhaustive]`，
+以为那样就能"随便加字段"。**但 `#[non_exhaustive]` 会禁止跨 crate 的结构体字面量
+——连带 `..Default::default()` 的也不行**（Rust 参考：非穷尽类型的字面量构造在定义
+crate 之外一律不可用）。最小复现：
+
+```rust
+// lib
+#[derive(Default)] #[non_exhaustive] pub struct S { pub a: u32, pub b: u32 }
+// bin
+let _ = l::S { a: 1, ..Default::default() };   // E0639
+```
+
+所以 `Options` 现在**没有** `non_exhaustive`，改用约定兜底；全字段都写时
+`..Default::default()` 可以省（clippy 的 `needless_update` 会提示，仓库里已按
+"省略"处理，0 警告）。下一次（0.4.0）若要真正的"加字段零破坏"，
+应把 `Options` 的字段改成私有 + `Options::new(..)` + builder setter，
+那时再加 `non_exhaustive` 才有意义。
 
 ### 3. `Table` 换成虚拟滚动实现（行为变化）
 
