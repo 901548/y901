@@ -1,26 +1,46 @@
-//! Table：多列 + 表头 + 选中行的**最小可用**数据表格。
+//! Table：多列表格，**支持排序、虚拟滚动与键盘导航**。
 //!
 //! 为什么需要它：`ListView` 是单列的虚拟列表，而工具型应用的第一个界面几乎都是
-//! "名称 / 大小 / 修改时间"这种**多列表格**（不要再手写坐标，交给 Grid 排）。
+//! "名称 / 大小 / 修改时间"这种**多列表格**。
 //!
-//! 当前版本**刻意不做**：排序、拖拽列宽、多选、单元格编辑、列冻结、虚拟滚动。
-//! 行数据用 `Vec<String>` 简化（后续可泛型化）。
+//! ## 为什么是"重写"而不是在旧实现上打补丁
+//!
+//! v0.2.x 的 `Table` 是"直接遍历全部行 + 溢出交给父容器裁剪"：数据一多就每帧
+//! 遍历上万个 cell，而且没有滚动能力（滚轮事件无处可去）。这次按 `ListView` 的
+//! 虚拟化模型重写：**只画可见行**，表头固定，滚动条独立，行高统一。
+//!
+//! ## 仍然刻意不做
+//!
+//! 可变行高、单元格编辑、列宽拖拽、列冻结、多选、列内联过滤。
+//! 行高统一是虚拟滚动的前提（`ListView` 的可变行高走 prefix 累加，表格暂不需要）。
+//!
+//! ## 排序语义
+//!
+//! - 点击表头：升序 → 降序 → 取消（三态循环），与桌面文件列表一致；
+//! - 比较规则：两侧都能解析为数字时**按数值**，否则按小写字典序（稳定排序）；
+//! - 排序只改**显示顺序**（`order`），不动 `rows` 本身；`selected_index()` 返回
+//!   **数据下标**，因此排序不会让业务手里的选中行"变成另一行"；
+//! - 设置 `sort_command` 时额外发一条命令，业务想自己排（例如服务端排序）就忽略内部排序。
 
 use y901_ui::widget::{Dimension, FlexItem};
 use y901_ui::{
-    Align, Constraints, EventCtx, EventResult, Pos, Rect, RenderCtx, Role, Semantics, Size, State,
-    TextMetrics, TextStyle, UiEvent, Widget,
+    Align, Constraints, EventCtx, EventPhase, EventResult, InputKind, Pos, Rect, RenderCtx, Role,
+    Semantics, Size, State, TextMetrics, TextStyle, UiEvent, Widget,
 };
+
+use crate::scroll::Scrollbar;
 
 /// 一列的定义。
 #[derive(Clone, Debug)]
 pub struct TableColumn {
     /// 列标题。
     pub title: String,
-    /// 列宽：`Px(w)` 固定；`Flex(f)` 按剩余宽度分配。
+    /// 列宽：`Px(w)` 固定；`Flex(f)` 按剩余宽度分配；`Percent(p)` 取整表宽度百分比。
     pub width: Dimension,
     /// 单元格文字对齐。
     pub align: Align,
+    /// 是否允许点击表头排序（默认 `true`）。
+    pub sortable: bool,
 }
 
 impl TableColumn {
@@ -30,6 +50,7 @@ impl TableColumn {
             title: title.into(),
             width: Dimension::Px(width),
             align: Align::Start,
+            sortable: true,
         }
     }
 
@@ -39,6 +60,7 @@ impl TableColumn {
             title: title.into(),
             width: Dimension::Flex(1.0),
             align: Align::Start,
+            sortable: true,
         }
     }
 
@@ -47,48 +69,112 @@ impl TableColumn {
         self.align = align;
         self
     }
+
+    /// 禁止点击本列表头排序（例如纯图标列）。
+    pub fn not_sortable(mut self) -> Self {
+        self.sortable = false;
+        self
+    }
+}
+
+/// 排序方向。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SortOrder {
+    /// 升序（A→Z / 小→大）。
+    Ascending,
+    /// 降序（Z→A / 大→小）。
+    Descending,
+}
+
+impl SortOrder {
+    /// 反转方向。
+    pub fn reversed(self) -> Self {
+        match self {
+            SortOrder::Ascending => SortOrder::Descending,
+            SortOrder::Descending => SortOrder::Ascending,
+        }
+    }
 }
 
 /// 表头高度（逻辑像素）。
 const HEADER_H: f32 = 32.0;
-/// 行高。
+/// 行高（所有行统一 —— 虚拟滚动的前提）。
 const ROW_H: f32 = 28.0;
 /// 单元格水平内边距。
 const CELL_PAD: f32 = 12.0;
 /// 弹性列的默认最小宽度。
 const FLEX_MIN_W: f32 = 80.0;
+/// 滚动条宽度。
+const BAR_W: f32 = 6.0;
 
-/// 多列数据表格（最小可用版）。
+/// 多列数据表格。
 pub struct Table {
     id: String,
+    /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。
+    key: u64,
     columns: Vec<TableColumn>,
     rows: Vec<Vec<String>>,
+    /// 显示顺序：`order[display] = data_index`。排序只动它。
+    order: Vec<usize>,
+    /// `order` 是否失效（排序变更或行数变更后置位）。
+    order_dirty: bool,
+    /// 选中行（**数据下标**，不随排序漂移）。
     selected: Option<usize>,
-    /// 选中行时发出的命令（args = {"row": index}）。
+    /// 当前排序。
+    sort: Option<(usize, SortOrder)>,
+    /// 选中行时发出的命令（args = {"row": 数据下标}）。
     command: Option<y901_ui::Command>,
-    rect: Rect,
+    /// 点击表头时额外发出的命令（args = {"column","descending"}）。
+    sort_command: Option<y901_ui::Command>,
+    /// 整个控件的矩形（含表头）。
+    viewport: Rect,
+    /// 行区域矩形（表头之下、滚动条之左）。
+    inner: Rect,
     item: FlexItem,
     /// 可选样式覆盖（仅容器型表面）。
     style: Option<crate::style::WidgetStyle>,
     /// **DPI 缩放**（`measure` 里唯一写入点；未 measure 时 1.0 = 兜底）。
     scale: f32,
+    /// 悬停行（数据下标）。
     hovered_row: Option<usize>,
+    /// 悬停列（表头）。
+    hovered_header: Option<usize>,
+    /// 竖向滚动偏移（像素，作用在行区域上）。
+    offset: f32,
+    /// 是否显示滚动条（内容高于行区域时）。
+    show_bar: bool,
+    bar: Scrollbar,
+    /// 最近一次安排时可见的整行数（PageUp/PageDown 用）。
+    page_rows: usize,
 }
 
 impl Table {
     /// 创建空表。
     pub fn new(id: impl Into<String>) -> Self {
+        let id = id.into();
+        let key = y901_ui::layout::id_key(&id);
         Self {
-            id: id.into(),
+            bar: Scrollbar::new(format!("{id}.bar"), id.clone()),
+            id,
+            key,
             columns: Vec::new(),
             rows: Vec::new(),
+            order: Vec::new(),
+            order_dirty: true,
             selected: None,
+            sort: None,
             command: None,
-            rect: Rect::ZERO,
+            sort_command: None,
+            viewport: Rect::ZERO,
+            inner: Rect::ZERO,
             item: FlexItem::default(),
             style: None,
             scale: 1.0,
             hovered_row: None,
+            hovered_header: None,
+            offset: 0.0,
+            show_bar: false,
+            page_rows: 1,
         }
     }
 
@@ -101,13 +187,41 @@ impl Table {
     /// 追加一行（单元格数量不足时补空串，多余时忽略）。
     pub fn row(mut self, cells: Vec<String>) -> Self {
         self.rows.push(cells);
+        self.order_dirty = true;
+        self.selected = self.selected.filter(|i| *i < self.rows.len());
         self
     }
 
-    /// 设置选中行。
+    /// 批量替换全部行（数据刷新用；保留排序与选中）。
+    pub fn set_rows(&mut self, rows: Vec<Vec<String>>) -> bool {
+        if self.rows.len() == rows.len() && self.rows == rows {
+            return false;
+        }
+        self.rows = rows;
+        self.order_dirty = true;
+        if let Some(sel) = self.selected {
+            if sel >= self.rows.len() {
+                self.selected = None;
+            }
+        }
+        true
+    }
+
+    /// 设置选中行（数据下标；越界会被忽略）。
     pub fn selected(mut self, index: Option<usize>) -> Self {
         self.selected = index.filter(|i| *i < self.rows.len());
         self
+    }
+
+    /// 以编程方式设置选中行，并把该行滚入可见区。
+    pub fn select(&mut self, index: Option<usize>) -> bool {
+        let index = index.filter(|i| *i < self.rows.len());
+        if self.selected == index {
+            return false;
+        }
+        self.selected = index;
+        self.scroll_selected_into_view();
+        true
     }
 
     /// 点击行回调。
@@ -116,12 +230,43 @@ impl Table {
         self
     }
 
+    /// 点击表头排序时额外发出的命令（不设置则不通知，只做内部排序）。
+    pub fn sort_command(mut self, cmd: y901_ui::Command) -> Self {
+        self.sort_command = Some(cmd);
+        self
+    }
+
+    /// 以编程方式设置排序（`None` = 恢复原始顺序）。
+    pub fn sort_by(&mut self, column: usize, order: SortOrder) -> bool {
+        if column >= self.columns.len() {
+            return false;
+        }
+        if self.sort == Some((column, order)) {
+            return false;
+        }
+        self.sort = Some((column, order));
+        self.order_dirty = true;
+        self.offset = 0.0;
+        true
+    }
+
+    /// 当前排序。
+    pub fn sort_state(&self) -> Option<(usize, SortOrder)> {
+        self.sort
+    }
+
     /// **覆盖容器型表面**（背景 / 描边 / 圆角）。
     ///
-    /// 注意：语义色（如 switch 轨道、error 红、empty 灰）**不**由它覆盖 ——
-    /// 那些走 `Theme`，否则会破坏 DARK/LIGHT 自适应。
+    /// 注意：语义色（如选中行、悬停行）**不**由它覆盖 —— 那些走 `Theme`，
+    /// 否则会破坏 DARK/LIGHT 自适应。
     pub fn style(mut self, style: crate::style::WidgetStyle) -> Self {
         self.style = Some(style);
+        self
+    }
+
+    /// 注入滚动条样式。
+    pub fn bar_style(mut self, style: crate::style::WidgetStyle) -> Self {
+        self.bar.set_style(Some(style));
         self
     }
 
@@ -141,17 +286,33 @@ impl Table {
         self.rows.is_empty()
     }
 
-    /// 当前选中行。
+    /// 当前选中行（**数据下标**）。
     pub fn selected_index(&self) -> Option<usize> {
         self.selected
     }
 
-    /// 总高度（表头 + 所有行）。
-    fn content_height(&self) -> f32 {
-        HEADER_H * self.scale + self.rows.len() as f32 * ROW_H * self.scale
+    // ---------------------------------------------------------------- 内部几何
+
+    /// 行区域总高度（不含表头）。
+    fn rows_height(&self) -> f32 {
+        self.rows.len() as f32 * ROW_H * self.scale
     }
 
-    /// 按最终宽度算每列的实际 x 与宽度。
+    /// 控件需要的高度（表头 + 全部行）。
+    fn wanted_height(&self) -> f32 {
+        HEADER_H * self.scale + self.rows_height()
+    }
+
+    /// 行区域最大滚动偏移。
+    fn max_offset(&self) -> f32 {
+        (self.rows_height() - self.inner.h).max(0.0)
+    }
+
+    fn row_h(&self) -> f32 {
+        ROW_H * self.scale
+    }
+
+    /// 按最终宽度算每列的实际 x 与宽度（宽度基准是**行区域**宽度）。
     fn column_layout(&self) -> Vec<(f32, f32)> {
         let n = self.columns.len();
         if n == 0 {
@@ -159,9 +320,7 @@ impl Table {
         }
         let mut fixed = 0.0f32;
         let mut flex_weight = 0.0f32;
-        // **Percent 基准** = 表格内容总宽（`self.rect.w`）：百分比列按"整表宽度"计算，
-        // 与 CSS 的 percentage 宽度语义一致。
-        let avail = self.rect.w.max(0.0);
+        let avail = self.inner.w.max(0.0);
         let mut percent_total = 0.0f32;
         for c in &self.columns {
             match c.width {
@@ -171,13 +330,12 @@ impl Table {
                 Dimension::Auto => fixed += FLEX_MIN_W,
             }
         }
-        let rest = (self.rect.w - fixed - percent_total).max(0.0);
+        let rest = (avail - fixed - percent_total).max(0.0);
         let mut out = Vec::with_capacity(n);
-        let mut x = self.rect.x;
+        let mut x = self.inner.x;
         for c in &self.columns {
             let w = match c.width {
                 Dimension::Px(v) => v.max(0.0) * self.scale,
-                // **百分比列**：直接取总宽的 p%（不参与余量分配）
                 Dimension::Percent(p) => avail * p.max(0.0) / 100.0,
                 Dimension::Flex(f) if flex_weight > 0.0 => {
                     (rest * f.max(0.0) / flex_weight).max(FLEX_MIN_W.min(rest))
@@ -190,36 +348,156 @@ impl Table {
         out
     }
 
-    /// 表头绘制区域。UI 坐标 y 轴向下，因此表头位于矩形顶部。
+    /// 表头绘制区域（固定在控件顶部）。
     fn header_rect(&self) -> Rect {
-        Rect::new(self.rect.x, self.rect.y, self.rect.w, HEADER_H * self.scale)
-    }
-
-    /// 第 `index` 行的绘制区域（第 0 行紧贴表头下方）。
-    fn row_rect(&self, index: usize) -> Rect {
         Rect::new(
-            self.rect.x,
-            self.rect.y + (HEADER_H + index as f32 * ROW_H) * self.scale,
-            self.rect.w,
-            ROW_H * self.scale,
+            self.inner.x,
+            self.viewport.y,
+            self.inner.w,
+            HEADER_H * self.scale,
         )
     }
 
-    /// 命中测试：返回鼠标所在行（不含表头），与绘制坐标从上往下对应。
-    fn row_at(&self, pos: Pos) -> Option<usize> {
-        if !self.rect.contains(pos) {
+    /// 第 `display` 行（**显示序号**）的绘制区域。
+    fn display_row_rect(&self, display: usize) -> Rect {
+        Rect::new(
+            self.inner.x,
+            self.inner.y + display as f32 * self.row_h() - self.offset,
+            self.inner.w,
+            self.row_h(),
+        )
+    }
+
+    /// 可见的显示行范围（半开区间）。
+    fn visible_range(&self) -> std::ops::Range<usize> {
+        let n = self.rows.len();
+        if n == 0 || self.inner.h <= 0.0 {
+            return 0..0;
+        }
+        let rh = self.row_h();
+        let first = (self.offset / rh).floor().max(0.0) as usize;
+        let count = (self.inner.h / rh).ceil() as usize + 1;
+        let first = first.min(n);
+        let end = (first + count).min(n);
+        first..end
+    }
+
+    /// 命中测试：返回表头列号（`pos` 在表头内且该列可排序）。
+    fn header_at(&self, pos: Pos) -> Option<usize> {
+        let header = self.header_rect();
+        if !header.contains(pos) {
             return None;
         }
-        let y = pos.y - self.rect.y - HEADER_H * self.scale;
+        let cols = self.column_layout();
+        let idx = cols
+            .iter()
+            .position(|(x, w)| pos.x >= *x && pos.x < *x + *w)?;
+        self.columns.get(idx).filter(|c| c.sortable).map(|_| idx)
+    }
+
+    /// 命中测试：返回**数据下标**（`pos` 在行区域内）。
+    fn row_at(&self, pos: Pos) -> Option<usize> {
+        if !self.inner.contains(pos) {
+            return None;
+        }
+        let y = pos.y - self.inner.y + self.offset;
         if y < 0.0 {
             return None;
         }
-        let idx = (y / (ROW_H * self.scale)) as usize;
-        (idx < self.rows.len()).then_some(idx)
+        let display = (y / self.row_h()) as usize;
+        self.order.get(display).copied()
+    }
+
+    /// 重建显示顺序（排序 + 稳定比较）。
+    fn rebuild_order(&mut self) {
+        let n = self.rows.len();
+        self.order.clear();
+        self.order.extend(0..n);
+        if let Some((col, order)) = self.sort {
+            let rows = &self.rows;
+            self.order.sort_by(|a, b| {
+                let va = rows[*a].get(col).map(String::as_str).unwrap_or("");
+                let vb = rows[*b].get(col).map(String::as_str).unwrap_or("");
+                let cmp = compare_cells(va, vb);
+                match order {
+                    SortOrder::Ascending => cmp,
+                    SortOrder::Descending => cmp.reverse(),
+                }
+            });
+        }
+        self.order_dirty = false;
+    }
+
+    /// 保证 `order` 可用（长度与行数一致）。
+    fn ensure_order(&mut self) {
+        if self.order_dirty || self.order.len() != self.rows.len() {
+            self.rebuild_order();
+        }
+    }
+
+    /// 数据下标在显示顺序中的位置。
+    fn display_of(&mut self, data_index: usize) -> Option<usize> {
+        self.ensure_order();
+        self.order.iter().position(|i| *i == data_index)
+    }
+
+    fn set_offset(&mut self, v: f32) -> bool {
+        let v = v.clamp(0.0, self.max_offset());
+        if (self.offset - v).abs() < 0.01 {
+            return false;
+        }
+        self.offset = v;
+        true
+    }
+
+    /// 把选中行滚进可见区（键盘导航后调用）。
+    fn scroll_selected_into_view(&mut self) -> bool {
+        let Some(sel) = self.selected else {
+            return false;
+        };
+        let Some(display) = self.display_of(sel) else {
+            return false;
+        };
+        let rh = self.row_h();
+        let top = display as f32 * rh;
+        let bottom = top + rh;
+        if top < self.offset {
+            return self.set_offset(top);
+        }
+        if bottom > self.offset + self.inner.h {
+            return self.set_offset(bottom - self.inner.h);
+        }
+        false
+    }
+
+    /// 三态循环：无 → 升 → 降 → 无。
+    fn cycle_sort(&mut self, column: usize) {
+        self.sort = match self.sort {
+            Some((c, SortOrder::Ascending)) if c == column => Some((column, SortOrder::Descending)),
+            Some((c, SortOrder::Descending)) if c == column => None,
+            _ => Some((column, SortOrder::Ascending)),
+        };
+        self.order_dirty = true;
+        self.offset = 0.0;
+    }
+
+    fn emit_select(&self, ctx: &mut EventCtx, data_index: usize) {
+        if let Some(cmd) = self.command.as_ref() {
+            let args = y901_ui::json::Json::obj().set("row", data_index as i32);
+            ctx.emit_command(crate::command_with_args(cmd, args));
+        }
     }
 }
 
 impl Widget for Table {
+    fn cache_key(&self) -> Option<u64> {
+        Some(self.key)
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+
     fn id(&self) -> &str {
         &self.id
     }
@@ -235,8 +513,12 @@ impl Widget for Table {
         _cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         self.scale = m.scale();
+        self.ensure_order();
+        // **小表按内容高度、大表按可用高度**：这样 v0.2.x 的"表格自然撑开"
+        // 行为对小数据不变，只有超出可用高度的表才进入虚拟滚动。
+        let want_h = self.wanted_height().min(c.max.h);
         let want_w = c.max.w;
-        c.constrain(Size::new(want_w, self.content_height()))
+        c.constrain(Size::new(want_w, want_h))
     }
 
     fn arrange(
@@ -245,7 +527,32 @@ impl Widget for Table {
         _m: &dyn TextMetrics,
         _cache: &mut y901_ui::layout::LayoutCache,
     ) {
-        self.rect = rect;
+        self.ensure_order();
+        self.viewport = rect;
+        let header_h = HEADER_H * self.scale;
+        let rows_h = (rect.h - header_h).max(0.0);
+        // 先按"无滚动条"算一次，再判断是否需要滚动条（避免滚动条自身引起反复抖动）。
+        self.show_bar = self.rows_height() > rows_h + 0.5;
+        let bar_w = if self.show_bar { BAR_W } else { 0.0 };
+        self.inner = Rect::new(rect.x, rect.y + header_h, (rect.w - bar_w).max(0.0), rows_h);
+        self.offset = self.offset.clamp(0.0, self.max_offset());
+        self.page_rows = ((rows_h / self.row_h()).floor() as usize).max(1);
+
+        let content = self.rows_height();
+        self.bar.arrange_at(
+            Rect::new(rect.right() - BAR_W, rect.y + header_h, BAR_W, rows_h),
+            if content > 0.0 {
+                (rows_h / content).min(1.0)
+            } else {
+                1.0
+            },
+            if self.max_offset() > 0.0 {
+                self.offset / self.max_offset()
+            } else {
+                0.0
+            },
+            self.show_bar,
+        );
     }
 
     fn flex(&self) -> FlexItem {
@@ -253,153 +560,248 @@ impl Widget for Table {
     }
 
     fn rect(&self) -> Rect {
-        self.rect
+        self.viewport
+    }
+
+    fn clip(&self) -> Option<Rect> {
+        Some(self.viewport)
     }
 
     fn event(&mut self, ctx: &mut EventCtx, event: &UiEvent) -> EventResult {
+        if ctx.phase == EventPhase::Capture {
+            return EventResult::Ignored;
+        }
+        // 顺序即优先级：滚动条 → 表头 → 行。
         match event {
+            UiEvent::MouseDown { pos, .. } if self.show_bar && self.bar.rect.contains(*pos) => {
+                ctx.set_pointer_capture(self.id.clone());
+                self.bar.dragging = true;
+                let ratio = self.bar.ratio_at(pos.y) - self.bar.thumb_ratio * 0.5;
+                if self.set_offset(ratio * self.max_offset()) {
+                    EventResult::Relayout
+                } else {
+                    EventResult::Handled
+                }
+            }
+            UiEvent::MouseMove { pos } if self.bar.dragging => {
+                let ratio = self.bar.ratio_at(pos.y) - self.bar.thumb_ratio * 0.5;
+                if self.set_offset(ratio * self.max_offset()) {
+                    EventResult::Relayout
+                } else {
+                    EventResult::Handled
+                }
+            }
+            UiEvent::MouseUp { .. } if self.bar.dragging => {
+                self.bar.dragging = false;
+                ctx.release_pointer_capture();
+                EventResult::Redraw
+            }
             UiEvent::MouseMove { pos } => {
-                let was = self.hovered_row;
-                self.hovered_row = self.row_at(*pos);
-                if was != self.hovered_row {
+                let header = self.header_at(*pos);
+                let row = self.row_at(*pos);
+                let changed = header != self.hovered_header || row != self.hovered_row;
+                self.hovered_header = header;
+                self.hovered_row = row;
+                if changed {
                     EventResult::Redraw
                 } else {
                     EventResult::Ignored
                 }
             }
             UiEvent::MouseUp { pos, .. } => {
-                if let Some(idx) = self.row_at(*pos) {
-                    self.selected = Some(idx);
-                    if let Some(cmd) = self.command.as_ref() {
-                        let args = y901_ui::json::Json::obj().set("row", idx as i32);
+                if let Some(column) = self.header_at(*pos) {
+                    self.cycle_sort(column);
+                    if let Some(cmd) = self.sort_command.as_ref() {
+                        let (col, order) = self.sort.unwrap_or((column, SortOrder::Ascending));
+                        let args = y901_ui::json::Json::obj().set("column", col as i32).set(
+                            "descending",
+                            if order == SortOrder::Descending { 1 } else { 0 },
+                        );
                         ctx.emit_command(crate::command_with_args(cmd, args));
                     }
-                    EventResult::Redraw
+                    return EventResult::Relayout;
+                }
+                if let Some(idx) = self.row_at(*pos) {
+                    self.selected = Some(idx);
+                    self.emit_select(ctx, idx);
+                    return EventResult::Redraw;
+                }
+                EventResult::Ignored
+            }
+            UiEvent::Wheel { pos, delta, .. } => {
+                if !self.viewport.contains(*pos) {
+                    return EventResult::Ignored;
+                }
+                let step = *delta / 120.0 * self.row_h() * 3.0;
+                if self.set_offset(self.offset - step) {
+                    EventResult::Relayout
                 } else {
-                    EventResult::Ignored
+                    EventResult::Handled
                 }
             }
-            // **键盘选行**：↑↓ 移动选中，**到边界停住**（不循环，与 ComboBox 一致）。
-            //
-            // 滚动：`Table` 目前**没有滚动机制**（渲染直接遍历全部行，
-            // 溢出部分被父容器裁剪），因此**不存在"跟随滚动"可做**；
-            // 等 Table 真正引入虚拟列表时再加。
             UiEvent::Key { key, .. } => {
+                use y901_ui::Key;
                 let n = self.rows.len();
                 if n == 0 {
                     return EventResult::Ignored;
                 }
-                // 无选中时：↓ 选第一行（不是第二行），↑ 选最后一行。
-                let next = match (key, self.selected) {
-                    (y901_ui::Key::Down, None) => Some(0),
-                    (y901_ui::Key::Down, Some(cur)) => Some((cur + 1).min(n - 1)),
-                    (y901_ui::Key::Up, None) => Some(n - 1),
-                    (y901_ui::Key::Up, Some(cur)) => Some(cur.saturating_sub(1)),
+                let cur_display = match self.selected {
+                    Some(sel) => self.display_of(sel),
+                    None => None,
+                };
+                let target_display = match (key, cur_display) {
+                    (Key::Down, None) => Some(0),
+                    (Key::Down, Some(d)) => Some((d + 1).min(n - 1)),
+                    (Key::Up, None) => Some(n - 1),
+                    (Key::Up, Some(d)) => Some(d.saturating_sub(1)),
+                    (Key::Home, _) => Some(0),
+                    (Key::End, _) => Some(n - 1),
+                    (Key::PageDown, None) => Some(0),
+                    (Key::PageDown, Some(d)) => Some((d + self.page_rows).min(n - 1)),
+                    (Key::PageUp, None) => Some(n - 1),
+                    (Key::PageUp, Some(d)) => Some(d.saturating_sub(self.page_rows)),
                     _ => None,
                 };
-                match next {
-                    Some(idx) if Some(idx) != self.selected => {
-                        self.selected = Some(idx);
-                        if let Some(cmd) = self.command.as_ref() {
-                            let args = y901_ui::json::Json::obj().set("row", idx as i32);
-                            ctx.emit_command(crate::command_with_args(cmd, args));
+                match target_display {
+                    Some(d) => {
+                        let data = self.order.get(d).copied().unwrap_or(d);
+                        if Some(data) == self.selected {
+                            // 到边界：不重绘，但表示"键已被消费"（避免父容器再滚一层）。
+                            return EventResult::Handled;
                         }
-                        EventResult::Redraw
+                        self.selected = Some(data);
+                        self.scroll_selected_into_view();
+                        self.emit_select(ctx, data);
+                        EventResult::Relayout
                     }
-                    // 到边界：不变更也不重绘，但表示"我处理了这个键"
-                    Some(_) => EventResult::Handled,
                     None => EventResult::Ignored,
                 }
+            }
+            UiEvent::Action { name, args } if name == "sort" => {
+                let col = args.get("column").and_then(|v| v.as_f64()).unwrap_or(-1.0);
+                if col < 0.0 || col as usize >= self.columns.len() {
+                    return EventResult::Ignored;
+                }
+                let desc = args
+                    .get("descending")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0)
+                    > 0.0;
+                let order = if desc {
+                    SortOrder::Descending
+                } else {
+                    SortOrder::Ascending
+                };
+                if self.sort_by(col as usize, order) {
+                    EventResult::Relayout
+                } else {
+                    EventResult::Handled
+                }
+            }
+            UiEvent::Action { name, args } if name == "select_row" => {
+                let row = args.get("row").and_then(|v| v.as_f64()).unwrap_or(-1.0);
+                if row < 0.0 || row as usize >= self.rows.len() {
+                    return EventResult::Ignored;
+                }
+                self.select(Some(row as usize));
+                EventResult::Relayout
             }
             _ => EventResult::Ignored,
         }
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {
-        if self.rect.w <= 0.0 || self.rect.h <= 0.0 {
+        if self.viewport.w <= 0.0 || self.viewport.h <= 0.0 {
             return;
         }
-        let theme = ctx.theme();
-        let header_bg = theme.style(Role::LIST_ITEM, State::Hovered).bg;
-        let row_bg = theme.style(Role::PANEL, State::Normal).bg;
-        let alt_bg = theme.style(Role::PANEL, State::Hovered).bg;
-        let hover_bg = theme.style(Role::LIST_ITEM, State::Hovered).bg;
-        let sel_bg = theme.style(Role::LIST_ITEM, State::Pressed).bg;
-        let text_fg = theme.style(Role::TEXT, State::Normal).fg;
-        let muted = theme.muted_text_color();
+        self.ensure_order();
+        // **先把用到的颜色全部取成值**：`ctx.theme()` 是借用，取完才能再可变借用
+        // `ctx` 去绘制（否则每个 `fill_rect` 都会被借用检查判冲突）。
+        let (header_bg, row_bg, alt_bg, hover_bg, sel_bg, text_fg, muted, sep) = {
+            let theme = ctx.theme();
+            (
+                self.style
+                    .and_then(|s| s.bg)
+                    .unwrap_or(theme.style(Role::LIST_ITEM, State::Hovered).bg),
+                self.style
+                    .and_then(|s| s.bg)
+                    .unwrap_or(theme.style(Role::PANEL, State::Normal).bg),
+                theme.style(Role::PANEL, State::Hovered).bg,
+                theme.style(Role::LIST_ITEM, State::Hovered).bg,
+                theme.style(Role::LIST_ITEM, State::Pressed).bg,
+                theme.style(Role::TEXT, State::Normal).fg,
+                theme.muted_text_color(),
+                theme.style(Role::PANEL, State::Disabled).bg,
+            )
+        };
 
-        ctx.push_clip(self.rect);
+        ctx.push_clip(self.viewport);
 
-        // UI 坐标系和后端缓冲都以左上为原点，Y 向下；表头绘制在顶部。
-        let header = self.header_rect();
-        let header_bg = self.style.and_then(|s| s.bg).unwrap_or(header_bg);
-        ctx.fill_rect(header, header_bg);
+        // ---- 行（先画，表头覆盖在上面，保证滚动时表头是"粘"的）
+        ctx.fill_rect(self.inner, row_bg);
         let cols = self.column_layout();
-        let header_style = TextStyle::fg(muted);
-        for (i, col) in self.columns.iter().enumerate() {
-            let Some((x, w)) = cols.get(i).copied() else {
-                break;
+        let range = self.visible_range();
+        for display in range {
+            let Some(&data) = self.order.get(display) else {
+                continue;
             };
-            draw_cell(
-                ctx,
-                col,
-                &col.title,
-                x,
-                header.y,
-                w,
-                HEADER_H * self.scale,
-                &header_style,
-                muted,
-                self.scale,
-            );
-            let _ = text_fg;
-        }
-
-        // 行
-        let mut visible = 0usize;
-        for (r, cells) in self.rows.iter().enumerate() {
-            let row_rect = self.row_rect(r);
-            let y = row_rect.y;
-            if y >= self.rect.y + self.rect.h {
-                break;
+            let row_rect = self.display_row_rect(display);
+            if row_rect.bottom() < self.inner.y || row_rect.y > self.inner.bottom() {
+                continue;
             }
-            let bg = if self.selected == Some(r) {
+            let bg = if self.selected == Some(data) {
                 sel_bg
-            } else if self.hovered_row == Some(r) {
+            } else if self.hovered_row == Some(data) {
                 hover_bg
-            } else if r % 2 == 1 {
+            } else if display % 2 == 1 {
                 alt_bg
             } else {
                 row_bg
             };
-            ctx.fill_rect(
-                Rect::new(self.rect.x, y, self.rect.w, ROW_H * self.scale),
-                bg,
-            );
+            ctx.fill_rect(row_rect, bg);
             let style = TextStyle::fg(text_fg);
-            for (i, col) in self.columns.iter().enumerate() {
-                let Some((x, w)) = cols.get(i).copied() else {
-                    break;
-                };
-                let text = cells.get(i).map(String::as_str).unwrap_or("");
-                draw_cell(
-                    ctx,
-                    col,
-                    text,
-                    x,
-                    y,
-                    w,
-                    ROW_H * self.scale,
-                    &style,
-                    text_fg,
-                    self.scale,
-                );
+            if let Some(cells) = self.rows.get(data) {
+                for (i, col) in self.columns.iter().enumerate() {
+                    let Some((x, w)) = cols.get(i).copied() else {
+                        break;
+                    };
+                    let text = cells.get(i).map(String::as_str).unwrap_or("");
+                    draw_cell(
+                        ctx, col, text, x, row_rect.y, w, row_rect.h, &style, self.scale,
+                    );
+                }
             }
-            visible += 1;
+        }
+
+        // ---- 表头（固定）
+        let header = self.header_rect();
+        ctx.fill_rect(header, header_bg);
+        let header_style = TextStyle::fg(muted);
+        let active_style = TextStyle::fg(text_fg);
+        for (i, col) in self.columns.iter().enumerate() {
+            let Some((x, w)) = cols.get(i).copied() else {
+                break;
+            };
+            let sorted = self.sort.filter(|(c, _)| *c == i);
+            let style = if sorted.is_some() {
+                &active_style
+            } else {
+                &header_style
+            };
+            let label = match sorted {
+                Some((_, SortOrder::Ascending)) => format!("{} ▲", col.title),
+                Some((_, SortOrder::Descending)) => format!("{} ▼", col.title),
+                None => col.title.clone(),
+            };
+            draw_cell(
+                ctx, col, &label, x, header.y, w, header.h, style, self.scale,
+            );
+            // 表头底部分隔线（1px，固定 DPI 缩放后仍为 1 物理像素附近）
+            ctx.fill_rect(Rect::new(x, header.bottom() - 1.0, w, 1.0), sep);
         }
 
         ctx.pop_clip();
-        let _ = visible;
+        self.bar.render_bar(ctx);
     }
 
     fn semantics(&self) -> Semantics {
@@ -408,11 +810,31 @@ impl Widget for Table {
             .label(format!("table {} ({} rows)", self.id, self.rows.len()))
             .prop("rows", self.rows.len().to_string())
             .prop("columns", self.columns.len().to_string())
-            .action("select_row");
+            .action_spec("select_row", InputKind::Number)
+            .action_spec("sort", InputKind::Number)
+            .state("offset", self.offset)
+            .state("first_visible", self.visible_range().start as u32);
         if let Some(i) = self.selected {
-            s = s.value(format!("row {i}"));
+            s = s.value(format!("row {i}")).state("selected", i as u32);
+        }
+        if let Some((col, order)) = self.sort {
+            s = s.prop("sort_column", col.to_string()).prop(
+                "sort_order",
+                match order {
+                    SortOrder::Ascending => "ascending",
+                    SortOrder::Descending => "descending",
+                },
+            );
         }
         s
+    }
+}
+
+/// 单元格比较：两侧都是数字时比数值，否则比小写字典序。
+fn compare_cells(a: &str, b: &str) -> std::cmp::Ordering {
+    match (a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
+        (Ok(x), Ok(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
+        _ => a.to_lowercase().cmp(&b.to_lowercase()),
     }
 }
 
@@ -427,10 +849,8 @@ fn draw_cell(
     w: f32,
     h: f32,
     style: &TextStyle,
-    fallback: y901_ui::Color,
     scale: f32,
 ) {
-    let _ = fallback;
     if text.is_empty() {
         return;
     }
@@ -495,6 +915,27 @@ mod tests {
         fn pop_clip(&mut self) {}
     }
 
+    fn arrange(t: &mut Table, w: f32, h: f32) -> &mut Table {
+        let mut cache = LayoutCache::new();
+        t.measure(&Metrics, Constraints::loose(Size::new(w, h)), &mut cache);
+        t.arrange(Rect::new(0.0, 0.0, w, h), &Metrics, &mut cache);
+        t
+    }
+
+    fn sorted_table(rows: Vec<Vec<String>>) -> Table {
+        let mut t = Table::new("t").column(TableColumn::fixed("name", 100.0));
+        t.set_rows(rows);
+        t
+    }
+
+    fn names(t: &mut Table) -> Vec<String> {
+        t.ensure_order();
+        t.order
+            .iter()
+            .map(|i| t.rows[*i][0].clone())
+            .collect::<Vec<_>>()
+    }
+
     #[test]
     fn construct_and_measure() {
         let mut t = Table::new("t")
@@ -511,8 +952,23 @@ mod tests {
             Constraints::loose(Size::new(400.0, 400.0)),
             &mut cache,
         );
-        assert_eq!(s.h, HEADER_H + 2.0 * ROW_H);
+        assert_eq!(s.h, HEADER_H + 2.0 * ROW_H, "小表按内容高度");
         assert!(s.w <= 400.0);
+    }
+
+    #[test]
+    fn large_table_is_capped_to_available_height() {
+        let mut t = Table::new("t").column(TableColumn::flex("a"));
+        for i in 0..10_000 {
+            t = t.row(vec![format!("r{i}")]);
+        }
+        let mut cache = LayoutCache::new();
+        let s = t.measure(
+            &Metrics,
+            Constraints::loose(Size::new(400.0, 300.0)),
+            &mut cache,
+        );
+        assert_eq!(s.h, 300.0, "超出可用高度时被裁到可用高度");
     }
 
     #[test]
@@ -521,29 +977,24 @@ mod tests {
             .column(TableColumn::flex("c"))
             .row(vec!["first".into()])
             .row(vec!["second".into()]);
-        t.rect = Rect::new(10.0, 20.0, 200.0, 120.0);
+        arrange(&mut t, 200.0, 120.0);
 
         let header = t.header_rect();
-        let row0 = t.row_rect(0);
-        let row1 = t.row_rect(1);
-        assert_eq!(header, Rect::new(10.0, 20.0, 200.0, HEADER_H));
-        assert_eq!(row0, Rect::new(10.0, 20.0 + HEADER_H, 200.0, ROW_H));
-        assert_eq!(row1, Rect::new(10.0, 20.0 + HEADER_H + ROW_H, 200.0, ROW_H));
+        let row0 = t.display_row_rect(0);
+        let row1 = t.display_row_rect(1);
+        assert_eq!(header, Rect::new(0.0, 0.0, 200.0, HEADER_H));
+        assert_eq!(row0, Rect::new(0.0, HEADER_H, 200.0, ROW_H));
+        assert_eq!(row1, Rect::new(0.0, HEADER_H + ROW_H, 200.0, ROW_H));
         assert!(header.bottom() <= row0.y, "表头应在第一行上方");
-        assert!(row0.bottom() <= row1.y, "数据行应从上到下排列");
 
-        let x = t.rect.x + 4.0;
-        assert_eq!(
-            t.row_at(Pos::new(x, header.y + 1.0)),
-            None,
-            "表头不应命中行"
-        );
+        let x = 4.0;
+        assert_eq!(t.row_at(Pos::new(x, header.y + 1.0)), None, "表头不命中行");
         assert_eq!(t.row_at(Pos::new(x, row0.y + row0.h * 0.5)), Some(0));
         assert_eq!(t.row_at(Pos::new(x, row1.y + row1.h * 0.5)), Some(1));
         assert_eq!(
             t.row_at(Pos::new(x, row0.bottom())),
             Some(1),
-            "行边界归属下方行"
+            "边界归属下行"
         );
 
         let mut ctx = EventCtx::new(None, Size::new(400.0, 300.0));
@@ -554,27 +1005,154 @@ mod tests {
                 button: y901_ui::MouseButton::Left,
             },
         );
-        assert_eq!(t.selected_index(), Some(1), "点击第二行应选择第二行");
+        assert_eq!(t.selected_index(), Some(1));
     }
 
     #[test]
-    fn render_draws_header_then_rows_top_down() {
+    fn render_draws_rows_then_sticky_header() {
         let mut t = Table::new("t")
             .column(TableColumn::fixed("c", 100.0))
             .row(vec!["first".into()])
             .row(vec!["second".into()]);
-        t.rect = Rect::new(10.0, 20.0, 200.0, 120.0);
+        arrange(&mut t, 200.0, 120.0);
         let mut ctx = RectRecorder::default();
-
         t.render(&mut ctx);
+        // 背景 + 2 行 + 表头 + 表头分隔线
+        assert!(ctx.fills.len() >= 4, "至少画背景/两行/表头");
+        assert_eq!(ctx.fills[0], t.inner, "第一笔是行区域背景");
+        assert_eq!(
+            ctx.fills[ctx.fills.len() - 2],
+            t.header_rect(),
+            "表头在行之后绘制（因此滚动时始终可见）"
+        );
+    }
 
-        // fill order: header, row 0, row 1. Recorded geometry is the visible contract.
-        assert_eq!(ctx.fills.len(), 3);
-        assert_eq!(ctx.fills[0], t.header_rect());
-        assert_eq!(ctx.fills[1], t.row_rect(0));
-        assert_eq!(ctx.fills[2], t.row_rect(1));
-        assert!(ctx.fills[0].y < ctx.fills[1].y);
-        assert!(ctx.fills[1].y < ctx.fills[2].y);
+    #[test]
+    fn only_visible_rows_are_drawn() {
+        let mut t = Table::new("t").column(TableColumn::fixed("c", 100.0));
+        for i in 0..5000 {
+            t = t.row(vec![format!("r{i}")]);
+        }
+        arrange(&mut t, 200.0, 200.0);
+        let mut ctx = RectRecorder::default();
+        t.render(&mut ctx);
+        // 200 高处约 6 行 + 背景 + 表头 + 分隔线；远小于 5000
+        assert!(ctx.fills.len() < 20, "只画可见行，实画 {}", ctx.fills.len());
+        assert!(t.visible_range().len() <= 8);
+    }
+
+    #[test]
+    fn sorting_numbers_and_text_and_toggles_three_states() {
+        let mut t = sorted_table(vec![vec!["10".into()], vec!["2".into()], vec!["1".into()]]);
+        t.sort_by(0, SortOrder::Ascending);
+        assert_eq!(names(&mut t), vec!["1", "2", "10"], "数字按数值排序");
+        t.sort_by(0, SortOrder::Descending);
+        assert_eq!(names(&mut t), vec!["10", "2", "1"]);
+
+        let mut text = sorted_table(vec![vec!["b".into()], vec!["A".into()], vec!["c".into()]]);
+        text.sort_by(0, SortOrder::Ascending);
+        assert_eq!(names(&mut text), vec!["A", "b", "c"], "文本忽略大小写");
+
+        // 三态循环：升 → 降 → 取消
+        text.cycle_sort(0);
+        assert_eq!(
+            text.sort_state(),
+            Some((0, SortOrder::Descending)),
+            "升 → 降"
+        );
+        text.cycle_sort(0);
+        assert_eq!(text.sort_state(), None, "降 → 取消排序");
+        assert_eq!(names(&mut text), vec!["b", "A", "c"], "取消后恢复原始顺序");
+    }
+
+    #[test]
+    fn selection_follows_data_row_not_display_position() {
+        let mut t = sorted_table(vec![vec!["3".into()], vec!["1".into()], vec!["2".into()]]);
+        t.selected = Some(0); // 数据行 "3"
+        t.sort_by(0, SortOrder::Ascending);
+        assert_eq!(names(&mut t), vec!["1", "2", "3"]);
+        assert_eq!(
+            t.selected_index(),
+            Some(0),
+            "排序不应改变选中的数据行（仍是 '3'）"
+        );
+        // 显示位置是最后一个
+        assert_eq!(t.display_of(0), Some(2));
+    }
+
+    #[test]
+    fn keyboard_navigation_and_page_keys() {
+        let mut t = Table::new("t").column(TableColumn::fixed("c", 100.0));
+        for i in 0..100 {
+            t = t.row(vec![format!("r{i}")]);
+        }
+        arrange(&mut t, 200.0, 200.0);
+        let mut ctx = EventCtx::new(None, Size::new(400.0, 300.0));
+        let press = |t: &mut Table, ctx: &mut EventCtx, key| {
+            t.event(
+                ctx,
+                &UiEvent::Key {
+                    key,
+                    modifiers: y901_ui::Modifiers::default(),
+                },
+            )
+        };
+        press(&mut t, &mut ctx, y901_ui::Key::Down);
+        assert_eq!(t.selected_index(), Some(0), "↓ 从无选中开始选第一行");
+        press(&mut t, &mut ctx, y901_ui::Key::End);
+        assert_eq!(t.selected_index(), Some(99), "End 选最后一行");
+        press(&mut t, &mut ctx, y901_ui::Key::Home);
+        assert_eq!(t.selected_index(), Some(0), "Home 选第一行");
+        press(&mut t, &mut ctx, y901_ui::Key::PageDown);
+        assert!(
+            t.selected_index().unwrap() >= 3,
+            "PageDown 至少前进一页（page_rows={}）",
+            t.page_rows
+        );
+    }
+
+    #[test]
+    fn wheel_scrolls_and_clamps() {
+        let mut t = Table::new("t").column(TableColumn::fixed("c", 100.0));
+        for i in 0..100 {
+            t = t.row(vec![format!("r{i}")]);
+        }
+        arrange(&mut t, 200.0, 200.0);
+        let mut ctx = EventCtx::new(None, Size::new(400.0, 300.0));
+        t.event(
+            &mut ctx,
+            &UiEvent::Wheel {
+                pos: Pos::new(10.0, 100.0),
+                delta: -360.0,
+                mods: y901_ui::Modifiers::default(),
+            },
+        );
+        assert!(t.offset > 0.0, "向下滚动应增加 offset");
+        let max = t.max_offset();
+        t.set_offset(100_000.0);
+        assert_eq!(t.offset, max, "offset 被 clamp 到最大偏移");
+        assert_eq!(t.selected_index(), None, "滚动不改变选中");
+    }
+
+    #[test]
+    fn sticky_header_hit_test_sorts_on_click() {
+        let mut t = sorted_table(vec![vec!["b".into()], vec!["a".into()]]);
+        arrange(&mut t, 200.0, 200.0);
+        let header = t.header_rect();
+        assert_eq!(
+            t.header_at(Pos::new(header.x + 5.0, header.y + 5.0)),
+            Some(0)
+        );
+        let mut ctx = EventCtx::new(None, Size::new(400.0, 300.0));
+        t.event(
+            &mut ctx,
+            &UiEvent::MouseUp {
+                pos: Pos::new(header.x + 5.0, header.y + 5.0),
+                button: y901_ui::MouseButton::Left,
+            },
+        );
+        assert_eq!(t.sort_state(), Some((0, SortOrder::Ascending)));
+        assert_eq!(names(&mut t), vec!["a", "b"]);
     }
 
     #[test]
@@ -585,18 +1163,16 @@ mod tests {
                 title: "b".to_string(),
                 width: Dimension::Percent(50.0),
                 align: Align::Start,
+                sortable: true,
             })
             .row(vec!["a".into(), "b".into()]);
-        let mut cache = LayoutCache::new();
-        t.arrange(Rect::new(0.0, 0.0, 400.0, 200.0), &Metrics, &mut cache);
+        arrange(&mut t, 400.0, 200.0);
         let cols = t.column_layout();
-        // Percent(50) 占 400 的一半
         assert!(
             (cols[1].1 - 200.0).abs() < 0.5,
             "Percent(50) 应为 200，实测 {}",
             cols[1].1
         );
-        // flex 列吃剩下的 200
         assert!(
             (cols[0].1 - 200.0).abs() < 0.5,
             "flex 应剩 200，实测 {}",
@@ -605,25 +1181,51 @@ mod tests {
     }
 
     #[test]
-    fn exposes_select_row_action() {
+    fn exposes_select_and_sort_actions() {
         let t = Table::new("t")
             .column(TableColumn::flex("a"))
             .row(vec!["x".into()]);
         let acts = t.semantics().actions;
-        assert!(
-            acts.iter().any(|a| a.name == "select_row"),
-            "table 应暴露 select_row"
+        assert!(acts.iter().any(|a| a.name == "select_row"));
+        assert!(acts.iter().any(|a| a.name == "sort"));
+    }
+
+    #[test]
+    fn semantics_reports_sort_and_visible_window() {
+        let mut t = Table::new("t").column(TableColumn::flex("a"));
+        for i in 0..50 {
+            t = t.row(vec![format!("r{i}")]);
+        }
+        arrange(&mut t, 200.0, 200.0);
+        t.sort_by(0, SortOrder::Descending);
+        let s = t.semantics();
+        assert_eq!(
+            s.state.get("first_visible").and_then(|v| v.as_f64()),
+            Some(0.0)
         );
+        let props: Vec<_> = s
+            .props
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert!(props.contains(&("sort_column", "0")));
+        assert!(props.contains(&("sort_order", "descending")));
     }
 
     #[test]
     fn style_is_stored_for_container_surface() {
         let st = crate::style::WidgetStyle::default().bg(Color::rgba(0.2, 0.2, 0.2, 1.0));
         let t = Table::new("t").column(TableColumn::flex("a")).style(st);
-        assert_eq!(
-            t.style,
-            Some(st),
-            "style 应被保存（render 里用它覆盖表头底色）"
-        );
+        assert_eq!(t.style, Some(st));
+    }
+
+    #[test]
+    fn set_rows_preserves_sort_and_drops_out_of_range_selection() {
+        let mut t = sorted_table(vec![vec!["2".into()], vec!["1".into()]]);
+        t.sort_by(0, SortOrder::Ascending);
+        t.selected = Some(1);
+        t.set_rows(vec![vec!["9".into()]]);
+        assert_eq!(t.selected_index(), None, "越界选中被清空");
+        assert_eq!(names(&mut t), vec!["9"], "新行沿用当前排序");
     }
 }

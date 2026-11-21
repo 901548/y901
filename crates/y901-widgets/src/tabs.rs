@@ -1,4 +1,4 @@
-//! Tabs：标签栏 + 内容区，切换带 200ms 过渡。
+﻿//! Tabs：标签栏 + 内容区，切换带 200ms 过渡。
 //!
 //! ## 设计取舍：**叶子控件 + 绘制回调**
 //!
@@ -399,5 +399,7 @@ impl Widget for Tabs {
             .action("select")
             .prop("count", self.items.len().to_string())
             .prop("selected", self.selected.get().to_string())
+            // 无障碍：单片标签页的"选中"状态（1 = 选中）
+            .selected(true)
     }
 }

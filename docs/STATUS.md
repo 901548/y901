@@ -2,7 +2,7 @@
 
 - **HEAD**: 见 `git log -1`（v0.2.5；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收 + X11 DPI/XSettings + 墨迹绘制裁剪修复 + crates.io 首发准备）
 - **tags**: v0.1.0 ~ **v0.2.5**（v0.2.0 含破坏性变更；v0.2.1 ~ v0.2.5 均为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`）；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**
-- **测试**: `passed=993` / `ignored=61` / `include_ignored=1054`（唯一来源 `docs/evidence/numbers.txt`）
+- **测试**: `passed=1018` / `ignored=61` / `include_ignored=1079`（唯一来源 `docs/evidence/numbers.txt`）
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -68,7 +68,7 @@
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***993** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1018** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -190,7 +190,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 `backend_parity` 加了 0.3 缩放行后立刻抓到（D3D `(132,136)` vs CPU `(133,135)`），已改到映射后空间计算。
 
 验证（**当轮口径**）：`cargo test --workspace` **963 passed / 0 failed**；
-`--include-ignored` **1024 passed / 0 failed**；硬件冒烟 **61 passed / 0 failed / 0 SKIP**；
+`--include-ignored` **1079 passed / 0 failed**；硬件冒烟 **61 passed / 0 failed / 0 SKIP**；
 `scripts/gate.ps1`（含 audit）→ **GATE OK**。
 
 仍待处理（下一批）：**P1-5** `line_height` 契约（需在"改 1em→ascent+descent"与
@@ -530,7 +530,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - 已验证（2026-11-20，Ubuntu 22.04 / WSL2 + rustc 1.92 + Xvfb）：
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **906 passed / 0 failed / 27 ignored**
   （151 个测试目标）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 993/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1018/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，

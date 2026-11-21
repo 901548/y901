@@ -1,4 +1,4 @@
-//! Switch：44x24 的开关，用于设置面板。
+﻿//! Switch：44x24 的开关，用于设置面板。
 //!
 //! 视觉：圆角轨道 + 圆形滑块。未选中 = panel Hovered 轨道、滑块靠左；
 //! 选中 = accent 轨道（`BUTTON Pressed` 底）、滑块靠右。
@@ -226,6 +226,7 @@ impl Widget for Switch {
             .label(format!("switch {}", self.id))
             .value(if self.checked { "on" } else { "off" })
             .prop("checked", self.checked.to_string())
+            .checked(self.checked)
             .action("toggle")
     }
 }

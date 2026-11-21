@@ -87,15 +87,30 @@ if ($Check) {
         exit 1
     }
 } else {
+    # **必须真的跑测试**：早前这两条赋值语句在编辑中丢失，`$defaultOut` / `$includeOut`
+    # 恒为 `$null`，于是"实测 passed=0"——数字从来不会更新（只有人手动改 numbers.txt 才会动）。
+    # 门禁的 `-Check` 只读文件，因此这个 bug 不会让门禁变红，正是"静默失效"的典型。
     $defaultArgs = @('test', '--workspace') + $cargoOffline
+    $defaultOut = & cargo @defaultArgs 2>&1 | Out-String
+    $defaultCode = $LASTEXITCODE
+    if ($defaultCode -ne 0) {
+        Write-Host (($defaultOut -split "`n" | Select-Object -Last 30) -join "`n")
+        Write-Host "[sync] FAIL: cargo test --workspace 退出码 $defaultCode（测试没全绿就不能同步数字）"
+        exit 1
+    }
     $passed = 0; $failed = 0; $ignored = 0
     foreach ($m in [regex]::Matches($defaultOut, 'test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored')) {
         $passed += [int]$m.Groups[1].Value; $failed += [int]$m.Groups[2].Value; $ignored += [int]$m.Groups[3].Value
+    }
+    if ($passed -eq 0) {
+        Write-Host "[sync] FAIL: 解析到 0 个通过用例 —— cargo 输出格式变了，先修解析再同步"
+        exit 1
     }
     # include-ignored 跑的是**全部**用例（含并行基准），而部分 `#[ignore]` 基准依赖**进程内全局计数器**，
     # 并行时会把别的用例的分配记到自己头上（实测：每帧应 0 却测到 4）。
     # 所以这个口径**只在全部通过时**才记录，否则写 n/a —— 不拿一个失真的数字去充数。
     $includeArgs = @('test', '--workspace') + $cargoOffline + @('--', '--include-ignored')
+    $includeOut = & cargo @includeArgs 2>&1 | Out-String
     $includeCode = $LASTEXITCODE
     $includePassed = 0
     foreach ($m in [regex]::Matches($includeOut, 'test result: \w+\. (\d+) passed')) { $includePassed += [int]$m.Groups[1].Value }
@@ -175,9 +190,13 @@ foreach ($f in $docFiles) {
             @{ name = 'include_ignored'; pattern = '含 ignore[^\n]{0,8}\*\*(\d+)\*\*';       want = $includePassed },
             @{ name = 'passed';          pattern = '\*\*(\d+)\*\*\s*passed';                 want = $passed  },
             # Markdown 表格以及显式包含默认测试统计的行，也纳入检查，避免 ACCEPTANCE.md 漏检。
-            @{ name = 'passed table';    pattern = '\|\s*`cargo test --workspace --offline`[^|]*\|\s*\*\*(\d+)\s+passed'; want = $passed },
-            @{ name = 'passed summary';  pattern = '默认测试[^\n]{0,50}\*\*(\d+)\s+passed';       want = $passed },
-            @{ name = 'include summary'; pattern = '完整运行[^\n]{0,30}\*\*(\d+)\s+passed';       want = $includePassed },
+            # **`[^|]*` 会连 `-- --include-ignored` 那行一起匹配**：那行写的是
+            # include-ignored 口径，用 `$passed` 去比必然误报。这里把默认行限定为
+            # "不带 `--include-ignored` 的行"，include 行交给下面的独立规则。
+            @{ name = 'passed table';    pattern = '\|\s*`cargo test --workspace --offline`(?!.*include-ignored)[^|]*\|\s*\*\*(\d+)\s+passed'; want = $passed },
+            @{ name = 'include table';   pattern = '\|\s*`cargo test --workspace --offline -- --include-ignored`[^|]*\|\s*\*\*(\d+)\s+passed'; want = $includePassed },
+            @{ name = 'passed summary';  pattern = '默认测试[^\n]{0,50}?\*\*(\d+)\s+passed';       want = $passed },
+            @{ name = 'include summary'; pattern = '完整运行[^\n]{0,30}?\*\*(\d+)\s+passed';       want = $includePassed },
             @{ name = 'include count';   pattern = 'include_ignored\s*=\s*(\d+)';                    want = $includePassed }
             # **行内形式的规则由 `$inlineFields` 自动生成**（见下方 foreach）。
             # 为何限定反引号：散文里也会出现 "Windows 侧 ignored=58、Linux 侧=59"，
@@ -243,12 +262,15 @@ foreach ($f in $docFiles) {
                 if ($line -notmatch 'Linux') { continue }
                 if ($line -notmatch $countKeywords) { continue }
                 if ($line -match $linuxLineExempt) { continue }
-                foreach ($m in [regex]::Matches($line, '(?<![\w.])(\d{3})(?![\w.])')) {
+                foreach ($m in [regex]::Matches($line, '(?<![\w.])(\d{3,})(?![\w.])')) {
                     $n = [int]$m.Groups[1].Value
                     $suffix = $line.Substring($m.Index + $m.Length)
                     $prefix = $line.Substring(0, $m.Index)
                     if ($suffix -match '^\s*(%|×|x\b|px|DPI|色|点|个像素)') { continue }
                     if ($prefix -match '×\s*$') { continue }
+                    # 与通用兜底同一套排除：四位年份 / 端口号不是计数。
+                    if ($suffix -match '^\s*[-/年]' -and $n -ge 1900 -and $n -le 2200) { continue }
+                    if ($prefix -match '[:=]\s*$') { continue }
                     if ($linuxAllowed -notcontains $n) {
                         Write-Host "[sync] stale: $f -- Linux 计数 $n 不在 linux-numbers.txt（$($linuxAllowed -join '/')）：$($line.Trim())"
                         $stale++
@@ -272,13 +294,19 @@ foreach ($f in $docFiles) {
         foreach ($line in ($t -split "`n")) {
             if ($line -notmatch $countKeywords) { continue }
             if ($line -match $exemptMarkers) { continue }
-            foreach ($m in [regex]::Matches($line, '(?<![\w.])(\d{3})(?![\w.])')) {
+            foreach ($m in [regex]::Matches($line, '(?<![\w.])(\d{3,})(?![\w.])')) {
                 $n = [int]$m.Groups[1].Value
                 $suffix = $line.Substring($m.Index + $m.Length)
                 $prefix = $line.Substring(0, $m.Index)
                 # 不是计数：125% / 400×220 / 12px / 1039 色
                 if ($suffix -match '^\s*(%|×|x\b|px|DPI|色|点|个像素)') { continue }
                 if ($prefix -match '×\s*$') { continue }
+                # **四位年份不是计数**：计数跨过 1000 后，`\d{3}` 会漏检，
+                # 放宽到 `\d{3,}` 又会把 `2026-11-02` / `2026 年` 当成计数。
+                # 年份的判别用"紧跟日期分隔符"，不靠数值区间（2030 也能是计数）。
+                if ($suffix -match '^\s*[-/年]' -and $n -ge 1900 -and $n -le 2200) { continue }
+                # 端口 / 显示器号 / 赋值（`DISPLAY=:4321`、`--port=8080`）不是计数。
+                if ($prefix -match '[:=]\s*$') { continue }
                 if ($allowed -notcontains $n) {
                     Write-Host "[sync] stale: $f -- $n 不是当前计数（$($allowed -join '/')）：$($line.Trim())"
                     $stale++
@@ -338,21 +366,28 @@ foreach ($f in $docFiles) {
         param($line)
         $x = $line.Value
         if ($x -match $exempt) { return $x }
-        $x = [regex]::Replace($x, '\b(\d{3})\s*passed\s*/\s*(\d+)\s*failed\s*/\s*(\d+)\s*ignored', { param($m) "$passed passed / $failed failed / $ignored ignored" })
-        $x = [regex]::Replace($x, '\b(\d{3})\s*个测试目标', { param($m) "$targets 个测试目标" })
+        $x = [regex]::Replace($x, '\b(\d{3,})\s*passed\s*/\s*(\d+)\s*failed\s*/\s*(\d+)\s*ignored', { param($m) "$passed passed / $failed failed / $ignored ignored" })
+        $x = [regex]::Replace($x, '\b(\d{3,})\s*个测试目标', { param($m) "$targets 个测试目标" })
         # 另外两种在文档里真实出现、但旧写入路径不认识的写法：
         #   FRAMEWORK: "N 项通过"；STATUS: "与 Windows 的 N/0/M 不同"；ACCEPTANCE: "完整运行 **N passed**"
         # 不加这些，-Check 的通用兜底会报 stale，但 sync 又改不动 → 永远修不好。
-        $x = [regex]::Replace($x, '\b(\d{3})\s*项通过', { param($m) "$passed 项通过" })
-        $x = [regex]::Replace($x, '(与 Windows 的 )(\d{3})/0/(\d+)', { param($m) "$($m.Groups[1].Value)$passed/0/$ignored" })
+        $x = [regex]::Replace($x, '\b(\d{3,})\s*项通过', { param($m) "$passed 项通过" })
+        $x = [regex]::Replace($x, '(与 Windows 的 )(\d{3,})/0/(\d+)', { param($m) "$($m.Groups[1].Value)$passed/0/$ignored" })
         $x = [regex]::Replace($x, '(完整运行[^\n]{0,30}\*\*)(\d+)', { param($m) "$($m.Groups[1].Value)$includePassed" })
+        # **加粗从句**：`**1079 passed / 0 failed**` —— 粗体包住整句时上面"数字在粗体里"的
+        # 规则都匹配不到，-Check 会报 stale 而 sync 改不动（实测卡住）。
+        # 只按**明确短语**替换，避免把同一行的 Windows 计数误改成 include-ignored 口径。
+        $x = [regex]::Replace($x, '(完整运行[^\n]{0,30}?\*\*)(\d{3,})(\s+)passed', { param($m) "$($m.Groups[1].Value)$includePassed$($m.Groups[3].Value)passed" })
+        $x = [regex]::Replace($x, '(默认测试[^\n]{0,20}?\*\*)(\d{3,})(\s+)passed', { param($m) "$($m.Groups[1].Value)$passed$($m.Groups[3].Value)passed" })
+        $x = [regex]::Replace($x, '(\|\s*\cargo test --workspace --offline -- --include-ignored\[^|]*\|\s*\*\*)(\d{3,})(\s+passed)', { param($m) "$($m.Groups[1].Value)$includePassed$($m.Groups[3].Value)" })
+        $x = [regex]::Replace($x, '(\|\s*\--include-ignored\[^|]*\|\s*\*\*)(\d{3,})(\s+passed)', { param($m) "$($m.Groups[1].Value)$includePassed$($m.Groups[3].Value)" })
         $x
     })
-    $t = [regex]::Replace($t, '\*\*(\d{3})\*\*\s*项测试', { param($m) "**$passed** 项测试" })
-    $t = [regex]::Replace($t, '(\d{3})\s*项测试', { param($m) "$passed 项测试" })
+    $t = [regex]::Replace($t, '\*\*(\d{3,})\*\*\s*项测试', { param($m) "**$passed** 项测试" })
+    $t = [regex]::Replace($t, '(\d{3,})\s*项测试', { param($m) "$passed 项测试" })
     # 测试行的加粗数字：只替换数字本身，不动冒号与其他字符
-    $t = [regex]::Replace($t, '(?<=测试[^\n]{0,4})\*\*(\d{3})\*\*', { param($m) "**$passed**" })
-    $t = [regex]::Replace($t, '\*\*(\d{3})\s*测试全绿\*\*', { param($m) "**$passed 测试全绿**" })
+    $t = [regex]::Replace($t, '(?<=测试[^\n]{0,4})\*\*(\d{3,})\*\*', { param($m) "**$passed**" })
+    $t = [regex]::Replace($t, '\*\*(\d{3,})\s*测试全绿\*\*', { param($m) "**$passed 测试全绿**" })
     if ($t -ne $orig) {
         if ($Check) { Write-Host "[sync] OUT OF SYNC: $f"; $stale++ }
         else {

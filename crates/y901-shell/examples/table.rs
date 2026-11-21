@@ -1,4 +1,9 @@
-//! Table 示例：5 行 3 列，选中第 2 行。
+//! Table 示例：**排序 + 虚拟滚动 + 键盘导航**。
+//!
+//! 演示三件事：
+//! 1. 点击表头排序（升 → 降 → 取消，三态循环）；
+//! 2. 2000 行数据下只渲染可见行（滚动时表头固定）；
+//! 3. ↑↓ / Home / End / PageUp / PageDown 键盘选行，滚轮滚动。
 use std::time::Instant;
 use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
@@ -18,7 +23,7 @@ impl Host for H {
     }
 }
 
-fn row(name: &str, size: &str, mtime: &str) -> Vec<String> {
+fn row(name: &str, size: u64, mtime: &str) -> Vec<String> {
     vec![name.to_string(), size.to_string(), mtime.to_string()]
 }
 
@@ -27,28 +32,30 @@ fn build() -> UiTree {
     let bg = theme.style(Role::PANEL, State::Normal).bg;
     let card = theme.style(Role::PANEL, State::Hovered).bg;
 
-    let table = Table::new("files")
+    // 合成 2000 行：足够触发虚拟滚动（200 高的可视区只画 ~7 行）。
+    let mut table = Table::new("files")
         .column(TableColumn::flex("名称"))
         .column(TableColumn::fixed("大小", 96.0).align(y901_ui::Align::End))
-        .column(TableColumn::fixed("修改时间", 150.0))
-        .row(row("screen.png", "1.2 MB", "2026-11-14 09:12"))
-        .row(row("notes.md", "4 KB", "2026-11-13 22:40"))
-        .row(row("setup.exe", "18 MB", "2026-11-10 08:05"))
-        .row(row("diagram.svg", "96 KB", "2026-11-09 17:31"))
-        .row(row("data.csv", "2.4 MB", "2026-11-02 11:58"))
+        .column(TableColumn::fixed("修改时间", 150.0).not_sortable())
         .selected(Some(1))
-        .command(y901_ui::Command::app(
-            "table:select",
-            y901_ui::json::Json::Null,
-        ))
-        .flex_item(FlexItem::height(32.0 + 5.0 * 28.0));
+        .command(Command::app("table:select", y901_ui::json::Json::Null))
+        .sort_command(Command::app("table:sort", y901_ui::json::Json::Null))
+        .flex_item(FlexItem::fill());
+    let mut rows = Vec::with_capacity(2000);
+    for i in 0..2000u64 {
+        let name = format!("file-{i:04}.dat");
+        let size = (i * 7919 % 100_000) + 12;
+        let mtime = format!("2026-11-{:02} 09:{:02}", (i % 28) + 1, i % 60);
+        rows.push(row(&name, size, &mtime));
+    }
+    table.set_rows(rows);
 
     let root = Flex::column("root")
         .background(bg)
         .padding(Edges::all(24.0))
-        .gap(16.0)
+        .gap(12.0)
         .push(Box::new(
-            y901_widgets::TextLabel::new("title", "文件").size(20.0),
+            y901_widgets::TextLabel::new("title", "文件（2000 行 · 点表头排序）").size(18.0),
         ))
         .push(Box::new(
             Flex::column("card")
@@ -65,7 +72,7 @@ fn main() -> Result<(), String> {
         Box::new(build),
         Options {
             width: 640,
-            height: 320,
+            height: 420,
             ..Default::default()
         },
     )

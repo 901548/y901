@@ -1,4 +1,4 @@
-//! Checkbox：方框 + 标签，点击或 Space 切换。
+﻿//! Checkbox：方框 + 标签，点击或 Space 切换。
 //!
 //! 视觉：左侧 16×16 圆角方框（半径 2，边框 2px），选中时框内画 V 形对勾；
 //! 右侧 8px 间距后接标签文字，垂直居中。
@@ -204,6 +204,7 @@ impl Widget for Checkbox {
             .value(self.checked.to_string())
             .action("toggle")
             .prop("checked", self.checked.to_string())
+            .checked(self.checked)
     }
 }
 

@@ -1,4 +1,4 @@
-//! Slider：水平轨道 + 圆形滑块。
+﻿//! Slider：水平轨道 + 圆形滑块。
 //!
 //! 交互：点击轨道跳转、按住滑块拖动、左右键微调（步进 0.05）。
 //! 滑块中心允许超出轨道两端半个滑块宽度 —— 这是滑块的常规观感（0 与 1 位置更易命中）。
@@ -284,6 +284,9 @@ impl Widget for Slider {
             .value(format!("{:.2}", self.value))
             .action("set")
             .prop("value", format!("{:.2}", self.value))
+            // 滑杆的 value 是 0..=1 的比例，因此范围固定，步进取 0.01。
+            .value_range(0.0, 1.0)
+            .value_step(0.01)
     }
 }
 

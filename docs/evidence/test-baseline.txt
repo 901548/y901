@@ -66,4 +66,7 @@
 #   新增 `crates/y901`（单一入口：re-export 全部子 crate + prelude + create_runtime）：
 #   3 条入口契约用例（create_runtime 可构造可析构 / prelude 类型身份 / 模块别名同一 crate）
 #   + 1 条 doctest ⇒ 二进制 137 → 138，目标数 151 → 153（lib unittests 与 doctests 各算一条）。
-993
+# Measured at 2026-11-21 (S1: Table v2 排序/虚拟滚动/键盘 + NumberInput + MenuBar + Semantics a11y 字段):
+#   default cargo test --workspace --no-fail-fast   passed 1018, failed 0, ignored 61
+#   (新增：Table 重写 12 条（含排序/虚拟化/键盘/超长表上限）、NumberInput 8 条、MenuBar 5 条)
+1018

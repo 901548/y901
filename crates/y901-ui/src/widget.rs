@@ -1229,6 +1229,11 @@ pub struct Semantics {
     pub label: String,
     /// 当前值的字符串形式（外部工具直接消费，不做类型推断）。
     pub value: String,
+    /// **补充说明**（无障碍的 accessible description）：比 label 更长的解释。
+    ///
+    /// 为什么与 `prop("description", …)` 不同：它是**一等字段**，
+    /// 因为屏幕阅读器的"名称/描述"是两个独立槽位，不是自定义属性。
+    pub description: String,
     /// 角色（query 用；由框架在遍历时从 Widget::role() 自动注入）。
     pub role: Role,
     /// 该节点支持的动作名，例如 ["click", "set_text"]。
@@ -1247,6 +1252,48 @@ pub struct Semantics {
     pub focused: bool,
     /// 结构化状态：外部工具直接消费。
     pub state: crate::json::Json,
+    // ---------------------------------------------------------------- 无障碍字段
+    /// 展开状态（`Some(false)` 才有意义；折叠/展开控件必须报）。
+    pub expanded: Option<bool>,
+    /// 勾选状态（三态控件用 `Some(false)` + `props["mixed"]="true"`）。
+    pub checked: Option<bool>,
+    /// 选中状态（列表/表格行/标签页）。
+    pub selected: Option<bool>,
+    /// 层级（标题、树节点；1 = 第一级）。
+    pub level: Option<u32>,
+    /// 值范围 `(min, max)`：滑杆/数值输入必须报，否则屏幕阅读器说不出"3 / 100"。
+    pub value_range: Option<(f64, f64)>,
+    /// 值步进（滑杆/数值输入的 ↑↓ 粒度）。
+    pub value_step: Option<f64>,
+    /// 该节点的名称由哪些节点的文本决定（accessible name from other elements）。
+    pub labelled_by: Vec<String>,
+    /// 该节点的描述由哪些节点决定。
+    pub described_by: Vec<String>,
+    /// 实时区域：内容变化时是否要主动播报（错误提示/进度/日志）。
+    pub live: LiveRegion,
+}
+
+/// 无障碍"实时区域"级别（对应 ARIA `aria-live`）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LiveRegion {
+    /// 不主动播报（默认）。
+    #[default]
+    Off,
+    /// 空闲时播报（进度、状态栏）。
+    Polite,
+    /// 立即播报（错误、告警）。
+    Assertive,
+}
+
+impl LiveRegion {
+    /// 稳定的字符串形式（进 JSON / 属性表用）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LiveRegion::Off => "off",
+            LiveRegion::Polite => "polite",
+            LiveRegion::Assertive => "assertive",
+        }
+    }
 }
 
 impl Default for Semantics {
@@ -1254,6 +1301,7 @@ impl Default for Semantics {
         Self {
             label: String::new(),
             value: String::new(),
+            description: String::new(),
             role: Role(""),
             actions: Vec::new(),
             props: Vec::new(),
@@ -1263,6 +1311,15 @@ impl Default for Semantics {
             sensitive: false,
             focused: false,
             state: crate::json::Json::Null,
+            expanded: None,
+            checked: None,
+            selected: None,
+            level: None,
+            value_range: None,
+            value_step: None,
+            labelled_by: Vec::new(),
+            described_by: Vec::new(),
+            live: LiveRegion::Off,
         }
     }
 }
@@ -1277,6 +1334,70 @@ impl Semantics {
     /// 设置当前值。
     pub fn value(mut self, value: impl Into<String>) -> Self {
         self.value = value.into();
+        self
+    }
+
+    /// 设置**补充说明**（无障碍 accessible description）。
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into();
+        self
+    }
+
+    /// 报展开状态（折叠面板 / 下拉框 / 树节点）。
+    pub fn expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
+        self
+    }
+
+    /// 报勾选状态（复选框 / 开关）。
+    pub fn checked(mut self, checked: bool) -> Self {
+        self.checked = Some(checked);
+        self
+    }
+
+    /// 报选中状态（列表项 / 表格行 / 标签页）。
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = Some(selected);
+        self
+    }
+
+    /// 报层级（标题 / 树节点；`1` = 第一级）。
+    pub fn level(mut self, level: u32) -> Self {
+        self.level = Some(level);
+        self
+    }
+
+    /// 报值范围与步进（滑杆 / 数值输入）。
+    pub fn value_range(mut self, min: f64, max: f64) -> Self {
+        if min.is_finite() && max.is_finite() && min <= max {
+            self.value_range = Some((min, max));
+        }
+        self
+    }
+
+    /// 报值步进。
+    pub fn value_step(mut self, step: f64) -> Self {
+        if step.is_finite() && step > 0.0 {
+            self.value_step = Some(step);
+        }
+        self
+    }
+
+    /// 名称来自哪些节点（例如 `<label for>` 的等价物）。
+    pub fn labelled_by(mut self, id: impl Into<String>) -> Self {
+        self.labelled_by.push(id.into());
+        self
+    }
+
+    /// 描述来自哪些节点。
+    pub fn described_by(mut self, id: impl Into<String>) -> Self {
+        self.described_by.push(id.into());
+        self
+    }
+
+    /// 标注实时区域（内容变化时是否主动播报）。
+    pub fn live(mut self, live: LiveRegion) -> Self {
+        self.live = live;
         self
     }
 

@@ -3189,11 +3189,37 @@ pub fn hash_semantics(role: Role, sem: &crate::widget::Semantics) -> u64 {
     feed(role.as_str().as_bytes());
     feed(sem.label.as_bytes());
     feed(sem.value.as_bytes());
+    feed(sem.description.as_bytes());
     feed(&u64::from(sem.disabled).to_le_bytes());
     feed(&u64::from(sem.sensitive).to_le_bytes());
     feed(&u64::from(sem.focused).to_le_bytes());
     feed(&u64::from(sem.exposed_to_ai).to_le_bytes());
     feed(sem.state.to_string().as_bytes());
+    // **无障碍状态必须进哈希**：否则"复选框从未勾选变成勾选"不会触发语义失效，
+    // 屏幕阅读器就读不到状态变化（这是 a11y 桥最典型的静默 bug）。
+    for flag in [sem.expanded, sem.checked, sem.selected] {
+        feed(&[match flag {
+            None => 0u8,
+            Some(false) => 1,
+            Some(true) => 2,
+        }]);
+    }
+    feed(&sem.level.unwrap_or(u32::MAX).to_le_bytes());
+    match sem.value_range {
+        Some((min, max)) => {
+            feed(&min.to_le_bytes());
+            feed(&max.to_le_bytes());
+        }
+        None => feed(&0u64.to_le_bytes()),
+    }
+    feed(&sem.value_step.unwrap_or(f64::NAN).to_le_bytes());
+    for id in &sem.labelled_by {
+        feed(id.as_bytes());
+    }
+    for id in &sem.described_by {
+        feed(id.as_bytes());
+    }
+    feed(sem.live.as_str().as_bytes());
     for action in &sem.actions {
         feed(action.name.as_bytes());
         // InputKind 是 4 值枚举，u8 足够；不是截断

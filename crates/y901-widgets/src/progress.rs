@@ -1,4 +1,4 @@
-//! ProgressBar：只读进度条。
+﻿//! ProgressBar：只读进度条。
 //!
 //! 视觉：轨道（背景色，圆角 4px，高 8px）+ 进度条（主题色，宽度 = value × 轨道宽度）。
 //! 无交互。`value` 越界时 **clamp** 到 `0..=1`，不 panic、不外溢。
@@ -144,6 +144,9 @@ impl Widget for ProgressBar {
             .label(format!("progress {}", self.id))
             .value(format!("{:.2}", self.value))
             .prop("value", format!("{:.2}", self.value))
+            // 进度是后台信息：空闲时播报即可。
+            .live(y901_ui::LiveRegion::Polite)
+            .value_range(0.0, 1.0)
     }
 }
 

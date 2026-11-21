@@ -34,6 +34,8 @@ pub mod image;
 pub mod label;
 pub mod list;
 pub mod list_view;
+pub mod menu_bar;
+pub mod number_input;
 pub mod overlay;
 pub mod popover;
 pub mod progress;
@@ -94,9 +96,11 @@ pub(crate) fn command_with_args(
 pub use alert::{Alert, AlertKind};
 pub use empty_state::EmptyState;
 pub use error_state::ErrorState;
+pub use menu_bar::{MenuBar, MenuEntry};
+pub use number_input::NumberInput;
 pub use spinner::Spinner;
 pub use switch::Switch;
-pub use table::{Table, TableColumn};
+pub use table::{SortOrder, Table, TableColumn};
 /// 常用控件的 glob 导入入口：`use y901_widgets::prelude::*;`。
 ///
 /// 为什么单独一个 prelude 而不是让用户 `use y901_widgets::*`：

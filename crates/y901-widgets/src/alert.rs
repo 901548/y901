@@ -1,4 +1,4 @@
-//! Alert：四种类型的瞬时提示条（**最小版**）。
+﻿//! Alert：四种类型的瞬时提示条（**最小版**）。
 //!
 //! 刻意不做：队列、自动消失、堆叠、多条合并 —— 那是一个"通知系统"，
 //! 不是单个组件（需要定时器、去重、最大同屏数、悬停暂停）。本组件只负责**画一条**，
@@ -244,9 +244,11 @@ impl Widget for Alert {
             .label(format!("alert {}", self.id))
             .value(self.title.clone())
             .prop("kind", self.kind.as_str())
+            // 告警是"打断式"内容：屏幕阅读器应立即播报（ARIA assertive）。
+            .live(y901_ui::LiveRegion::Assertive)
             .action("dismiss");
         if let Some(d) = self.description.as_ref() {
-            s = s.prop("description", d.clone());
+            s = s.description(d.clone());
         }
         s
     }
