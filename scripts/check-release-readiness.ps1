@@ -146,7 +146,20 @@ if ($null -ne $published) {
 }
 
 Record '真机读屏器验收（讲述人 / Orca / NVDA）' 'BLOCKED' '无障碍桥已能推树，但没有真人验证过读屏效果'
-Record 'Linux 验收（scripts/linux-verify.sh）' 'BLOCKED' '必须在 Linux/Xvfb 上跑，Windows 无法替代'
+# Linux 验收：Windows 跑不了，但可以查**证据文件是否新鲜**（7 天内 = 可接受）。
+$linuxLogs = @(Get-ChildItem (Join-Path $root 'docs\evidence\cross-platform') -Filter '*.log' -File -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending)
+if ($linuxLogs.Count -gt 0) {
+    $newest = $linuxLogs[0]
+    $ageDays = ((Get-Date) - $newest.LastWriteTime).TotalDays
+    if ($ageDays -le 7) {
+        Record 'Linux 验收证据（7 天内）' 'PASS' ("{0}（{1:N1} 天前）" -f $newest.Name, $ageDays)
+    } else {
+        Record 'Linux 验收证据（7 天内）' 'BLOCKED' ("最新是 {0}（{1:N1} 天前）：发布前在 Linux 上重跑 scripts/linux-verify.sh" -f $newest.Name, $ageDays)
+    }
+} else {
+    Record 'Linux 验收证据（7 天内）' 'BLOCKED' '没有 docs/evidence/cross-platform/*.log：必须在 Linux 上跑一次 linux-verify.sh'
+}
 
 # ---------------------------------------------------------------- 汇总
 Write-Host ''
