@@ -244,7 +244,8 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
    **`soft.rs` 纹理复制已修**：改为分片借用，每帧分配 **0 次 / 0 字节**（修前 4 MiB/帧）。
 3. ~~`#19` 31 处 `#[allow(dead_code)]` 未定性~~ —— **已处理**：29 处加了归类注释
    （诊断 API 13 / 测试 API 4 / 内部实现与编译见证 12），**2 处真死代码已删除**。
-4. `cargo update` 会顺带升级 3 个依赖且需联网，`Cargo.lock` 里 `serial` 残留未清（已记录在 `DEPENDENCIES.md`）。
+4. ~~`cargo update` 会顺带升级 3 个依赖且需联网，`Cargo.lock` 里 `serial` 残留未清~~
+   —— **已清**：`portable-pty` 升 0.9 后 `serial*` / `termios` / `ioctl-rs` 全部移出。
 5. audit 依赖联网刷新指南库；离线时结论带 `STALE AUDIT` 标记，**不算发布门禁**。
 
 ## #18 tree.rs 测量结果（本轮）
@@ -497,7 +498,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 
 - **P0 = 0**
 - **P1 = 1**：P1-03 x11 `EnvGuard`（需 WSL，Windows 宿主无法编译验证）
-- **P2 = 1**：`serial` lock 残留（需联网）；其余已修（ignore 计数同步、Guide 编号）或接受（miniz_oxide 上游约束）
+- **P2 = 0**：`serial` 残留已清（`portable-pty` 0.9）；其余已修（ignore 计数同步、Guide 编号）或接受（miniz_oxide 上游约束）
 - **P3 = 4**（设计取舍 / 旧项失效）
 - 数字由 `scripts/sync-doc-numbers.ps1` 生成，并由 gate 的 `-Check` 步骤拦截漂移
 - 历史审查报告：[`docs/archive/reviews/audit-v0.1.15.md`](archive/reviews/audit-v0.1.15.md)；后续 v0.1.17 档案见 [`docs/archive/reviews/audit-v0.1.17-final.md`](archive/reviews/audit-v0.1.17-final.md)。这些报告仅供历史追溯，不代表当前项目状态。
@@ -506,6 +507,8 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 
 - **P2-01 `serial`**：**描述更正** —— 它是 `portable-pty 0.8.1` 的**必选依赖**，不是 lock 残留；
   `cargo update --workspace` 归零个包，`cargo generate-lockfile` 也不会删它。需升级 `portable-pty` 到 0.9 才能去掉（未做，需验证 API）。
+  **2026-11-22 已做**：升到 `portable-pty 0.9.0`，`serial*` / `termios` / `ioctl-rs` / `memoffset 0.6.5` 全部移出，
+  `nix` 0.25 → 0.28；`cargo audit` 的 allowed warning 7 → 6。PTY API 与本仓用量兼容，双平台测试通过。
 - **P1-03 x11 EnvGuard**：代码已修，**双平台编译通过**；WSL 里 `Xvfb :99` 启动成功，
   单测 `handshake_reports_screen_and_visual` **通过**；但 **13 个用例并行跑时全部卡住**（>600s 超时），
   尚未定位是 `SERVER_LOCK` 互斥、基准耗时过长，还是某个用例等事件不返回。
