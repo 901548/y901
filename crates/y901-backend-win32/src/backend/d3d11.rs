@@ -2726,6 +2726,19 @@ impl Gfx {
             self.snapshot_requested = false;
         }
 
+        // **无头模式**：渲染与回读照常做，但**不 Present**。
+        //
+        // 为什么需要它：CI 的 Windows runner 没有 GPU，只能走 WARP 软件设备；
+        // 而 WARP 在这里的 `Present` 会返回 `DXGI_ERROR_DEVICE_REMOVED`（实测
+        // 0x887A0005），把整条渲染路径判成失败 —— 尽管**像素已经在 present 之前
+        // 回读好了**（上一段的 `read_back_frame`）。于是所有 GPU 用例只能 SKIP。
+        //
+        // 这个开关只给测试/CI 用：生产路径永远走真正的 Present，因为应用需要上屏。
+        // 命名与 `Y901_SIMULATE_PRESENT_FAIL` 同一套约定（显式环境变量、OnceLock 缓存）。
+        if headless_present_skipped() {
+            return 0; // S_OK：本帧"已呈现"给回读，不呈现给屏幕
+        }
+
         swap_chain.present(sync_interval)
     }
 
@@ -2759,15 +2772,27 @@ impl Gfx {
     /// `D3D11_USAGE_STAGING` + `CPU_ACCESS_READ`。
     /// 违反后果：`Present` 之后回读拿到空帧或上一帧；staging 配置错误时 `Map` 返回 null（本函数返回 `None`）。
     unsafe fn read_back_frame(&self) -> Option<(Vec<u8>, u32, u32)> {
+        let debug = std::env::var_os("Y901_SNAPSHOT_DEBUG").is_some();
         let (Some(device), Some(context), Some(swap_chain)) = (
             self.device.as_ref(),
             self.context.as_ref(),
             self.swap_chain.as_ref(),
         ) else {
+            if debug {
+                eprintln!("[snapshot-debug] device/context/swap_chain 缺失");
+            }
             return None;
         };
         let (w, h) = (self.width.max(1), self.height.max(1));
-        let backbuffer = swap_chain.back_buffer(0).ok()?;
+        let backbuffer = match swap_chain.back_buffer(0) {
+            Ok(b) => b,
+            Err(e) => {
+                if debug {
+                    eprintln!("[snapshot-debug] back_buffer(0) 失败: {e}");
+                }
+                return None;
+            }
+        };
         let desc = Texture2DDesc {
             width: w,
             height: h,
@@ -2783,9 +2808,25 @@ impl Gfx {
             cpu_access_flags: D3D11_CPU_ACCESS_READ,
             misc_flags: 0,
         };
-        let staging = device.create_texture_2d_empty(&desc).ok()?;
+        let staging = match device.create_texture_2d_empty(&desc) {
+            Ok(t) => t,
+            Err(e) => {
+                if debug {
+                    eprintln!("[snapshot-debug] staging 纹理创建失败: {e}");
+                }
+                return None;
+            }
+        };
         context.copy_resource(staging.as_ptr(), backbuffer.as_ptr());
-        let mapped = context.map_read(&staging)?;
+        let mapped = match context.map_read(&staging) {
+            Some(m) => m,
+            None => {
+                if debug {
+                    eprintln!("[snapshot-debug] Map 失败（staging -> CPU）");
+                }
+                return None;
+            }
+        };
         let pitch = mapped.row_pitch as usize;
         let row_bytes = (w as usize) * 4;
         let base = mapped.data as *const u8;
@@ -2994,6 +3035,39 @@ impl Gfx {
     }
 }
 
+/// 是否**跳过 Present**（无头模式）。
+///
+/// 只给测试/CI 用：`Y901_HEADLESS=1` 时渲染与像素回读照常执行、只是不上屏。
+/// 配合 [`force_warp`] 使用，就能在**没有 GPU 的 CI runner** 上真跑 GPU 用例
+/// （WARP 的 `Present` 会返回 `DXGI_ERROR_DEVICE_REMOVED`，但快照在它之前就回读完了）。
+///
+/// 生产环境**永远**不要设这个变量：跳过 Present 意味着窗口不会更新。
+fn headless_present_skipped() -> bool {
+    static HEADLESS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HEADLESS.get_or_init(|| {
+        matches!(
+            std::env::var("Y901_HEADLESS").as_deref(),
+            Ok("1") | Ok("true") | Ok("yes")
+        )
+    })
+}
+
+/// 是否**强制**走 WARP（软件光栅器）设备。
+///
+/// 为什么要有这个开关：GitHub 的 `windows-latest` runner 没有真实 GPU，于是
+/// 所有 D3D 探针只能 `SKIP`，`gate.ps1` 还得用 `-SkipGpu` 才能绿 ——
+/// 结果是**渲染路径在 CI 里从来没有被执行过**。
+///
+/// WARP 是微软的 D3D11 参考软件光栅器；只要它能建出交换链并回读像素，
+/// 那些"必须真机"的用例就能在 CI 里真跑。设 `Y901_D3D_WARP=1` 即强制它，
+/// 本机也能用同一条路径复现 CI 结果（否则本机会先命中真实硬件）。
+fn force_warp() -> bool {
+    matches!(
+        std::env::var("Y901_D3D_WARP").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
 /// # Safety
 ///
 /// 只在**拥有该 HWND 的线程**上、且 `Gfx` 已完成初始化后调用：
@@ -3033,7 +3107,15 @@ unsafe fn create_device_and_swap_chain(
         D3D_FEATURE_LEVEL_10_0,
     ];
 
-    for driver_type in [D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP] {
+    let driver_types: &[u32] = if force_warp() {
+        // 强制软件设备：CI 的 windows runner 没有真实 GPU，而 WARP 是 D3D11 的
+        // 参考光栅器。能跑通就意味着 **GPU 用例不必再被 `-SkipGpu` 整体跳过**。
+        &[D3D_DRIVER_TYPE_WARP]
+    } else {
+        &[D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP]
+    };
+
+    for &driver_type in driver_types {
         let mut device: *mut c_void = null_mut();
         let mut context: *mut c_void = null_mut();
         let mut swap_chain: *mut c_void = null_mut();
