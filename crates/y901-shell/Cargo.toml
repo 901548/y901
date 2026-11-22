@@ -49,3 +49,10 @@ crate-type = ["cdylib", "rlib"]
 [[example]]
 name = "shell_hello"
 path = "examples/hello.rs"
+
+[features]
+default = []
+# 转发到平台后端的无障碍桥（Windows UIA / Linux AT-SPI）。
+# 为什么要在 shell 转发：示例与用户应用都从 `create_runtime()` 走，
+# 只有一路转发特征，普通用户才不用直接依赖 `y901-backend-*`。
+a11y = ["y901-backend-win32/a11y", "y901-backend-x11/a11y"]

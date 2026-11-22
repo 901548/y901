@@ -414,7 +414,10 @@ Web 不能走 AccessKit（读屏器只认 DOM），所以另开一条路：
   "not found in module"——类型（`Document`/`Element`）能解析、函数不能，很容易误判成
   模块不可见。新增绑定后必须同步 `bindings_golden` 的 `EXPECTED_JS_NAMES` 与
   `structural` 计数。
-- **仍未做**：真机读屏器验收（讲述人 / Orca / NVDA+浏览器）；焦点代理。
+- **仍未做**：真机读屏器验收的**执行**（讲述人 / Orca / NVDA+浏览器）；焦点代理。
+  验收材料已备好：[`docs/A11Y_ACCEPTANCE.md`](A11Y_ACCEPTANCE.md)（20 项清单 + 记录表）
+  与演示页 `crates/y901-shell/examples/a11y_demo.rs`（`--features a11y` 运行）；
+  `y901-shell` 与 facade 都已转发 `a11y` feature，用户不必直接依赖后端 crate。
 
 ### S4（2026-11-21）：0.3.0 收敛完成（除授权项）
 

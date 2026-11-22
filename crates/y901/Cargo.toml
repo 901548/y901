@@ -44,4 +44,4 @@ version = "0.3.0"
 [features]
 # 无障碍桥（AccessKit 映射层）。默认关：不需要 a11y 的应用不拉 accesskit 依赖。
 # 打开后可直接用 y901::a11y::to_tree_update(tree.snapshot())。
-a11y = ["dep:y901-a11y"]
+a11y = ["dep:y901-a11y", "y901-shell/a11y"]

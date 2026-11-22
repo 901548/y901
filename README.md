@@ -107,6 +107,7 @@ y901-shell           app shell: create_runtime() + clipboard + secrets + screens
 - [docs/QUICKSTART.md](docs/QUICKSTART.md) — install, first window, next steps
 - [docs/PLATFORMS.md](docs/PLATFORMS.md) — support tiers and out-of-scope platforms
 - [docs/ROADMAP.md](docs/ROADMAP.md) — plan for shaping, accessibility, API stability, components
+- [docs/A11Y_ACCEPTANCE.md](docs/A11Y_ACCEPTANCE.md) — 10-minute screen-reader acceptance checklist (needs a human)
 - [docs/STATUS.md](docs/STATUS.md) — current state, gates and evidence (Chinese)
 - [docs/FRAMEWORK.md](docs/FRAMEWORK.md) — architecture, component model, rendering contract (Chinese)
 - [docs/CRATES_IO.md](docs/CRATES_IO.md) — release process and pitfalls (Chinese)
