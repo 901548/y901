@@ -65,14 +65,15 @@ cargo run -p y901-shell --example alert         # four alert variants
 
 ## Known limitations
 
-- **International text and complex layout: not supported (hard boundary).** The text
-  pipeline looks up one cmap glyph per character and lays it out on the monospace cell
-  grid. There is **no HarfBuzz-equivalent shaping engine**: Arabic/Hebrew joining and RTL,
-  Indic reordering, complex ligatures (GSUB/GPOS), kerning, variable fonts
-  (`fvar`/named instances), font fallback chains and bidirectional text are **not
-  implemented**. CJK renders because Han/Kana/Hangul mostly fit the "one wide glyph per
-  two cells" contract — that is not complex-text support. Applications that need those
-  features should not use Y901.
+- **International text: partial, opt-in.** The default build keeps the original cell
+  pipeline — one cmap glyph per character, laid out on the monospace cell grid. The
+  `shaping` feature (off by default) adds a rustybuzz shaping pass, Unicode bidi
+  (P2/P3 direction + visual reordering), grapheme-cluster segmentation and a platform
+  fallback font chain (Windows: Segoe UI/Tahoma/YaHei/SimSun/Nirmala; Linux: DejaVu/Noto).
+  Still **not** implemented: hyphenation, justification, kinsoku line breaking, emoji ZWJ
+  sequence handling, per-run multi-face splitting, and any real-word validation of complex
+  scripts. CJK renders because Han/Kana/Hangul mostly fit the "one wide glyph per two
+  cells" contract — that is not full complex-text support.
 - **Accessibility: semantics tree + AccessKit bridge.** `Widget::semantics` exposes roles,
   labels, values, actions and state; the optional `y901-a11y` crate (facade feature `a11y`)
   maps that to AccessKit, with Windows UIA and Linux AT-SPI adapters behind features.
@@ -86,15 +87,16 @@ cargo run -p y901-shell --example alert         # four alert variants
 - **0.x API.** Breaking changes bump the minor version (0.3.0, 0.4.0 …) and ship migration
   notes in `docs/RELEASE_NOTES_v*.md`; published version numbers are never reused.
 
-## Repository layout (11 crates)
+## Repository layout (12 crates)
 
 ```
 y901                 single entry point: re-exports + prelude + create_runtime()
 y901-core            pure logic: terminal grid / cell widths / intervals
 y901-ui              framework: Widget / UiTree / layout / events / theme / animation / semantics
+y901-a11y            semantics -> AccessKit bridge (Windows UIA / Linux AT-SPI, behind features)
 y901-widgets         widgets: Button / Table / Alert / Switch / ...
 y901-extras          subsystem widgets: TerminalWidget (grid + VT + PTY)
-y901-render          software rasterizer + in-house TTF engine + atlas
+y901-render          software rasterizer + in-house TTF engine + atlas + text shaping
 y901-runtime         platform-agnostic contracts: Host / PlatformRuntime / frames / fonts
 y901-backend-win32   Win32 + D3D11 + DirectWrite + IME + DPI
 y901-backend-x11     X11 backend (Xvfb + real-server spot checks)
@@ -115,6 +117,19 @@ y901-shell           app shell: create_runtime() + clipboard + secrets + screens
 
 Internal design documents are written in Chinese; public entry points (README, quick start,
 platform matrix) are in English.
+
+## Reporting problems
+
+This is a 0.x project with no support SLA, but reports are welcome and read:
+
+- **Bugs / feature requests** — open an issue at
+  <https://github.com/901548/y901/issues>. Templates are provided; please include the
+  `y901` version, OS/backend (Win32 / X11 / Web) and a minimal reproduction.
+- **Security issues** — do **not** open a public issue. Use the repository's
+  **Security → Report a vulnerability** tab (see [SECURITY.md](SECURITY.md)). If that tab
+  is not available to you, open an issue titled `[SECURITY]` with no details and you will
+  be contacted privately.
+- **Usage questions** — same issue tracker, `question` label.
 
 ## Contributing
 

@@ -9,8 +9,11 @@ Y901 目前处于 **0.x 实验阶段**。安全修复只保证打在**最新发�
 
 **请不要开公开 issue。** 用 GitHub 的私密渠道：
 
-- 邮箱/私密报告：在 https://github.com/901548 页面通过仓库的
-  **Security → Report a vulnerability** 提交（GitHub Private Vulnerability Reporting）。
+- 私密报告：在 https://github.com/901548/y901 的 **Security → Report a vulnerability**
+  提交（GitHub Private Vulnerability Reporting）。
+- **兜底**：若该入口对你不可见（维护者可能尚未在仓库设置里开启），请开一个标题为
+  `[SECURITY]`、正文不含漏洞细节的 issue，维护者会用私密渠道联系你。
+  目前仓库未公开邮箱，因此 issue 是唯一兜底通道。
 
 报告里请包含：
 
@@ -35,4 +38,4 @@ Y901 目前处于 **0.x 实验阶段**。安全修复只保证打在**最新发�
 - 每次 CI 都跑 `cargo audit`（`rustsec/audit-check`），0 漏洞才算绿；
 - 零 C/C++ 依赖守卫：`crates/y901-shell/tests/no_c_deps.rs`（黑名单 crate +
   `-sys` 白名单 + `build.rs` 源码扫描），CI 与本地门禁都会跑；
-- 发布前用 `scripts/check-packaging.ps1` 校验 11 个 crate 的打包产物。
+- 发布前用 `scripts/check-packaging.ps1` 校验 12 个 crate 的打包产物。

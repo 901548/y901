@@ -74,15 +74,16 @@ cargo run -p y901-shell --example alert           # 四种 Alert
 > 都在应用壳 crate 里（`crates/y901-shell/examples/`）。`cargo run --example static_page`
 > 不带 `-p` 只会找 `y901` 自己的 examples。
 
-## 仓库结构（11 个 crate）
+## 仓库结构（12 个 crate）
 
 ```
 y901                 单一入口：re-export 全部子 crate + prelude + create_runtime()
 y901-core            纯逻辑：终端 Grid / 格宽 / 区间
 y901-ui              框架：Widget / UiTree / 布局 / 事件 / 主题 / 动画 / 语义树
+y901-a11y            语义树 → AccessKit 桥（Windows UIA / Linux AT-SPI，feature 后）
 y901-widgets         组件：Button / Table / Alert / Switch / ...
 y901-extras          扩展：TerminalWidget（Grid + VT + PTY）
-y901-render          软光栅器（SoftBackend）+ 自研 TTF 字形引擎 + 图集
+y901-render          软光栅器 + 自研 TTF 字形引擎 + 图集 + 文本 shaping
 y901-runtime         平台无关契约：Host / PlatformRuntime / 帧 / 字体配置
 y901-backend-win32   Win32 + D3D11 + DirectWrite + IME + DPI
 y901-backend-x11     X11 后端（Xvfb 下验证）
@@ -92,11 +93,13 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 
 ## 已知限制
 
-- **国际文字与复杂排版：明确不支持（边界声明）**。文本管线是“逐字符查 cmap 字形 + 等宽 cell”，
-  **没有 HarfBuzz 等价的 shaping 引擎**：阿拉伯语/希伯来语的连写与 RTL、印度语系的字形重组与
-  重排序、复杂连字（GSUB/GPOS）、kerning、可变字体（`fvar`/命名实例）、字体回退链、双向文本
-  （bidi）均**未实现**。CJK 能正常显示，是因为汉字/假名/谚文大多能落进“整字 2 格、宽 1 em”
-  的等宽格契约，**不代表支持复杂排版**。依赖上述能力的应用不应选用 Y901。
+- **国际文字：部分支持，需显式开启**。默认构建仍是原来的 cell 管线（逐字符查 cmap 字形 +
+  等宽格排布）。`shaping` feature（默认关）才加入 rustybuzz shaping、Unicode 双向文本
+  （P2/P3 方向判定 + 视觉重排）、字素簇切分与平台回退字体链（Windows：Segoe UI/Tahoma/
+  YaHei/SimSun/Nirmala；Linux：DejaVu/Noto 等）。**仍未做**：连字符断词、两端对齐、
+  避头尾标点、emoji ZWJ 序列、按 run 切多字体面，以及任何真实语料上的复杂文种验证。
+  CJK 能正常显示，是因为汉字/假名/谚文大多能落进“整字 2 格、宽 1 em”的等宽格契约，
+  **不代表已支持完整复杂排版**。
 - **无障碍：语义树 + AccessKit 桥**。`Widget::semantics` 已是完整语义模型，另有可选的 `y901-a11y` crate（facade 的 `a11y` feature）把它映射成 AccessKit，平台适配器 Windows UIA / Linux AT-SPI 都在 feature 后。**尚未做**：后端自动接线与读屏器验收。
 - **macOS 与 Wayland 后端未实现**；Wayland 用户走 XWayland。
 - **Web 后端是 Tier 3**：单 canvas、整帧 `putImageData`、隐藏 `<input>` 承接 IME（候选窗不可钉位）、
@@ -110,6 +113,17 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
   `StartInstanceLocation`），回归用例 `crates/y901-backend-win32/tests/grid_image_gpu.rs`。
 - **API 仍是 0.x 语义**：破坏性变更会升 minor（0.3.0…）并在
   `docs/RELEASE_NOTES_v*.md` 里给迁移说明；已发布的版本号不会被复用。
+
+## 反馈与问题报告
+
+0.x 项目不承诺响应时间，但报告都会被看：
+
+- **Bug / 功能请求** —— 在 <https://github.com/901548/y901/issues> 开 issue（有模板）；
+  请附上 `y901` 版本、系统与后端（Win32 / X11 / Web）、最小复现。
+- **安全问题** —— **不要开公开 issue**。走仓库的 **Security → Report a vulnerability**
+  （见 [SECURITY.md](SECURITY.md)）；若你看不到该入口，请开一个标题为 `[SECURITY]`
+  且不含细节的 issue，我会私下联系你。
+- **使用问题** —— 同上 issue 区，打 `question` 标签。
 
 ## 构建与测试
 
