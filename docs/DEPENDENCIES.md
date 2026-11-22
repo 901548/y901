@@ -30,7 +30,7 @@
 
 **当前结论：选 A（接受风险）**。理由：攻击面是本机系统字体；且 B 有明确退路，随时可切换。
 
-## `serial 0.4.0` —— unmaintained（lock 残留）
+## `serial 0.4.0` —— unmaintained（**已清除**，见本节末）
 
 **状态**：`RUSTSEC-2017-0008`，2017 年起无人维护。
 
@@ -55,6 +55,11 @@
 
 **当前结论**：`serial` 只是审计输出里的噪声，**不属于任何会被编译的 crate**；
 本轮**不强行清除**，因为 `cargo update` 会顺带升级 3 个依赖且需要联网下载，与"离线可复现"冲突。
+
+> **2026-11-22 更新：已清除**。上面的"不可达残留"判断后来被证伪（它是 `portable-pty 0.8` 的必选依赖），
+> 本轮把 `portable-pty` 升到 `0.9.0`：`serial*` / `termios` / `ioctl-rs` / `memoffset 0.6.5` 全部移出，
+> 换成 `serial2`，`nix` 0.25 → 0.28。`cargo audit` 的 allowed warning 从 7 条降到 6 条。
+> 详见文末「`serial 0.4.0` —— 已清除」一节。
 
 ## `rustybuzz 0.20.1` —— unmaintained（shaping feature 才引入）
 
@@ -112,11 +117,21 @@ shaping 只做字形映射，不执行字体里的 hinting 程序（`ttf-parser`
 ## 审计基线
 
 ```
-cargo audit
+cargo audit            # 2026-11-22，portable-pty 升到 0.9.0 之后
   → 0 vulnerabilities
-  → 2 allowed warnings（本节记录的两条，均已决策）
+  → 6 allowed warnings（ttf-parser / rustybuzz / pin-utils / zvariant / zvariant_derive / zbus_names）
   → exit code 0
 ```
+
+此前是 7 条：`serial`（`RUSTSEC-2017-0008`）已随 `portable-pty` 0.9 清除。
+剩下 6 条全部**阻塞在上游**，逐条结论见下：
+
+| 告警 | 引入方 | 能否本仓消除 |
+|---|---|---|
+| `ttf-parser` | `y901-render` 自研字形引擎（直接依赖） | 否 —— 换成 FreeType 会破"零 C 依赖"承诺 |
+| `rustybuzz` | `y901-render` 的 `shaping` feature | 否 —— 纯 Rust shaping 没有等价替代 |
+| `pin-utils` | `rustbus → nix 0.26` | 否 —— `rustbus` 最新版仍是 0.19.3，其 nix 约束上不去 |
+| `zvariant` / `zvariant_derive` / `zbus_names` | `accesskit_unix → zbus` | 否 —— 由 AccessKit 的 Linux 后端决定 |
 
 `scripts/gate.ps1` 在 `cargo-audit` **未安装**时打印 `skipped`，而不是当作通过 ——
 "没审计"不等于"审计通过"。
@@ -134,38 +149,34 @@ miniz_oxide v0.9.1 <- flate2 v1.1.10 <- png v0.17.16 (*)
 **不属于我们能单独统一的依赖**：要统一需等 `png`/`flate2` 发布新版。
 **当前决策**：接受（只增二进制体积与编译时间，无行为差异）。
 
-## `serial 0.4.0` — 实为 `portable-pty` 的**必选依赖**（更正 P2-01 的描述）
+## `serial 0.4.0` —— **已清除**（2026-11-22，`portable-pty` 升到 0.9.0）
 
-之前记为“lock 残留（不可达）”，**这个判断是错的**。本轮在联网条件下查证：
+之前记为“lock 残留（不可达）”，**那个判断是错的**；后来更正为“`portable-pty` 0.8 的必选依赖”，
+并留了三条出路。本轮走了第 1 条：
 
 ```
-portable-pty 0.8.1 的 Cargo.toml：
-    [dependencies.serial]
-    version = "0.4"            # 非 optional！
+$ cargo update -p portable-pty
+    Updating portable-pty v0.8.1 -> v0.9.0
+    Removing serial v0.4.0 / serial-core / serial-unix / serial-windows
+      Adding serial2 v0.2.39
+    Removing ioctl-rs v0.1.6 / termios v0.2.2 / memoffset v0.6.5
+    Updating nix v0.25.1 -> v0.28.0
 ```
 
-`y901-extras` 依赖 `portable-pty`，所以 `serial` 在依赖图里是**可达的**。
-`cargo tree -i serial` 报 "did not match any packages" 是它的查询方式问题，不是事实。
-
-**清除方式**（均未执行）：
-
-1. 升级 `portable-pty` 到 0.9（cargo 提示 "available: v0.9.0"）—— 需验证 PTY API 兼容；
-2. 换用其它 PTY crate；
-3. 接受（当前选择）。
-
-**结论**：不是“残留”，而是**传递依赖**；不能靠 `cargo update` 或手删 lock 清掉。
-RUSTSEC-2017-0008 仍会在审计里出现，直到 `portable-pty` 升级。
+**结论**：`RUSTSEC-2017-0008` 已从审计输出里消失（`cargo audit` 的 allowed warning 从 7 条降到 6 条）。
+`portable-pty` 0.9 的 API 与本仓库用量兼容（只用 `native_pty_system` / `openpty` /
+`spawn_command` / `take_writer` / `try_clone_reader` / `resize`），
+`y901-extras` 的 33 条单测与既有 8 条集成测试全绿，Windows 与 Linux 双平台验证通过。
 
 ## `pin-utils 0.1.1` —— unmaintained
 
 **状态**：`RUSTSEC-2026-0441`（2026-10-01，上游仓库归档后发布 0.1.1）。**不是漏洞**：
 `cargo audit` / `cargo deny check` 只报维护性警告，没有安全公告。
 
-**为什么在依赖图里**：两条传递路径都会带上它 ——
+**为什么在依赖图里**：`portable-pty` 升到 0.9 后只剩**一条**路径 ——
 
 ```
 pin-utils v0.1.1
-├── nix v0.25.1 <- portable-pty v0.8.1 <- y901-extras
 └── nix v0.26.4 <- rustbus v0.19.3    <- y901-backend-x11
 ```
 

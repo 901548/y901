@@ -50,6 +50,15 @@
 - 新增环境开关 `Y901_D3D_WARP` / `Y901_HEADLESS` / `Y901_SNAPSHOT_DEBUG`
   （默认关闭），研究记录见 [`evidence/cross-platform/warp-feasibility-2026-11-22.md`](evidence/cross-platform/warp-feasibility-2026-11-22.md)。
 
+### 依赖
+
+- `portable-pty` 0.8 → **0.9**：`serial`（`RUSTSEC-2017-0008`，2017 年起无维护）
+  连同 `termios` / `ioctl-rs` / `memoffset 0.6.5` 一并移出，`nix` 0.25 → 0.28。
+  `cargo audit` 的 allowed warning 从 7 条降到 6 条；剩下 6 条全部阻塞在上游，
+  逐条结论见 [`DEPENDENCIES.md`](DEPENDENCIES.md)。
+- `unicode-width` 0.2.2 → 0.2.3。
+- CI 动作 `actions/checkout` 4 → 7、`actions/upload-artifact` 4 → 7。
+
 ## 发布前仍缺
 
 1. 真机读屏器验收（Windows 讲述人 / Linux Orca / NVDA）—— 自 0.3.0 起一直未做；
