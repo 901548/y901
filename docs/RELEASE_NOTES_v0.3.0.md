@@ -1,9 +1,9 @@
-# Y901 v0.3.0 发布说明（草案 · 未发布）
+# Y901 v0.3.0 发布说明
 
-> 版本：`0.3.0` · 日期：2026-11-21 · 上一版：[`RELEASE_NOTES_v0.2.5.md`](RELEASE_NOTES_v0.2.5.md)
+> 版本：`0.3.0` · 发布日：2026-11-22 · 上一版：[`RELEASE_NOTES_v0.2.5.md`](RELEASE_NOTES_v0.2.5.md)
 >
-> **尚未发布。** 本文是发布候选的变更清单与验证记录，**不是公布承诺**：
-> crates.io 上传、tag、真机读屏器验收都还没做（见 §6）。
+> **已发布到 crates.io**：12 个 crate 全部上传完毕（见 §6 的实际记录）。
+> 仍**未**完成的是真机读屏器验收与 docs.rs 构建确认，见 §6 的“仍未完成”一节。
 
 ## 1. 版本语义
 
@@ -97,11 +97,25 @@ Linux（WSL Ubuntu 22.04 + Xvfb），本轮 2026-11-22 执行 `CARGO_FLAGS=--off
 - **平台**：macOS、Wayland 无后端；Web 是 T3（演示级）。
 - **0.x API**：仍是 0.x 语义，破坏性变更集中在本次 0.3.0。
 
-## 6. 发布前仍缺（阻塞发布）
+## 6. 发布记录与仍未完成项
 
-1. **凭据**：本机无 `~/.cargo/credentials.toml`、无 `CARGO_REGISTRY_TOKEN` —— 需 `cargo login`；
-2. **授权**：上传 crates.io、打 `v0.3.0` tag、推送 GitHub 均需明确授权；
-3. **真机读屏器验收**：Windows 讲述人 / Linux Orca 手工清单（机器无法替代）；
-4. **发布后验证**：`scripts/check-consumer.ps1 -Version 0.3.0` 与 docs.rs 构建。
+### 已完成的发布动作（2026-11-22）
 
-在这些完成前，本文件不得作为正式发行说明。
+1. **crates.io 上传**：12 个 crate 按依赖序全部 `Uploaded`（`scripts/publish-crates.ps1`，`PUBLISH: OK`）。
+   顺序：`core → ui → render → a11y → widgets → runtime → extras → backend-win32 → backend-x11 → backend-web → shell → y901`。
+2. **下游验证**：`scripts/check-consumer.ps1 -Version 0.3.0` 通过 —— 独立临时目录里从 registry 拉
+   `y901 0.3.0` 编译最小工程成功，证明发布链路可用（path 依赖测不到这一点）。
+3. **tag 与 push**：`v0.3.0` 附注 tag 打在本次发布的对应提交上，并推送 `origin/main`。
+
+### 仍未完成
+
+1. **真机读屏器验收**：Windows 讲述人 / Linux Orca / NVDA 手工清单（机器无法替代）。
+   无障碍桥能推树，但**没有任何真人验证过读屏效果**；Web ARIA helper 亦无 runtime 调用点。
+2. **docs.rs 构建确认**：发布后由 docs.rs 异步构建，需到 docs.rs/y901/0.3.0 核对是否成功。
+
+### 已知的发布过程波折（不影响产物）
+
+- 首个 token 只成功上传了 `y901-core`，其余全部 `403 authentication failed`（疑似 crate scope 限制或被撤销），已换新 token。
+- 中途出现过一次 `SSL connect error (schannel)`，重试即成功（网络抖动，非认证问题）。
+- `y901-core 0.3.0` 先于 README 的“反馈渠道”修订发布，因此它的 crates.io 页面**不含**新增的
+  “反馈与问题报告”小节；其余 11 个 crate（含入口包 `y901`）都包含。

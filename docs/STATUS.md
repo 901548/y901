@@ -1,7 +1,7 @@
 # 项目状态
 
-- **状态（2026-11-22）**: workspace 版本 `0.3.0` 发布候选，尚未发布；变更摘要见 [RELEASE_NOTES_v0.3.0.md](RELEASE_NOTES_v0.3.0.md)。基线 HEAD 见 `git log -1`。
-- **tags**: v0.1.0 ~ **v0.2.5**（当前 0.3.0 尚未打 tag）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
+- **状态（2026-11-22）**: workspace 版本 `0.3.0` **已发布到 crates.io**（12 个 crate 全部 Uploaded，下游 `check-consumer` 验证通过）；变更摘要见 [RELEASE_NOTES_v0.3.0.md](RELEASE_NOTES_v0.3.0.md)。基线 HEAD 见 `git log -1`。
+- **tags**: v0.1.0 ~ **v0.3.0**（0.3.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
 - **测试记录**: Windows 2026-11-22 复测 `passed=1112` / `ignored=61` / `targets=155`；`--include-ignored` 全量 `passed=1173` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-22 `passed=1031` / `ignored=27` / `targets=155`（[linux-numbers.txt](evidence/linux-numbers.txt)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
