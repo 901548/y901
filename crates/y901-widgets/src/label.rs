@@ -60,7 +60,7 @@ impl TextLabel {
         }
     }
 
-    /// 绑定一个 Signal<String>：值变化 → 框架自动标脏重绘。
+    /// 绑定一个 `Signal<String>`：值变化 → 框架自动标脏重绘。
     pub fn bind(mut self, signal: y901_ui::Signal<String>) -> Self {
         self.text = signal.get();
         self.signal = Some(signal);

@@ -656,7 +656,7 @@ impl UiTree {
     /// 创建一个绑定到 `owner` 的状态：**改值就自动标脏那个控件**。
     ///
     /// 输入：`owner`（控件 id）、`initial`（初值）。
-    /// 返回：[`State<T>`]（拿着它的人负责读/写）。
+    /// 返回：[`State<T>`](crate::state::State)（拿着它的人负责读/写）。
     /// 副作用：向树的失效队列注册订阅（`owner` 变更→ 下一帧标脏）。
     ///
     /// 与 `EventCtx::request_redraw()` 的分工：事件里用 `ctx`；
@@ -857,7 +857,7 @@ impl UiTree {
     /// 这类变更**不会**自动触发布局：
     /// - [`UiTree::mark_layout_dirty`] 只清**布局缓存**，让"下一次 layout"重算该节点，
     ///   但**不**请求 layout —— 没人请求，就永远不重算；
-    /// - [`UiTree::invalidate`] / [`invalidate_all`] 只标**脏区**（重绘），同样不触发布局。
+    /// - [`UiTree::invalidate`] / [`UiTree::invalidate_all`] 只标**脏区**（重绘），同样不触发布局。
     ///
     /// 典型误用：给容器新增子节点后只调 `invalidate`，于是新子节点**从未被 arrange**，
     /// 表现为"控件画在了旧位置/别的位置"。

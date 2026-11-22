@@ -138,7 +138,7 @@ impl GlyphInfo {
 /// 字形引擎的统一接口。
 ///
 /// 为什么要这个 trait：两个后端（D3D11 / 纯 CPU）都只需这 9 个能力。
-/// 把它们抽出来之后，`TextEngine`（DirectWrite）与 [`MyFontEngine`]（自研）
+/// 把它们抽出来之后，`TextEngine`（DirectWrite）与 [`MyFontEngine`](crate::MyFontEngine)（自研）
 /// 可以**互相替换**，而 `y901-widgets` / `y901-ui` 一行不改。
 ///
 /// 【硬约束】图集像素格式与脏区协议必须一致：

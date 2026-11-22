@@ -11,7 +11,7 @@
 //! - 混合方向：一段文字里同时有 LTR 与 RTL，需要按 Unicode Bidi 算法重排。
 //!
 //! 这些都**不是**"多查一次 cmap"能解决的，必须有 shaping 引擎。
-//! 本模块用 [`rustybuzz`]（HarfBuzz 的纯 Rust 移植，MIT，复用我们已钉的
+//! 本模块用 `rustybuzz`（HarfBuzz 的纯 Rust 移植，MIT，复用我们已钉的
 //! `ttf-parser 0.25`）做字形映射，用 [`unicode_bidi`] 做方向重排。
 //!
 //! ## 为什么默认不启用
