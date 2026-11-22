@@ -156,6 +156,41 @@ pub fn stats(node: &AriaNode) -> (usize, usize) {
     (count, max_depth)
 }
 
+/// 语义树指纹：`(role, id, attrs, children)` 的确定性摘要（FNV-1a）。
+///
+/// **用途只有一个**：让后端判断"这次推树和上次是不是同一棵树"，相同就跳过 DOM 重建。
+/// 动画帧里位置/颜色在动、语义通常不动 —— 每帧重建会让读屏器看到一棵全新的树。
+///
+/// 不承诺跨版本稳定（不是对外 API 契约），只保证：同一棵 `AriaNode` 永远同值，
+/// 不同结构极大概率不同值。`attrs` 的顺序由 [`to_aria_tree`] 固定。
+pub fn tree_fingerprint(node: &AriaNode) -> u64 {
+    fn feed(h: &mut u64, bytes: &[u8]) {
+        for b in bytes {
+            *h ^= *b as u64;
+            *h = h.wrapping_mul(0x1000_0000_01b3);
+        }
+        // 每个字段后打分隔标记：否则 ("ab","c") 与 ("a","bc") 拼接后同值。
+        *h ^= 0xff;
+        *h = h.wrapping_mul(0x1000_0000_01b3);
+    }
+    fn walk(node: &AriaNode, h: &mut u64) {
+        feed(h, node.role.as_bytes());
+        feed(h, node.id.as_bytes());
+        for (name, value) in &node.attrs {
+            feed(h, name.as_bytes());
+            feed(h, value.as_bytes());
+        }
+        for child in &node.children {
+            walk(child, h);
+        }
+        // 子树结束标记（同上：区分 "一个带子节点的节点" 与 "两个兄弟节点"）。
+        feed(h, b"\xfe");
+    }
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    walk(node, &mut h);
+    h
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,5 +321,56 @@ mod tests {
         let a = to_aria_tree(&n).expect("tree");
         assert_eq!(a.attr("data-y901-sensitive"), Some("true"));
         let _ = Pos::new(0.0, 0.0);
+    }
+
+    #[test]
+    fn fingerprint_is_stable_for_the_same_tree() {
+        let mut root = node("root", "window");
+        root.children.push(node("a", "button"));
+        let t1 = to_aria_tree(&root).expect("tree");
+        let t2 = to_aria_tree(&root).expect("tree");
+        assert_eq!(tree_fingerprint(&t1), tree_fingerprint(&t2), "同树必须同值");
+        assert_ne!(tree_fingerprint(&t1), 0, "0 是哨兵值（表示还没推过）");
+    }
+
+    #[test]
+    fn fingerprint_changes_when_semantics_change() {
+        let plain = to_aria_tree(&node("a", "button")).expect("tree");
+        let mut labelled = node("a", "button");
+        labelled.semantics = labelled.semantics.label("Save");
+        let labelled = to_aria_tree(&labelled).expect("tree");
+        assert_ne!(
+            tree_fingerprint(&plain),
+            tree_fingerprint(&labelled),
+            "标签变了必须换指纹，否则镜像会停在旧文案"
+        );
+    }
+
+    #[test]
+    fn fingerprint_distinguishes_sibling_structure() {
+        // 一个带子节点的节点 vs 两个兄弟节点：节点数相同、层数不同。
+        let mut nested = node("root", "window");
+        let mut mid = node("mid", "panel");
+        mid.children.push(node("leaf", "button"));
+        nested.children.push(mid);
+        let mut siblings = node("root", "window");
+        siblings.children.push(node("mid", "panel"));
+        siblings.children.push(node("leaf", "button"));
+        let f1 = tree_fingerprint(&to_aria_tree(&nested).expect("tree"));
+        let f2 = tree_fingerprint(&to_aria_tree(&siblings).expect("tree"));
+        assert_ne!(f1, f2, "嵌套与兄弟不能撞指纹");
+    }
+
+    #[test]
+    fn fingerprint_does_not_collide_on_field_boundaries() {
+        // ("ab","c") 与 ("a","bc") 若少了字段分隔符就会撞。
+        let mut a = node("ab", "button");
+        a.semantics = a.semantics.label("c");
+        let mut b = node("a", "button");
+        b.semantics = b.semantics.label("bc");
+        assert_ne!(
+            tree_fingerprint(&to_aria_tree(&a).expect("tree")),
+            tree_fingerprint(&to_aria_tree(&b).expect("tree"))
+        );
     }
 }

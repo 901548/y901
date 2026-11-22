@@ -399,12 +399,19 @@ Web 不能走 AccessKit（读屏器只认 DOM），所以另开一条路：
   `aria-valuemin`+`aria-valuemax` / `aria-checked`+`aria-expanded`+`aria-selected` /
   `aria-level` / `aria-live`；**不设的状态不写属性**（"没设"与 `false` 是两种语义）。
   未暴露节点连同子树跳过，与 AccessKit 路径同规则。
-- `y901-backend-web::aria`（feature `a11y`，wasm-only）：实现把映射结果写入
-  `<div id="y901-a11y" role="application">` 隐藏 DOM 树的 helper，使用 `clip:rect` + 1px
-  隐藏，避免 `display:none` 将其移出无障碍树。当前代码**尚无 runtime 调用点**，不会随帧自动推送；以下“每帧整棵重建”是 helper 的设计意图，尚未接入运行循环。
-- 测试：ARIA 映射 11 条（角色、属性、缺省不写、范围、隐藏子树、深度统计、敏感标记）；
-  DOM 侧 2 条仅检查容器 id / 样式常量，不在真实浏览器 DOM 中执行。
-- CI 新增 `web-aria` job，但目前只对 wasm32 + `a11y` feature 执行 `cargo check`，不等同于浏览器、DOM 或读屏器测试。
+- `y901-backend-web::aria`（feature `a11y`，wasm-only）：把映射结果写入
+  `<div id="y901-a11y" role="application">` 隐藏 DOM 树，使用 `clip:rect` + 1px
+  隐藏，避免 `display:none` 将其移出无障碍树。
+- **已接入帧循环**（2026-11-22，发布 0.3.0 之后）：`WasmState` 在构造时建一次镜像
+  （容器复用，`init()` 拿不到 `document`/`body` 时整体关闭且不报错），
+  `tick()` 与 rAF 回调在 `frame_step` 之后、**仅当该帧真正上屏**时推树。
+  推之前先比对 `tree_fingerprint`（`y901-a11y` 里，带单测）：语义没变就一个 DOM 操作都不做 ——
+  动画帧每 16ms 重建一次整棵树会让读屏器看到全新的无障碍树，轻则白做功、重则冲掉当前朗读节点。
+- 测试：ARIA 映射 + 指纹共 15 条纯逻辑单测（角色、属性、缺省不写、范围、隐藏子树、
+  深度统计、敏感标记、指纹稳定性/变更/结构区分/字段边界）；
+  DOM 侧 2 条仅检查容器 id / 样式常量，**不在真实浏览器 DOM 中执行**。
+- CI `web-aria` job：对 wasm32 + `a11y` feature 编译（含默认无 feature 的对照），
+  并跑 `y901-a11y` 单测；**仍不等同于浏览器、DOM 或读屏器测试**。
 - **踩坑记录**：wasm-bindgen 的 `extern` 函数带 `this` 参数时**只能以方法调用**
   （`doc.create_element(..)`），写成 `bindings::create_element(doc, ..)` 会报
   "not found in module"——类型（`Document`/`Element`）能解析、函数不能，很容易误判成

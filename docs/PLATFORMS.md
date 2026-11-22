@@ -34,7 +34,9 @@ has an explicit tier. The tier determines what CI enforces and what users can ex
 Explicit non-goals for now:
 
 - full-frame `putImageData` upload (no partial upload / WebGL texture path);
-- a single canvas alone exposes no semantics to the DOM. An optional `a11y` ARIA-mirror helper exists, but is not wired into the runtime and has no browser/assistive-technology validation;
+- a single canvas alone exposes no semantics to the DOM. The optional `a11y` feature wires an
+  ARIA mirror into the frame loop (it publishes on presented frames and skips unchanged
+  semantics), but it has **no browser or assistive-technology validation** yet;
 - IME composition is forwarded through a hidden `<input>`; the browser owns the candidate
   window and Y901 cannot position it;
 - single window, no FileDrop, no multi-canvas.

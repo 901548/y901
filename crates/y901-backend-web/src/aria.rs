@@ -17,10 +17,14 @@
 //! `display:none` / `visibility:hidden` 会把节点**从无障碍树里移除** —— 那就等于没做。
 //! 上面的写法是"对视觉隐藏但对 AT 可见"的标准做法。
 //!
-//! ## 每次推树都重建
+//! ## 每次推树都重建，但**语义没变就不碰 DOM**
 //!
 //! 增量 diff（节点增删、顺序变化、属性合并）的复杂度远高于收益：整棵树通常只有
 //! 几十到几百个节点，重建一次在毫秒级。**宁可慢一点，也不要"DOM 与画面不一致"**。
+//!
+//! 但"每帧都重建"并不必要：动画帧里位置/颜色在动、语义（角色/标签/状态）通常不动。
+//! 所以先用 [`y901_a11y::aria::tree_fingerprint`] 比对语义树指纹，相同就整帧跳过 ——
+//! 否则读屏器每 16ms 看到一棵全新的无障碍树，轻则白做功，重则把当前朗读节点冲掉。
 //!
 //! ## 已知边界
 //!
@@ -29,7 +33,7 @@
 //! - 不做 live region 的播报调度（交给浏览器读 `aria-live`）；
 //! - 不映射文本光标位置（canvas 无此语义）。
 
-use y901_a11y::aria::{to_aria_tree, AriaNode};
+use y901_a11y::aria::{to_aria_tree, tree_fingerprint, AriaNode};
 use y901_ui::NodeInfo;
 
 use crate::bindings::{Document, Element};
@@ -46,6 +50,12 @@ pub struct AriaMirror {
     container: Option<Element>,
     /// 最近一次成功推入镜像的节点数（0 = 空树或尚未推过）。
     published: usize,
+    /// 最近一次推入的语义树指纹（0 = 还没推过）。
+    ///
+    /// 为什么要指纹：动画帧里**语义通常不变**（位置/颜色在变，角色/标签不变），
+    /// 而每帧整棵重建 DOM 会让读屏器看到一个全新的无障碍树 —— 轻则白做功，重则
+    /// 把读屏器的当前节点冲掉。指纹相同就**一个 DOM 操作都不做**。
+    last_fingerprint: u64,
 }
 
 impl AriaMirror {
@@ -68,6 +78,7 @@ impl AriaMirror {
         Self {
             container: Some(container),
             published: 0,
+            last_fingerprint: 0,
         }
     }
 
@@ -76,23 +87,46 @@ impl AriaMirror {
         self.published
     }
 
-    /// 把语义树镜像进 DOM（整棵重建）。
+    /// 把语义树镜像进 DOM（语义未变时**不碰 DOM**）。
     ///
-    /// 返回：写进去的节点数（`0` = 根不可见，容器被清空）。
+    /// 返回：镜像里当前的节点数（`0` = 根不可见，容器被清空）。
     pub fn publish(&mut self, doc: &Document, snapshot: &NodeInfo) -> usize {
         let Some(container) = self.container.as_ref() else {
             return 0;
         };
-        // 清空：清空 `textContent` 会把所有子元素一起移除（比重建容器省事且可靠）。
-        container.set_text_content("");
         let Some(tree) = to_aria_tree(snapshot) else {
-            self.published = 0;
+            // 根不可见：容器里不该留任何东西。只在"之前推过"时才写 DOM。
+            if self.published != 0 || self.last_fingerprint != 0 {
+                container.set_text_content("");
+                self.published = 0;
+                self.last_fingerprint = 0;
+            }
             return 0;
         };
+        let fingerprint = tree_fingerprint(&tree);
+        if fingerprint == self.last_fingerprint && self.published > 0 {
+            // 语义没变：跳过。（画面可能在动，但读屏器关心的东西没动。）
+            return self.published;
+        }
+        // 清空：清空 `textContent` 会把所有子元素一起移除（比重建容器省事且可靠）。
+        container.set_text_content("");
         let count = append_node(doc, container, &tree);
         self.published = count;
+        self.last_fingerprint = fingerprint;
         count
     }
+}
+
+/// 在浏览器里建立镜像：认领（或创建）`#y901-a11y` 容器，并把 `document` 句柄一并交回。
+///
+/// 返回 `None` = 当前环境没有 `window` / `document` / `body`（例如脚本在 `<head>` 里跑、
+/// 页面还没有 body）。**不 panic、不报错**：无障碍是增强能力，不该让应用起不来。
+pub fn init() -> Option<(AriaMirror, Document)> {
+    let window = crate::bindings::global_window()?;
+    let doc = window.document()?;
+    let body = doc.body()?;
+    let mirror = AriaMirror::new(&doc, &body);
+    Some((mirror, doc))
 }
 
 /// 递归建元素：容器下的每个节点都是一个带 `role` 的 `div`。

@@ -3,7 +3,8 @@
 > 本文设计与实现细节最初记录于 HEAD `2b1a0cd`，其历史决策表和实现状态未必反映当前源码。当前平台定位见 [`docs/PLATFORMS.md`](PLATFORMS.md)；无障碍现状以本文后附“无障碍现状”一节、CI 工作流和源码核对结果为准。
 >
 > **平台定位：Tier 3（演示/触达），不是产品级。** 明确的非目标：整帧 `putImageData`
-> 上传、没有已接入 runtime 的 DOM 无障碍树（`a11y` feature 下有尚未接线的 ARIA helper）、IME 候选窗不可钉位、单 canvas 无多窗口/FileDrop。需要产品级
+> 上传、IME 候选窗不可钉位、单 canvas 无多窗口/FileDrop。DOM 无障碍树只在 `a11y` feature 下提供
+> （隐藏 ARIA 镜像，已接入帧循环，但**未做浏览器与读屏器验证**）。需要产品级
 > Web 能力的项目不应选这个后端。分层说明见 [`docs/PLATFORMS.md`](PLATFORMS.md)。
 
 ## 1. 方案概述

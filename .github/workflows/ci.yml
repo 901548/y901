@@ -205,6 +205,13 @@ jobs:
       # 只在 wasm32 下编译，所以必须有独立 job 真编一遍。
       - name: cargo check -p y901-backend-web --features a11y
         run: cargo check -p y901-backend-web --features a11y --target wasm32-unknown-unknown
+      # 默认构建也要编：`aria` 字段与推送调用点都是 `#[cfg(feature)]` 掉的，
+      # 只测开 feature 的一侧，关掉 feature 的构建坏了也看不见。
+      - name: cargo check -p y901-backend-web (default features)
+        run: cargo check -p y901-backend-web --target wasm32-unknown-unknown
+      # 映射与"指纹去重"是纯逻辑，能在宿主机上单测；DOM 行为只能靠真实浏览器，这里不做。
+      - name: cargo test -p y901-a11y
+        run: cargo test -p y901-a11y
   semver-guard:
     name: semver guard (breaking `!` commits require minor/major bump)
     runs-on: ubuntu-latest

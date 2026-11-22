@@ -103,7 +103,8 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 - **无障碍：语义树 + AccessKit 桥**。`Widget::semantics` 已是完整语义模型，另有可选的 `y901-a11y` crate（facade 的 `a11y` feature）把它映射成 AccessKit，平台适配器 Windows UIA / Linux AT-SPI 都在 feature 后。**尚未做**：后端自动接线与读屏器验收。
 - **macOS 与 Wayland 后端未实现**；Wayland 用户走 XWayland。
 - **Web 后端是 Tier 3**：单 canvas、整帧 `putImageData`、隐藏 `<input>` 承接 IME（候选窗不可钉位）、
-  无无障碍树、无多窗口/FileDrop。
+  无多窗口/FileDrop。DOM 语义只在可选的 `a11y` feature 下提供（隐藏 ARIA 镜像，已接入帧循环），
+  且**未在真实浏览器与读屏器上验证过**。
 - **文本模型要求等宽字体**：`cell_metrics_for` 固定按 `0.5em × 1em` 出 cell。
   默认字体 `NSimSun`（等宽、中英文齐全）。`FontConfig::modern()` 可切到
   `Microsoft YaHei UI`，但**只建议做视觉试验**——比例字体按固定步进排布会字距不均。
@@ -131,7 +132,7 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 
 ```bash
 cargo check --workspace --all-targets      # 0 warning
-cargo test --workspace                     # 1112 passed / 0 failed / 61 ignored（155 个测试目标）
+cargo test --workspace                     # 1116 passed / 0 failed / 61 ignored（155 个测试目标）
 powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0xF7455CCE7781A864，400x220）
 powershell -File scripts/gate.ps1          # 完整门禁（发布前必跑）
 ```

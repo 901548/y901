@@ -199,6 +199,16 @@ pub struct WasmState {
     pub listeners: Vec<Listener>,
     /// 上一帧的时间戳（毫秒）。
     pub last_frame_ms: f64,
+    /// **ARIA 镜像**（feature `a11y`）：canvas 里画的东西对读屏器不存在，
+    /// 语义树必须镜像进隐藏 DOM（见 `crate::aria`）。
+    ///
+    /// 为何放在状态里而不是每帧新建：容器元素要**复用** —— `AriaMirror::new` 会认领
+    /// 已存在的 `#y901-a11y`；每帧重建容器会让读屏器看到节点被反复销毁/重建。
+    #[cfg(feature = "a11y")]
+    pub aria: Option<crate::aria::AriaMirror>,
+    /// 推 ARIA 时需要的 `document` 句柄（`AriaMirror::publish` 要用它建元素）。
+    #[cfg(feature = "a11y")]
+    pub aria_doc: Option<crate::bindings::Document>,
     /// **当前这一帧的 rAF 回调**。
     ///
     /// 为何要存起来：`Closure` 一旦 drop，回调立即失效；
@@ -292,6 +302,12 @@ impl WasmState {
         soft.set_proportional_text(true);
         let cloned: HtmlCanvasElement = canvas.clone().into();
         let present = Present::new(cloned);
+        // **ARIA 镜像在这里建一次**：容器要复用（见字段注释）；没有 body 就整体关掉。
+        #[cfg(feature = "a11y")]
+        let (aria, aria_doc) = match crate::aria::init() {
+            Some((mirror, doc)) => (Some(mirror), Some(doc)),
+            None => (None, None),
+        };
         Ok(Self {
             canvas,
             soft,
@@ -305,10 +321,39 @@ impl WasmState {
             ime_input: None,
             listeners: Vec::new(),
             last_frame_ms: 0.0,
+            #[cfg(feature = "a11y")]
+            aria,
+            #[cfg(feature = "a11y")]
+            aria_doc,
             raf: Rc::new(RefCell::new(None::<Closure<dyn FnMut(f64)>>)),
             raf_handle: Rc::new(std::cell::Cell::new(0)),
         })
     }
+}
+
+/// 把语义树推给隐藏的 ARIA DOM（feature `a11y`）。
+///
+/// **只在真正上屏的帧推**：镜像必须与画面一致；没上屏的帧重推等于把整棵树重建一遍
+/// （几十到几百个节点，毫秒级）而画面根本没变，纯属浪费。
+///
+/// 参数取 `Option<&mut _>` / `Option<&_>` 而不是 `&mut WasmState`：调用点正同时
+/// 借出 `tree`（它也在 `WasmState` 里），整块可变借用会撞借用检查器。
+#[cfg(feature = "a11y")]
+fn publish_aria(
+    mirror: Option<&mut crate::aria::AriaMirror>,
+    doc: Option<&crate::bindings::Document>,
+    tree: &UiTree,
+    presented: bool,
+) {
+    if !presented {
+        return;
+    }
+    let (Some(mirror), Some(doc)) = (mirror, doc) else {
+        return;
+    };
+    let snapshot = tree.snapshot();
+    // 返回 0 是合法结果（整棵树不可见 → 容器被清空），不是错误。
+    let _ = mirror.publish(doc, &snapshot);
 }
 
 /// 浏览器端运行时。`run` 与 rAF 循环在 S1-b 实现。
@@ -380,6 +425,20 @@ impl WasmRuntime {
             .try_borrow_mut()
             .map_err(|_| "WasmRuntime 状态被重入借用".to_string())?;
         state.apply_pending();
+        // 解构出 `aria` / `aria_doc` 才能与 `tree` 同时借用（两个 cfg 分支只在字段上不同）。
+        #[cfg(feature = "a11y")]
+        let WasmState {
+            soft,
+            present,
+            canvas,
+            tree,
+            host,
+            events,
+            aria,
+            aria_doc,
+            ..
+        } = &mut *state;
+        #[cfg(not(feature = "a11y"))]
         let WasmState {
             soft,
             present,
@@ -399,13 +458,16 @@ impl WasmRuntime {
             events: &*events,
         };
         let evs = window.wait_events(0).unwrap_or_default();
-        frame_step(
+        let stats = frame_step(
             &mut window,
             tree,
             host,
             &evs,
             std::time::Duration::from_millis(16),
-        )
+        )?;
+        #[cfg(feature = "a11y")]
+        publish_aria(aria.as_mut(), aria_doc.as_ref(), tree, stats.presented);
+        Ok(stats)
     }
 }
 
@@ -948,6 +1010,20 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
             };
             // 先处理"回调里只能标记"的两件事：窗口尺寸变化与鼠标光标形状。
             s.apply_pending();
+            #[cfg(feature = "a11y")]
+            let WasmState {
+                soft,
+                present,
+                canvas,
+                tree,
+                host,
+                events,
+                last_frame_ms,
+                aria,
+                aria_doc,
+                ..
+            } = &mut *s;
+            #[cfg(not(feature = "a11y"))]
             let WasmState {
                 soft,
                 present,
@@ -974,13 +1050,19 @@ pub fn schedule_frame(state: Rc<RefCell<WasmState>>) {
                     events: &*events,
                 };
                 let evs = window.wait_events(0).unwrap_or_default();
-                let _ = frame_step(
+                let stats = frame_step(
                     &mut window,
                     tree,
                     host,
                     &evs,
                     std::time::Duration::from_millis(dt_ms as u64),
                 );
+                // 推 ARIA 与推帧同步：上屏后立刻让隐藏 DOM 与画面一致。
+                #[cfg(feature = "a11y")]
+                if let Ok(stats) = stats.as_ref() {
+                    publish_aria(aria.as_mut(), aria_doc.as_ref(), tree, stats.presented);
+                }
+                let _ = stats;
             }
         }
         // ---- 排下一帧（必须在上面的借用结束之后）----

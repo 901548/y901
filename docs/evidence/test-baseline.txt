@@ -78,4 +78,7 @@
 # Measured at 2026-11-22 (0.3.0 发布候选复核：S4/审查整改后重新测量):
 #   default cargo test --workspace --no-fail-fast   passed 1112, failed 0, ignored 61 / 155 个测试目标
 #   (较 1053 增加 59 条：S4 及后续审查整改新增的用例；此前的 numbers.txt 未随之刷新)
-1112
+# Measured at 2026-11-22 (0.3.0 发布后：Web ARIA 接线 + 语义指纹去重):
+#   default cargo test --workspace --no-fail-fast   passed 1116, failed 0, ignored 61 / 155 个测试目标
+#   (新增 4 条：指纹稳定性、语义变更、兄弟/嵌套结构区分、字段边界不碰撞)
+1116
