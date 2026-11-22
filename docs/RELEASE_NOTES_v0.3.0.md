@@ -66,6 +66,9 @@
 | 检查 | 结果 |
 |---|---|
 | `scripts/gate.ps1` | **GATE OK**（本机完整门禁：MSRV / fmt / 默认测试基线 / Windows 测试清单 / clippy / 像素哈希 / missing_docs / 版本一致 / 文档数字与自测 / audit；audit 使用当时可用的 advisory DB，非本轮联网刷新） |
+| 默认测试（`cargo test --workspace`，2026-11-22 重新测量） | **1112 passed / 0 failed / 61 ignored / 155 个测试目标**（旧文档停留在 1053；`docs/evidence/numbers.txt` 已重新生成） |
+| 全量测试（`--include-ignored`，2026-11-22） | **1173 passed / 0 failed**（含 30 条性能基准与 GPU 用例） |
+| GPU 快照套件（`snapshot_harness --ignored`，真机 D3D11，150% DPI） | **10 passed / 0 failed** |
 | `scripts/check-packaging.ps1` | **12 个 crate 全部可打包** |
 | `scripts/check-version-consistency.ps1` | 通过（0.3.0，12 个 workspace crate） |
 | `scripts/check-semver-bump.ps1` | 通过（v0.2.5 → 0.3.0 = minor） |
@@ -79,6 +82,11 @@
 | Accessibility demo | `cargo check -p y901-shell --example a11y_demo` with and without `--features a11y` passed |
 
 Linux（WSL Ubuntu 22.04 + Xvfb），本轮 2026-11-22 执行 `CARGO_FLAGS=--offline bash scripts/linux-verify.sh`：8/8 阶段通过；全 workspace `155` 个测试目标，1031 passed / 0 failed / 27 ignored。详细输出见 [`linux-verify-2026-11-22.log`](evidence/cross-platform/linux-verify-2026-11-22.log)。
+
+> **GPU 套件的 DPI 假设已修正**：本机窗口缩放为 150%，`snapshot_harness` 的流式行框原先写死 20px
+> （按 125% 写的），比 150% 下的 24px 物理行高矮 4px，导致 `invalidate_rect_partial_equals_full`
+> 出现 740 字节差异。已改为按 `TextMetrics::line_height` 取行框高度，10 条 GPU 用例复跑全绿；
+> 这项修正只改了测试，不改渲染行为。细节见 [`ACCEPTANCE.md`](ACCEPTANCE.md) 的“GPU 像素验收用例”一节。
 
 ## 5. 已知边界（不承诺）
 

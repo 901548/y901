@@ -75,4 +75,7 @@
 # Measured at 2026-11-21 (S3: 无障碍桥 y901-a11y：角色/状态/动作/几何映射 + UIA/AT-SPI 适配):
 #   default cargo test --workspace --no-fail-fast   passed 1053, failed 0, ignored 61
 #   (新增 19 条：角色映射、未暴露子树跳过、checked/expanded/数值/实时区域、焦点、动作映射、NodeIdMap)
-1053
+# Measured at 2026-11-22 (0.3.0 发布候选复核：S4/审查整改后重新测量):
+#   default cargo test --workspace --no-fail-fast   passed 1112, failed 0, ignored 61 / 155 个测试目标
+#   (较 1053 增加 59 条：S4 及后续审查整改新增的用例；此前的 numbers.txt 未随之刷新)
+1112

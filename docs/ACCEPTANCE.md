@@ -1,15 +1,15 @@
 # Y901 框架验收凭证
 
-本验收矩阵汇总的是带日期的历史运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-20：默认测试 **1053 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1114 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-22 刷新为 **1031 passed / 0 failed / 27 ignored / 155 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
+本验收矩阵汇总的是带日期的历史运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1112 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1173 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-22 刷新为 **1031 passed / 0 failed / 27 ignored / 155 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1053 passed / 0 failed / 61 ignored** |
-| `cargo test --workspace --offline -- --include-ignored` | **1114 passed / 0 failed** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1112 passed / 0 failed / 61 ignored** |
+| `cargo test --workspace --offline -- --include-ignored` | **1173 passed / 0 failed** |
 
-`include_ignored=1114`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
+`include_ignored=1173`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -41,7 +41,13 @@
 | `two_disjoint_dirty_rects_match_full_redraw` | 两块不相邻脏区 == 整窗重绘（逐字节 0 差异） |
 | `grid_with_images_is_not_blank_on_gpu` | Grid + 4 图片不再整帧空白（62 381 种颜色；四象限主色命中） |
 
-## 双平台验证矩阵（Windows 2026-11-20；Linux 2026-11-22）
+2026-11-22 复跑（Windows 本机 150% DPI）：`snapshot_harness` 的 10 条 `#[ignore]` 用例全部 ok。
+其中 `invalidate_rect_partial_equals_full` 在复跑时先红（740 字节差异，首个差异在行底线下一行）：
+用例把流式行框写死为 20px，而 150% 下 16 号字的物理行高是 24px，行框比字形矮 4px，
+溢出的像素落在框架 2px 最小外扩之外。根因是**用例的 DPI 假设过期**（注释按 125% 写的），
+不是渲染错；现已改为按 `TextMetrics::line_height` 取行框高度，100%/125%/150% 通用。
+
+## 双平台验证矩阵（Windows 2026-11-22；Linux 2026-11-22）
 
 Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 Windows 上，
 `#[cfg(unix)]` 代码与 X11 运行时只能靠 `scripts/linux-verify.sh`（Xvfb）覆盖。
@@ -51,8 +57,8 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **1053 passed / 0 failed / 61 ignored**（155 个测试目标） |
-| `--include-ignored` | **1114 passed / 0 failed** |
+| 默认测试 | **1112 passed / 0 failed / 61 ignored**（155 个测试目标） |
+| `--include-ignored` | **1173 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
 | `cargo audit` | 0 漏洞 |
