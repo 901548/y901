@@ -11,8 +11,8 @@ keywords = ["gui", "widgets", "terminal"]
 categories = ["gui"]
 
 [dependencies]
-y901-core = { path = "../y901-core", version = "0.3.0" }
-y901-ui = { path = "../y901-ui", version = "0.3.0" }
+y901-core = { path = "../y901-core", version = "0.4.0" }
+y901-ui = { path = "../y901-ui", version = "0.4.0" }
 
 # **PTY 只在非 wasm 目标上**：`portable-pty` 会拉进 `filedescriptor`，后者在 wasm32
 # 上编译不过（实测 `cannot find type RawFileDescriptor`，见 `docs/WASM.md`）。
@@ -25,5 +25,5 @@ crossbeam-channel = "0.5"
 portable-pty = "0.8"
 
 [dev-dependencies]
-y901-render = { path = "../y901-render", version = "0.3.0" }
-y901-widgets = { path = "../y901-widgets", version = "0.3.0" }
+y901-render = { path = "../y901-render", version = "0.4.0" }
+y901-widgets = { path = "../y901-widgets", version = "0.4.0" }

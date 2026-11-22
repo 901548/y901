@@ -14,12 +14,12 @@ categories = ["gui"]
 # 不引入 x11 / xcb / x11rb —— 这是整个自研方案的前提。
 [dependencies]
 # 键盘事件要映射成 `y901_ui::Key` / `Modifiers`，所以需要它（纯 Rust、零外部依赖）
-y901-ui = { path = "../y901-ui", version = "0.3.0" }
+y901-ui = { path = "../y901-ui", version = "0.4.0" }
 # 事件要汇成 `RawEvent`，`Presenter` 要实现 runtime 的 trait
-y901-runtime = { path = "../y901-runtime", version = "0.3.0" }
-y901-render = { path = "../y901-render", version = "0.3.0" }
+y901-runtime = { path = "../y901-runtime", version = "0.4.0" }
+y901-render = { path = "../y901-render", version = "0.4.0" }
 # 无障碍桥（AT-SPI）。可选：默认不拉 zbus。
-y901-a11y = { path = "../y901-a11y", version = "0.3.0", optional = true }
+y901-a11y = { path = "../y901-a11y", version = "0.4.0", optional = true }
 
 [target."cfg(unix)".dependencies]
 # 纯 Rust D-Bus 实现（容忍 IBus 不合规的 sender 字段；zbus 会直接 panic）

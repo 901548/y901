@@ -18,28 +18,28 @@ categories = ["gui"]
 # - 依赖可裁剪：只想用布局的人不必拉 D3D11/X11；
 # - 版本可独立演进（但本仓目前统一版本，简化发布）。
 [dependencies]
-y901-core = { path = "../y901-core", version = "0.3.0" }
-y901-a11y = { path = "../y901-a11y", version = "0.3.0", optional = true }
-y901-ui = { path = "../y901-ui", version = "0.3.0" }
-y901-render = { path = "../y901-render", version = "0.3.0" }
-y901-widgets = { path = "../y901-widgets", version = "0.3.0" }
-y901-extras = { path = "../y901-extras", version = "0.3.0" }
-y901-runtime = { path = "../y901-runtime", version = "0.3.0" }
+y901-core = { path = "../y901-core", version = "0.4.0" }
+y901-a11y = { path = "../y901-a11y", version = "0.4.0", optional = true }
+y901-ui = { path = "../y901-ui", version = "0.4.0" }
+y901-render = { path = "../y901-render", version = "0.4.0" }
+y901-widgets = { path = "../y901-widgets", version = "0.4.0" }
+y901-extras = { path = "../y901-extras", version = "0.4.0" }
+y901-runtime = { path = "../y901-runtime", version = "0.4.0" }
 
 # 平台后端按目标平台裁剪：Windows 拉 D3D11 绑定，Linux 拉 X11 协议栈，wasm 拉浏览器绑定。
 [target.'cfg(target_os = "windows")'.dependencies]
-y901-backend-win32 = { path = "../y901-backend-win32", version = "0.3.0" }
+y901-backend-win32 = { path = "../y901-backend-win32", version = "0.4.0" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-y901-backend-x11 = { path = "../y901-backend-x11", version = "0.3.0" }
+y901-backend-x11 = { path = "../y901-backend-x11", version = "0.4.0" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-y901-backend-web = { path = "../y901-backend-web", version = "0.3.0" }
+y901-backend-web = { path = "../y901-backend-web", version = "0.4.0" }
 
 # 应用壳（`create_runtime()` + 剪贴板/密钥/快照）。唯一入口的"能真正跑起来"就靠它。
 [dependencies.y901-shell]
 path = "../y901-shell"
-version = "0.3.0"
+version = "0.4.0"
 
 [features]
 # 无障碍桥（AccessKit 映射层）。默认关：不需要 a11y 的应用不拉 accesskit 依赖。
