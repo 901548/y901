@@ -38,8 +38,8 @@
 ### 3.2 无障碍（S3）
 
 - 新 crate `y901-a11y`：`map_role` / `to_tree_update` / `PlatformBridge` / `NodeIdMap`；
-- 平台适配（feature 门控）：Windows `windows-uia`（accesskit_windows），
-  Linux `unix-atspi`（accesskit_unix / zbus）；
+- 平台适配（`y901-a11y` crate 的 target-specific feature）：Windows `windows-uia`（accesskit_windows），
+  Linux `unix-atspi`（accesskit_unix / zbus）；两个 backend crate 对外暴露的开关均命名为 `a11y`；
 - 两个后端都**已经会推树**：`y901-backend-win32`（`ShowWindow` 之前挂载 UIA）、
   `y901-backend-x11`（`render_tree` 末尾推树 + 回派 Click 动作）；
 - facade 增加 `a11y` feature（`pub use y901_a11y as a11y`），默认关。
@@ -59,32 +59,32 @@
   `semver-checks` 五个 job；
 - 历史审查报告归档到 `docs/archive/reviews/`。
 
-## 4. 本次验证（Windows 本地实测）
+## 4. 自动验证记录（Windows 本地与 Linux WSL，2026-11-22）
 
-**一条命令复核**：[`scripts/check-release-readiness.ps1`](../scripts/check-release-readiness.ps1)
-（自动项全绿，并列出 6 项 `BLOCKED` 的人工/授权项）。
+[`scripts/check-release-readiness.ps1`](../scripts/check-release-readiness.ps1) 汇总自动检查与人工/授权阻塞项。本轮运行结果：自动项全部通过，仍有 5 项人工/授权 `BLOCKED`；数量会随凭据、tag、registry、工作区和验收状态变化。退出码 0 只表示没有自动项 `FAIL`，不表示发布阻塞项已清除。下表记录本轮执行的检查。
 
 | 检查 | 结果 |
 |---|---|
-| `scripts/gate.ps1` | **GATE OK**（MSRV / fmt / 1053 tests / inventory 139 二进制 1156 用例 / clippy 0 警告 / 像素哈希 / missing_docs / 版本一致 / doc 数字 + 自测 / audit 0 漏洞 7 条已记录警告） |
+| `scripts/gate.ps1` | **GATE OK**（本机完整门禁：MSRV / fmt / 默认测试基线 / Windows 测试清单 / clippy / 像素哈希 / missing_docs / 版本一致 / 文档数字与自测 / audit；audit 使用当时可用的 advisory DB，非本轮联网刷新） |
 | `scripts/check-packaging.ps1` | **12 个 crate 全部可打包** |
-| `scripts/check-version-consistency.ps1` | 通过（0.3.0，11 个 lock 条目） |
+| `scripts/check-version-consistency.ps1` | 通过（0.3.0，12 个 workspace crate） |
 | `scripts/check-semver-bump.ps1` | 通过（v0.2.5 → 0.3.0 = minor） |
+| `scripts/check-consumer.ps1 -Version 0.3.0` / docs.rs | 未运行：0.3.0 尚未发布，发布前置条件未满足 |
 | `cargo semver-checks --workspace --exclude y901-a11y --baseline-rev v0.2.5` | 通过（新 crate 无基线，故排除） |
-| `cargo deny check` | advisories/bans/licenses/sources 全 ok |
+| `cargo deny check` | advisories/bans/licenses/sources 全 ok（使用缓存 advisories，不代表在线实时审计） |
 | 像素哈希 | `0xF7455CCE7781A864`（**全 S2 改动后未变**） |
-| `shaping` feature | `cargo test -p y901-render --lib --features shaping` 125 passed |
-| `a11y` feature | Windows `--features windows-uia` 21 passed；Linux `unix-atspi` 21 passed |
+| `shaping` feature | `cargo test -p y901-render --lib --features shaping --offline` 126 passed / 1 ignored；wasm check passed |
+| `a11y` feature | `y901-a11y` 32 tests + doctest passed；Win32/X11 backend `a11y` feature suites passed (the backend feature is named `a11y`) |
+| Accessibility demo | `cargo check -p y901-shell --example a11y_demo` with and without `--features a11y` passed |
 
-Linux（WSL Ubuntu 22.04 + Xvfb）：`linux-verify.sh` 各步通过；全 workspace
-`155` 个测试二进制全绿（`CARGO_INCREMENTAL=0`，磁盘清理后复跑）。
+Linux（WSL Ubuntu 22.04 + Xvfb），本轮 2026-11-22 执行 `CARGO_FLAGS=--offline bash scripts/linux-verify.sh`：8/8 阶段通过；全 workspace `155` 个测试目标，1031 passed / 0 failed / 27 ignored。详细输出见 [`linux-verify-2026-11-22.log`](evidence/cross-platform/linux-verify-2026-11-22.log)。
 
 ## 5. 已知边界（不承诺）
 
 - **复杂文本**：shaping 需显式开启 `shaping` feature；**默认不折行的组件**（只有
   `TextLabel::wrap(true)` 会折）；不做连字符断词、两端对齐、避头尾标点；
   emoji ZWJ 序列的集群判定未覆盖。
-- **无障碍**：真机读屏器（讲述人 / Orca）**未验收**；Web 的 DOM/ARIA 镜像未做。
+- **无障碍**：Windows UIA / Linux AT-SPI 原生后端有推树接线；Web ARIA 映射与 DOM helper 存在，但尚无 runtime 调用点。CI 的 `web-aria` 仅编译 wasm `a11y` feature，不是浏览器测试；未做浏览器 DOM 或人工读屏器验证。Windows 讲述人 / Linux Orca 真人验收**未完成**；Web 焦点代理亦未做。
 - **平台**：macOS、Wayland 无后端；Web 是 T3（演示级）。
 - **0.x API**：仍是 0.x 语义，破坏性变更集中在本次 0.3.0。
 

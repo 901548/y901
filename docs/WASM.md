@@ -1,9 +1,9 @@
 # Y901 WASM 后端实现说明
 
-> **本文件描述当前实现状态（截至 HEAD `2b1a0cd`）。** 未来计划见 issue tracker，不在本文档里写。
+> 本文设计与实现细节最初记录于 HEAD `2b1a0cd`，其历史决策表和实现状态未必反映当前源码。当前平台定位见 [`docs/PLATFORMS.md`](PLATFORMS.md)；无障碍现状以本文后附“无障碍现状”一节、CI 工作流和源码核对结果为准。
 >
 > **平台定位：Tier 3（演示/触达），不是产品级。** 明确的非目标：整帧 `putImageData`
-> 上传、无 DOM 无障碍树、IME 候选窗不可钉位、单 canvas 无多窗口/FileDrop。需要产品级
+> 上传、没有已接入 runtime 的 DOM 无障碍树（`a11y` feature 下有尚未接线的 ARIA helper）、IME 候选窗不可钉位、单 canvas 无多窗口/FileDrop。需要产品级
 > Web 能力的项目不应选这个后端。分层说明见 [`docs/PLATFORMS.md`](PLATFORMS.md)。
 
 ## 1. 方案概述
@@ -213,6 +213,13 @@ input。
 | `dpr` 非 1.0 破坏对拍 | 强制 1.0（D4） |
 | rAF 在后台标签页暂停 | 接受（动画停住），不做补偿 |
 | 缓存导致测的不是最新产物 | 页面 JS/字体 URL 都带 `?v=`；每次重建必须换值 |
+
+## 无障碍现状
+
+`crates/y901-backend-web/src/aria.rs` 在可选 `a11y` feature 下提供 `AriaMirror` DOM helper；
+它把平台无关 ARIA 映射结果写成隐藏 DOM 节点，但截至本文最近核对时没有 runtime 调用点，
+因此不会随 UI 帧自动发布。CI 的 `web-aria` job 只执行 wasm32 `cargo check`；没有浏览器 DOM
+集成测试，也没有读屏器验收或焦点代理。不要将 helper 的存在描述为已集成的 Web 无障碍树。
 
 ## 8. 接口事实摘要
 

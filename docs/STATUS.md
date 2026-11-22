@@ -1,8 +1,8 @@
 # 项目状态
 
-- **HEAD**: 见 `git log -1`（v0.2.5；v0.2.0 之后：审查整改 3 批 + Linux 双平台验收 + X11 DPI/XSettings + 墨迹绘制裁剪修复 + crates.io 首发准备）
-- **tags**: v0.1.0 ~ **v0.2.5**（v0.2.0 含破坏性变更；v0.2.1 ~ v0.2.5 均为无破坏性修复版，见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`）；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**
-- **测试**: `passed=1053` / `ignored=61` / `include_ignored=1114`（唯一来源 `docs/evidence/numbers.txt`）
+- **状态（2026-11-22）**: workspace 版本 `0.3.0` 发布候选，尚未发布；变更摘要见 [RELEASE_NOTES_v0.3.0.md](RELEASE_NOTES_v0.3.0.md)。基线 HEAD 见 `git log -1`。
+- **tags**: v0.1.0 ~ **v0.2.5**（当前 0.3.0 尚未打 tag）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
+- **测试记录**: Windows 2026-11-20 `passed=1053` / `ignored=61` / `include_ignored=1114`（[numbers.txt](evidence/numbers.txt)）；Linux 2026-11-22 `passed=1031` / `ignored=27` / `targets=155`（[linux-numbers.txt](evidence/linux-numbers.txt)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -528,7 +528,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - 四条测试基建债（22 个测试无门控 / lib 的 4 处 `#[link]` /
   `file_drop` 硬编码 `C:\` / supersample 阈值绑定字体）就是靠它首次暴露的。
 - 已验证（2026-11-20，Ubuntu 22.04 / WSL2 + rustc 1.92 + Xvfb）：
-  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast` → **1019 passed / 0 failed / 27 ignored**
+  Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；现已由 2026-11-22 复测更新，详见 `docs/evidence/cross-platform/linux-verify-2026-11-22.log`）→ 当时 **1019 passed / 0 failed / 27 ignored**
   （155 个测试目标）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
   与 Windows 的 1053/0/61 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`

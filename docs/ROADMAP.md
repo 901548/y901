@@ -372,11 +372,11 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   - **未暴露节点（`exposed_to_ai == false`）整棵子树跳过**，与外部工具网关同一规则；
   - `platform::PlatformBridge` trait + `NodeIdMap`（AccessKit u64 ↔ Y901 字符串 id 双向映射，
     防止动作打到上一帧的节点上）。
-- **Windows UIA**（feature `windows-uia`）：`accesskit_windows::SubclassingAdapter`
+- **Windows UIA**（`y901-a11y` feature `windows-uia`，由 `y901-backend-win32` 的 `a11y` feature 启用）：`accesskit_windows::SubclassingAdapter`
   挂在 HWND 上；`ActionHandler::do_action` **只入队不处理**（回调可能在工作线程），
   应用线程用 `poll_action` 取；队列上限 256 条防刷爆。**必须在 `ShowWindow` 之前挂载**
   （库的硬约束，已在文档与注释里标明）。
-- **Linux AT-SPI**（feature `unix-atspi`）：`accesskit_unix::Adapter`（zbus 纯 Rust D-Bus），
+- **Linux AT-SPI**（`y901-a11y` feature `unix-atspi`，由 `y901-backend-x11` 的 `a11y` feature 启用）：`accesskit_unix::Adapter`（zbus 纯 Rust D-Bus），
   支持根窗口 bounds、焦点状态、动作队列。
 - 依赖：`accesskit 0.25`（映射层，纯 Rust）；平台适配器按目标平台 feature 门控。
   `accesskit_windows` 只依赖 `windows` 纯绑定，`accesskit_unix` 走 `zbus` —— 两者都不破零 C。
@@ -387,9 +387,7 @@ labelled-by/described-by 关系、live region、屏幕坐标。
   CI 新增 `a11y-bridge` job（Windows 编 UIA、Linux 编 AT-SPI，并复核依赖树无 C/C++ 构建依赖）。
 - 测试：19 条（角色映射 / 未暴露子树跳过 / checked+expanded / 数值范围 / live region /
   动作映射 / 焦点 / bounds / 空树 / 队列上限 / 初始树单次取用）。
-- **未做**：真机验收（讲述人 / Orca 手工清单）；
-  从后端（`y901-backend-win32` / `-x11`）自动挂载并每帧 `push` —— 目前是库层已就绪、
-  后端接线待做。
+- **历史记录（已被后续 S4 实现取代）**：截至 S3 初版，尚未完成真机验收，也尚未从 Win32/X11 后端自动挂载并推送语义树。S4 已完成这两类原生后端接线；真机读屏器验收仍未完成，见 [A11Y_ACCEPTANCE.md](A11Y_ACCEPTANCE.md)。
 
 ### S3 续（2026-11-21）：Web 的 ARIA 镜像（平台无关映射 + wasm 落 DOM）
 
@@ -401,41 +399,33 @@ Web 不能走 AccessKit（读屏器只认 DOM），所以另开一条路：
   `aria-valuemin`+`aria-valuemax` / `aria-checked`+`aria-expanded`+`aria-selected` /
   `aria-level` / `aria-live`；**不设的状态不写属性**（"没设"与 `false` 是两种语义）。
   未暴露节点连同子树跳过，与 AccessKit 路径同规则。
-- `y901-backend-web::aria`（feature `a11y`，wasm-only）：把映射结果写成
-  `<div id="y901-a11y" role="application">` 下的隐藏 DOM 树。
-  **用 `clip:rect` + 1px 隐藏，不用 `display:none`** —— 后者会把节点移出无障碍树，等于没做。
-- 每帧整棵重建（不做增量 diff）：节点量级几十~几百，重建是毫秒级，
-  宁可慢一点也不要"DOM 与画面不一致"。
+- `y901-backend-web::aria`（feature `a11y`，wasm-only）：实现把映射结果写入
+  `<div id="y901-a11y" role="application">` 隐藏 DOM 树的 helper，使用 `clip:rect` + 1px
+  隐藏，避免 `display:none` 将其移出无障碍树。当前代码**尚无 runtime 调用点**，不会随帧自动推送；以下“每帧整棵重建”是 helper 的设计意图，尚未接入运行循环。
 - 测试：ARIA 映射 11 条（角色、属性、缺省不写、范围、隐藏子树、深度统计、敏感标记）；
-  DOM 侧 2 条（容器 id 稳定、样式必须"视觉隐藏但对 AT 可见"）。
-- CI 新增 `web-aria` job（装 wasm32 target 后真编译）。
+  DOM 侧 2 条仅检查容器 id / 样式常量，不在真实浏览器 DOM 中执行。
+- CI 新增 `web-aria` job，但目前只对 wasm32 + `a11y` feature 执行 `cargo check`，不等同于浏览器、DOM 或读屏器测试。
 - **踩坑记录**：wasm-bindgen 的 `extern` 函数带 `this` 参数时**只能以方法调用**
   （`doc.create_element(..)`），写成 `bindings::create_element(doc, ..)` 会报
   "not found in module"——类型（`Document`/`Element`）能解析、函数不能，很容易误判成
   模块不可见。新增绑定后必须同步 `bindings_golden` 的 `EXPECTED_JS_NAMES` 与
   `structural` 计数。
-- **仍未做**：真机读屏器验收的**执行**（讲述人 / Orca / NVDA+浏览器）；焦点代理。
+- **仍未做**：Web ARIA helper 的 runtime 接线、浏览器 DOM 行为测试、真机读屏器验收（讲述人 / Orca / NVDA+浏览器）及焦点代理。
   验收材料已备好：[`docs/A11Y_ACCEPTANCE.md`](A11Y_ACCEPTANCE.md)（20 项清单 + 记录表）
   与演示页 `crates/y901-shell/examples/a11y_demo.rs`（`--features a11y` 运行）；
   `y901-shell` 与 facade 都已转发 `a11y` feature，用户不必直接依赖后端 crate。
 
 ### S4（2026-11-21）：0.3.0 收敛完成（除授权项）
 
-**一条命令复核**：[`scripts/check-release-readiness.ps1`](../scripts/check-release-readiness.ps1)
-把发布前检查串起来，并**严格区分**自动项与人工/授权项。最终实测：
-自动项 **9/9 PASS**（fmt / 版本一致性 / semver 纪律 / gate / packaging 12 crate /
-cargo deny / semver-checks / 工作区干净 / Linux 证据 7 天内），
-**4 项 BLOCKED**（crates.io 凭据、`v0.3.0` tag、crates.io 上该版本、真机读屏器验收）——
-这四项按任务约束（不发布/不打 tag/不推送，除非明确授权）刻意留给用户决定。
+**发布前检查**：[`scripts/check-release-readiness.ps1`](../scripts/check-release-readiness.ps1) 汇总自动检查与人工/授权阻塞项。脚本运行时会动态探测凭据、工作区、tag、registry 状态、人工验收及 Linux 证据新鲜度；因此旧运行里记录的 `PASS` / `BLOCKED` 项数不是当前状态承诺。脚本退出码 0 只表示没有自动检查 `FAIL`，`SKIP` 或 `BLOCKED` 仍需另行处理。当前实际缺项见 [`RELEASE_NOTES_v0.3.0.md`](RELEASE_NOTES_v0.3.0.md) §6；发布、打 tag 和推送仍需用户明确授权。
 
-**发布候选已就绪（除授权项外）**：`docs/RELEASE_NOTES_v0.3.0.md` 已写好，
-记录破坏性变更、新能力、实测验证矩阵与"发布前仍缺"四项。
+**发布候选材料**：`docs/RELEASE_NOTES_v0.3.0.md` 记录破坏性变更、新能力、实测验证矩阵与发布前仍缺项；它不是发布授权或发布就绪承诺。
 `docs/RELEASE_NOTES_v0.2.6.md` 标记为**已作废**（并入 0.3.0，该版本号从未发布）。
 
-发布候选验证（本轮实测）：`check-semver-bump` 通过（v0.2.5 → 0.3.0 = minor）；
+发布候选验证（此前本机实测，非本轮复跑）：`check-semver-bump` 通过（v0.2.5 → 0.3.0 = minor）；
 `check-packaging` 12/12 crate 可打包；`cargo semver-checks --workspace
 --exclude y901-a11y --baseline-rev v0.2.5` 通过（新 crate 无基线，必须排除，
-否则报 "package not found in baseline"）；`cargo deny check` 四类全绿；gate GATE OK。
+否则报 "package not found in baseline"）；`cargo deny check` 四类全绿；gate 曾报告 GATE OK。
 
 **已验证的环境事实（写下来免得下次误判）**：本机 `F:` 盘会被 `target/` 撑满，
 表现为 `rustc-LLVM ERROR: IO failure on output stream` / `os error 5`，
@@ -456,8 +446,7 @@ Windows `gate.ps1` **GATE OK**。所以之前的红是磁盘，不是代码。
   不长期持有会过期的 `NodeIdMap`。
 - 修复：`Cargo.toml` 被写入 BOM 导致零 C 守卫把本地 crate 当 registry crate
   （报"源码缺失"假红）——已剥 BOM，并让守卫解析时剥掉。
-- 验证：gate GATE OK；Windows `--features a11y` 测试通过；
-  Linux Xvfb 下 `real_window` 17 passed / 2 ignored，a11y 21 条通过。
+- 验证（历史记录）：Windows `--features a11y` 测试通过；Linux Xvfb 下 `real_window` 17 passed / 2 ignored，a11y 21 条通过。本轮 release-readiness 自动项通过，真人读屏器验收仍未完成。
 
 **未做**（0.3.0 收敛的剩余项）：
 
@@ -470,7 +459,7 @@ Windows `gate.ps1` **GATE OK**。所以之前的红是磁盘，不是代码。
 2. 真机读屏器验收（Windows 讲述人 / Linux Orca 手工清单）—— 需要人操作，机器做不了。
 3. **发布阻塞项**：crates.io 凭据（本机无 `~/.cargo/credentials.toml` / `CARGO_REGISTRY_TOKEN`）、
    上传与打 `v0.3.0` tag 的授权、推送 GitHub 的授权 —— 这三项**只能由用户决定**。
-3. Web 的 DOM/ARIA 镜像 —— 属 Tier 3 升级项，不在 0.3 关键路径。
+4. Web ARIA 镜像的 runtime 接线、浏览器及读屏器验证 —— helper 已存在但尚未集成，属 Tier 3 后续工作，不在 0.3 自动门禁范围。
 
 - 新增 `crates/y901-render/src/text/`：
   - `GlyphKey { face, glyph }` —— 图集键的正确形状（`char` 作键会让不同上下文的

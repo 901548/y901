@@ -47,7 +47,7 @@ cargo semver-checks check-release --workspace --baseline-rev (git describe --tag
 cargo package -p y901-core --allow-dirty --offline
 ```
 
-### 1b. 首发前把**全部 11 个 crate** 都打包验证一遍（不发布）
+### 1b. 首发前把**全部 12 个 crate** 都打包验证一遍（不发布）
 
 首次发布时下游 crate 的 `cargo package` 必然报
 `no matching package named 'y901-xxx' found` —— 因为 cargo 会去 registry 解析依赖。
@@ -55,7 +55,7 @@ cargo package -p y901-core --allow-dirty --offline
 `--config` 临时给上游打 `[patch.crates-io]`：
 
 ```powershell
-$order = 'y901-core','y901-ui','y901-render','y901-widgets','y901-runtime',
+$order = 'y901-core','y901-ui','y901-render','y901-a11y','y901-widgets','y901-runtime',
          'y901-extras','y901-backend-win32','y901-backend-x11','y901-backend-web',
          'y901-shell','y901'   # y901 是单一入口，必须最后发
 for ($i = 0; $i -lt $order.Count; $i++) {
@@ -67,7 +67,7 @@ for ($i = 0; $i -lt $order.Count; $i++) {
 }
 ```
 
-2026-11-20 实测：当时的 **10 个 crate** 全部打包成功（7–78 个文件，18–179 KiB 压缩后）。截至 0.2.6，workspace 已增至 **11 个 crate**；新增 crate 的打包验证记录需另行补充。
+历史记录：2026-11-20 的验证覆盖当时全部 **10 个 crate**（7–78 个文件，18–179 KiB 压缩后）。截至 0.3.0 workspace 有 **12 个 crate**；本轮 `scripts/check-packaging.ps1` 已逐一验证 12 个 crate 可打包。
 这一步抓到过一个真问题：`y901-shell` 的 wasm 依赖 `y901-backend-web` **没写
 `version`**，导致 `cargo publish -p y901-shell` 会直接失败：
 
@@ -93,7 +93,7 @@ dependency `y901-backend-web` does not specify a version
 ## 2. 首次发布顺序（**被依赖的先发**）
 
 > **y901 是单一入口，必须最后发**（它依赖其余全部 crate）。用户侧只需要 `cargo add y901`，
-> 其它 10 个 crate 是内部实现；截至 0.2.6 共 11 个 crate，仍可单独依赖（需要裁剪依赖时才这么做）。
+> 其它 11 个 crate 是内部实现；截至 0.3.0 共 12 个 crate，仍可单独依赖（需要裁剪依赖时才这么做）。
 
 一条命令（推荐）：[`scripts/publish-crates.ps1`](../scripts/publish-crates.ps1) 内置了
 依赖顺序、已发布版本跳过、索引等待与失败解释：
