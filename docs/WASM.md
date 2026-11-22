@@ -188,10 +188,14 @@ input。
    它是"桌面零回归"的硬判据。
 2. **wasm32 check**：`cargo check -p y901-shell --target wasm32-unknown-unknown` 必须 exit 0。
    （`--workspace` + wasm32 **不能**通过：`y901-backend-win32` 没有 cfg 守卫，这是既有情况。）
-   同理**单入口 `y901` 也不能构建 wasm32**：它依赖 `y901-extras`，而后者的 `portable-pty`
-   会拉进 `filedescriptor`，该 crate 在 wasm32 上编译不过（实测
-   `cannot find type RawFileDescriptor`）。Web 侧请直接依赖 `y901-shell`；
-   要开无障碍镜像则 `y901-shell` + feature `a11y`（已在 CI 里固定校验）。
+   单入口 `y901` 曾经也构建不了 wasm32：它经 `y901-extras → portable-pty → filedescriptor`
+   拖进一条在 wasm32 上编译不过的链（`cannot find type RawFileDescriptor`）。
+   **现已按 target 门控修好**（`crates/y901-extras/Cargo.toml` 把 `portable-pty` /
+   `crossbeam-channel` 放进 `cfg(not(target_arch = "wasm32"))`），
+   `cargo check -p y901 --target wasm32-unknown-unknown` 现在 exit 0，CI 已固定校验
+   （含 `--features a11y` 与"PTY 仍在宿主机依赖树里"的反向守卫）。
+   wasm32 上 `TerminalWidget` 依然可用，只是 `attach_shell` 返回明确错误、`pump` 恒 false、
+   `write` 空操作；宿主用 `feed_vt_for_test` 注入 VT 字节。
 3. **纯函数单测**：事件映射（`keys.rs`）、坐标映射（`to_ui_y`）、通道交换
    （`present.rs`）与脏区裁剪重绘逻辑（`tree.rs`，用记录型 `RenderCtx`，不需要 GPU）。
 4. **native 不受影响**：`cargo check --workspace --all-targets` 与 `cargo test --workspace` 必须绿。

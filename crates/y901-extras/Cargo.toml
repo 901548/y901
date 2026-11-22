@@ -13,6 +13,14 @@ categories = ["gui"]
 [dependencies]
 y901-core = { path = "../y901-core", version = "0.3.0" }
 y901-ui = { path = "../y901-ui", version = "0.3.0" }
+
+# **PTY 只在非 wasm 目标上**：`portable-pty` 会拉进 `filedescriptor`，后者在 wasm32
+# 上编译不过（实测 `cannot find type RawFileDescriptor`，见 `docs/WASM.md`）。
+# 之前这两个依赖是无条件写的，于是**整个 workspace 的单入口 `y901` 无法构建 wasm32** ——
+# 一个只想用按钮的 Web 应用也得把编不过的 PTY 链一起拖进去。
+# `TerminalWidget` 本体仍然可用（Grid/VT/选区/渲染都与平台无关），只有 `attach_shell`
+# 在 wasm 上返回明确错误。
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 crossbeam-channel = "0.5"
 portable-pty = "0.8"
 

@@ -3,10 +3,24 @@
 //! 它不知道 D3D11，也不知道 Win32 —— 只实现 `Widget`，
 //! 通过 `RenderCtx` 出图，通过 `TextMetrics` 量字。
 //! PTY 是它自己的实现细节，框架完全看不见。
+//!
+//! ## 平台差异：wasm32 没有 PTY
+//!
+//! 浏览器里没有进程可以 fork，所以 wasm32 上**只去掉"接 shell"这一层**：
+//! `attach_shell` 返回明确错误、`has_shell` 恒 `false`、`pump` 恒 `false`、`write` 是空操作。
+//! Grid / VT 解析 / 选区 / 渲染全部照旧可用，宿主用
+//! [`TerminalWidget::feed_vt_for_test`]（名字里虽有 test，但它是公开且稳定的注入口）自行灌字节。
+//!
+//! 为什么用"返回错误"而不是 `unimplemented!()`、也不是把方法 `cfg` 掉：
+//! 方法 `cfg` 掉会让调用方在两端写两套 `cfg`；`unimplemented!()` 则把"能编译"
+//! 变成"一跑就崩"，而 `attach_shell` 本来就已经是 `Result`，报错是它自己的语义。
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Write};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crossbeam_channel::{unbounded, Receiver};
+#[cfg(not(target_arch = "wasm32"))]
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
 use y901_core::{CellKind, ColorSpec, Grid};
@@ -35,6 +49,8 @@ pub struct TerminalWidget {
     grid: Grid,
     text: VtFilter,
     pending_utf8: Vec<u8>,
+    /// 已接上的 PTY 会话；`None` = 没接（wasm32 上恒为 `None`，字段本身也不存在）。
+    #[cfg(not(target_arch = "wasm32"))]
     pty: Option<PtySession>,
     rect: Rect,
     /// 单格尺寸（逻辑像素），由字体度量得出。
@@ -55,6 +71,8 @@ pub struct TerminalWidget {
     selection: Option<crate::selection::Selection>,
 }
 
+/// 一条已建立的 PTY 会话（仅在非 wasm 目标上存在）。
+#[cfg(not(target_arch = "wasm32"))]
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -70,6 +88,7 @@ impl TerminalWidget {
             grid: Grid::new(cols.max(1), rows.max(1)),
             text: VtFilter::new(),
             pending_utf8: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             pty: None,
             paste_detect: crate::paste::BracketedPasteDetector::default(),
             clipboard: None,
@@ -233,6 +252,15 @@ impl TerminalWidget {
     }
 
     /// 启动 shell 并把 PTY 接上。
+    ///
+    /// wasm32：**没有进程可以 fork**，返回 `Err` 而不是 panic 或假成功。
+    #[cfg(target_arch = "wasm32")]
+    pub fn attach_shell(&mut self) -> Result<(), String> {
+        Err("wasm32 没有 PTY（浏览器里不能 fork 进程）：请用 feed_vt_for_test 注入字节".to_string())
+    }
+
+    /// 启动 shell 并把 PTY 接上。
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn attach_shell(&mut self) -> Result<(), String> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -291,13 +319,21 @@ impl TerminalWidget {
 
     /// 是否已接上真实 shell（`attach_shell` 成功过）。
     ///
-    /// 返回：`true` = 输入会写进 PTY；`false` = 纯展示（测试/日志视图）。
+    /// 返回：`true` = 输入会写进 PTY；`false` = 纯展示（测试/日志视图，wasm32 恒为 `false`）。
     /// 副作用：无。
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn has_shell(&self) -> bool {
         self.pty.is_some()
     }
 
+    /// wasm32：永远没有 shell。
+    #[cfg(target_arch = "wasm32")]
+    pub fn has_shell(&self) -> bool {
+        false
+    }
+
     /// 把已经到达的 PTY 数据吃进 Grid。返回是否真的读到了东西。
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn pump(&mut self) -> bool {
         let mut any = false;
         if let Some(pty) = self.pty.as_ref() {
@@ -320,7 +356,14 @@ impl TerminalWidget {
         any
     }
 
+    /// wasm32：没有 PTY 可泵，恒为 `false`（宿主自己调 `feed_vt_for_test` 灌字节）。
+    #[cfg(target_arch = "wasm32")]
+    pub fn pump(&mut self) -> bool {
+        false
+    }
+
     /// 写入 PTY（键盘/注入都走这里）。
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn write(&mut self, bytes: &[u8]) {
         if let Some(pty) = self.pty.as_mut() {
             // 不静默：向 PTY 写失败意味着**输入丢了**（用户会发现“键不响应”）。
@@ -335,6 +378,11 @@ impl TerminalWidget {
         }
     }
 
+    /// wasm32：没有 PTY，写入是空操作（键盘输入由宿主的 DOM 事件转成 VT 字节再注入）。
+    #[cfg(target_arch = "wasm32")]
+    pub fn write(&mut self, _bytes: &[u8]) {}
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn sync_pty_size(&mut self) {
         if let Some(pty) = self.pty.as_mut() {
             let _ = pty.master.resize(PtySize {
@@ -345,6 +393,9 @@ impl TerminalWidget {
             });
         }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn sync_pty_size(&mut self) {}
 
     /// 按 rect 与字体度量重算 cols/rows。
     fn retile(&mut self, rect: Rect, metrics: &dyn TextMetrics) {

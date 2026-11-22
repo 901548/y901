@@ -104,8 +104,8 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 - **macOS 与 Wayland 后端未实现**；Wayland 用户走 XWayland。
 - **Web 后端是 Tier 3**：单 canvas、整帧 `putImageData`、隐藏 `<input>` 承接 IME（候选窗不可钉位）、
   无多窗口/FileDrop。DOM 语义只在可选的 `a11y` feature 下提供（隐藏 ARIA 镜像，已接入帧循环），
-  且**未在真实浏览器与读屏器上验证过**。Web 构建直接用 `y901-shell` —— 单入口 `y901` 目前是
-  桌面专用的，因为 `y901-extras` 里的 PTY 依赖不支持 `wasm32`。
+  且**未在真实浏览器与读屏器上验证过**。单入口 `y901` 现在可以构建 `wasm32`；
+  `TerminalWidget` 也能用，但 `attach_shell` 会返回错误 —— 浏览器里没有进程可 fork。
 - **文本模型要求等宽字体**：`cell_metrics_for` 固定按 `0.5em × 1em` 出 cell。
   默认字体 `NSimSun`（等宽、中英文齐全）。`FontConfig::modern()` 可切到
   `Microsoft YaHei UI`，但**只建议做视觉试验**——比例字体按固定步进排布会字距不均。

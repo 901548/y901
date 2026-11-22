@@ -483,3 +483,29 @@ Windows `gate.ps1` **GATE OK**。所以之前的红是磁盘，不是代码。
 - 测试：22 条（方向判定 / 视觉重排 / 集群 / 拉丁 shaping / 阿拉伯 RTL / 坏字体报错 / face 键）。
 - **未做**（下一步）：图集键真正切到 `GlyphKey`；`Widget::measure` 增加可用宽度重载；
   Label/RichText/TextInput 接入 shaped 路径；字体回退链。
+
+### S5（2026-11-22）：0.3.0 发布后 —— wasm 门面修复 + 门禁补强
+
+发布 0.3.0 后回头补审计中发现的"已发布但没验证"的三处缺口：
+
+- **单入口 `y901` 无法构建 wasm32（已修）**：根因是 `y901-extras` 无条件依赖
+  `portable-pty`，它拉进 `filedescriptor`，后者在 wasm32 上编译不过
+  （`cannot find type RawFileDescriptor`）。修法是把 PTY 依赖按 target 门控
+  （`crates/y901-extras/Cargo.toml` 的 `cfg(not(target_arch = "wasm32"))`），
+  代码侧只把 `attach_shell` / `has_shell` / `pump` / `write` / `sync_pty_size`
+  拆成两个 cfg 分支：wasm 上返回明确错误或空操作，**不 panic、不假成功**。
+  `TerminalWidget` 的 Grid / VT / 选区 / 渲染在 wasm 上照旧可用。
+- **验证矩阵**（全部实跑）：`cargo check -p y901 --target wasm32-unknown-unknown`
+  exit 0；`--features a11y` 亦为 0；`y901-shell` 两种配置也仍然为 0；
+  `cargo tree -p y901 --target wasm32` 里 `portable-pty` / `filedescriptor` 已消失，
+  而宿主机依赖树仍保留（`cargo tree -i portable-pty` 有输出）——
+  反向守卫写进 CI，防止"修 wasm 顺手把桌面 PTY 删了"。
+- CI `web-aria` job 增加 3 步：门面 wasm 构建、门面 + a11y、PTY 仍在宿主机依赖树。
+- **门禁补强（同日）**：`scripts/gate.ps1` 新增 rustdoc 警告门禁
+  （`RUSTDOCFLAGS=-D warnings`，断链会被挡下，已用注入变异验证）与脚本编码门禁
+  （带非 ASCII 的 `.ps1` 必须有 UTF-8 BOM，否则 Windows PowerShell 5.1 会把中文注释
+  按 ANSI 解码并吞掉后续字符，报出与真实原因无关的语法错误——本轮实际踩到过）。
+- **文档数字静默篡改（已修）**：`sync-doc-numbers.ps1` 的行内 `key=N` 改写曾把
+  `STATUS.md` 里 Linux 的 `passed=` 换成 Windows 的值，而 `-Check` 因该值也在允许
+  集合里放行。现在写路径跳过"同一行 Linux 之后"的部分，检查路径按首个 `Linux`
+  切段分别校验，并加了第 9 条变异用例钉住这个场景。

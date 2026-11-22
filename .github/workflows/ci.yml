@@ -216,6 +216,16 @@ jobs:
       # 否则浏览器用户开了 feature 仍然读不到任何东西（镜像代码根本没参与编译）。
       - name: cargo check -p y901-shell --features a11y (wasm32)
         run: cargo check -p y901-shell --features a11y --target wasm32-unknown-unknown
+      # **单入口门面必须在 wasm32 上成立**：它经由 `y901-extras` 间接依赖 PTY 链
+      # （portable-pty → filedescriptor），而那条链在 wasm32 上编译不过。
+      # extras 已按 target 门控掉 PTY；这一步守住"门面不退化回桌面专用"。
+      - name: cargo check -p y901 (facade, wasm32)
+        run: cargo check -p y901 --target wasm32-unknown-unknown
+      - name: cargo check -p y901 (facade + a11y, wasm32)
+        run: cargo check -p y901 --features a11y --target wasm32-unknown-unknown
+      # 反向守卫：PTY 依赖真的**还在**宿主机上，没有被 target 门控误删。
+      - name: portable-pty still resolves on the host target
+        run: cargo tree -p y901-extras -i portable-pty
   semver-guard:
     name: semver guard (breaking `!` commits require minor/major bump)
     runs-on: ubuntu-latest
