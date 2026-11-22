@@ -57,6 +57,9 @@
   `cargo audit` 的 allowed warning 从 7 条降到 6 条；剩下 6 条全部阻塞在上游，
   逐条结论见 [`DEPENDENCIES.md`](DEPENDENCIES.md)。
 - `unicode-width` 0.2.2 → 0.2.3。
+- `png` 0.17 → **0.18**：API 有两处收紧（`Decoder::new` 要求 `Read + Seek`；
+  `output_buffer_size()` 返回 `Option<usize>`），`Image::from_png` 已相应适配 ——
+  用 `Cursor<&[u8]>` 包装、尺寸拿不到时返回 `Err` 而不是 `unwrap`。
 - CI 动作 `actions/checkout` 4 → 7、`actions/upload-artifact` 4 → 7。
 
 ## 发布前仍缺

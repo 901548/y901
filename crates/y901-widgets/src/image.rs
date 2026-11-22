@@ -158,11 +158,19 @@ impl Image {
     /// 为什么用 `png` crate 而不是手写解码：它只依赖 `flate2`→`miniz_oxide`，
     /// **全链纯 Rust**，零 C 依赖守卫测试会替我们继续盯着这一点。
     pub fn from_png(id: impl Into<String>, bytes: &[u8]) -> Result<Self, String> {
-        let decoder = png::Decoder::new(bytes);
+        // **`Cursor` 而不是裸 `&[u8]`**：`png` 0.18 的 `Decoder::new` 要求
+        // `R: Read + Seek`，而 `&[u8]` 只实现 `Read`/`BufRead`（0.17 时代够用）。
+        // `Cursor<&[u8]>` 不复制字节，只是加了个位置指针。
+        let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
         let mut reader = decoder
             .read_info()
             .map_err(|e| format!("PNG 读取失败: {e}"))?;
-        let mut buf = vec![0; reader.output_buffer_size()];
+        // **`None` 不 panic**：0.18 在尺寸溢出 `usize`（或头部信息不足）时返回 `None`，
+        // 而调用方拿到的是 `Result`，就该报错而不是炸掉整个 UI。
+        let need = reader
+            .output_buffer_size()
+            .ok_or_else(|| "PNG 解码缓冲尺寸无法确定（图像过大或头部损坏）".to_string())?;
+        let mut buf = vec![0; need];
         let info = reader
             .next_frame(&mut buf)
             .map_err(|e| format!("PNG 解码失败: {e}"))?;
