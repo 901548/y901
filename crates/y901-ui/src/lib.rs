@@ -38,6 +38,7 @@ pub mod cluster;
 pub mod color;
 pub mod command;
 pub mod event;
+pub mod fasthash;
 pub mod geometry;
 pub mod grid;
 pub mod image;

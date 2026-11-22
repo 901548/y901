@@ -17,7 +17,7 @@
 //! **仍不做**：absolute（定位逃逸）、aspect-ratio。理由：它们与“所有子控件由父容器分配 rect”
 //! 的模型直接冲突；当前层叠需求已由 `Stack` + 各控件自算 rect 满足。
 
-use std::collections::{HashMap, HashSet};
+use crate::fasthash::{fast_map, fast_set, FastMap, FastSet};
 
 use crate::color::Color;
 use crate::event::{EventResult, UiEvent};
@@ -64,10 +64,10 @@ pub fn id_key(id: &str) -> u64 {
 
 /// 布局缓存：记忆化 + 脏传播。
 pub struct LayoutCache {
-    entries: HashMap<u64, Entry>,
-    dirty: HashSet<u64>,
+    entries: FastMap<u64, Entry>,
+    dirty: FastSet<u64>,
     /// 子 → 父（脏传播用）。键是 id_key 的结果。
-    parents: HashMap<u64, u64>,
+    parents: FastMap<u64, u64>,
     /// 当前正在测量的祖先链（用于填写 `parents`）。
     stack: Vec<u64>,
     stats: LayoutStats,
@@ -83,9 +83,9 @@ impl LayoutCache {
     /// 建立空缓存。
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
-            dirty: HashSet::new(),
-            parents: HashMap::new(),
+            entries: fast_map(),
+            dirty: fast_set(),
+            parents: fast_map(),
             stack: Vec::new(),
             stats: LayoutStats::default(),
         }

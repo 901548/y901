@@ -188,6 +188,27 @@ fn profile_skip_by_size() {
 
 #[test]
 #[ignore = "剖析台：cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture"]
+fn profile_shape_costs() {
+    // 同样的节点量、不同的形状：区分"每容器开销"与"每节点开销"。
+    // - 宽树（1 个容器 + 10k 叶子）：几乎全是叶子路径（缓存哈希 + measure/arrange）
+    // - 深树（本项目默认 10^4）：1111 个容器，每个 10 个子件
+    let viewport = Size::new(2000.0, 2000.0);
+    for (label, w, d) in [("wide-10k", 10000usize, 1usize), ("deep-10k", 10, 4)] {
+        let mut tree = build(w, d);
+        tree.layout(viewport, &Mono);
+        let (avg, _) = time_layout(&mut tree, viewport, 10);
+        let s = tree.layout_stats();
+        eprintln!(
+            "[shape] {label} nodes={} cold_avg={avg:.1}us measured={} arranged={}",
+            w.pow(d as u32),
+            s.measured,
+            s.arranged
+        );
+    }
+}
+
+#[test]
+#[ignore = "剖析台：cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture"]
 fn profile_10k_layout() {
     let viewport = Size::new(2000.0, 2000.0);
 

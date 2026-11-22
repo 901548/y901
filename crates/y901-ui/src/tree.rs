@@ -4,6 +4,8 @@
 //! 拿到的矩形与语义与实际渲染完全一致（同一棵树算出来的）。
 
 use std::collections::HashMap;
+
+use crate::fasthash::{fast_map, FastMap};
 use web_time::Instant;
 
 use crate::event::{EventPhase, PointerCapture};
@@ -245,7 +247,7 @@ pub struct UiTree {
     /// 为什么不标脏时现算：标脏发生在事件分发/布局阶段，那里拿不到 `metrics`
     /// （`Widget::ink_overflow` 需要字体度量），而现查树是 O(n)。
     /// 布局已经递归过整棵树，顺手采一遍是零额外遍历。
-    node_ink_margin: HashMap<u64, f32>,
+    node_ink_margin: FastMap<u64, f32>,
     /// **上一次 Tick 广播时 `wants_tick() == true` 的节点数**。
     ///
     /// 为何要存：`run_loop` 要据此决定 Tick 节拍（16ms 还是 idle_wait）。
@@ -260,7 +262,7 @@ pub struct UiTree {
     focus: Option<String>,
     viewport: Size,
     /// id -> rect 的缓存，避免每次 RPC 都走一遍树。
-    rects: HashMap<u64, Rect>,
+    rects: FastMap<u64, Rect>,
     /// 组件在本轮分发中产生的命令，等待 `drain_commands` 处理。
     pending: Vec<crate::command::Command>,
     /// 布局记忆化 + 脏传播。
@@ -465,12 +467,12 @@ impl UiTree {
             pending_texture_releases: Vec::new(),
             scale: 1.0,
             ink_margin: 0.0,
-            node_ink_margin: HashMap::new(),
+            node_ink_margin: fast_map(),
             root,
             popups: Vec::new(),
             focus: None,
             viewport: Size::ZERO,
-            rects: HashMap::new(),
+            rects: fast_map(),
             pending: Vec::new(),
             cache: crate::layout::LayoutCache::new(),
             // 首帧必须整窗绘制
@@ -1672,7 +1674,7 @@ impl UiTree {
         // "上一轮每个节点的 rect"，语义等价、零分配。
         //
         // 视口变化时整窗已经是脏的，不需要对比。
-        let before: Option<HashMap<u64, Rect>> = if viewport_changed {
+        let before: Option<FastMap<u64, Rect>> = if viewport_changed {
             None
         } else {
             Some(std::mem::take(&mut self.rects))
@@ -1721,7 +1723,7 @@ impl UiTree {
             node: &dyn Widget,
             metrics: &dyn TextMetrics,
             default: f32,
-            out: &mut HashMap<u64, f32>,
+            out: &mut FastMap<u64, f32>,
         ) {
             let margin = node.ink_overflow(metrics).unwrap_or(default);
             out.insert(crate::layout::id_key(node.id()), margin);
@@ -1757,7 +1759,7 @@ impl UiTree {
     /// 为什么用 `u64` 而不是 id 字符串：字符串版本每次布局都要
     /// `id().to_string()` + 反查 `id_key` 各一遍，11k 节点上是两次全树哈希；
     /// 索引表本来就用 `Widget::cache_key()` 预算好的键。
-    fn mark_moved_map(&mut self, before: &HashMap<u64, Rect>) {
+    fn mark_moved_map(&mut self, before: &FastMap<u64, Rect>) {
         for (key, old) in before {
             let Some(new) = self.rects.get(key).copied() else {
                 // 节点消失了（弹窗关闭、列表删行、子树被隐藏）：
@@ -1779,7 +1781,7 @@ impl UiTree {
 
         // 把四个可变的输出目标打包：既避免 8 参数，也明确"它们是一起写的"
         struct Outputs<'a> {
-            rects: &'a mut HashMap<u64, Rect>,
+            rects: &'a mut FastMap<u64, Rect>,
             order: &'a mut Vec<PaintEntry>,
             modal_root: &'a mut Option<Vec<usize>>,
         }
@@ -2957,7 +2959,7 @@ fn render_pass(
     // per-node 墨迹边距：判断"要不要重绘"时必须用 **rect ∪ 墨迹**。
     // 只看 rect 会让"墨迹压到脏区里的邻居"被漏画：脏区清屏把它的笔画擦掉，
     // 而它自己又没被重绘 → 局部刷新后笔画消失（StyledText 放宽裁剪后才暴露）。
-    ink: &HashMap<u64, f32>,
+    ink: &FastMap<u64, f32>,
     // `paint_all`：**强制整树绘制**。局部重绘时画面被剪到脏区，脏区内必须按
     // **完整绘制顺序**重画（父背景 → 子 → 文字），否则会出现"父背景没画"的黑块。
     paint_all: bool,

@@ -408,6 +408,11 @@ foreach ($f in $docFiles) {
         #   FRAMEWORK: "N 项通过"；STATUS: "与 Windows 的 N/0/M 不同"；ACCEPTANCE: "完整运行 **N passed**"
         # 不加这些，-Check 的通用兜底会报 stale，但 sync 又改不动 → 永远修不好。
         $x = [regex]::Replace($x, '\b(\d{3,})\s*项通过', { param($m) "$passed 项通过" })
+        # FRAMEWORK 的同一个句子里还有"（N 项忽略）"：只改"项通过"会留下过期的忽略数，
+        # 而 -Check 的通用兜底会因为该值不在允许集合里报 stale、sync 又改不动 ——
+        # 结果就是"跑一次 sync 之后门禁仍然红"。这条只作用在**非 Linux 行**上，
+        # 所以不会碰 "Linux … 27 项忽略"。
+        $x = [regex]::Replace($x, '\b(\d{1,4})\s*项忽略', { param($m) "$ignored 项忽略" })
         $x = [regex]::Replace($x, '(与 Windows 的 )(\d{3,})/0/(\d+)', { param($m) "$($m.Groups[1].Value)$passed/0/$ignored" })
         $x = [regex]::Replace($x, '(完整运行[^\n]{0,30}\*\*)(\d+)', { param($m) "$($m.Groups[1].Value)$includePassed" })
         # **加粗从句**：`**1079 passed / 0 failed**` —— 粗体包住整句时上面"数字在粗体里"的
