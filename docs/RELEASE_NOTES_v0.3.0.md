@@ -3,7 +3,7 @@
 > 版本：`0.3.0` · 发布日：2026-11-22 · 上一版：[`RELEASE_NOTES_v0.2.5.md`](RELEASE_NOTES_v0.2.5.md)
 >
 > **已发布到 crates.io**：12 个 crate 全部上传完毕（见 §6 的实际记录）。
-> 仍**未**完成的是真机读屏器验收与 docs.rs 构建确认，见 §6 的“仍未完成”一节。
+> 仍**未**完成的是真机读屏器验收（docs.rs 构建已确认成功），见 §6 的“仍未完成”一节。
 
 ## 1. 版本语义
 
@@ -72,8 +72,9 @@
 | `scripts/check-packaging.ps1` | **12 个 crate 全部可打包** |
 | `scripts/check-version-consistency.ps1` | 通过（0.3.0，12 个 workspace crate） |
 | `scripts/check-semver-bump.ps1` | 通过（v0.2.5 → 0.3.0 = minor） |
-| `scripts/check-consumer.ps1 -Version 0.3.0` / docs.rs | 未运行：0.3.0 尚未发布，发布前置条件未满足 |
-| `scripts/check-consumer.ps1 -Version 0.2.5`（已发布版） | 通过：独立临时目录内用 registry 的 `y901 0.2.5` 编译最小下游工程；仅证明发布链路可用，不覆盖 0.3.0 新 API |
+| `scripts/check-consumer.ps1 -Version 0.3.0` | 通过（发布后实测）：独立临时目录里从 registry 拉 `y901 0.3.0` 编译最小工程成功 |
+| docs.rs 构建 | 通过（发布后实测）：`docs.rs/y901/0.3.0/y901/` 返回真实 rustdoc 页面，无构建失败提示 |
+| `scripts/check-consumer.ps1 -Version 0.2.5`（旧版对照） | 通过：仅证明发布链路可用，不覆盖 0.3.0 新 API |
 | `cargo semver-checks --workspace --exclude y901-a11y --baseline-rev v0.2.5` | 通过（新 crate 无基线，故排除） |
 | `cargo deny check` | advisories/bans/licenses/sources 全 ok（使用缓存 advisories，不代表在线实时审计） |
 | 像素哈希 | `0xF7455CCE7781A864`（**全 S2 改动后未变**） |
@@ -111,7 +112,6 @@ Linux（WSL Ubuntu 22.04 + Xvfb），本轮 2026-11-22 执行 `CARGO_FLAGS=--off
 
 1. **真机读屏器验收**：Windows 讲述人 / Linux Orca / NVDA 手工清单（机器无法替代）。
    无障碍桥能推树，但**没有任何真人验证过读屏效果**；Web ARIA helper 亦无 runtime 调用点。
-2. **docs.rs 构建确认**：发布后由 docs.rs 异步构建，需到 docs.rs/y901/0.3.0 核对是否成功。
 
 ### 已知的发布过程波折（不影响产物）
 
