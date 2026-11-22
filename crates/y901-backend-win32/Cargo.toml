@@ -17,7 +17,7 @@ y901-runtime = { path = "../y901-runtime", version = "0.4.0" }
 y901-render = { path = "../y901-render", version = "0.4.0" }
 # 无障碍桥（UIA）。可选：默认不拉 accesskit。
 y901-a11y = { path = "../y901-a11y", version = "0.4.0", optional = true }
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
   "Win32_Security",
     "Win32_Graphics_Gdi",
