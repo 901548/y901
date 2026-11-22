@@ -458,8 +458,8 @@ Windows `gate.ps1` **GATE OK**。所以之前的红是磁盘，不是代码。
    `new()` + builder，那时再打属性才有意义。
 2. 真机读屏器验收（Windows 讲述人 / Linux Orca 手工清单）—— 需要人操作，机器做不了。
 3. **发布（2026-11-22 已完成）**：12 个 crate 已上传 crates.io，`v0.3.0` tag 与 `origin/main` 均已推送；
-   下游 `check-consumer.ps1 -Version 0.3.0` 通过。详见 [`RELEASE_NOTES_v0.3.0.md`](RELEASE_NOTES_v0.3.0.md) §6。
-   仍未完成：docs.rs 构建确认（异步，需到页面核对）。
+   下游 `check-consumer.ps1 -Version 0.3.0` 通过，docs.rs 构建亦已确认成功
+   （`docs.rs/y901/0.3.0/y901/` 为真实 rustdoc 页面）。详见 [`RELEASE_NOTES_v0.3.0.md`](RELEASE_NOTES_v0.3.0.md) §6。
 4. Web ARIA 镜像的 runtime 接线、浏览器及读屏器验证 —— helper 已存在但尚未集成，属 Tier 3 后续工作，不在 0.3 自动门禁范围。
 
 - 新增 `crates/y901-render/src/text/`：
