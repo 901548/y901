@@ -85,7 +85,9 @@ cargo run -p y901-shell --example alert         # four alert variants
 - **Browser backend (Tier 3).** Single canvas, full-frame `putImageData`, hidden-input IME
   with no candidate-window positioning, no multi-window/FileDrop. DOM semantics exist only
   behind the opt-in `a11y` feature (a hidden ARIA mirror wired into the frame loop); it has
-  **not** been validated in a real browser or with a screen reader.
+  **not** been validated in a real browser or with a screen reader. Web builds use
+  `y901-shell` directly — the `y901` facade is desktop-only today because `y901-extras`
+  pulls a PTY dependency that does not compile for `wasm32`.
 - **0.x API.** Breaking changes bump the minor version (0.3.0, 0.4.0 …) and ship migration
   notes in `docs/RELEASE_NOTES_v*.md`; published version numbers are never reused.
 

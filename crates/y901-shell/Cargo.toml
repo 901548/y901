@@ -52,7 +52,11 @@ path = "examples/hello.rs"
 
 [features]
 default = []
-# 转发到平台后端的无障碍桥（Windows UIA / Linux AT-SPI）。
+# 转发到平台后端的无障碍桥（Windows UIA / Linux AT-SPI / Web ARIA 镜像）。
 # 为什么要在 shell 转发：示例与用户应用都从 `create_runtime()` 走，
 # 只有一路转发特征，普通用户才不用直接依赖 `y901-backend-*`。
-a11y = ["y901-backend-win32/a11y", "y901-backend-x11/a11y"]
+#
+# **必须带上 web**：`y901-backend-web` 只有 wasm32 才存在，但 feature 引用允许指向
+# 目标条件依赖 —— 少了它，浏览器用户开 `y901/a11y` 时镜像代码根本不参与编译，
+# 现象是"开了 feature 但读屏器仍然什么都读不到"。
+a11y = ["y901-backend-win32/a11y", "y901-backend-x11/a11y", "y901-backend-web/a11y"]

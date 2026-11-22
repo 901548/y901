@@ -212,6 +212,10 @@ jobs:
       # 映射与"指纹去重"是纯逻辑，能在宿主机上单测；DOM 行为只能靠真实浏览器，这里不做。
       - name: cargo test -p y901-a11y
         run: cargo test -p y901-a11y
+      # 门面转发：`y901-shell/a11y` 必须真的把 `y901-backend-web/a11y` 打开，
+      # 否则浏览器用户开了 feature 仍然读不到任何东西（镜像代码根本没参与编译）。
+      - name: cargo check -p y901-shell --features a11y (wasm32)
+        run: cargo check -p y901-shell --features a11y --target wasm32-unknown-unknown
   semver-guard:
     name: semver guard (breaking `!` commits require minor/major bump)
     runs-on: ubuntu-latest
