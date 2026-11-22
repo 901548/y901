@@ -509,6 +509,13 @@ fn invalidate_rect_partial_equals_full() {
         n: std::rc::Rc<std::cell::Cell<usize>>,
         rect: Rect,
         line: Rect,
+        /// 行框高度走**后端真实度量**（`TextMetrics::line_height`），不写死 20px。
+        ///
+        /// 写死会在高 DPI 下失效：本机窗口缩放是 150%，16 号字物理行高 24px，
+        /// 写死 20px 的行框比字形还矮 4px，局部刷新必然漏掉溢出的那几行像素
+        /// （实测 740 字节差异、首个差异在行底线下一行）。这不是渲染 bug，
+        /// 而是用例假设了"125% 下 20px 刚好等于行高"。
+        line_h: std::rc::Rc<std::cell::Cell<f32>>,
     }
     impl Widget for Stream {
         fn id(&self) -> &str {
@@ -525,12 +532,15 @@ fn invalidate_rect_partial_equals_full() {
         fn arrange(
             &mut self,
             r: Rect,
-            _m: &dyn TextMetrics,
+            m: &dyn TextMetrics,
             _cache: &mut y901_ui::layout::LayoutCache,
         ) {
             self.rect = r;
-            // 流式行固定在左上角一块小区域
-            self.line = Rect::new(r.x + 8.0, r.y + 8.0, 320.0, 20.0);
+            // 流式行固定在左上角一块小区域；行高取真实度量，保证"行框装得下字形"
+            // 与 DPI 无关（100%/125%/150% 都成立）。
+            let line_h = m.line_height(&TextStyle::default()).max(20.0);
+            self.line_h.set(line_h);
+            self.line = Rect::new(r.x + 8.0, r.y + 8.0, 320.0, line_h);
         }
         fn rect(&self) -> Rect {
             self.rect
@@ -554,12 +564,14 @@ fn invalidate_rect_partial_equals_full() {
 
     let make = |n: usize| {
         let cell = std::rc::Rc::new(std::cell::Cell::new(n));
+        let line_h = std::rc::Rc::new(std::cell::Cell::new(20.0f32));
         let tree = UiTree::new(Box::new(Stream {
             n: cell.clone(),
             rect: Rect::ZERO,
             line: Rect::ZERO,
+            line_h: line_h.clone(),
         }));
-        (tree, cell)
+        (tree, cell, line_h)
     };
 
     // ---- A/B：同一个窗口里先短后长，用 invalidate_rect 做局部刷新 ----
@@ -573,7 +585,7 @@ fn invalidate_rect_partial_equals_full() {
         fullscreen: false,
     };
     let mut window = Window::create(&options).expect("需要可用的 D3D11 设备");
-    let (mut tree, cell) = make(4);
+    let (mut tree, cell, line_h) = make(4);
     window.resize(&mut tree);
     tree.invalidate_all();
     window.render(&mut tree); // A：短文本整窗
@@ -583,29 +595,23 @@ fn invalidate_rect_partial_equals_full() {
     let line = tree.rect_of("stream").expect("stream");
     // **脏区必须覆盖"实际画出来的"字形**，而不只是这行的逻辑矩形。
     //
-    // 字号按 DPI 缩放（`px * dpi_scale`），而这条测试行的固定高度是 20px、
-    // 文字又从 `line.y + 2` 起笔：本机 125% 缩放下默认 16 号字的物理高度正好
-    // 是 20px，于是字形会溢出到这行**下方 1~2px**。只标 `320x20` 时，溢出的
-    // 那两行像素既不重绘也不被覆盖，局部刷新与全量重绘必然不一致
-    // （实测差异 156 字节，首个差异在行底边下一行）。
+    // 字号按 DPI 缩放（`px * dpi_scale`），文字又从 `line.y + 2` 起笔，所以字形
+    // 可能越过行框底边。脏区只标逻辑行矩形时，溢出的那几行像素既不重绘也不被
+    // 覆盖，局部刷新与全量重绘必然不一致（125% 下实测 156 字节差异）。
     //
-    // 这是**测试的脏区写窄了**，不是渲染错：真实控件标脏时用的是自身 bounds，
-    // 而它的 bounds 会随字号一起长高。这里用 4px 余量把"字形溢出"包进来，
-    // 同时仍然只标窗口内的一小块，局部重绘的语义没有被削弱。
-    // **脏区只标逻辑行矩形，不加任何手工余量**。
-    //
-    // 修前这里必须手工 `pad = 4.0` 才绿（125% 下字形溢出这行 1~2px，
-    // 溢出的像素不在脏区里、局部重绘清不掉）。现在 `UiTree` 在标脏时统一
-    // 按 `ink_bounds` + 最小安全边距外扩（`add_dirty`），所以这里可以回到
-    // 最朴素的写法 —— 这条用例同时也守住了"框架兜底不许退化"。
-    tree.invalidate_rect(Rect::new(line.x + 8.0, line.y + 8.0, 320.0, 20.0));
+    // 行框高度现在取 `TextMetrics::line_height`（见 `Stream::arrange`），因此
+    // 100%/125%/150% 下"行框装得下字形"都成立；脏区仍然**只标逻辑行矩形、
+    // 不加任何手工余量**。溢出部分由 `UiTree` 标脏时按 `ink_bounds` + 最小安全
+    // 边距统一外扩（`add_dirty`）兜住 —— 这条用例同时也守住了"框架兜底不许退化"。
+    let line_h = line_h.get();
+    tree.invalidate_rect(Rect::new(line.x + 8.0, line.y + 8.0, 320.0, line_h));
     window.request_snapshot();
     window.render(&mut tree);
     let (px1, w1, h1) = window.take_snapshot().expect("快照 A/B 失败");
 
     // ---- C：全新窗口，直接渲染长文本 ----
     let mut window2 = Window::create(&options).expect("需要可用的 D3D11 设备");
-    let (mut tree2, _cell2) = make(26);
+    let (mut tree2, _cell2, _line_h2) = make(26);
     window2.resize(&mut tree2);
     window2.request_snapshot();
     tree2.invalidate_all();
