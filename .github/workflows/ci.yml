@@ -4,7 +4,7 @@ name: CI
 #   windows-gate : 完整 scripts/gate.ps1（MSRV/fmt/计数/inventory/clippy/像素哈希/
 #                  missing_docs/版本一致/doc 数字/audit）—— 与本地发布前跑的是同一份脚本
 #   linux-x11    : scripts/linux-verify.sh 八步（Xvfb 真窗口 + cfg(unix) 代码 + Linux clippy）
-#   packaging    : scripts/check-packaging.ps1（11 个 crate 逐个 `cargo package`，不发布）
+#   packaging    : scripts/check-packaging.ps1（12 个 crate 逐个 `cargo package`，不发布）
 #   dependency-policy : cargo-deny 校验 deny.toml（安全公告 / 许可 / 来源 / 重复版本）
 #   semver-guard : `!` 破坏性提交必须对应 minor/major 升级（scripts/check-semver-bump.ps1）
 #   semver-checks: 公开 API 与最近 tag 的签名级兼容性（cargo-semver-checks）
@@ -100,7 +100,7 @@ jobs:
           if-no-files-found: ignore
 
   packaging:
-    name: cargo package (11 crates, no publish)
+    name: cargo package (12 crates, no publish)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
