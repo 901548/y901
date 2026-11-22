@@ -253,19 +253,43 @@ foreach ($f in $docFiles) {
         # 但**显式标注为历史口径的行**必须豁免：保留上一台机器的真实记录是证据，
         # 强行改成当前数字等于伪造历史。豁免标记与通用兜底同一套（可审计）。
         #
+        # **同一行混写两台机器时按"第一个 Linux 出现位置"切段**：
+        # 前段按 Windows 口径校验，后段按 Linux 口径校验 —— 否则 Windows 的数字
+        # 落在 Linux 段里也能通过（实测：Linux 的 `passed=1031` 被脚本改成 1112，
+        # 而 1112 在允许集合里，-Check 视而不见）。
+        #
         # 注意 `$countKeywords` 必须在这里定义：下面按行过滤"是否在谈计数"，
         # 而通用兜底段（更靠后）也要用同一个词表。
         $countKeywords = '测试|passed|ignored|基线|项测试|include[-_ ]?ignored|含 ignore'
         $linuxLineExempt = '历史|旧口径|当轮|<!--\s*counts-exempt\s*-->'
+        $winAllowed = @($passed, $ignored, $baseline, $targets, $includePassed) | Where-Object { $_ -ge 0 }
         if ($linuxAllowed.Count -gt 0) {
             foreach ($line in ($t -split "`n")) {
                 if ($line -notmatch 'Linux') { continue }
                 if ($line -notmatch $countKeywords) { continue }
                 if ($line -match $linuxLineExempt) { continue }
-                foreach ($m in [regex]::Matches($line, '(?<![\w.])(\d{3,})(?![\w.])')) {
+                # `key=N` 形式（平台汇总行）按切段后的归属校验：
+                $split = $line.IndexOf('Linux')
+                $winSeg = if ($split -gt 0) { $line.Substring(0, $split) } else { '' }
+                $linSeg = $line.Substring([Math]::Max($split, 0))
+                foreach ($kv in [regex]::Matches($winSeg, '`(passed|ignored|targets|include_ignored|baseline)=(\d+)`')) {
+                    $n = [int]$kv.Groups[2].Value
+                    if ($winAllowed -notcontains $n) {
+                        Write-Host ("[sync] stale: {0} -- Windows 段 {1}={2} 不是当前计数（{3}）：{4}" -f $f, $kv.Groups[1].Value, $n, ($winAllowed -join '/'), $line.Trim())
+                        $stale++
+                    }
+                }
+                foreach ($kv in [regex]::Matches($linSeg, '`(passed|ignored|targets)=(\d+)`')) {
+                    $n = [int]$kv.Groups[2].Value
+                    if ($linuxAllowed -notcontains $n) {
+                        Write-Host ("[sync] stale: {0} -- Linux 段 {1}={2} 不在 linux-numbers.txt（{3}）：{4}" -f $f, $kv.Groups[1].Value, $n, ($linuxAllowed -join '/'), $line.Trim())
+                        $stale++
+                    }
+                }
+                foreach ($m in [regex]::Matches($linSeg, '(?<![\w.])(\d{3,})(?![\w.])')) {
                     $n = [int]$m.Groups[1].Value
-                    $suffix = $line.Substring($m.Index + $m.Length)
-                    $prefix = $line.Substring(0, $m.Index)
+                    $suffix = $linSeg.Substring($m.Index + $m.Length)
+                    $prefix = $linSeg.Substring(0, $m.Index)
                     if ($suffix -match '^\s*(%|×|x\b|px|DPI|色|点|个像素)') { continue }
                     if ($prefix -match '×\s*$') { continue }
                     # 与通用兜底同一套排除：四位年份 / 端口号不是计数。
@@ -352,7 +376,19 @@ foreach ($f in $docFiles) {
         if ("$v" -match '^\d+$') {
             $pat = '`' + $k + '=(\d+)`'
             $rep = [char]96 + "$k=$v" + [char]96
-            $t = [regex]::Replace($t, $pat, $rep)
+            # **同一行里 "Linux" 之后的部分不auto改写**：一行可以同时写 Windows 与 Linux
+            # 的数字（STATUS 顶部就是这么写的），而 $v 只来自 Windows 的 numbers.txt。
+            # 实测事故：Windows `passed=1112` 与 Linux `passed=1031` 同处一行时，
+            # 这条规则把 Linux 的 1031 也改成了 1112 —— 文档看起来"已同步"，
+            # 实际 Linux 口径被 Windows 口径覆盖，且 -Check 因为该值也在允许集合里而放行。
+            $t = [regex]::Replace($t, $pat, {
+                param($m)
+                $lineStart = $t.LastIndexOf("`n", [Math]::Min($m.Index, $t.Length - 1))
+                if ($lineStart -lt 0) { $lineStart = 0 }
+                $linePrefix = $t.Substring($lineStart, $m.Index - $lineStart)
+                if ($linePrefix -match 'Linux') { return $m.Value }
+                return $rep
+            })
         }
     }
 

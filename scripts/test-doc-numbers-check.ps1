@@ -60,7 +60,11 @@ $cases = @(
     # 锚点用 ACCEPTANCE 的**当前** Linux 行（未标"历史"）；STATUS 里那条是历史记录，
     # 按文档规范带 `历史` 标记后由豁免规则跳过 —— 所以漂移用例必须打在活跃行上。
     # 数字从 linux-numbers.txt 现读，避免文档数字变动后锚点失效。
-    @{ File = 'docs\ACCEPTANCE.md'; Old = "| **$linuxPassed passed / 0 failed / $linuxIgnored ignored**（$linuxTargets 个测试目标） |"; New = "| **$($linuxPassed - 1) passed / 0 failed / $linuxIgnored ignored**（$linuxTargets 个测试目标） |"; Label = "Linux 计数漂移（$linuxPassed → $($linuxPassed - 1)）" }
+    @{ File = 'docs\ACCEPTANCE.md'; Old = "| **$linuxPassed passed / 0 failed / $linuxIgnored ignored**（$linuxTargets 个测试目标） |"; New = "| **$($linuxPassed - 1) passed / 0 failed / $linuxIgnored ignored**（$linuxTargets 个测试目标） |"; Label = "Linux 计数漂移（$linuxPassed → $($linuxPassed - 1)）" },
+    # **同一条行里混写两台机器**：Windows 数字被写进 Linux 段。这是脚本曾经真实制造的
+    # 事故（同步时把 Linux 的 `passed=` 改成了 Windows 的值），而当时 -Check 因为异常值
+    # 恰好也落在"允许集合"里而放行 —— 所以必须有一条变异用例钉住"按 Linux 标记切段"的规则。
+    @{ File = 'docs\STATUS.md'; Old = "Linux 2026-11-22 第二次复测 ``passed=$linuxPassed``"; New = "Linux 2026-11-22 第二次复测 ``passed=$passed``"; Label = 'Linux 段被写入 Windows 计数（混写行切段校验）' }
 )
 
 $failures = 0

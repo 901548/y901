@@ -1,6 +1,6 @@
 # Y901 框架验收凭证
 
-本验收矩阵汇总的是带日期的历史运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1112 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1173 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-22 刷新为 **1031 passed / 0 failed / 27 ignored / 155 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
+本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1116 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1177 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-22 第二次复测刷新为 **1035 passed / 0 failed / 27 ignored / 155 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
 
 ## 结果
 
@@ -67,12 +67,15 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| Linux 默认测试（`xvfb-run cargo test --workspace`） | **1031 passed / 0 failed / 27 ignored**（155 个测试目标） |
+| Linux 默认测试（`xvfb-run cargo test --workspace`） | **1035 passed / 0 failed / 27 ignored**（155 个测试目标） |
 | Linux x11 `check --all-targets` | exit 0 |
 | Linux x11 `golden` | 36 passed / 0 failed |
 | Linux `xvfb-run real_window` | 17 passed / 0 failed / 2 ignored |
 | Linux x11 `clippy --all-targets -- -D warnings` | exit 0（补上 Windows 门禁看不到的 `#[cfg(unix)]` 代码） |
 | Linux `render stroke_round_aa` / `extras sgr_reverse` / `ui+widgets` / `full workspace` | 全部 exit 0（脚本汇总 8/8） |
+
+> 该表为 2026-11-22 **第二次**复测结果（Web ARIA 接线后重跑）：比首次的 1031 多 4 条 ARIA
+> 指纹用例，因此 Linux 计数从 1031 变为 1035。首次记录见 git 历史与本文件旧版本。
 
 Linux 本轮证据：[`linux-verify-2026-11-22.log`](evidence/cross-platform/linux-verify-2026-11-22.log)。
 命令：`CARGO_FLAGS=--offline bash scripts/linux-verify.sh`（Ubuntu 22.04 / WSL2 + Xvfb）。
