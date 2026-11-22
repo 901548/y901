@@ -1,6 +1,6 @@
 # Y901 框架验收凭证
 
-本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1135 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1196 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-22 第二次复测刷新为 **1035 passed / 0 failed / 27 ignored / 155 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
+本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1135 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1196 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-22 第三次复测刷新为 **1054 passed / 0 failed / 27 ignored / 155 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
 
 ## 结果
 
@@ -67,17 +67,20 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| Linux 默认测试（`xvfb-run cargo test --workspace`） | **1035 passed / 0 failed / 27 ignored**（155 个测试目标） |
+| Linux 默认测试（`xvfb-run cargo test --workspace`） | **1054 passed / 0 failed / 27 ignored**（155 个测试目标） |
 | Linux x11 `check --all-targets` | exit 0 |
 | Linux x11 `golden` | 36 passed / 0 failed |
 | Linux `xvfb-run real_window` | 17 passed / 0 failed / 2 ignored |
 | Linux x11 `clippy --all-targets -- -D warnings` | exit 0（补上 Windows 门禁看不到的 `#[cfg(unix)]` 代码） |
 | Linux `render stroke_round_aa` / `extras sgr_reverse` / `ui+widgets` / `full workspace` | 全部 exit 0（脚本汇总 8/8） |
 
-> 该表为 2026-11-22 **第二次**复测结果（Web ARIA 接线后重跑）：比首次的 1031 多 4 条 ARIA
-> 指纹用例，因此 Linux 计数从 1031 变为 1035。首次记录见 git 历史与本文件旧版本。
+> 该表为 2026-11-22 **第三次**复测结果（TextArea 加入后重跑）：比第二次的 1035 多 19 条
+> （18 条 TextArea 用例 + 1 条 doctest），因此 Linux 计数从 1035 变为 1054。
+> 更早的首次 1031（Web ARIA 接线前）见 git 历史与本文件旧版本。
 
-Linux 本轮证据：[`linux-verify-2026-11-22.log`](evidence/cross-platform/linux-verify-2026-11-22.log)。
+Linux 本轮证据：[`linux-verify-2026-11-22-s6.log`](evidence/cross-platform/linux-verify-2026-11-22-s6.log)（TextArea 加入后，1054 passed）。
+更早的 [`linux-verify-2026-11-22.log`](evidence/cross-platform/linux-verify-2026-11-22.log) 是同日 Web ARIA 接线后的 1031 记录，
+保留为历史，不可当作本轮证据。
 命令：`CARGO_FLAGS=--offline bash scripts/linux-verify.sh`（Ubuntu 22.04 / WSL2 + Xvfb）。
 2026-11-20 的历史记录保留为 [`linux-full-2026-11-20.log`](evidence/cross-platform/linux-full-2026-11-20.log)、
 [`linux-verify-2026-11-20.log`](evidence/cross-platform/linux-verify-2026-11-20.log)，不可视为本轮证据。更早的 CentOS 7.9 记录见 [`linux-verify-2026-11-19.log`](evidence/cross-platform/linux-verify-2026-11-19.log)。

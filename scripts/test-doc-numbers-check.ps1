@@ -64,7 +64,11 @@ $cases = @(
     # **同一条行里混写两台机器**：Windows 数字被写进 Linux 段。这是脚本曾经真实制造的
     # 事故（同步时把 Linux 的 `passed=` 改成了 Windows 的值），而当时 -Check 因为异常值
     # 恰好也落在"允许集合"里而放行 —— 所以必须有一条变异用例钉住"按 Linux 标记切段"的规则。
-    @{ File = 'docs\STATUS.md'; Old = "Linux 2026-11-22 第二次复测 ``passed=$linuxPassed``"; New = "Linux 2026-11-22 第二次复测 ``passed=$passed``"; Label = 'Linux 段被写入 Windows 计数（混写行切段校验）' }
+    #
+    # 锚点**只用代码片段**（`` `passed=<linux 计数>` ``），不写"第二次/第三次复测"这类
+    # 会随文档改写的散文：那种锚点每次改文档就要跟着改，本轮已经因此误报过一次
+    # （gate 报"锚点失效"，看起来像检查器坏了，实际是文档措辞变了）。
+    @{ File = 'docs\STATUS.md'; Old = "``passed=$linuxPassed``"; New = "``passed=$passed``"; Label = 'Linux 段被写入 Windows 计数（混写行切段校验）' }
 )
 
 $failures = 0

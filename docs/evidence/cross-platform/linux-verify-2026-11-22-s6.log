@@ -1,0 +1,145 @@
+
+=== CHECK_X11 ===
+$ cargo check -p y901-backend-x11 --all-targets --offline
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.89s
+EXIT_CHECK_X11=0
+
+=== GOLDEN ===
+$ cargo test -p y901-backend-x11 --test golden --offline
+test keymap_lookup_respects_first_keycode_and_columns ... ok
+test keysym_ascii_maps_to_char ... ok
+test map_window_is_exactly_8_bytes ... ok
+test modifier_keysyms_are_not_characters ... ok
+test no_operation_packet ... ok
+test open_font_pads_name ... ok
+test pad4_aligns_upward ... ok
+test put_image_length_field_caps_single_request_at_256kb ... ok
+test put_image_data_is_padded_to_4_bytes ... ok
+test randr_output_geometry_selects_the_containing_monitor ... ok
+test randr_reply_parsers_decode_physical_output_data ... ok
+test put_image_zpixmap_stride_and_length ... ok
+test randr_request_encoders_match_wire_layout ... ok
+test setup_request_layout ... ok
+test setup_request_without_auth_has_no_padding ... ok
+test special_keysyms_map_to_function_keys ... ok
+test x11_state_bits_map_to_modifiers ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT_GOLDEN=0
+
+=== REAL_WINDOW ===
+$ xvfb-run -a -s -screen 0 1280x800x24 cargo test -p y901-backend-x11 --test real_window --offline
+test put_image_requires_chunking_for_hd_sizes ... ok
+test clipboard_timeout_is_within_600ms ... ok
+test send_event_packet_layout ... ok
+test benchmark_shm_vs_putimage_1080p ... ok
+test clipboard_roundtrip_through_selection_protocol ... ok
+test create_map_and_paint_a_solid_red_window ... ok
+test cursor_shapes_are_created_and_applied ... ok
+test dpi_scale_prefers_explicit_env_over_xft ... ok
+test handshake_reports_screen_and_visual ... ok
+test keyboard_input_reaches_the_ui_layer ... ok
+test randr_active_output_dpi_query_is_safe_on_xvfb ... ok
+test keyboard_mapping_covers_ascii ... ok
+test reads_xft_dpi_from_root_resource_manager ... ok
+test reads_xsettings_through_selection_protocol ... ok
+test runtime_scale_change_rebuilds_soft_backend ... ok
+test shm_and_fallback_produce_identical_pixels ... ok
+test window_implements_event_source_and_presenter ... ok
+
+test result: ok. 17 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.98s
+
+EXIT_REAL_WINDOW=0
+
+=== CLIPPY_X11 ===
+$ cargo clippy -p y901-backend-x11 --all-targets --offline -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.80s
+EXIT_CLIPPY_X11=0
+
+=== STROKE ===
+$ cargo test -p y901-render --test stroke_round_aa --offline
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.69s
+     Running tests/stroke_round_aa.rs (/home/y901548/y901-target/debug/deps/stroke_round_aa-ed77b78b5d563377)
+
+running 1 test
+test rounded_stroke_is_antialiased_and_bounded ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT_STROKE=0
+
+=== SGR_REVERSE ===
+$ cargo test -p y901-extras --test sgr_reverse --offline
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.83s
+     Running tests/sgr_reverse.rs (/home/y901548/y901-target/debug/deps/sgr_reverse-acf30359bfd497a9)
+
+running 3 tests
+test selection_on_top_of_sgr7_cancels_out ... ok
+test sgr27_restores_default_colours ... ok
+test sgr7_swaps_default_colours_with_exact_rgb ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+EXIT_SGR_REVERSE=0
+
+=== UI_WIDGETS ===
+$ cargo test -p y901-ui -p y901-widgets --offline
+test fixed_padding_and_gap_do_not_scale ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_ui
+
+running 2 tests
+test crates/y901-ui/src/lib.rs - (line 22) - compile ... ok
+test crates/y901-ui/src/widget.rs - widget::Role (line 66) ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
+
+   Doc-tests y901_widgets
+
+running 2 tests
+test crates/y901-widgets/src/text_area.rs - text_area::TextArea (line 50) - compile ... ok
+test crates/y901-widgets/src/style.rs - style::WidgetStyle (line 15) ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s
+
+EXIT_UI_WIDGETS=0
+
+=== FULL_WORKSPACE ===
+$ xvfb-run -a cargo test --workspace --no-fail-fast --offline
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests y901_ui
+
+running 2 tests
+test crates/y901-ui/src/lib.rs - (line 22) - compile ... ok
+test crates/y901-ui/src/widget.rs - widget::Role (line 66) ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+
+   Doc-tests y901_widgets
+
+running 2 tests
+test crates/y901-widgets/src/text_area.rs - text_area::TextArea (line 50) - compile ... ok
+test crates/y901-widgets/src/style.rs - style::WidgetStyle (line 15) ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+EXIT_FULL_WORKSPACE=0
+[linux-verify] wrote docs/evidence/linux-numbers.txt (passed=1054 ignored=27 targets=155)
+[linux-verify] REMINDER: copy this file back to the Windows checkout and commit it.
+
+=== 汇总 ===
+CHECK_X11=0
+GOLDEN=0
+REAL_WINDOW=0
+CLIPPY_X11=0
+STROKE=0
+SGR_REVERSE=0
+UI_WIDGETS=0
+FULL_WORKSPACE=0
+LINUX VERIFY: OK
