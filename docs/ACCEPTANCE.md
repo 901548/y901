@@ -1,15 +1,15 @@
 # Y901 框架验收凭证
 
-本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1135 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1196 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-22 第三次复测刷新为 **1054 passed / 0 failed / 27 ignored / 155 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
+本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1135 passed / 0 failed / 63 ignored**；包含 ignored 的完整运行 **1198 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-22 第三次复测刷新为 **1054 passed / 0 failed / 27 ignored / 155 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1135 passed / 0 failed / 61 ignored** |
-| `cargo test --workspace --offline -- --include-ignored` | **1196 passed / 0 failed** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1135 passed / 0 failed / 63 ignored** |
+| `cargo test --workspace --offline -- --include-ignored` | **1198 passed / 0 failed** |
 
-`include_ignored=1196`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
+`include_ignored=1198`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -20,13 +20,13 @@
 | 性能基准 | **30** | ui 12（`perf_bench` ×6、`perf_dispatch_alloc` ×3、`layout_bench`、`perf_alloc`、`rev_snapshot`）、win32 8（`perf_bench` ×3、`present_bench`、`breakdown_rasterize_vs_atlas_insert`、`cold_start_500_cjk_glyphs`、`all_phases_reference_cost`、`soft_fill_rate_1280x800`）、render 10（`cjk_cold_start` ×3、`mip_latin` ×3、`perf_texture_alloc` ×3、`which_method_is_closer_to_supersampled_truth`） |
 | 调试探针 | **5** | `debug_print_glyphs`、`debug_crossings_for_a`、`debug_print_cjk_frames`、`occupancy_matches_glyph_count_sanity`、`probe_orientation_and_channels` |
 | 压力测试 | **1** | `forced_eviction_thrash_measurement`（图集 eviction 抖动） |
-| **本表已分类合计** | **51** | 依据当前列出的名称计算；与全仓 ignored=61 相差 10 条未在本分类表盘点。总数以 `docs/evidence/numbers.txt` 为准。 |
+| **本表已分类合计** | **51** | 依据当前列出的名称计算；与全仓 ignored=63 相差 12 条未在本分类表盘点（其中 2 条是 `layout_profile` 的剖析用例）。总数以 `docs/evidence/numbers.txt` 为准。 |
 
 ## GPU 像素验收用例（真机 D3D11，全部 ok）
 
 > **三个口径别混淆**（此前标题只写"8 个/7 个"，与另外两个数互相矛盾）：
 > 本表列的是 **8 条按像素/解析真值断言的用例**；`snapshot_harness.rs` **文件里共 10 条
-> `#[ignore]`**（另有 2 条是纯诊断/确定性自检）；全仓 `ignored=61` 是**所有 crate 的
+> `#[ignore]`**（另有 2 条是纯诊断/确定性自检）；全仓 `ignored=63` 是**所有 crate 的
 > `#[ignore]` 总数**（含性能基准、DirectWrite 对拍、调试探针），不是本表。
 
 
@@ -57,8 +57,8 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **1135 passed / 0 failed / 61 ignored**（155 个测试目标） |
-| `--include-ignored` | **1196 passed / 0 failed** |
+| 默认测试 | **1135 passed / 0 failed / 63 ignored**（156 个测试目标） |
+| `--include-ignored` | **1198 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
 | `cargo audit` | 0 漏洞 |

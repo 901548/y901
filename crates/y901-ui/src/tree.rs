@@ -571,9 +571,17 @@ impl UiTree {
 
     /// 用**该节点自己的**墨迹边距标脏；节点没有覆盖时退回树级默认。
     fn add_dirty_rect_for(&mut self, id: &str, rect: Rect) {
+        self.add_dirty_rect_for_key(crate::layout::id_key(id), rect);
+    }
+
+    /// 同上，但直接收缓存键（省掉一次字符串哈希）。
+    ///
+    /// 布局前后对比 rect 的路径拿到的就是 u64 键（来自 `rects` 索引表），
+    /// 若先转成字符串再哈希回来，等于每次布局都白做一遍节点数 × 一次 FNV。
+    fn add_dirty_rect_for_key(&mut self, key: u64, rect: Rect) {
         let margin = self
             .node_ink_margin
-            .get(&crate::layout::id_key(id))
+            .get(&key)
             .copied()
             .unwrap_or(self.ink_margin);
         self.add_dirty_rect_with_margin(rect, margin);
@@ -1655,13 +1663,19 @@ impl UiTree {
             self.dirty = DirtyRegion::full();
         }
         self.viewport = viewport;
-        // 布局前快照：控件收缩/内容变短时，**旧 rect 也要重绘**，
+        // 布局前后的 rect 对比：控件收缩/内容变短时，**旧 rect 也要重绘**，
         // 否则旧内容的残影会留在屏幕上（局部重绘下才暴露）。
-        // 视口变化时整窗已经是脏的，不需要快照。
-        let before = if viewport_changed {
-            Vec::new()
+        //
+        // **直接搬走上一轮的 `rects` 索引表**（`u64 → Rect`），而不是再走一遍树、
+        // 为每个节点 `id().to_string()` 建快照：那条老路在 11k 节点上每次布局要分配
+        // 11k 个 String（实测热布局 573µs，几乎全花在这上面），而索引表本来就是
+        // "上一轮每个节点的 rect"，语义等价、零分配。
+        //
+        // 视口变化时整窗已经是脏的，不需要对比。
+        let before: Option<HashMap<u64, Rect>> = if viewport_changed {
+            None
         } else {
-            self.snapshot_rects()
+            Some(std::mem::take(&mut self.rects))
         };
         crate::layout::layout_tree(self.root.as_mut(), viewport, metrics, &mut self.cache);
         // per-node 墨迹边距：只有**真的重排**时才重采。
@@ -1686,10 +1700,14 @@ impl UiTree {
         }
         if !self.layout_stats().skipped {
             self.rebuild_indices();
-            if !before.is_empty() {
-                self.mark_moved(&before);
+            if let Some(before) = before {
+                self.mark_moved_map(&before);
             }
             self.enforce_modal_focus();
+        } else if let Some(before) = before {
+            // 布局被跳过：没有重排就没有 rect 变化，把索引表原样放回
+            // （否则下一次 `before` 会误以为"上一轮没有节点"，把整棵树当成新出现的）。
+            self.rects = before;
         }
     }
 
@@ -1715,7 +1733,15 @@ impl UiTree {
             }
         }
         let default = self.ink_margin;
-        let mut out = HashMap::new();
+        // **复用同一张表，不每次新建**：这张表是"节点键 → 边距"，节点集合在一次
+        // 重排里几乎不变；老实现每次都 `HashMap::new()` 再灌 11k 项，实测 11k 节点
+        // 的一次重排里约一半的分配与字节都花在它的反复 rehash 上。
+        //
+        // 顺序也不能颠倒：先把旧值清掉但**保留容量**，再灌新值 —— 这样只有在节点数
+        // 增长时才扩容。`clear()` 不清容量正是我们要的语义。
+        let mut out = std::mem::take(&mut self.node_ink_margin);
+        out.clear();
+        out.reserve(self.rects.len().max(out.capacity() / 2));
         walk(self.root.as_ref(), metrics, default, &mut out);
         for popup in &self.popups {
             walk(popup.widget.as_ref(), metrics, default, &mut out);
@@ -1723,40 +1749,24 @@ impl UiTree {
         self.node_ink_margin = out;
     }
 
-    /// 快照当前每个节点的 rect（布局前调用）。
+    /// 对比布局前后的 rect：变了就标记 `旧 ∪ 新`（键是缓存键，零字符串哈希）。
     ///
-    /// 返回：`(id, rect)` 列表；顺序无所谓（后面按 id 查）。
-    /// 开销：O(n) 次 String clone——只在**非视口变化**的重排里做，
-    /// 视口变化（拉伸）走整窗脏区，不需要它。
-    fn snapshot_rects(&self) -> Vec<(String, Rect)> {
-        fn walk(node: &dyn Widget, out: &mut Vec<(String, Rect)>) {
-            out.push((node.id().to_string(), node.rect()));
-            if !node.is_open() {
-                return;
-            }
-            for child in node.children() {
-                walk(child.as_ref(), out);
-            }
-        }
-        let mut out = Vec::new();
-        walk(self.root.as_ref(), &mut out);
-        out
-    }
-
-    /// 对比布局前后的 rect：变了就标记 `旧 ∪ 新`。
-    ///
-    /// 输入：布局前的快照。副作用：往 `dirty` 里加并集矩形。
+    /// 输入：布局前的 `rects` 索引表（`UiTree::layout` 里 `mem::take` 出来的那份）。
+    /// 副作用：往 `dirty` 里加并集矩形。
     /// 为什么是并集：只标新区域会把"原来那块"留在屏幕上（残影）。
-    fn mark_moved(&mut self, before: &[(String, Rect)]) {
-        for (id, old) in before {
-            let Some(new) = self.rects.get(&crate::layout::id_key(id)).copied() else {
+    /// 为什么用 `u64` 而不是 id 字符串：字符串版本每次布局都要
+    /// `id().to_string()` + 反查 `id_key` 各一遍，11k 节点上是两次全树哈希；
+    /// 索引表本来就用 `Widget::cache_key()` 预算好的键。
+    fn mark_moved_map(&mut self, before: &HashMap<u64, Rect>) {
+        for (key, old) in before {
+            let Some(new) = self.rects.get(key).copied() else {
                 // 节点消失了（弹窗关闭、列表删行、子树被隐藏）：
                 // **旧矩形必须重绘**，否则原来的内容留在屏幕上（弹窗残影）。
-                self.add_dirty_rect_for(id, *old);
+                self.add_dirty_rect_for_key(*key, *old);
                 continue;
             };
             if new != *old {
-                self.add_dirty_rect_for(id, old.union(new));
+                self.add_dirty_rect_for_key(*key, old.union(new));
             }
         }
     }
