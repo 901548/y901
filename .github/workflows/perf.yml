@@ -35,17 +35,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # release 构建才有意义（debug 阈值留了 10~20 倍余量，只能挡"数量级退化"）
-      - name: grid_perf（10k 网格布局 + 10k place）
+      #
+      # **与本地共用同一个脚本**：这里不再逐个列 cargo 命令，
+      # 否则 CI 与本地的"怎么测"会慢慢分叉（哪边加了 `--include-ignored`、哪边忘了 `-p`）。
+      - name: perf-gate.ps1（4 项基准，强制阈值）
         shell: pwsh
-        run: cargo test -p y901-ui --test grid_perf --release
-
-      - name: layout_bench（保留数字，不设阈值）
-        shell: pwsh
-        run: cargo test -p y901-ui --test layout_bench --release -- --nocapture
-
-      - name: dirty_strategy_bench（保留数字）
-        shell: pwsh
-        run: cargo test -p y901-render --test dirty_strategy_bench --release -- --nocapture
+        run: ./scripts/perf-gate.ps1
 
       # 结果汇总到 job summary，方便看趋势（不用点开每条 log）
       - name: Summary

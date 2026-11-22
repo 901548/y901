@@ -216,19 +216,50 @@ GameViewer / ToDesk 两个虚拟显示适配器，窗口实际合成在虚拟显
 
 ## 6. 复现命令
 
-```bash
-# 布局 / 脏区（release）
-cargo test -p y901-ui --release --test perf_bench -- --ignored --nocapture
+**首选：一条命令跑全部四项**（与 CI 的 perf workflow 同源，输出带 CPU / OS / rustc）：
 
-# 布局（debug）
-cargo test -p y901-ui --test perf_bench -- --ignored --nocapture
+```powershell
+powershell -NoProfile -File scripts/perf-gate.ps1          # 4 项，默认强制阈值
+powershell -NoProfile -File scripts/perf-gate.ps1 -Only grid
+powershell -NoProfile -File scripts/perf-gate.ps1 -NoEnforce  # 只打数字，不断言
+```
+
+单项手动跑（了解每个基准在测什么时用）：
+
+```bash
+# 布局 10k（grid_perf 里的两个用例，release 预算 6ms）
+cargo test -p y901-ui --release --test grid_perf -- --include-ignored --nocapture
+
+# 布局（10k / 50k，打印 avg/worst）
+cargo test -p y901-ui --release --test layout_bench -- --include-ignored --nocapture
+
+# 脏区合并策略对比（打印每种场景的 rect 数与覆盖面积）
+cargo test -p y901-render --release --test dirty_strategy_bench -- --include-ignored --nocapture
 
 # 堆分配计数（独立二进制，勿混入计时）
 cargo test -p y901-ui --release --test perf_alloc -- --ignored --nocapture
 
-# 图集 / 实例提交（需真实 GPU）
+# 软光栅填充率 + 图集/实例提交（后者需真实 GPU）
+cargo test -p y901-backend-win32 --release --test soft_backend -- --include-ignored --nocapture soft_fill_rate
 cargo test -p y901-backend-win32 --release --test perf_bench -- --ignored --nocapture
 ```
+
+### 6.1 2026-11-22 复测（本机，用于校准"现在还是这个数吗"）
+
+环境：Intel i7-13650HX / Windows 11 (10.0.26200) / rustc 1.92.0 / `--release`。
+
+| 基准 | 结果 |
+|---|---|
+| `grid_perf`：10k 网格 layout | avg **1.30 ms**，worst **1.46 ms**（预算 6 ms） |
+| `grid_perf`：10k place | **2.15 ms** |
+| `layout_bench`：11 111 节点 × 20 轮 | avg **1 853 µs**，worst 2 237 µs |
+| `dirty_strategy_bench` | 光标闪烁 128 rects；多控件 38 400 → 2 720；角落相贴 50 150 → 300 |
+| `soft_backend` 填充率 1280×800 | fill_rect **0.10 ms**；gradient 4.25 ms；round_rect(SDF) 0.69 ms |
+
+> **与 §2 历史值的差异要如实看**：§2 记的 10k 布局是 972 µs，本轮同机同命令测得 1 853 µs
+> （约 1.9×）。两次不是同一台机器、也不是同一轮代码（中间加了 per-node 墨迹边距、
+> 文本 shaping 基础设施等），**不能据此说"性能退化了 90%"**，也不能拿它当基线承诺。
+> 要判定退化，需要在同一台机器上对照两个 commit 各跑一次 `scripts/perf-gate.ps1`。
 
 ---
 
