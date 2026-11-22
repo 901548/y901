@@ -81,4 +81,8 @@
 # Measured at 2026-11-22 (0.3.0 发布后：Web ARIA 接线 + 语义指纹去重):
 #   default cargo test --workspace --no-fail-fast   passed 1116, failed 0, ignored 61 / 155 个测试目标
 #   (新增 4 条：指纹稳定性、语义变更、兄弟/嵌套结构区分、字段边界不碰撞)
-1116
+# Measured at 2026-11-22 (TextArea 多行编辑控件):
+#   default cargo test --workspace --no-fail-fast   passed 1135, failed 0, ignored 61 / 155 个测试目标
+#   (新增 19 条：软换行/空行可点/↑↓保持目标列/回车换行/行首退格合并/跨行选区/
+#    预编辑不进正文/剪贴板/禁用/点击命中/滚动跟随/渲染期重排/可见行虚拟化 + 1 条 doctest)
+1135

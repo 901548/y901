@@ -110,7 +110,7 @@ pub mod prelude {
     pub use crate::ui::{Color, Constraints, Pos, Rect, Size, TextStyle, UiEvent, UiTree, Widget};
     pub use crate::widgets::{
         Badge, Button, Checkbox, ComboBox, Image, ProgressBar, RadioGroup, ScrollView, Slider,
-        Spinner, Switch, Tabs, TextInput, TextLabel, Tooltip, VerticalList,
+        Spinner, Switch, Tabs, TextArea, TextInput, TextLabel, Tooltip, VerticalList,
     };
 }
 

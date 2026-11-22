@@ -9,7 +9,7 @@ Y901 是一个**零 C/C++ 编译依赖**的桌面 UI 框架。UI 框架本身不
 |---|---|---|
 | `y901-core` | 纯逻辑：终端 Grid / reflow / scrollback / 格宽（`width_of_char`） | `unicode-width` |
 | `y901-ui` | 框架：Widget / UiTree / 布局 / 事件 / Signal / 语义树 / revision | `y901-core`（内部，仅布局原语 `IntervalSet`） |
-| `y901-widgets` | **通用**组件：Button / TextLabel / TextInput / ScrollView / ListView / SplitView / Menu / Dialog / StyledText | `core`, `ui` |
+| `y901-widgets` | **通用**组件：Button / TextLabel / TextInput / TextArea / ScrollView / ListView / SplitView / Menu / Dialog / StyledText | `core`, `ui` |
 | `y901-extras` | **扩展**组件：TerminalWidget（Grid + VT + PTY） | `core`, `ui`, `crossbeam-channel`, `portable-pty` |
 | `y901-runtime` | 平台无关契约：`Host` / `PlatformRuntime` / `RawEvent` / `translate` / `RenderBackend` | `ui` |
 | `y901-backend-win32` | 唯一接触 Win32 的 crate：窗口 / D3D11 / DirectWrite / IME / DPI | `core`, `ui`, `runtime`, `windows-sys` |
@@ -30,7 +30,7 @@ y901-shell ──> y901-backend-win32 ──> y901-runtime ──> y901-ui
 
 - `y901-ui` **零外部依赖**：它只依赖内部 crate `y901-core`（用于布局原语 `IntervalSet`）。
   这不是洁癖，而是测试策略的地基：
-  Windows 工作区测试运行记录（2026-11-22 复测）为 1116 项通过、61 项忽略（155 个测试目标）。
+  Windows 工作区测试运行记录（2026-11-22 复测）为 1135 项通过、61 项忽略（155 个测试目标）。
   Linux 2026-11-22 记录为 1035 项通过、27 项忽略（155 个测试目标，见 `docs/evidence/linux-numbers.txt`）。
   这些是带日期的平台证据，不代表每次提交均重新执行；绝大多数测试无需窗口、GPU、PTY。
 - **`y901-backend-win32` 与 `y901-shell` 都直接依赖 `windows-sys`**（grep 可验证；前者用于窗口/渲染，后者用于命令行与磁盘操作）。

@@ -1,15 +1,15 @@
 # Y901 框架验收凭证
 
-本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1116 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1177 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-22 第二次复测刷新为 **1035 passed / 0 failed / 27 ignored / 155 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
+本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1135 passed / 0 failed / 61 ignored**；包含 ignored 的完整运行 **1196 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-22 第二次复测刷新为 **1035 passed / 0 failed / 27 ignored / 155 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1116 passed / 0 failed / 61 ignored** |
-| `cargo test --workspace --offline -- --include-ignored` | **1177 passed / 0 failed** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1135 passed / 0 failed / 61 ignored** |
+| `cargo test --workspace --offline -- --include-ignored` | **1196 passed / 0 failed** |
 
-`include_ignored=1177`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
+`include_ignored=1196`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -57,8 +57,8 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **1116 passed / 0 failed / 61 ignored**（155 个测试目标） |
-| `--include-ignored` | **1177 passed / 0 failed** |
+| 默认测试 | **1135 passed / 0 failed / 61 ignored**（155 个测试目标） |
+| `--include-ignored` | **1196 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
 | `cargo audit` | 0 漏洞 |

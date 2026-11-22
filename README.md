@@ -57,7 +57,7 @@ cargo run -p y901-shell --example alert         # four alert variants
 
 | Category | Widgets |
 |---|---|
-| Input | `Button` `TextInput` `Checkbox` `RadioGroup` `Switch` `Slider` |
+| Input | `Button` `TextInput` `TextArea` `Checkbox` `RadioGroup` `Switch` `Slider` |
 | Layout | `Flex` (with `radius`/`border`) `Grid` `Stack` `ScrollView` `SplitView` `Tabs` |
 | Data | `Table` `ListView` `TreeView` `Image` `RichText` `TextLabel` |
 | Feedback | `Spinner` `ProgressBar` `EmptyState` `ErrorState` `Alert` |
