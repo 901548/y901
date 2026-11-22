@@ -58,6 +58,27 @@ Step "cargo fmt --all -- --check"
 if ($LASTEXITCODE -ne 0) { Fail "格式检查失败：请运行 cargo fmt --all" }
 Write-Host "[gate] ok: fmt clean"
 
+# ---------------------------------------------------------------- 1c. script encoding
+# 为什么要有这一步：本仓库的脚本都含中文注释，而 `powershell`（Windows PowerShell 5.1）
+# 对**没有 BOM 的 UTF-8** 会按 ANSI/GBK 解码 —— 中文注释会"吃掉"后面的 ASCII 字符，
+# 报出与真实原因毫无关系的语法错误（实测：编辑脚本时 BOM 被去掉，gate 直接
+# `Missing expression after ','` 崩在第 21 行的 param 块）。这类失败极难自诊，
+# 所以在门禁里直接判死，并给出怎么修。
+Step "PowerShell script encoding (non-ASCII scripts need a UTF-8 BOM)"
+$badEnc = @()
+foreach ($f in (Get-ChildItem (Join-Path $PSScriptRoot '*.ps1') -File)) {
+    $b = [System.IO.File]::ReadAllBytes($f.FullName)
+    $hasBom = ($b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)
+    if ($hasBom) { continue }
+    foreach ($x in $b) { if ($x -gt 0x7F) { $badEnc += $f.Name; break } }
+}
+if ($badEnc.Count -gt 0) {
+    Write-Host ("带非 ASCII 但没有 BOM：" + ($badEnc -join ', '))
+    Write-Host "修法：用 UTF-8 with BOM 重新保存（[System.Text.UTF8Encoding]::new(\$true)），不要用无 BOM 的 UTF-8。"
+    Fail "$($badEnc.Count) 个脚本缺少 UTF-8 BOM，Windows PowerShell 5.1 会按 ANSI 解码并解析失败"
+}
+Write-Host "[gate] ok: script encodings safe"
+
 # ---------------------------------------------------------------- 2. tests (count against baseline)
 if (-not $SkipTest) {
     Step "cargo test --workspace (count must not drop below baseline)"
@@ -155,6 +176,28 @@ if ($docCode -ne 0) {
 $docCount = ([regex]::Matches($docOut, 'missing documentation')).Count
 if ($docCount -gt 0) { Fail "$docCount items without docs" }
 Write-Host "[gate] ok: 0 missing docs"
+
+# ---------------------------------------------------------------- 5b. rustdoc warnings
+# 为什么单独一步：`missing_docs` 只保证"有文档"，不保证"文档里的链接是活的"。
+# 0.3.0 发布前手工修掉 8 处 broken intra-doc link 与 1 处未闭合 HTML 标签 ——
+# 它们都是 rustdoc 的 warning，而当时的 gate 完全看不见，只能靠人肉扫、且发版前才想起来。
+# 用 `-D warnings` 让 rustdoc 直接失败，再用正则兜一层（防止环境吞掉 RUSTDOCFLAGS）。
+Step "rustdoc intra-doc links and HTML (warnings must be 0)"
+$env:RUSTDOCFLAGS = '-D warnings'
+$rdArgs = @('doc', '--workspace', '--no-deps') + $cargoOffline
+$rdOut = & cargo @rdArgs 2>&1 | Out-String
+$rdCode = $LASTEXITCODE
+Remove-Item Env:\RUSTDOCFLAGS -ErrorAction SilentlyContinue
+if ($rdCode -ne 0) {
+    ($rdOut -split "`n" | Select-String -Pattern 'warning:|error' | Select-Object -First 12) | ForEach-Object { Write-Host $_ }
+    Fail "cargo doc exited $rdCode (broken intra-doc link or invalid HTML in doc comments)"
+}
+$rdWarn = ([regex]::Matches($rdOut, '(?m)^\s*warning:')).Count
+if ($rdWarn -gt 0) {
+    ($rdOut -split "`n" | Select-String -Pattern 'warning:' | Select-Object -First 12) | ForEach-Object { Write-Host $_ }
+    Fail "rustdoc reported $rdWarn warning(s)"
+}
+Write-Host "[gate] ok: rustdoc clean"
 
 # ---------------------------------------------------------------- version consistency
 Step "version consistency (workspace / crates / internal deps / Cargo.lock)"
