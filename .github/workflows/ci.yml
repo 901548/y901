@@ -33,7 +33,7 @@ jobs:
     name: Windows gate (fmt / clippy / tests / pixel hash / doc numbers / audit)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust 1.92
         uses: dtolnay/rust-toolchain@master
         with:
@@ -73,7 +73,7 @@ jobs:
     name: Linux Xvfb (X11 backend + cross-platform crates)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install X11 test deps
         run: |
           sudo apt-get update
@@ -103,7 +103,7 @@ jobs:
     name: cargo package (12 crates, no publish)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust 1.92
         uses: dtolnay/rust-toolchain@master
         with:
@@ -119,7 +119,7 @@ jobs:
     name: cargo-deny (advisories / licenses / bans / sources)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # 版本固定成 0.21.0：0.22+ 要求 rustc 1.95，与本仓库 MSRV 1.92 不符。
       - name: Install cargo-deny 0.21.0
         uses: taiki-e/install-action@v2
@@ -134,7 +134,7 @@ jobs:
     name: text shaping (rustybuzz + bidi + clusters)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust 1.92
         uses: dtolnay/rust-toolchain@master
         with:
@@ -168,7 +168,7 @@ jobs:
             feature: unix-atspi
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust 1.92
         uses: dtolnay/rust-toolchain@master
         with:
@@ -194,7 +194,7 @@ jobs:
     name: web ARIA mirror (wasm32 + a11y feature)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust 1.92 + wasm32 target
         uses: dtolnay/rust-toolchain@master
         with:
@@ -230,7 +230,7 @@ jobs:
     name: semver guard (breaking `!` commits require minor/major bump)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # 脚本要读最近 tag 到 HEAD 的提交，浅 clone 拿不到 tag 历史。
           fetch-depth: 0
@@ -242,7 +242,7 @@ jobs:
     name: cargo-semver-checks (public API vs latest tag)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install Rust 1.92
