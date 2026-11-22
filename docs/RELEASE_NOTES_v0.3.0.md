@@ -61,7 +61,7 @@
 
 ## 4. 自动验证记录（Windows 本地与 Linux WSL，2026-11-22）
 
-[`scripts/check-release-readiness.ps1`](../scripts/check-release-readiness.ps1) 汇总自动检查与人工/授权阻塞项。本轮运行结果：自动项全部通过，仍有 5 项人工/授权 `BLOCKED`；数量会随凭据、tag、registry、工作区和验收状态变化。退出码 0 只表示没有自动项 `FAIL`，不表示发布阻塞项已清除。下表记录本轮执行的检查。
+[`scripts/check-release-readiness.ps1`](../scripts/check-release-readiness.ps1) 汇总自动检查与人工/授权阻塞项。本轮运行结果：自动项全部通过；工作区已提交干净，仍有 4 项人工/授权 `BLOCKED`（crates.io 凭据、`v0.3.0` tag、0.3.0 是否已上传、真机读屏器验收）。数量会随凭据、tag、registry、工作区和验收状态变化。退出码 0 只表示没有自动项 `FAIL`，不表示发布阻塞项已清除。下表记录本轮执行的检查。
 
 | 检查 | 结果 |
 |---|---|
@@ -70,6 +70,7 @@
 | `scripts/check-version-consistency.ps1` | 通过（0.3.0，12 个 workspace crate） |
 | `scripts/check-semver-bump.ps1` | 通过（v0.2.5 → 0.3.0 = minor） |
 | `scripts/check-consumer.ps1 -Version 0.3.0` / docs.rs | 未运行：0.3.0 尚未发布，发布前置条件未满足 |
+| `scripts/check-consumer.ps1 -Version 0.2.5`（已发布版） | 通过：独立临时目录内用 registry 的 `y901 0.2.5` 编译最小下游工程；仅证明发布链路可用，不覆盖 0.3.0 新 API |
 | `cargo semver-checks --workspace --exclude y901-a11y --baseline-rev v0.2.5` | 通过（新 crate 无基线，故排除） |
 | `cargo deny check` | advisories/bans/licenses/sources 全 ok（使用缓存 advisories，不代表在线实时审计） |
 | 像素哈希 | `0xF7455CCE7781A864`（**全 S2 改动后未变**） |

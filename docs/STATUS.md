@@ -515,6 +515,7 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 
 ### Linux 全量测试（**交付前必跑**）
 
+以下为历史排障记录；当前复测命令与 2026-11-22 的验收证据见 [`docs/ACCEPTANCE.md`](ACCEPTANCE.md)。
 这是唯一能发现"只在 Linux 链接 / 运行时暴露"的债的探针。
 `cargo check --all-targets` **不链接**；Windows 的 `cargo test` **不编译 `#[cfg(unix)]` 代码**。
 
