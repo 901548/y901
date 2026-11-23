@@ -95,4 +95,7 @@
 # Measured at 2026-11-23 (绘制遍历优化：整帧帧不再逐节点查墨迹边距):
 #   default cargo test --workspace --no-fail-fast   passed 1138, failed 0, ignored 65 / 156 个测试目标
 #   (新增 1 条 #[ignore] 剖析用例 profile_render_walk)
-1138
+# Measured at 2026-11-23 (审查修复：布局缓存吊销 + Stack 无界 + 哈希器初始化):
+#   default cargo test --workspace --no-fail-fast   passed 1147, failed 0, ignored 65 / 158 个测试目标
+#   (新增 9 条：layout_cache_identity 2、Stack 2、fasthash 1、ui_partial_vs_full 4；passed 1138 → 1147)
+1147

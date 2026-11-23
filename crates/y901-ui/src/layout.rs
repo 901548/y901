@@ -125,6 +125,22 @@ impl LayoutCache {
         self.parents.clear();
     }
 
+    /// **忘掉一个节点**：子树被卸载时调用（`UiTree::remove_node`）。
+    ///
+    /// 为什么必须清：缓存键是 `(id_key, constraints, layout_version)`，而"新实例"的
+    /// `layout_version()` 又从 0 开始 —— 只要视口与约束没变，`is_fresh_by_key` 就会命中
+    /// 旧实例的条目并**直接返回旧尺寸、跳过 `measure`**。
+    /// 表现：同一 id 重建的控件保留旧尺寸/旧内部状态（内容变长被截断、
+    /// `ScrollView` 没跑过 measure 导致滚不动）。
+    ///
+    /// `parents` 也要一起删：否则脏传播会沿"已经不存在的父链"走，
+    /// id 复用后甚至可能形成环，让 `mark_dirty` 提前停下、根部不被标脏。
+    pub fn forget(&mut self, key: u64) {
+        self.entries.remove(&key);
+        self.dirty.remove(&key);
+        self.parents.remove(&key);
+    }
+
     /// 某节点上次测得的尺寸（不管约束）。arrange 阶段复用。
     pub fn last_size(&self, id: &str) -> Option<Size> {
         self.entries.get(&id_key(id)).map(|e| e.size)
@@ -236,10 +252,6 @@ pub fn flex_measure(
     )
 }
 
-/// 同 [`flex_measure`]，额外把每个子节点的 `(实测尺寸, flex 参数)` 写进 `measured`。
-///
-/// 让 `arrange` 能直接复用（省掉每个子节点一次 id 哈希 + 一次 `flex()` 虚调用）。
-#[allow(clippy::too_many_arguments)] // 与 flex_measure 保持同一组参数 + 一个 out 参数
 /// 把某轴的尺寸 clamp 到 `[min, max]`；若 `avail` 有限则上限也不超过 `avail`
 /// （**`min > avail` 时退化为 `avail`**，不溢出父容器）。
 fn clamp_axis(v: f32, min: Dimension, max: Dimension, avail: f32) -> f32 {
@@ -287,7 +299,9 @@ fn clamp_pair(
     )
 }
 
-/// 测量本容器与子节点（子尺寸写入 `measured` 供 arrange 复用）。
+/// 同 [`flex_measure`]，额外把每个子节点的 `(实测尺寸, flex 参数)` 写进 `measured`。
+///
+/// 让 `arrange` 能直接复用测量结果（省掉每子节点一次 id 哈希）。
 ///
 /// 详细约束与无界处理见函数体内注释。
 #[allow(clippy::too_many_arguments)] // 与 d3d11::draw_scene 一致：参数就是布局所需的最小集合
@@ -1242,10 +1256,28 @@ impl Widget for Stack {
         Some(&mut self.children)
     }
     fn measure(&mut self, m: &dyn TextMetrics, c: Constraints, cache: &mut LayoutCache) -> Size {
+        let mut content_w = 0.0f32;
+        let mut content_h = 0.0f32;
         for child in self.children.iter_mut() {
-            let _ = cache.measure(child.as_mut(), m, c);
+            let s = cache.measure(child.as_mut(), m, c);
+            content_w = content_w.max(s.w);
+            content_h = content_h.max(s.h);
         }
-        c.constrain(c.max)
+        // **有界时仍然"填满"**（叠放容器的语义：所有子节点拿同一个矩形，历来如此），
+        // 但**无界时回退到内容**：旧实现直接 `c.constrain(c.max)`，而无界轴的
+        // `c.max = ∞` 会被 `Constraints::constrain` 归零 ——
+        // 于是放进滚动容器里的 `Stack` 报高度 0，滚不动（内容明明有高度）。
+        let w = if c.max.w.is_finite() {
+            c.max.w
+        } else {
+            content_w
+        };
+        let h = if c.max.h.is_finite() {
+            c.max.h
+        } else {
+            content_h
+        };
+        c.constrain(Size::new(w, h))
     }
     fn arrange(&mut self, rect: Rect, m: &dyn TextMetrics, cache: &mut LayoutCache) {
         self.rect = rect;
@@ -1769,5 +1801,43 @@ mod wrap_tests {
         // 第一行高 = 20（a:10, b:20）→ a 居中后 y = (20-10)/2 = 5
         assert_eq!(rects[0].y, 5.0, "a 应在行内垂直居中：{rects:?}");
         assert_eq!(rects[1].y, 0.0, "b 撑满行高：{rects:?}");
+    }
+
+    /// **回归**：`Stack` 在**无界**轴上必须报内容尺寸，不能报 0。
+    ///
+    /// 旧实现 `c.constrain(c.max)` 在无界轴（`max = ∞`）会被 `Constraints::constrain`
+    /// 归零 —— 放进滚动容器的 `Stack` 高度报 0，于是"滚不动"（内容明明有高度）。
+    #[test]
+    fn stack_reports_content_on_unbounded_axis() {
+        use crate::Axis2;
+
+        let mut stack = Stack::new("s").push(Box::new(Box1::new("a", 10.0, 20.0)));
+        let mut cache = LayoutCache::new();
+        let m = Fixed;
+        // 竖直方向无界（滚动容器内部就是这么量的）
+        let c = Constraints {
+            min: Size::ZERO,
+            max: Size::new(100.0, f32::INFINITY),
+            unbounded: Axis2::V,
+        };
+        let size = cache.measure(&mut stack, &m, c);
+        assert_eq!(
+            (size.w, size.h),
+            (100.0, 20.0),
+            "有界轴填满（100），无界轴回退内容（20）"
+        );
+    }
+
+    /// 有界时 `Stack` 仍然"填满"（保持既有语义，别把叠放容器改成内容自适应）。
+    #[test]
+    fn stack_still_fills_bounded_constraints() {
+        let mut stack = Stack::new("s2").push(Box::new(Box1::new("a", 10.0, 20.0)));
+        let mut cache = LayoutCache::new();
+        let size = cache.measure(
+            &mut stack,
+            &Fixed,
+            Constraints::loose(Size::new(100.0, 80.0)),
+        );
+        assert_eq!((size.w, size.h), (100.0, 80.0), "有界时填满父级");
     }
 }

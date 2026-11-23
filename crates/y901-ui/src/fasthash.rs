@@ -30,10 +30,20 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 /// FNV-1a 流式哈希器。
 ///
+/// 初值是 FNV 的 **offset basis**（不是 0）：这样 `write(b"")`、`write_u64` 的结果与
+/// 标准 FNV-1a 一致，也不会出现"累加器恰好等于 0 时被误当成未初始化"的分支 ——
+/// 那个分支让字节流变成**分块相关**，与"流式 FNV-1a"的承诺不符。
+///
 /// `write_u64` 走的是"键本来就是均匀的"这条快路径：
-/// 直接乘质数再异或，不做逐字节循环。
-#[derive(Default)]
+/// 直接异或再乘质数，不做逐字节循环。
+#[derive(Clone)]
 pub struct FnvHasher(u64);
+
+impl Default for FnvHasher {
+    fn default() -> Self {
+        Self(FNV_OFFSET)
+    }
+}
 
 impl Hasher for FnvHasher {
     fn finish(&self) -> u64 {
@@ -41,7 +51,7 @@ impl Hasher for FnvHasher {
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        let mut hash = if self.0 == 0 { FNV_OFFSET } else { self.0 };
+        let mut hash = self.0;
         for byte in bytes {
             hash ^= *byte as u64;
             hash = hash.wrapping_mul(FNV_PRIME);
@@ -52,8 +62,7 @@ impl Hasher for FnvHasher {
     fn write_u64(&mut self, n: u64) {
         // 键已经是我们自己算过的 FNV 值，再做一次乘法把低位打散就够了；
         // 关键是**不要**退回 std 的 SipHash 轮函数。
-        let base = if self.0 == 0 { FNV_OFFSET } else { self.0 };
-        self.0 = (base ^ n).wrapping_mul(FNV_PRIME);
+        self.0 = (self.0 ^ n).wrapping_mul(FNV_PRIME);
     }
 
     fn write_usize(&mut self, n: usize) {
@@ -133,5 +142,26 @@ mod tests {
         let mut h2 = FnvHasher::default();
         h2.write_u64(123);
         assert_eq!(h1.finish(), h2.finish());
+    }
+
+    /// **空输入必须是标准 FNV offset basis**。
+    ///
+    /// 旧实现用"状态 == 0 表示未初始化"，于是 `write(b"")` 收在 0、而真实 FNV-1a
+    /// 收在 offset basis；更糟的是"累加器恰好为 0"会被当成重新开始，
+    /// 使字节流变成**分块相关**（同一串字节分两次喂进去结果不同）。
+    #[test]
+    fn empty_input_is_the_offset_basis() {
+        use std::hash::Hasher;
+        let mut h = FnvHasher::default();
+        h.write(b"");
+        assert_eq!(h.finish(), FNV_OFFSET);
+
+        // 分块无关：一次喂 "ab" 与分两次喂 "a"、"b" 必须相同
+        let mut one = FnvHasher::default();
+        one.write(b"ab");
+        let mut two = FnvHasher::default();
+        two.write(b"a");
+        two.write(b"b");
+        assert_eq!(one.finish(), two.finish(), "流式哈希不能分块相关");
     }
 }

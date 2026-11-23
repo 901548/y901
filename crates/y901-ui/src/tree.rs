@@ -1674,6 +1674,10 @@ impl UiTree {
         // "上一轮每个节点的 rect"，语义等价、零分配。
         //
         // 视口变化时整窗已经是脏的，不需要对比。
+        // `node_hint`：搬走之前记下节点数 —— `collect_ink_margins` 要用它预留容量，
+        // 搬走之后 `self.rects.len()` 恒为 0（旧实现就是在搬运**之后**读的，
+        // 于是 `reserve(len)` 永远等于"不预留"，是个静默失效的优化）。
+        let node_hint = self.rects.len();
         let before: Option<FastMap<u64, Rect>> = if viewport_changed {
             None
         } else {
@@ -1684,7 +1688,7 @@ impl UiTree {
         // 若放在 `is_fresh` 快路径外面，每帧 layout 都会白走一遍全树（O(n)），
         // 与"约束未变时 layout 是 O(1)"的契约冲突。
         if !self.layout_stats().skipped {
-            self.collect_ink_margins(metrics);
+            self.collect_ink_margins(metrics, node_hint);
         }
 
         // 浮层摆放：先量尺寸（浮层自己决定内容高），再用 `place_popup`
@@ -1718,7 +1722,7 @@ impl UiTree {
     /// 输入：字体度量。副作用：重建 `node_ink_margin`。
     /// 为何在布局后：`Widget::ink_overflow` 需要 `metrics` 与节点**当前**字号，
     /// 而字号可能来自刚生效的 `TextStyle`（例如 Signal 驱动的字号切换）。
-    fn collect_ink_margins(&mut self, metrics: &dyn TextMetrics) {
+    fn collect_ink_margins(&mut self, metrics: &dyn TextMetrics, node_hint: usize) {
         fn walk(
             node: &dyn Widget,
             metrics: &dyn TextMetrics,
@@ -1743,7 +1747,9 @@ impl UiTree {
         // 增长时才扩容。`clear()` 不清容量正是我们要的语义。
         let mut out = std::mem::take(&mut self.node_ink_margin);
         out.clear();
-        out.reserve(self.rects.len().max(out.capacity() / 2));
+        // `node_hint` 是**搬运前**记下的节点数（调用点在 `layout()` 里）：
+        // 搬走 `rects` 之后 `self.rects.len()` 恒为 0，用它会退化成"不预留"。
+        out.reserve(node_hint);
         walk(self.root.as_ref(), metrics, default, &mut out);
         for popup in &self.popups {
             walk(popup.widget.as_ref(), metrics, default, &mut out);
@@ -1769,6 +1775,29 @@ impl UiTree {
             };
             if new != *old {
                 self.add_dirty_rect_for_key(*key, old.union(new));
+            }
+        }
+        // **反向**：本轮**新出现**的节点（`before` 里没有它）也要标脏。
+        //
+        // 旧实现走的是"布局前全树快照"，而快照在 `is_open()` 之前就 push 了自己，
+        // 所以"上一轮被关闭、这一轮重新打开的子树"仍然带着旧 rect 参与对比；
+        // 换成索引表之后，关闭的子树**根本不在表里**（`rebuild_indices` 跳过它们），
+        // 于是这类节点重建后不会被标脏 —— 若它恰好又在关闭期间被重新布局过，
+        // 新位置就画不出来（旧位置的内容也不会被擦）。
+        //
+        // 为什么只在**节点数变化**时才做这一遍：稳态下两张表键集合相同，
+        // 多走一遍 11k 次哈希纯属浪费；而"有无增删"正是键集合变化最常见的形态
+        // （增删接口本身还会 `dirty = full`，所以这里只是兜底）。
+        if before.len() != self.rects.len() {
+            // 先收集再标脏：`add_dirty_rect_for_key` 要 `&mut self`，不能与遍历 `self.rects` 并存。
+            let appearing: Vec<(u64, Rect)> = self
+                .rects
+                .iter()
+                .filter(|(key, _)| !before.contains_key(key))
+                .map(|(key, rect)| (*key, *rect))
+                .collect();
+            for (key, rect) in appearing {
+                self.add_dirty_rect_for_key(key, rect);
             }
         }
     }
@@ -3253,13 +3282,17 @@ fn collect_ids(node: &dyn Widget) -> Vec<String> {
     out
 }
 
-/// 把子树里每个 id 从所有 revision 相关 map 里清掉。
+/// 把子树里每个 id 从所有 revision 相关 map 里清掉，并吊销布局缓存条目。
 fn forget_recursive(node: &dyn Widget, tree: &mut UiTree) {
     let id = node.id().to_string();
     tree.generations.remove(&id);
     tree.last_semantic.remove(&id);
     tree.rev.remove(&id);
     tree.pending_semantic.remove(&id);
+    // **布局缓存也要吊销**：新实例的 `layout_version()` 从 0 开始，与旧实例相同；
+    // 视口/约束没变时 `is_fresh_by_key` 会命中旧条目、直接返回旧尺寸而**不调 `measure`**。
+    // 见 `LayoutCache::forget` 的说明与 `tests/layout_cache_identity.rs`。
+    tree.cache.forget(crate::layout::id_key(&id));
     for child in node.children() {
         forget_recursive(child.as_ref(), tree);
     }
