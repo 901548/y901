@@ -329,13 +329,23 @@ impl Atlas {
     /// 放不下时依次尝试：**升到 85% 以上就 LRU 淘汰 → 压缩搬移 → 再试一次**。
     /// 全过程不重画任何一个字形，只做一次搬移 + 一次全量上传。
     pub fn place(&mut self, key: GlyphKey, w: u32, h: u32) -> Option<Placement> {
+        // **命中前必须比对尺寸**：同一个 `GlyphKey` 被要求不同尺寸时（换字号、
+        // 回退字体、同一 gid 在不同 px 下复用键），直接返回旧矩形会让调用方
+        // 按新尺寸的 `src` 往旧尺寸的槽里拷 —— `write` 按 `slot.w` 逐行拷贝，
+        // 结果是**行对不齐的花屏**。尺寸不符就当作未命中，重新分配。
         if let Some(slot) = self.slots.get(&key) {
-            self.hits += 1;
-            let (x, y, w, h) = (slot.x, slot.y, slot.w, slot.h);
-            if let Some(slot) = self.slots.get_mut(&key) {
-                slot.last_used = self.frame;
+            if slot.w == w && slot.h == h {
+                self.hits += 1;
+                let (x, y) = (slot.x, slot.y);
+                if let Some(slot) = self.slots.get_mut(&key) {
+                    slot.last_used = self.frame;
+                }
+                // 旧槽的原尺寸与新请求一致，直接用
+                return Some(Placement { x, y, w, h });
             }
-            return Some(Placement { x, y, w, h });
+            // 尺寸变了：旧槽无法容纳新内容，丢弃它（像素区域由 packer 复用，
+            // 不清零也不影响正确性 —— 新内容会整块覆盖）。
+            self.slots.remove(&key);
         }
 
         self.misses += 1;
@@ -431,9 +441,17 @@ impl Atlas {
         let mut fresh = vec![0u8; (self.size * self.size) as usize];
         self.packer.reset();
 
+        // **重建 `slots`，而不是就地 `insert` 覆盖**。
+        //
+        // 旧实现：插入失败时 `continue` ——注释说"保留原槽位"，但 `self.slots`
+        // 里那条记录的坐标指向**旧图集**，而 `self.data` 已经被 `fresh` 换掉，
+        // 中途还被别的条目覆盖过。结果那个字形之后会画出一块"别人的像素"。
+        // 现在：失败的直接从表里删掉（当作未命中，下次按需重画），语义干净。
+        let mut rebuilt: std::collections::HashMap<GlyphKey, Slot> =
+            std::collections::HashMap::with_capacity(entries.len());
         for (key, old) in entries {
             let Some((x, y)) = self.packer.insert(old.padded_w(), old.padded_h()) else {
-                // 理论上不会发生（内容总量没变），保守起见保留原槽位
+                // 打包失败：丢弃该槽位（数据已是新的，保留旧坐标必然指错）
                 continue;
             };
             // 拷贝像素
@@ -443,7 +461,7 @@ impl Atlas {
                 fresh[dst..dst + old.w as usize]
                     .copy_from_slice(&self.data[src..src + old.w as usize]);
             }
-            self.slots.insert(
+            rebuilt.insert(
                 key,
                 Slot {
                     x,
@@ -455,6 +473,7 @@ impl Atlas {
             );
         }
 
+        self.slots = rebuilt;
         self.data = fresh;
         self.dirty.clear();
         self.reset = true;
@@ -518,6 +537,41 @@ mod tests {
             sky * 100 < shelf * 85,
             "skyline {sky} vs shelf {shelf}：应至少省 15%"
         );
+    }
+
+    /// **回归**：同一个 `GlyphKey` 被要求不同尺寸时，`place` 不能返回旧尺寸的槽。
+    ///
+    /// 旧实现命中就直接返回旧矩形，调用方随后按**新尺寸**的 `src` 交给 `write`，
+    /// 而 `write` 按 `slot.w` 逐行拷贝 —— 行对不齐，画出的是花屏。
+    #[test]
+    fn place_reallocates_when_the_requested_size_changes() {
+        let mut atlas = Atlas::new(128);
+        atlas.begin_frame();
+        let key = GlyphKey::from_char('A');
+
+        let small = atlas.place(key, 6, 8).expect("首次放置");
+        assert_eq!((small.w, small.h), (6, 8));
+
+        // 同一个 key、更大的尺寸：必须重新分配，而不是返回 6×8
+        let big = atlas.place(key, 12, 16).expect("换尺寸后应能重新放置");
+        assert_eq!(
+            (big.w, big.h),
+            (12, 16),
+            "place 必须按新尺寸重新分配（旧实现返回旧槽 → write 行错位花屏）"
+        );
+
+        // 按新尺寸写入后，读回来必须是完整的一整块
+        let pixels: Vec<u8> = (0..big.w * big.h).map(|i| (i % 251 + 1) as u8).collect();
+        atlas.write(key, &pixels);
+        assert_eq!(
+            atlas.read(key).expect("read"),
+            pixels,
+            "换尺寸后写入的内容必须完整可读"
+        );
+
+        // 再要一次同尺寸：这次才是真正的命中
+        let again = atlas.place(key, 12, 16).expect("同尺寸应命中");
+        assert_eq!((again.w, again.h), (12, 16));
     }
 
     #[test]

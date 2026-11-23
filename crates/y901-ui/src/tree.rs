@@ -1697,6 +1697,8 @@ impl UiTree {
         // 浮层摆放：先量尺寸（浮层自己决定内容高），再用 `place_popup`
         // 把它放在锚点旁且不超出视口。绘制与命中都用这个 rect。
         let bounds = Rect::new(0.0, 0.0, viewport.w, viewport.h);
+        // 位移先收集再标脏：`add_dirty_rect` 要 `&mut self`，与 `popups` 的 `&mut` 冲突。
+        let mut moved_popups: Vec<Rect> = Vec::new();
         for popup in self.popups.iter_mut() {
             let size = popup.widget.measure(
                 metrics,
@@ -1704,8 +1706,21 @@ impl UiTree {
                 &mut self.cache,
             );
             let rect = crate::place_popup(popup.anchor, size, bounds);
+            let old = popup.rect;
             popup.rect = rect;
             popup.widget.arrange(rect, metrics, &mut self.cache);
+            // **浮层挪位也要标脏**：锚点移动（滚动、窗口缩放、内容变高）时它会被重新摆放，
+            // 而浮层不在树里、`mark_moved_map` 看不到它 —— 不标就会在旧位置留残影。
+            if old != rect {
+                moved_popups.push(if old.is_empty() {
+                    rect
+                } else {
+                    old.union(rect)
+                });
+            }
+        }
+        for r in moved_popups {
+            self.add_dirty_rect(r);
         }
         if !self.layout_stats().skipped {
             // 用**备用缓冲**接住旧的索引表：`swap` 零分配，旧内容仍在 `old` 里，
@@ -1721,6 +1736,28 @@ impl UiTree {
             old.clear();
             self.spare = old; // 归还缓冲（保留容量），下一轮继续用
             self.enforce_modal_focus();
+        }
+
+        // **浮层子树也进 `rects`**（放最后：`rebuild_indices` 会清空整表）。
+        //
+        // 为什么必须有：`rect_of(id)` 与 `invalidate(id)` 都是查这张表，
+        // 浮层不在树里（`paint_order` / `find_path` 走不到），不索引的话
+        // "对浮层里的控件 invalidate" 会**静默 no-op** —— 局部重绘下它永远不刷新。
+        //
+        // 为什么"跳过的布局也要做"：浮层同样在跳过路径里被重新摆放（上面那段循环
+        // 是无条件执行的），几何可能已经变了。
+        // 只进 `rects`、**不进 `paint_order`**：命中测试与路径重建依赖树路径。
+        fn walk_rects(node: &dyn Widget, out: &mut FastMap<u64, Rect>) {
+            if !node.is_open() {
+                return;
+            }
+            out.insert(crate::layout::key_of(node), node.rect());
+            for child in node.children() {
+                walk_rects(child.as_ref(), out);
+            }
+        }
+        for popup in &self.popups {
+            walk_rects(popup.widget.as_ref(), &mut self.rects);
         }
     }
 
@@ -1877,8 +1914,6 @@ impl UiTree {
             modal_root: &mut self.modal_root,
         };
         walk(self.root.as_ref(), &mut path, None, None, &mut outputs);
-
-        // 稳定排序：同层内保持树序（即绘制先后）
 
         self.rebuild_focus_order();
     }
