@@ -275,6 +275,37 @@ cargo test -p y901-backend-win32 --release --test perf_bench -- --ignored --noca
 
 **本框架的"性能调优阶段"到此竣工。** 后续若性能回退，先跑 §6 的命令对表，再决定是否动刀。
 
+---
+
+## 8. 内核优化：2026-11-23 一轮（有测量、有前后对比）
+
+这一轮不是"感觉慢就改"，而是先写了剖析台
+[`crates/y901-ui/tests/layout_profile.rs`](../crates/y901-ui/tests/layout_profile.rs)
+（`#[ignore]`，带可开关的计数分配器 + 空 `RenderCtx`），用**数字**找出真实浪费。复跑：
+
+```powershell
+cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture
+```
+
+| 项 | 发现的浪费 | 修法 | 前后（11k 节点，同机同进程） |
+|---|---|---|---|
+| 热布局 | **"能跳过的布局"其实不便宜**：`UiTree::layout` 在判断能否跳过**之前**就走一遍全树、给每节点 `id().to_string()` 建快照 —— 11k 次 String 分配/帧 | `mem::take` 上一轮的 `rects` 索引表（`u64 → Rect`）直接对比；跳过时原样放回 | 热布局 **573–735 µs → 0.1 µs**，分配 **11k 次 → 0** |
+| 墨迹边距表 | 每次重排 `HashMap::new()` 再灌 11k 项 | `clear()` 复用同一张表（保留容量） | 分配字节 **646 140 → 88 944**（7.3×） |
+| 索引表哈希 | 键是我们自己算好的 `u64`，却仍走 SipHash；每节点 4–5 次查表 | 新增 `crates/y901-ui/src/fasthash.rs`（FNV-1a `BuildHasher`，零新依赖），换 `FastMap`/`FastSet` | 冷布局 **1 808 µs → 1 222 µs**（−32%）；宽树 10k **1 137 → 936 µs** |
+| 整帧绘制遍历 | 整帧时仍逐节点查墨迹边距并与脏区求交（`paint_all` 下结果恒真，纯浪费） | `paint_all` 时跳过该查表 | 约 **1 466 → 1 300–1 320 µs**（3 次取样中 2 次；第 3 次 1 623 µs 属调度噪声） |
+
+**为什么先做前两项**：它们都出现在"什么也没变"的路径上 —— 真实应用的静止帧
+每 16 ms 走一次 `layout()`，旧实现每帧白做 11k 次字符串分配。
+
+**明确没做**（避免"为了好看而改"）：
+
+- 布局数据结构换平铺数组：与 `Box<dyn Widget>` 树模型冲突，收益 < 改造成本；
+- 绘制遍历改"按 `paint_order` 走平铺表"：需要别名化的 `&mut dyn Widget`，会引入 `unsafe`
+  或每帧重建索引，违背"正确性优先"；
+- 不设虚阈值：所有数字都是本机实测，`perf-gate.ps1` 里没有拍脑袋的预算。
+
+---
+
 ## 5. Present 节拍：sync=0 vs sync=1（v0.1.12）
 
 基准：`crates/y901-backend-win32/tests/present_bench.rs`（`#[ignore]`），800×600 窗口，100 帧，release。

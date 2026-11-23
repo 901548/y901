@@ -92,4 +92,7 @@
 # Measured at 2026-11-23 (布局内核优化 2：内部索引表换 FNV 快速哈希):
 #   default cargo test --workspace --no-fail-fast   passed 1138, failed 0, ignored 64 / 156 个测试目标
 #   (新增 3 条 fasthash 单测 + 1 条 #[ignore] 剖析用例 profile_shape_costs；passed 1135 → 1138)
+# Measured at 2026-11-23 (绘制遍历优化：整帧帧不再逐节点查墨迹边距):
+#   default cargo test --workspace --no-fail-fast   passed 1138, failed 0, ignored 65 / 156 个测试目标
+#   (新增 1 条 #[ignore] 剖析用例 profile_render_walk)
 1138

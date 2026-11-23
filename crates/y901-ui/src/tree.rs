@@ -2976,20 +2976,24 @@ fn render_pass(
     // 有效像素——却可能触发除零或产生空裁剪下的异常绘制。组件侧只有一半实现了 `rect.w <= 0` 早退，
     // 在这里统一兜住，比逐个组件补防御更可靠（不改 Widget trait）。
     let node_rect = node.rect();
-    let margin = ink
-        .get(&crate::layout::id_key(node.id()))
-        .copied()
-        .unwrap_or(0.0);
-    // `needs_paint` 只看 rect；这里补一条"墨迹与脏区相交"的判据。
-    // 扩展量很小（通常 2~14px），不会明显增加绘制量，但能消除邻居擦除笔画的问题。
-    let ink_hits = margin > 0.0
-        && !node_rect.is_empty()
-        && dirty.intersects(Rect::new(
-            node_rect.x - margin,
-            node_rect.y - margin,
-            node_rect.w + 2.0 * margin,
-            node_rect.h + 2.0 * margin,
-        ));
+    // **整帧绘制时不需要查墨迹边距**：下面 `paint_all` 已经让条件恒真，
+    // 而这次查表要 `id_key(node.id())`（字符串 FNV）+ 一次 map 查询 ——
+    // 每帧每节点一次，11k 节点上实测就是白白多花一百多微秒。
+    let ink_hits = !paint_all && !node_rect.is_empty() && {
+        let margin = ink
+            .get(&crate::layout::id_key(node.id()))
+            .copied()
+            .unwrap_or(0.0);
+        // `needs_paint` 只看 rect；这里补一条"墨迹与脏区相交"的判据。
+        // 扩展量很小（通常 2~14px），不会明显增加绘制量，但能消除邻居擦除笔画的问题。
+        margin > 0.0
+            && dirty.intersects(Rect::new(
+                node_rect.x - margin,
+                node_rect.y - margin,
+                node_rect.w + 2.0 * margin,
+                node_rect.h + 2.0 * margin,
+            ))
+    };
     if (paint_all || node.needs_paint(dirty) || ink_hits) && !node_rect.is_empty() {
         // 诊断开关：按**真实绘制顺序**打印每个节点的 id/矩形/裁切，
         // 用于定位"文字被后画的背景盖掉"这类问题。

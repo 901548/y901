@@ -207,6 +207,93 @@ fn profile_shape_costs() {
     }
 }
 
+/// 空渲染上下文：只统计调用次数，不做任何像素工作 ——
+/// 这样测到的是**绘制遍历**本身（clip 计算、脏区裁剪、节点遍历），与光栅化无关。
+#[derive(Default)]
+struct Sink {
+    fills: usize,
+    texts: usize,
+    clips: usize,
+}
+
+impl TextMetrics for Sink {
+    fn measure_text(&self, t: &str, _s: &TextStyle) -> Size {
+        Size::new(t.chars().count() as f32 * 8.0, 16.0)
+    }
+    fn line_height(&self, _s: &TextStyle) -> f32 {
+        16.0
+    }
+    fn scale(&self) -> f32 {
+        1.0
+    }
+}
+
+impl RenderCtx for Sink {
+    fn size(&self) -> Size {
+        Size::new(2000.0, 2000.0)
+    }
+    fn fill_rect(&mut self, _r: Rect, _c: y901_ui::Color) {
+        self.fills += 1;
+    }
+    fn stroke_rect(&mut self, _r: Rect, _c: y901_ui::Color, _w: f32) {
+        self.fills += 1;
+    }
+    fn draw_text(&mut self, _o: y901_ui::Pos, _t: &str, _s: &TextStyle) -> f32 {
+        self.texts += 1;
+        0.0
+    }
+    fn push_clip(&mut self, _r: Rect) {
+        self.clips += 1;
+    }
+    fn pop_clip(&mut self) {}
+}
+
+#[test]
+#[ignore = "剖析台：cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture"]
+fn profile_render_walk() {
+    // 每帧的绘制遍历：全量脏 vs 只脏一个叶子。
+    // 这一步在生产里是**每帧都跑**的（只要有脏区），比布局更常触发。
+    let viewport = Size::new(2000.0, 2000.0);
+    let mut tree = build(10, 4);
+    tree.layout(viewport, &Mono);
+    tree.invalidate_all();
+
+    // 预热一次，让 paint_order 等结构就位
+    let mut sink = Sink::default();
+    tree.render(&mut sink);
+
+    let rounds = 20;
+    let mut total = 0.0;
+    for _ in 0..rounds {
+        tree.invalidate_all();
+        let t = Instant::now();
+        tree.render(&mut sink);
+        total += t.elapsed().as_secs_f64() * 1e6;
+    }
+    let full_avg = total / rounds as f64;
+    let full_fills = sink.fills;
+    let full_clips = sink.clips;
+
+    // 局部：只脏一个叶子的矩形
+    let leaf_rect = tree
+        .rect_of("n_0_0_0_0_leaf")
+        .unwrap_or(Rect::new(0.0, 0.0, 10.0, 10.0));
+    let mut total_partial = 0.0;
+    for _ in 0..rounds {
+        tree.invalidate_rect(leaf_rect);
+        let t = Instant::now();
+        tree.render(&mut sink);
+        total_partial += t.elapsed().as_secs_f64() * 1e6;
+    }
+    let partial_avg = total_partial / rounds as f64;
+
+    eprintln!(
+        "[render] full_frame avg={full_avg:.1}us fills={full_fills} clips={full_clips} | \
+         one_leaf avg={partial_avg:.1}us"
+    );
+    assert!(full_avg > 0.0);
+}
+
 #[test]
 #[ignore = "剖析台：cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture"]
 fn profile_10k_layout() {
