@@ -121,12 +121,34 @@ impl SplitView {
         }
     }
 
+    /// 第一块的实际主轴长度。
+    ///
+    /// **必须只有这一份实现**：`arrange` 用它摆两块，`divider_pos` 用它画分隔条，
+    /// 命中测试与拖拽起点也用它。旧版 `arrange` 把结果按 `min_first` 钳过，
+    /// 而 `divider_pos` 直接用 `ratio * total` —— 一旦 `min_first` 生效
+    /// （例如 400px 宽的默认 0.28 → 112 < 120），分隔条就被画到**第一块内部**，
+    /// 而真正 1px 的间隙没人画（露出背景），鼠标也得点在错的位置才能拖动。
+    ///
+    /// `min_second` 也在这里落实：不能只顾第一块把第二块挤成 0。
+    fn first_len(&self) -> f32 {
+        let total = self.along();
+        if total <= 0.0 {
+            return 0.0;
+        }
+        let want = total * self.ratio;
+        let min_first = self.min_first.min(total);
+        let min_second = self.min_second.min(total);
+        let upper = (total - DIVIDER - min_second).max(min_first).min(total);
+        want.max(min_first).min(upper).max(0.0)
+    }
+
     /// 分隔条中心（主轴方向的绝对坐标）。
     fn divider_pos(&self) -> f32 {
-        match self.axis {
-            Axis::Horizontal => self.rect.x + self.along() * self.ratio,
-            Axis::Vertical => self.rect.y + self.along() * self.ratio,
-        }
+        let start = match self.axis {
+            Axis::Horizontal => self.rect.x,
+            Axis::Vertical => self.rect.y,
+        };
+        start + self.first_len()
     }
 
     fn on_divider(&self, pos: Pos) -> bool {
@@ -200,10 +222,8 @@ impl Widget for SplitView {
         cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
+        let first_len = self.first_len();
         let total = self.along();
-        let first_len = (total * self.ratio)
-            .max(self.min_first.min(total))
-            .min(total);
         let second_len = (total - first_len - DIVIDER).max(0.0);
 
         let (a, b) = match self.axis {

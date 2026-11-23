@@ -1,4 +1,4 @@
-﻿//! Slider：水平轨道 + 圆形滑块。
+//! Slider：水平轨道 + 圆形滑块。
 //!
 //! 交互：点击轨道跳转、按住滑块拖动、左右键微调（步进 0.05）。
 //! 滑块中心允许超出轨道两端半个滑块宽度 —— 这是滑块的常规观感（0 与 1 位置更易命中）。
@@ -202,7 +202,10 @@ impl Widget for Slider {
                 self.dragging = true;
                 ctx.set_pointer_capture(self.id.clone());
                 self.set_value(self.value_at(pos.x, ctx.scale()));
-                EventResult::Handled
+                // **值变了就要重绘**：`EventResult::Handled < Redraw`，
+                // 只回 `Handled` 时框架不会标脏 —— 点击后滑块停在旧位置，
+                // 要等下一次无关事件才跳过去。
+                EventResult::Redraw
             }
             UiEvent::MouseMove { pos } => {
                 if !self.dragging {
@@ -228,12 +231,22 @@ impl Widget for Slider {
                 }
                 match key {
                     Key::Left => {
+                        let before = self.value;
                         self.set_value(self.value - STEP);
-                        EventResult::Handled
+                        if self.value != before {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Handled
+                        }
                     }
                     Key::Right => {
+                        let before = self.value;
                         self.set_value(self.value + STEP);
-                        EventResult::Handled
+                        if self.value != before {
+                            EventResult::Redraw
+                        } else {
+                            EventResult::Handled
+                        }
                     }
                     _ => EventResult::Ignored,
                 }

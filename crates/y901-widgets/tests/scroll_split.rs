@@ -186,10 +186,25 @@ fn splitter_reports_resize_cursor() {
     let mut tree = UiTree::new(Box::new(split));
     tree.layout(Size::new(400.0, 200.0), &Mono);
 
-    // 分隔条在 x=100
+    // **分隔条必须落在两块真正分开的位置**：默认 `min_first = 120`，
+    // 而 `0.25 × 400 = 100` 会被它抬到 120 —— 所以分隔条在 x=120，不是在 100。
+    // 旧实现 `arrange` 按 120 摆两块、`divider_pos` 却按 100 画条，
+    // 于是条画在第一块内部、真正的 1px 间隙露背景，拖动也得点错位置。
+    let expected = 120.0;
+    assert!(
+        (tree.rect_of("left").expect("left").right() - expected).abs() < 0.01,
+        "第一块的右边界应与分隔条起始一致，实际 {:?}",
+        tree.rect_of("left")
+    );
+    assert_eq!(
+        tree.cursor_at(Pos::new(expected + 0.5, 100.0)),
+        Cursor::ResizeHorizontal,
+        "分隔条中心应命中"
+    );
     assert_eq!(
         tree.cursor_at(Pos::new(100.5, 100.0)),
-        Cursor::ResizeHorizontal
+        Cursor::Default,
+        "已钳制到 120 时，x=100 在第一块内部，不该命中分隔条"
     );
     assert_eq!(tree.cursor_at(Pos::new(300.0, 100.0)), Cursor::Default);
 }

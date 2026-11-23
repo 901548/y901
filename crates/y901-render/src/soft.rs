@@ -171,10 +171,12 @@ impl SoftBackend {
         theme: Option<Theme>,
     ) -> Result<Self, String> {
         let _ = Size::new(0.0, 0.0);
+        // `width * height` 用 usize：u32 相乘在 >2^32 像素时会溢出。
+        let px_count = (width.max(1) as usize) * (height.max(1) as usize);
         Ok(Self {
             width: width.max(1),
             height: height.max(1),
-            buf: vec![0; (width.max(1) * height.max(1)) as usize],
+            buf: vec![0; px_count],
             textures: std::collections::HashMap::new(),
             mips: std::collections::HashMap::new(),
             next_texture: 0,
@@ -226,9 +228,14 @@ impl SoftBackend {
         if w == self.width && h == self.height {
             return false;
         }
+        // **usize 乘法**：`w * h` 在 u32 上会在 >2^32 像素时溢出（debug panic，
+        // release 回绕成一个小缓冲，随后的绘制按大尺寸写就越界）。
+        let Some(pixels) = (w as usize).checked_mul(h as usize) else {
+            return false; // 尺寸不可表示：保持原样，不破坏已有缓冲
+        };
         self.width = w;
         self.height = h;
-        self.buf = vec![0; (w * h) as usize];
+        self.buf = vec![0; pixels];
         true
     }
 
@@ -380,10 +387,39 @@ impl SoftBackend {
         out
     }
 
+    fn fill_rect_device(&mut self, rect: Rect, color: Color) {
+        let r = self.clip_rect(rect);
+        if r.w <= 0.0 || r.h <= 0.0 {
+            return;
+        }
+        let px = pack(color, 1.0, self.state.current_opacity());
+        let x0 = r.x.floor() as i32;
+        let x1 = r.right().ceil() as i32;
+        let y0 = r.y.floor() as i32;
+        let y1 = r.bottom().ceil() as i32;
+        for y in y0..y1 {
+            let row = (y as u32 * self.width) as usize;
+            let start = row + x0 as usize;
+            let end = row + x1 as usize;
+            if px >> 24 == 0xff {
+                if let Some(dst) = self.buf.get_mut(start..end) {
+                    dst.fill(px);
+                }
+            } else if let Some(dst) = self.buf.get_mut(start..end) {
+                for pixel in dst {
+                    *pixel = blend(*pixel, px);
+                }
+            }
+        }
+    }
+
     fn clip_rect(&self, r: Rect) -> Rect {
-        let mut out = Rect::new(r.x.max(0.0), r.y.max(0.0), r.w.max(0.0), r.h.max(0.0));
-        out.w = out.w.min(self.width as f32 - out.x);
-        out.h = out.h.min(self.height as f32 - out.y);
+        // **必须用求交，而不是"把左上角钳到 0 再保留原宽高"**：
+        // 后者会把"被屏幕左边裁掉的部分"补到右边 —— 一个 `x=-8,w=20` 的矩形
+        // 会在 `0..20` 上画满，而正确结果是只画 `0..12`。
+        // 负 x/y 的矩形在真实场景里很常见（轮播页、出血图、自己画到窗口外的控件）。
+        let viewport = Rect::new(0.0, 0.0, self.width as f32, self.height as f32);
+        let mut out = r.intersect(viewport);
         if let Some(c) = self.state.current_clip() {
             out = out.intersect(c);
         }
@@ -599,7 +635,7 @@ impl SoftBackend {
             // **推进宽度**：比例字体用真实字宽，否则按格宽。
             let adv = self.advance_of(ch, px_final, cell_w);
             if style.bg.a > 0.0 {
-                self.fill_rect(Rect::new(pen_x, origin.y, adv, cell_h), style.bg);
+                self.fill_rect_device(Rect::new(pen_x, origin.y, adv, cell_h), style.bg);
             }
             if ch != ' ' {
                 // 先 clone 再画：避开 `&mut self.text` 与 `self.text.atlas()` 的借用冲突
@@ -663,7 +699,7 @@ impl SoftBackend {
                 }
             }
             if style.underline {
-                self.fill_rect(
+                self.fill_rect_device(
                     Rect::new(pen_x, origin.y + cell_h - 2.0, adv, 1.0),
                     style.fg,
                 );
@@ -721,13 +757,23 @@ impl RenderCtx for SoftBackend {
         height: u32,
         rgba: &[u8],
     ) -> y901_ui::image::TextureId {
-        if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
+        // **用 usize/checked 乘法**：`width * height * 4` 在 u32 上会溢出
+        // （65536×65536 → 0），release 下"空切片"竟然能通过长度校验，
+        // 随后 mip 构建按截断后的尺寸写越界。尺寸来自解码器/窗口管理器，
+        // 不是我们能控制的输入，所以拒绝而不是回绕。
+        let Some(need) = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|px| px.checked_mul(4))
+        else {
+            return y901_ui::image::TextureId::INVALID;
+        };
+        if width == 0 || height == 0 || rgba.len() < need {
             return y901_ui::image::TextureId::INVALID;
         }
         self.next_texture += 1;
         let id = y901_ui::image::TextureId(self.next_texture);
         // 只保留需要的字节：调用方可能持有一个很大的缓冲
-        let bytes = rgba[..(width * height * 4) as usize].to_vec();
+        let bytes = rgba[..need].to_vec();
         // 上传即拥有一次引用（创建者）
         self.textures.insert(id, (width, height, bytes, 1));
         // 静态图片：就地建 mip 链（L1 起）。
@@ -881,7 +927,11 @@ impl RenderCtx for SoftBackend {
                 if c[3] <= 0.0 {
                     continue;
                 }
-                let src_px = pack(Color::rgba(c[0], c[1], c[2], c[3]), 1.0, 1.0);
+                // **必须乘上透明栈**：旧实现把 opacity 写死成 1.0，于是
+                // `push_opacity(0.2); draw_image(...)` 里图片不淡出、而同色的 `fill_rect` 淡出
+                // —— 与 D3D 后端（对每个实例都乘 `current_opacity()`）行为相左。
+                let o = self.state.current_opacity();
+                let src_px = pack(Color::rgba(c[0], c[1], c[2], c[3]), o, 1.0);
                 let di = (y as u32 * self.width + x as u32) as usize;
                 if let Some(dst_px) = self.buf.get_mut(di) {
                     *dst_px = blend(*dst_px, src_px);
@@ -897,29 +947,7 @@ impl RenderCtx for SoftBackend {
 
     fn fill_rect(&mut self, rect: Rect, color: Color) {
         let rect = self.map_rect(rect);
-        let r = self.clip_rect(rect);
-        if r.w <= 0.0 || r.h <= 0.0 {
-            return;
-        }
-        let px = pack(color, 1.0, self.state.current_opacity());
-        let x0 = r.x.floor() as i32;
-        let x1 = r.right().ceil() as i32;
-        let y0 = r.y.floor() as i32;
-        let y1 = r.bottom().ceil() as i32;
-        for y in y0..y1 {
-            let row = (y as u32 * self.width) as usize;
-            let start = row + x0 as usize;
-            let end = row + x1 as usize;
-            if px >> 24 == 0xff {
-                if let Some(dst) = self.buf.get_mut(start..end) {
-                    dst.fill(px);
-                }
-            } else if let Some(dst) = self.buf.get_mut(start..end) {
-                for pixel in dst {
-                    *pixel = blend(*pixel, px);
-                }
-            }
-        }
+        self.fill_rect_device(rect, color);
     }
 
     /// 圆角矩形描边：与 D3D shader 同公式的 SDF 覆盖率（包含 1px 过渡）。
@@ -1020,7 +1048,7 @@ impl RenderCtx for SoftBackend {
             let base_px = self.text.size_px();
             let adv = self.advance_of(ch, base_px, cell_w) * scale;
             if style.bg.a > 0.0 {
-                self.fill_rect(Rect::new(pen_x, origin.y, adv, self.cell.h), style.bg);
+                self.fill_rect_device(Rect::new(pen_x, origin.y, adv, self.cell.h), style.bg);
             }
             if ch != ' ' {
                 // 按当前缩放选一级字形（level 0 = L0，与不缩放时逐像素相同）
@@ -1129,7 +1157,7 @@ impl RenderCtx for SoftBackend {
                 }
             }
             if style.underline {
-                self.fill_rect(
+                self.fill_rect_device(
                     Rect::new(pen_x, origin.y + self.cell.h - 2.0, adv, 1.0),
                     style.fg,
                 );
@@ -1272,6 +1300,13 @@ impl RenderCtx for SoftBackend {
         radius: f32,
     ) {
         // 先画圆角不透明遮罩再叠渐变：保证角上的抗锯与纯圆角一致
+        //
+        // **必须过变换栈**：同级的 `fill_round_rect` / `fill_gradient_rect_dir` /
+        // `stroke_round_rect` 都先 `map_rect`，只有这里漏了 —— 弹层打开动画
+        // （整棵子树在 0.8→1.0 缩放下绘制）里渐变圆角面板会保持原尺寸，
+        // 与它自己的子节点错位。
+        let rect = self.map_rect(rect);
+        let radius = radius * self.map_scale();
         let r = radius.clamp(0.0, rect.w.min(rect.h) * 0.5);
         if r <= 0.5 {
             self.fill_gradient_rect_dir(rect, from, to, dir);

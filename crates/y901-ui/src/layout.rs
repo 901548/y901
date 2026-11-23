@@ -535,7 +535,11 @@ pub fn flex_arrange_with(
         Justify::SpaceAround => (free / n * 0.5, free / n),
     };
     for (idx, child) in children.iter_mut().enumerate() {
-        let item = child.flex();
+        // **复用 measure 阶段的 flex 参数**（有快照时）：下面算 `main` 用的 `item`
+        // 必须与上面算 `fixed_total`/`flex_total` 的那一份**同源** ——
+        // 否则 `justify` 的偏移来自一次取值、几何来自另一次取值，
+        // 对"`flex()` 是计算出来的"控件就会自相矛盾。
+        let item = if reuse { measured[idx].1 } else { child.flex() };
         let size = sizes[idx];
         let (main_dim, cross_dim) = match axis {
             Axis::Horizontal => (item.width, item.height),
@@ -546,10 +550,24 @@ pub fn flex_arrange_with(
             Some(factor) if flex_total > 0.0 => leftover * factor / flex_total,
             _ => match main_dim {
                 Dimension::Px(v) => v * scale,
-                Dimension::Percent(p) if inner.w.is_finite() && inner.h.is_finite() => match axis {
-                    Axis::Horizontal => inner.w * (p / 100.0),
-                    Axis::Vertical => inner.h * (p / 100.0),
-                },
+                // **百分比只按主轴自己的基准判断有限性**：旧实现同时要求两个轴都有限，
+                // 于是"竖向 flex 在横向无界的环境里"会出现 measure 解出了百分比、
+                // arrange 却回退到内容尺寸的 divergence。目前 arrange 的 rect
+                // 恒为有限值，所以这是修一条**潜在**不一致，不改变任何可达输出。
+                Dimension::Percent(p) => {
+                    let base = match axis {
+                        Axis::Horizontal => inner.w,
+                        Axis::Vertical => inner.h,
+                    };
+                    if base.is_finite() {
+                        base * (p / 100.0)
+                    } else {
+                        match axis {
+                            Axis::Horizontal => size.w,
+                            Axis::Vertical => size.h,
+                        }
+                    }
+                }
                 _ => match axis {
                     Axis::Horizontal => size.w,
                     Axis::Vertical => size.h,

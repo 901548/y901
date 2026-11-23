@@ -68,6 +68,15 @@ pub struct TextArea {
     lines: Vec<VisLine>,
     /// 行高（物理像素），`relayout` 时从 metrics 取。
     line_h: f32,
+    /// 半角字符宽度（物理像素），`relayout` 时实测。
+    ///
+    /// 为什么不在事件里临时算：事件阶段拿不到 `TextMetrics`。旧实现用
+    /// `line_h * 0.5` 近似，在**奇数逻辑字号**下与真实格宽不等
+    /// （13px 时近似 6.5、真实 `round(6.5)=7`），14 个字符就偏差一个整格 ——
+    /// 光标与点击会落到相邻字符上。这里直接存度量结果。
+    cell_w: f32,
+    /// 全角字符宽度（物理像素），同上。
+    wide_w: f32,
     /// 可视区尺寸（已扣掉内边距）。
     inner_w: f32,
     inner_h: f32,
@@ -113,6 +122,8 @@ impl TextArea {
             rect: Rect::ZERO,
             lines: vec![VisLine { start: 0, end: 0 }],
             line_h: 16.0,
+            cell_w: 8.0,
+            wide_w: 16.0,
             inner_w: 0.0,
             inner_h: 0.0,
             scroll_y: 0.0,
@@ -262,6 +273,8 @@ impl TextArea {
     /// - 空逻辑行也占一条可视行（否则空行无法点进去）。
     fn relayout(&mut self, metrics: &dyn TextMetrics) {
         self.line_h = metrics.line_height(&self.style).max(1.0);
+        self.cell_w = metrics.measure_text("M", &self.style).w.max(1.0);
+        self.wide_w = metrics.measure_text("中", &self.style).w.max(self.cell_w);
         let width = self.inner_w.max(1.0);
         let text = self.buffer.text().to_string();
         let mut lines: Vec<VisLine> = Vec::new();
@@ -313,6 +326,11 @@ impl TextArea {
             lines.push(VisLine { start: 0, end: 0 });
         }
         self.lines = lines;
+        // **滚动偏移必须跟着内容收缩**：文本从 20 行变回 1 行时，旧的 `scroll_y`
+        // 会把第一条可视行推到窗口外，`first` 直接等于 `lines.len()` ——
+        // 结果是整块空白（看起来像 set_text 没生效），而且要等重新聚焦才恢复。
+        let max_scroll = (self.lines.len() as f32 * self.line_h - self.inner_h).max(0.0);
+        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
     }
 
     /// 光标所在的可视行下标。
@@ -326,11 +344,25 @@ impl TextArea {
         self.lines.len().saturating_sub(1)
     }
 
+    /// 切片的**安全区间**：`lines` 可能比当前文本"旧"（编辑只返回 `Redraw`，
+    /// 重排要等到下一次 `render` 才有度量），直接拿 `line.start..line.end` 去切字符串
+    /// 会在文本变短后越界 panic（"删字后同一帧内点一下"就复现）。
+    ///
+    /// 这里只做**钳制**，不试图修正映射：旧行边界至多让指针落点偏一个字符，
+    /// 而 panic 会让整个进程崩溃 —— 两害相权。
+    fn line_range(&self, line: &VisLine) -> std::ops::Range<usize> {
+        let len = self.buffer.text().len();
+        let start = line.start.min(len);
+        let end = line.end.min(len).max(start);
+        start..end
+    }
+
     /// 字节偏移在本行内的 x 偏移（物理像素）。
     fn x_in_line(&self, line: &VisLine, byte: usize) -> f32 {
-        let byte = byte.clamp(line.start, line.end);
+        let range = self.line_range(line);
+        let byte = byte.clamp(range.start, range.end);
         let mut w = 0.0;
-        for ch in self.buffer.text()[line.start..byte].chars() {
+        for ch in self.buffer.text()[range.start..byte].chars() {
             w += self.char_w(ch);
         }
         w
@@ -343,11 +375,10 @@ impl TextArea {
     /// （CJK/全角 = 2 倍宽，其它 = 1 倍宽）。它只影响点击落点与光标 x，
     /// 真实绘制仍走 `RenderCtx::draw_text` 的度量 —— 两者误差被限制在半个字符内。
     fn char_w(&self, ch: char) -> f32 {
-        let unit = self.line_h * 0.5;
         if (ch as u32) >= 0x2E80 {
-            unit * 2.0
+            self.wide_w
         } else {
-            unit
+            self.cell_w
         }
     }
 
@@ -362,15 +393,16 @@ impl TextArea {
             return self.buffer.cursor();
         };
         let line = *line;
+        let range = self.line_range(&line);
         let mut acc = 0.0;
-        for (off, ch) in self.buffer.text()[line.start..line.end].char_indices() {
+        for (off, ch) in self.buffer.text()[range.start..range.end].char_indices() {
             let cw = self.char_w(ch);
             if x < acc + cw * 0.5 {
-                return line.start + off;
+                return range.start + off;
             }
             acc += cw;
         }
-        line.end
+        range.end
     }
 
     /// 把屏幕坐标（客户端坐标）映射成字节偏移。
@@ -663,10 +695,18 @@ impl Widget for TextArea {
             _ if constraints.max.w.is_finite() => constraints.max.w,
             _ => self.inner_w + padding_h,
         };
-        // 高度：由 `rows` 决定默认值；父级给了有限高度就**填满**（像编辑器那样吃掉剩余空间）。
+        // 高度：**默认只占 `rows` 行**，只有显式声明"要伸缩/百分比"时才吃满父级。
+        //
+        // 旧实现无条件 `constraints.max.h`（= 父容器整个内高），后果很实际：
+        // `Flex::column([TextArea, Button])` 里 TextArea 报满高度、按顺序排下去，
+        // 后面的按钮直接被挤到容器底部之外（看不见），而 `rows(4)` 永远不生效。
+        // 这与 `TextInput` 的口径也不一致（它只报一行高）。
+        //
+        // 想让编辑器占满剩余空间时，用 `.flex_item(FlexItem::fill())` 显式表达。
         let default_h = self.line_h * self.rows as f32 + padding_v;
-        let content_h = if constraints.max.h.is_finite() {
-            constraints.max.h.max(default_h.min(constraints.max.h))
+        let want_fill = matches!(self.item.height, Dimension::Flex(_) | Dimension::Percent(_));
+        let content_h = if want_fill && constraints.max.h.is_finite() {
+            constraints.max.h
         } else {
             default_h
         };
@@ -1251,6 +1291,51 @@ mod tests {
             "光标在最后一行时必须滚动，scroll_y={}",
             area.scroll_y()
         );
+    }
+
+    /// **回归（P0）**：编辑让文本变短后，同一帧内的坐标命中不能越界 panic。
+    ///
+    /// `lines` 只在 `relayout`（arrange/render）里重建，而编辑只回 `Redraw`；
+    /// 一帧里"先删字、再点击"时行表还是旧的，切片 `text[start..end]` 会越界。
+    #[test]
+    fn click_right_after_shrinking_edit_does_not_panic() {
+        let mut area = TextArea::new("a").with_text("abc");
+        mount(&mut area, 240.0, 100.0);
+        focus(&mut area);
+        key(&mut area, Key::Backspace); // 文本变 "ab"，行表仍是 (0,3)
+        assert_eq!(area.text(), "ab");
+
+        let mut c = ctx();
+        let r = area.event(
+            &mut c,
+            &UiEvent::MouseDown {
+                pos: Pos::new(20.0, 8.0),
+                button: MouseButton::Left,
+            },
+        );
+        assert!(matches!(r, EventResult::Redraw | EventResult::Handled));
+        assert!(area.cursor() <= area.text().len(), "光标必须落在文本范围内");
+    }
+
+    /// **回归**：文本大幅变短后 `scroll_y` 必须跟着收回去。
+    ///
+    /// 否则第一条可视行被推到窗口外，`render` 画 0 行 —— 看起来像 set_text 没生效。
+    #[test]
+    fn shrinking_text_resets_scroll() {
+        let mut text = String::new();
+        for i in 0..40 {
+            text.push_str(&format!("line{i}\n"));
+        }
+        let mut area = TextArea::new("a").with_text(text);
+        mount(&mut area, 240.0, 48.0); // 只够 2.5 行
+        focus(&mut area);
+        area.buffer.set_cursor(area.text().len());
+        area.ensure_caret_visible();
+        assert!(area.scroll_y() > 0.0, "前置：应先滚动起来");
+
+        area.set_text("hello");
+        area.relayout(&Mono);
+        assert_eq!(area.scroll_y(), 0.0, "内容只剩一行时必须回到顶部");
     }
 
     #[test]

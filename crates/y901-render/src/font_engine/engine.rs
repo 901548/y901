@@ -682,7 +682,10 @@ impl MyFontEngine {
     /// 清空图集（验收用：清空后必须能全量恢复）。
     pub fn clear_atlas(&mut self) {
         self.cache.clear();
-        self.packer = SkylinePacker::new(ATLAS_SIZE);
+        // **必须用 `self.atlas_size`**：写死 `ATLAS_SIZE`(2048) 会让 packer 把后续字形
+        // 分配到"像素缓冲区之外"（`with_atlas_size` 可以把缓冲调小），
+        // 紧接着的写入就是越界 panic 或写进下一行造成花屏。
+        self.packer = SkylinePacker::new(self.atlas_size);
         self.atlas.fill(0);
         self.reset_pending = true;
     }

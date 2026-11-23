@@ -98,4 +98,7 @@
 # Measured at 2026-11-23 (审查修复：布局缓存吊销 + Stack 无界 + 哈希器初始化):
 #   default cargo test --workspace --no-fail-fast   passed 1147, failed 0, ignored 65 / 158 个测试目标
 #   (新增 9 条：layout_cache_identity 2、Stack 2、fasthash 1、ui_partial_vs_full 4；passed 1138 → 1147)
-1147
+# Measured at 2026-11-23 (审查修复 2：TextArea 越界/高度/滚动、Split 分隔条、Slider 重绘、软光栅裁剪与变换):
+#   default cargo test --workspace --no-fail-fast   passed 1154, failed 0, ignored 65 / 159 个测试目标
+#   (新增 7 条：TextArea 2、soft_clip_transform 5；passed 1147 → 1154)
+1154
