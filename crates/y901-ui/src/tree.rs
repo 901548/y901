@@ -263,6 +263,8 @@ pub struct UiTree {
     viewport: Size,
     /// id -> rect 的缓存，避免每次 RPC 都走一遍树。
     rects: FastMap<u64, Rect>,
+    /// 上一轮索引表的**备用缓冲**（布局末尾与 `rects` 交换，零分配）。
+    spare: FastMap<u64, Rect>,
     /// 组件在本轮分发中产生的命令，等待 `drain_commands` 处理。
     pending: Vec<crate::command::Command>,
     /// 布局记忆化 + 脏传播。
@@ -473,6 +475,7 @@ impl UiTree {
             focus: None,
             viewport: Size::ZERO,
             rects: fast_map(),
+            spare: fast_map(),
             pending: Vec::new(),
             cache: crate::layout::LayoutCache::new(),
             // 首帧必须整窗绘制
@@ -1674,15 +1677,15 @@ impl UiTree {
         // "上一轮每个节点的 rect"，语义等价、零分配。
         //
         // 视口变化时整窗已经是脏的，不需要对比。
-        // `node_hint`：搬走之前记下节点数 —— `collect_ink_margins` 要用它预留容量，
-        // 搬走之后 `self.rects.len()` 恒为 0（旧实现就是在搬运**之后**读的，
-        // 于是 `reserve(len)` 永远等于"不预留"，是个静默失效的优化）。
+        // `node_hint`：`collect_ink_margins` 要用它预留容量。
+        // （**不能**在换出 `rects` 之后再读 `self.rects.len()` —— 那时恒为 0，
+        // `reserve(0)` 是个静默失效的"优化"。）
         let node_hint = self.rects.len();
-        let before: Option<FastMap<u64, Rect>> = if viewport_changed {
-            None
-        } else {
-            Some(std::mem::take(&mut self.rects))
-        };
+        // **布局期间不动 `rects`**：`layout_tree` 只改各节点自己的 rect 字段，
+        // 索引表由末尾的 `rebuild_indices` 整体重建。这样即使 `layout_tree` 或
+        // `collect_ink_margins` panic，"上一轮每个节点的 rect" 仍然是完整的 ——
+        // 旧实现在这里就把表搬空（`mem::take`），panic 之后 `rect_of()` 全为空、
+        // `invalidate(id)` 静默 no-op，下一轮还会把整棵树当成"全新节点"。
         crate::layout::layout_tree(self.root.as_mut(), viewport, metrics, &mut self.cache);
         // per-node 墨迹边距：只有**真的重排**时才重采。
         // 若放在 `is_fresh` 快路径外面，每帧 layout 都会白走一遍全树（O(n)），
@@ -1705,15 +1708,19 @@ impl UiTree {
             popup.widget.arrange(rect, metrics, &mut self.cache);
         }
         if !self.layout_stats().skipped {
+            // 用**备用缓冲**接住旧的索引表：`swap` 零分配，旧内容仍在 `old` 里，
+            // `rebuild_indices` 往（已腾空的）`rects` 写新内容，随后两表对比。
+            // 这样"布局前快照"的语义保持不变，而 `rects` 在任何时刻都不会被丢弃。
+            let mut old = std::mem::take(&mut self.spare);
+            std::mem::swap(&mut old, &mut self.rects);
             self.rebuild_indices();
-            if let Some(before) = before {
-                self.mark_moved_map(&before);
+            if !viewport_changed {
+                // 视口变化时整窗已经是脏的，不需要逐节点对比。
+                self.mark_moved_map(&old);
             }
+            old.clear();
+            self.spare = old; // 归还缓冲（保留容量），下一轮继续用
             self.enforce_modal_focus();
-        } else if let Some(before) = before {
-            // 布局被跳过：没有重排就没有 rect 变化，把索引表原样放回
-            // （否则下一次 `before` 会误以为"上一轮没有节点"，把整棵树当成新出现的）。
-            self.rects = before;
         }
     }
 
@@ -1730,7 +1737,7 @@ impl UiTree {
             out: &mut FastMap<u64, f32>,
         ) {
             let margin = node.ink_overflow(metrics).unwrap_or(default);
-            out.insert(crate::layout::id_key(node.id()), margin);
+            out.insert(crate::layout::key_of(node), margin);
             if !node.is_open() {
                 return;
             }
@@ -1836,11 +1843,9 @@ impl UiTree {
                 (None, None) => None,
             };
 
-            // 优先用组件预算好的 key（热路径组件都缓存了一份），
-            // 没缓存的才现场哈希字符串。
-            let key = node
-                .cache_key()
-                .unwrap_or_else(|| crate::layout::id_key(node.id()));
+            // 统一走 `key_of`：契约（cache_key == id_key(id)）在调试构建里被断言，
+            // 这样"某个控件返回自定义键"不会变成"它的矩形永远查不到/永远不被标脏"。
+            let key = crate::layout::key_of(node);
             out.rects.insert(key, rect);
             // 自己在 `order` 里的下标：子节点要用它当 parent
             let me = out.order.len();
@@ -3010,7 +3015,7 @@ fn render_pass(
     // 每帧每节点一次，11k 节点上实测就是白白多花一百多微秒。
     let ink_hits = !paint_all && !node_rect.is_empty() && {
         let margin = ink
-            .get(&crate::layout::id_key(node.id()))
+            .get(&crate::layout::key_of(node))
             .copied()
             .unwrap_or(0.0);
         // `needs_paint` 只看 rect；这里补一条"墨迹与脏区相交"的判据。
@@ -3292,7 +3297,7 @@ fn forget_recursive(node: &dyn Widget, tree: &mut UiTree) {
     // **布局缓存也要吊销**：新实例的 `layout_version()` 从 0 开始，与旧实例相同；
     // 视口/约束没变时 `is_fresh_by_key` 会命中旧条目、直接返回旧尺寸而**不调 `measure`**。
     // 见 `LayoutCache::forget` 的说明与 `tests/layout_cache_identity.rs`。
-    tree.cache.forget(crate::layout::id_key(&id));
+    tree.cache.forget(crate::layout::key_of(node));
     for child in node.children() {
         forget_recursive(child.as_ref(), tree);
     }

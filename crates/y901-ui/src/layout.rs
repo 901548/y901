@@ -62,6 +62,33 @@ pub fn id_key(id: &str) -> u64 {
     hash
 }
 
+/// **节点的规范键**（唯一入口）：`cache_key()` 有值就用它，否则退回 `id_key(id)`。
+///
+/// 为什么必须只有这一个入口：框架里"按 id 查"（`rect_of`/`invalidate`/`mark_dirty`）
+/// 与"按节点查"（`measure`/`rebuild_indices`/墨迹边距）如果各自推导键，一旦某个控件
+/// 返回了**不是 `id_key(id)`** 的 `cache_key()`，两边就会指向不同的桶 ——
+/// `invalidate(id)` 静默失效、跳过布局的判断永远不命中、墨迹边距丢失。
+///
+/// 因此 `Widget::cache_key()` 的契约被收紧为：**只能是 `id_key(self.id())` 的预算缓存**。
+/// 违反时在调试构建里直接断言失败（而不是让线上出现"某些节点不刷新"这种幽灵问题）。
+pub(crate) fn key_of(node: &dyn crate::widget::Widget) -> u64 {
+    let id_key = id_key(node.id());
+    match node.cache_key() {
+        Some(k) => {
+            debug_assert_eq!(
+                k,
+                id_key,
+                "Widget::cache_key() 必须等于 id_key(id())（id = {:?}）：它只能当作 id 键的\
+                 预算缓存，不能当作自定义键。自定义键会让按 id 的查询（rect_of/invalidate）\
+                 与按节点的查询（measure/rebuild_indices）指向不同的桶。",
+                node.id()
+            );
+            k
+        }
+        None => id_key,
+    }
+}
+
 /// 布局缓存：记忆化 + 脏传播。
 pub struct LayoutCache {
     entries: FastMap<u64, Entry>,
@@ -176,7 +203,7 @@ impl LayoutCache {
         constraints: Constraints,
     ) -> Size {
         // 优先用 widget 自报的键（容器在构造时算好），避免字符串哈希
-        let key = widget.cache_key().unwrap_or_else(|| id_key(widget.id()));
+        let key = key_of(widget);
         let version = widget.layout_version();
 
         if self.is_fresh_by_key(key, constraints, version) {
@@ -338,7 +365,7 @@ pub fn flex_measure_into(
     for child in children.iter_mut() {
         let item = child.flex();
         let size = cache.measure(child.as_mut(), metrics, Constraints::loose(inner_max));
-        measured.push((size, item));
+        let _ = &size;
 
         let (main_dim, cross_dim) = match axis {
             Axis::Horizontal => (item.width, item.height),
@@ -399,6 +426,17 @@ pub fn flex_measure_into(
         main_total += main;
         cross_max = cross_max.max(cross);
         visible += 1;
+        // **存"解析后的尺寸"而不是控件自报的尺寸**：这是 measure 与 arrange
+        // 对 `Px`/`Percent` 达成一致的关键。旧实现存自报尺寸，arrange 再按容器的
+        // 实际 rect 重算一次百分比 —— 只要容器尺寸是内容驱动的（自动高度 + `Align::Center`），
+        // 两处就会得出不同结果：量出 100 高的列，子项摆进去只有 50 高（列里留空洞）。
+        measured.push((
+            match axis {
+                Axis::Horizontal => Size::new(main, cross),
+                Axis::Vertical => Size::new(cross, main),
+            },
+            item,
+        ));
     }
 
     if visible > 1 {
@@ -462,7 +500,9 @@ pub fn flex_arrange_with(
     cache: &mut LayoutCache,
     measured: &[(Size, FlexItem)],
 ) {
-    let scale = metrics.scale();
+    // 注意：这里**不再**需要 `metrics.scale()` —— `Px` 的缩放已经在 measure 阶段
+    // 应用过了，arrange 一律消费解析后的尺寸（见 `flex_measure_into` 的 measured 说明）。
+    let _ = metrics;
     if children.is_empty() {
         return;
     }
@@ -497,17 +537,10 @@ pub fn flex_arrange_with(
         if let Some(factor) = main_dim.flex_factor() {
             flex_total += factor;
         } else {
-            fixed_total += match (axis, main_dim) {
-                (Axis::Horizontal, Dimension::Px(v)) => v * scale,
-                (Axis::Vertical, Dimension::Px(v)) => v * scale,
-                (Axis::Horizontal, Dimension::Percent(p)) if inner.w.is_finite() => {
-                    inner.w * (p / 100.0)
-                }
-                (Axis::Vertical, Dimension::Percent(p)) if inner.h.is_finite() => {
-                    inner.h * (p / 100.0)
-                }
-                (Axis::Horizontal, _) => size.w,
-                (Axis::Vertical, _) => size.h,
+            // 一律用 measure 解析好的尺寸：`Px`/`Percent` 不再在这里二次解析。
+            fixed_total += match axis {
+                Axis::Horizontal => size.w,
+                Axis::Vertical => size.h,
             };
         }
     }
@@ -546,32 +579,17 @@ pub fn flex_arrange_with(
             Axis::Vertical => (item.height, item.width),
         };
 
+        // **主轴尺寸直接取 measure 解析好的值**（`measured[idx].0`）。
+        //
+        // 为什么不再按 `inner`/`scale` 重算：measure 与 arrange 各算一次就会分歧 ——
+        // 百分比在 measure 里按"父级给的可用空间"解析，在 arrange 里按容器实际 rect
+        // 解析；容器尺寸一旦是内容驱动的（自动高度 + `Align::Center`），
+        // 就会"量出 100、摆下 50"（列里留空洞）。现在**测量结果就是唯一事实**。
         let main = match main_dim.flex_factor() {
             Some(factor) if flex_total > 0.0 => leftover * factor / flex_total,
-            _ => match main_dim {
-                Dimension::Px(v) => v * scale,
-                // **百分比只按主轴自己的基准判断有限性**：旧实现同时要求两个轴都有限，
-                // 于是"竖向 flex 在横向无界的环境里"会出现 measure 解出了百分比、
-                // arrange 却回退到内容尺寸的 divergence。目前 arrange 的 rect
-                // 恒为有限值，所以这是修一条**潜在**不一致，不改变任何可达输出。
-                Dimension::Percent(p) => {
-                    let base = match axis {
-                        Axis::Horizontal => inner.w,
-                        Axis::Vertical => inner.h,
-                    };
-                    if base.is_finite() {
-                        base * (p / 100.0)
-                    } else {
-                        match axis {
-                            Axis::Horizontal => size.w,
-                            Axis::Vertical => size.h,
-                        }
-                    }
-                }
-                _ => match axis {
-                    Axis::Horizontal => size.w,
-                    Axis::Vertical => size.h,
-                },
+            _ => match axis {
+                Axis::Horizontal => size.w,
+                Axis::Vertical => size.h,
             },
         };
 
@@ -583,8 +601,8 @@ pub fn flex_arrange_with(
             Axis::Vertical => size.w,
         };
         let cross = match cross_dim {
-            Dimension::Px(v) => v * scale,
-            Dimension::Percent(p) if cross_avail.is_finite() => cross_avail * (p / 100.0),
+            // 显式交叉轴尺寸同样取 measure 解析好的值（含 min/max 钳制）
+            Dimension::Px(_) | Dimension::Percent(_) => content_cross,
             _ => match align {
                 Align::Stretch => cross_avail,
                 _ => content_cross,
@@ -1199,6 +1217,10 @@ pub fn layout_tree(
     cache: &mut LayoutCache,
 ) -> LayoutStats {
     cache.begin_layout();
+    // **清掉可能残留的祖先栈**：`measure` 里 push/pop 成对出现，但控件 panic 会跳过
+    // pop，栈里留下半条祖先链。下一次布局若不清理，`parents` 会被写成"上一个崩溃
+    // 那轮的祖先"，脏传播随之错乱 —— 这是"panic 之后还能继续用"的最低要求。
+    cache.stack.clear();
 
     let tight = Constraints::tight(viewport);
     if cache.is_fresh(root.id(), tight, root.layout_version()) {

@@ -113,4 +113,7 @@
 # Measured at 2026-11-23 (审查修复 6：组合记号宽度 + Tabs 越界钳制 + shaped 背景):
 #   default cargo test --workspace --no-fail-fast   passed 1160, failed 0, ignored 65 / 159 个测试目标
 #   (新增 1 条 combining_marks_do_not_advance_the_caret；passed 1159 → 1160)
-1160
+# Measured at 2026-11-23 (审查修复 7：百分比跨阶段一致 + 缓存键契约 + 布局 panic 安全):
+#   default cargo test --workspace --no-fail-fast   passed 1165, failed 0, ignored 65 / 161 个测试目标
+#   (新增 5 条：layout_percent 2、layout_robustness 3；passed 1160 → 1165，目标 159 → 161)
+1165
