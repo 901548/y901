@@ -122,4 +122,7 @@
 # Measured at 2026-11-23 (审查修复 9：shaping 路径真正接通 + 双向混排摆放):
 #   default cargo test --workspace --no-fail-fast   passed 1170, failed 0, ignored 65 / 163 个测试目标
 #   (新增 5 条：bidi visual_runs 2、shaped_bidi_placement 4 中的净新增 3；passed 1168 → 1170)
-1170
+# Measured at 2026-11-23 (审查修复 10：TextInput 同帧点击 + 逐帧状态栈清理):
+#   default cargo test --workspace --no-fail-fast   passed 1172, failed 0, ignored 65 / 163 个测试目标
+#   (新增 2 条：TextInput click-after-edit、soft 跨帧泄漏；passed 1170 → 1172)
+1172

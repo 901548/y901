@@ -177,3 +177,30 @@ fn text_background_is_not_mapped_twice() {
         "x=17 在两格背景之外；若被画上说明背景块宽度被放大"
     );
 }
+/// **回归**：`push_transform` / `push_opacity` 泄漏不能跨帧累积。
+///
+/// 旧实现每帧只清裁剪栈。任何一个控件漏了 `pop_transform`（或 render 中途 panic），
+/// 之后**每一帧**都会带着残留缩放绘制 —— 表现为"界面整体变小"，且没有任何报错。
+#[test]
+fn leaked_transform_and_opacity_do_not_survive_a_frame_boundary() {
+    let mut s = backend();
+    clear(&mut s);
+    // 故意泄漏：压栈不弹
+    s.push_transform(Pos::new(0.0, 0.0), 0.5);
+    s.push_opacity(0.2);
+
+    // 下一帧开始（clear 相当于 frame 边界）
+    clear(&mut s);
+    s.fill_rect(Rect::new(0.0, 0.0, 8.0, 8.0), Color::WHITE);
+
+    assert_eq!(
+        rgb(&s, 4, 4),
+        (255, 255, 255),
+        "泄漏的透明度不应影响下一帧（旧实现会变暗）"
+    );
+    assert_eq!(
+        rgb(&s, 6, 6),
+        (255, 255, 255),
+        "泄漏的缩放不应影响下一帧（旧实现只会画 4x4）"
+    );
+}

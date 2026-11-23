@@ -76,6 +76,18 @@ impl RenderState {
         self.clips.last().copied()
     }
 
+    /// 清空**所有逐帧状态栈**：裁剪、变换、不透明度。
+    ///
+    /// 为什么不只清裁剪：`push_transform` / `push_opacity` 同样是"调用方必须配对"的栈。
+    /// 一次泄漏（控件在 `render` 中途 panic、或某分支漏了 `pop`）会让**之后每一帧**
+    /// 都带着残留的缩放/透明度画，而且不会报错 —— 表现为"界面整体变小/变淡"，
+    /// 很难定位。每帧开始清空一次，代价 O(1)。
+    pub fn clear_frame_stacks(&mut self) {
+        self.clips.clear();
+        self.transforms.clear();
+        self.opacity_stack.clear();
+    }
+
     /// 清空裁剪栈。
     pub fn clear_clips(&mut self) {
         self.clips.clear();

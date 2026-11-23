@@ -87,6 +87,13 @@ pub struct TextInput {
     layout: Vec<GlyphX>,
     layout_width: f32,
     layout_dirty: bool,
+    /// 半角/全角字符宽度（最近一次按真实度量排版时实测）。
+    ///
+    /// 为什么缓存：**事件阶段拿不到 `TextMetrics`**，而编辑只返回 `Redraw`
+    /// （不会重排），于是"同一帧里先删字、再点击"会用**旧排版表**映射坐标 ——
+    /// 光标/选区落点偏移一个字符。有了这两个宽度，事件里可以就地重建排版表。
+    cell_w: f32,
+    wide_w: f32,
 
     /// 水平滚动：文本比可视区宽时，保证光标可见。
     scroll_x: f32,
@@ -137,6 +144,8 @@ impl TextInput {
             layout: Vec::new(),
             layout_width: 0.0,
             layout_dirty: true,
+            cell_w: 8.0,
+            wide_w: 16.0,
             scroll_x: 0.0,
             inner_w: 0.0,
             focused: false,
@@ -350,6 +359,9 @@ impl TextInput {
         // 选区高亮越过可见文本，点击也映射到错误的字节。
         // 每个字符仍保留一条 `GlyphX`（字节位置来自原文），
         // 所以光标/选区/命中的字节偏移语义不变。
+        // 先实测两类代表字符：事件阶段没有度量能力，靠这两个值就地重排。
+        self.cell_w = width_of('M').max(0.0);
+        self.wide_w = width_of('中').max(self.cell_w);
         let mask_w = if self.password {
             Some(width_of('*').max(0.0))
         } else {
@@ -362,6 +374,24 @@ impl TextInput {
         }
         self.layout_width = pen;
         self.layout_dirty = false;
+    }
+
+    /// 用**缓存的字符宽度**就地重建排版表（事件阶段用，不需要 `TextMetrics`）。
+    ///
+    /// 精度：与真实度量同阶（分类宽度来自上一次实测），足以让"编辑后立刻点击"
+    /// 的落点正确；下一次 `render` 仍会用真实度量重建一次。
+    fn relayout_cached(&mut self) {
+        if !self.layout_dirty {
+            return;
+        }
+        let (cell_w, wide_w) = (self.cell_w, self.wide_w);
+        self.layout_with(|ch| {
+            if (ch as u32) >= 0x2E80 {
+                wide_w
+            } else {
+                cell_w
+            }
+        });
     }
 
     fn layout_from_metrics(&mut self, metrics: &dyn TextMetrics) {
@@ -637,6 +667,9 @@ impl Widget for TextInput {
         if self.disabled {
             return EventResult::Ignored;
         }
+        // **先保证排版表与当前文本一致**：编辑只返回 `Redraw`，重排要等下一次
+        // `render`；而一帧里可能"先编辑、再点击/按键"，那时坐标映射必须用新表。
+        self.relayout_cached();
         match event {
             UiEvent::Focus(on) => {
                 self.focused = *on;
@@ -1077,6 +1110,49 @@ mod tests {
 
     // ---------- 综合流程 ----------
 
+    /// **回归**：编辑之后**同一帧内**的点击必须用新排版表映射。
+    ///
+    /// 编辑只返回 `Redraw`（不触发布局），旧实现在这一帧里仍用编辑前的排版表。
+    /// 用"追加两个字符再点击"来区分：旧表只有 `a/b` 两格（中点在 4/12），
+    /// 点行内 x=14 会一路走到"末尾"→ 光标 4；新表有 `a/b/c/d` 四格，
+    /// x=14 落在 `c` 的左半边 → 光标 2。
+    #[test]
+    fn click_after_edit_in_the_same_frame_uses_fresh_layout() {
+        let mut w = TextInput::new("input").with_text("ab");
+        mount_focused(&mut w);
+        // 渲染一次，让排版表按真实度量建好并缓存 cell 宽度
+        let mut rec = Recorder::default();
+        w.render(&mut rec);
+
+        // 光标到末尾后追加两个字符：文本变 "abcd"，但**没有重排**
+        w.buffer.set_cursor(w.buffer.len_bytes());
+        for ch in ['c', 'd'] {
+            let mut c = ctx();
+            w.event(
+                &mut c,
+                &UiEvent::Key {
+                    key: Key::Char(ch),
+                    modifiers: Modifiers::default(),
+                },
+            );
+        }
+        assert_eq!(w.text(), "abcd");
+
+        // 同一帧内点击：padding.left = 8，点 x = 22 → 行内 14
+        let mut c = ctx();
+        w.event(
+            &mut c,
+            &UiEvent::MouseDown {
+                pos: Pos::new(22.0, 12.0),
+                button: MouseButton::Left,
+            },
+        );
+        assert_eq!(
+            w.cursor(),
+            2,
+            "编辑后点击必须用新排版表（旧排版表里只有两格，会落到末尾 4）"
+        );
+    }
     #[test]
     fn full_flow_click_shift_select_replace_backspace() {
         let mut w = TextInput::new("input").with_text("abc中");

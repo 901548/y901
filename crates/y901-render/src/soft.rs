@@ -236,6 +236,8 @@ impl SoftBackend {
         self.width = w;
         self.height = h;
         self.buf = vec![0; pixels];
+        // 尺寸变了：旧的裁剪/变换矩形是按旧视口算的，留着只会画错。
+        self.state.clear_frame_stacks();
         true
     }
 
@@ -259,8 +261,9 @@ impl SoftBackend {
     pub fn clear(&mut self) {
         let px = pack(self.clear_color, 1.0, 1.0);
         self.buf.fill(px);
-        // 防御式：任何组件的 push_clip 不配对都不会污染到下一帧。
-        self.state.clear_clips();
+        // 防御式：任何组件的 `push_clip` / `push_transform` / `push_opacity` 不配对
+        // 都不会污染到下一帧（旧实现只清了裁剪栈，泄漏的缩放/透明度会一直累积）。
+        self.state.clear_frame_stacks();
     }
 
     /// 当前帧缓冲尺寸。
