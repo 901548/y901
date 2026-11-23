@@ -686,11 +686,18 @@ impl Widget for Table {
                 if let Some(column) = self.header_at(*pos) {
                     self.cycle_sort(column);
                     if let Some(cmd) = self.sort_command.as_ref() {
-                        let (col, order) = self.sort.unwrap_or((column, SortOrder::Ascending));
-                        let args = y901_ui::json::Json::obj().set("column", col as i32).set(
-                            "descending",
-                            if order == SortOrder::Descending { 1 } else { 0 },
-                        );
+                        // **第三态（取消排序）也要如实上报**：旧实现用
+                        // `unwrap_or((column, Ascending))`，于是"点第三次把排序清掉"时
+                        // 应用收到的却是"升序" —— 表头没有箭头、命令却说在升序排。
+                        // `column = -1` 表示不排序（与 `sort` 为 `None` 同义）。
+                        let (col, descending) = match self.sort {
+                            Some((c, SortOrder::Descending)) => (c as i32, 1),
+                            Some((c, SortOrder::Ascending)) => (c as i32, 0),
+                            None => (-1, 0),
+                        };
+                        let args = y901_ui::json::Json::obj()
+                            .set("column", col)
+                            .set("descending", descending);
                         ctx.emit_command(crate::command_with_args(cmd, args));
                     }
                     return EventResult::Relayout;

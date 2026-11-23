@@ -1,4 +1,4 @@
-﻿//! NumberInput：**可键盘编辑的数值输入框**（带步进、范围钳制与格式化）。
+//! NumberInput：**可键盘编辑的数值输入框**（带步进、范围钳制与格式化）。
 //!
 //! ## 为什么单独做一个组件
 //!
@@ -58,6 +58,9 @@ impl NumberInput {
     pub fn new(id: impl Into<String>, value: f64) -> Self {
         let id = id.into();
         let key = y901_ui::layout::id_key(&id);
+        // **非法初值不进入状态**：`NaN`/`inf` 一旦落进 `value`，格式化与钳制都会
+        // 传下去（`clamp` 只比大小，不做有限性检查），最后是界面显示 `NaN`。
+        let value = if value.is_finite() { value } else { 0.0 };
         Self {
             id,
             key,
@@ -89,7 +92,9 @@ impl NumberInput {
         if min.is_finite() && max.is_finite() && min <= max {
             self.min = Some(min);
             self.max = Some(max);
-            self.value = self.clamp(self.value);
+            // **钳制后再按 `decimals` 规范化**：否则 `value()` 会保留比任何提交路径
+            // 都多的精度（显示 1.23、语义里是 1.23456），两边对不上。
+            self.value = self.clamp(self.round(self.value));
         }
         self
     }
@@ -97,6 +102,9 @@ impl NumberInput {
     /// 小数位数（`0..=6`；会用于展示与规范化的四舍五入）。
     pub fn decimals(mut self, places: usize) -> Self {
         self.decimals = places.min(6);
+        // 改小数位后**立刻按新精度规范化**：`NumberInput::new("n", 1.23456).decimals(2)`
+        // 旧实现里 `value()` 仍是 1.23456，而框里显示 1.23、`semantics` 也写 1.23。
+        self.value = self.clamp(self.round(self.value));
         self
     }
 
@@ -475,11 +483,37 @@ mod tests {
 
     #[test]
     fn starts_with_given_value_and_formats_decimals() {
+        // **`value()` 必须等于显示与语义里的值**：旧实现保留原始精度
+        // （`value() == 1.23456` 而框里显示 `1.23`），任何读取 `value()`
+        // 的下游都会拿到一个界面上根本不存在、也不可能是提交结果的小数。
         let w = NumberInput::new("n", 1.23456).decimals(2);
-        assert_eq!(w.value(), 1.23456);
+        assert_eq!(w.value(), 1.23, "decimals(2) 之后 value() 应已规范化");
         assert_eq!(w.display_text(), "1.23");
+        assert_eq!(
+            format!("{}", w.value()),
+            w.display_text(),
+            "value() 与展示文本必须一致"
+        );
         let w = NumberInput::new("n", 7.6).decimals(0);
         assert_eq!(w.display_text(), "8", "decimals(0) 展示时四舍五入");
+        assert_eq!(w.value(), 8.0, "decimals(0) 之后 value() 也应取整");
+    }
+
+    #[test]
+    fn range_normalizes_precision_too() {
+        // range() 之前只 clamp 不 round：value() 会保留比任何提交路径都多的精度。
+        let w = NumberInput::new("n", 1.23456).decimals(2).range(0.0, 10.0);
+        assert_eq!(w.value(), 1.23);
+        let w = NumberInput::new("n", 12.3456).decimals(1).range(0.0, 10.0);
+        assert_eq!(w.value(), 10.0, "越界先夹到 max 再按小数位取整");
+    }
+
+    #[test]
+    fn non_finite_initial_value_is_rejected() {
+        let w = NumberInput::new("n", f64::NAN);
+        assert_eq!(w.value(), 0.0, "NaN 初值不得进入状态");
+        let w = NumberInput::new("n", f64::INFINITY);
+        assert_eq!(w.value(), 0.0);
     }
 
     #[test]

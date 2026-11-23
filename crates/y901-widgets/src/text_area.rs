@@ -814,6 +814,24 @@ impl Widget for TextArea {
                 EventResult::Redraw
             }
 
+            UiEvent::Wheel { delta, .. } => {
+                // 多行编辑器必须能滚：内容超过可视高度时，其它可滚动控件
+                // （ScrollView / ListView / Table / TreeView）都有 Wheel 分支，
+                // 这里缺了就只能靠移动光标来"滚"，鼠标滚轮会一路传给祖先。
+                let max_scroll = (self.lines.len() as f32 * self.line_h - self.inner_h).max(0.0);
+                if max_scroll <= 0.0 {
+                    return EventResult::Ignored;
+                }
+                let before = self.scroll_y;
+                // `delta` 为正 = 向上滚（与 `UiEvent::Wheel` 的约定一致）→ scroll_y 减小。
+                self.scroll_y = (self.scroll_y - *delta).clamp(0.0, max_scroll);
+                if (self.scroll_y - before).abs() > 0.01 {
+                    EventResult::Redraw
+                } else {
+                    EventResult::Ignored
+                }
+            }
+
             UiEvent::Tick => {
                 if !self.focused {
                     return EventResult::Ignored;
@@ -1338,6 +1356,55 @@ mod tests {
         assert_eq!(area.scroll_y(), 0.0, "内容只剩一行时必须回到顶部");
     }
 
+    /// **回归**：鼠标滚轮应能滚动多行编辑器（其它可滚动控件都有 Wheel 分支）。
+    /// **回归**：鼠标滚轮应能滚动多行编辑器（其它可滚动控件都有 Wheel 分支）。
+    ///
+    /// 注意前置状态：`with_text` 把光标放在**末尾**，`arrange` 里的
+    /// `ensure_caret_visible` 会把视图滚到底 —— 所以先向上滚、再向下滚，
+    /// 两个方向都要能动（旧实现完全没有 Wheel 分支，两者都不动）。
+    #[test]
+    fn wheel_scrolls_the_editor() {
+        let mut text = String::new();
+        for i in 0..40 {
+            text.push_str(&format!("line{i}\n"));
+        }
+        let mut area = TextArea::new("a").with_text(text);
+        mount(&mut area, 240.0, 48.0); // 只够 2.5 行
+        let at_bottom = area.scroll_y();
+        assert!(at_bottom > 0.0, "前置：光标在末尾应已滚到底");
+
+        let mut c = ctx();
+        // delta 为正 = 向上滚
+        area.event(
+            &mut c,
+            &UiEvent::Wheel {
+                delta: 120.0,
+                pos: Pos::new(10.0, 10.0),
+                mods: Modifiers::default(),
+            },
+        );
+        let after_up = area.scroll_y();
+        assert!(
+            after_up < at_bottom,
+            "向上滚轮应减小 scroll_y（旧实现没有 Wheel 分支，纹丝不动）：{at_bottom} -> {after_up}"
+        );
+
+        // 再向下滚回去
+        area.event(
+            &mut c,
+            &UiEvent::Wheel {
+                delta: -120.0,
+                pos: Pos::new(10.0, 10.0),
+                mods: Modifiers::default(),
+            },
+        );
+        assert!(
+            area.scroll_y() > after_up,
+            "向下滚轮应增大 scroll_y：{} -> {}",
+            after_up,
+            area.scroll_y()
+        );
+    }
     #[test]
     fn shift_down_extends_selection() {
         let mut area = TextArea::new("a").with_text("ab\ncd");

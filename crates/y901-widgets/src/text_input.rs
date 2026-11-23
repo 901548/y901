@@ -344,8 +344,19 @@ impl TextInput {
     fn layout_with(&mut self, mut width_of: impl FnMut(char) -> f32) {
         self.layout.clear();
         let mut pen = 0.0;
+        // **密码模式按 `*` 的宽度排版**：渲染时每个字符画一个 `*`，
+        // 而旧实现仍按**原文**逐字量宽 —— 一个 CJK/emoji 是两格宽，
+        // 于是"画出来的 `*` 串"比"算出来的坐标"窄一半：光标浮在文字右侧，
+        // 选区高亮越过可见文本，点击也映射到错误的字节。
+        // 每个字符仍保留一条 `GlyphX`（字节位置来自原文），
+        // 所以光标/选区/命中的字节偏移语义不变。
+        let mask_w = if self.password {
+            Some(width_of('*').max(0.0))
+        } else {
+            None
+        };
         for (byte, ch) in self.buffer.text().char_indices() {
-            let w = width_of(ch).max(0.0);
+            let w = mask_w.unwrap_or_else(|| width_of(ch).max(0.0));
             self.layout.push(GlyphX { byte, x: pen, w });
             pen += w;
         }

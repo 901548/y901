@@ -125,6 +125,12 @@ impl ComboBox {
         if i >= self.items.len() {
             return false;
         }
+        // **同值不重复发命令**：三态列表里"又选了当前项"很常见，
+        // 若每次都发 `select`，应用会收到一串重复事件（幂等但噪音大，
+        // 而且上位机可能把它当成"用户确实改了"）。
+        if self.selected == Some(i) {
+            return false;
+        }
         self.selected = Some(i);
         if let Some(cmd) = self.command.as_ref() {
             let args = y901_ui::json::Json::obj().set("index", i as i32);

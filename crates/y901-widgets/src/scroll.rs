@@ -187,6 +187,25 @@ impl Widget for ScrollView {
         let bar_w = if self.show_bar { BAR_WIDTH } else { 0.0 };
         self.inner = Rect::new(rect.x, rect.y, (rect.w - bar_w).max(0.0), rect.h);
 
+        // **滚动条出现后要按更窄的宽度重新量一次内容**。
+        //
+        // 为什么：`measure` 是按"没有滚动条"的宽度量的，而 `arrange` 让内容少 10px。
+        // 依赖宽度的内容（`TextLabel::wrap` 按可用宽度重新折行）会因此**变高**，
+        // 但 `max_offset` 用的是旧的 `content_h` —— 最后一段永远滚不到。
+        // 代价可接受：约束不变时 `cache.measure` 直接命中，只有宽度真的变了才重测。
+        if self.show_bar {
+            let again = cache.measure(
+                self.kids[0].as_mut(),
+                metrics,
+                Constraints::unbounded_main(y901_ui::Axis::Vertical, self.inner.size()),
+            );
+            self.content_h = again.h;
+        }
+
+        // **先钳制偏移，再摆内容**：旧实现先按旧 offset 摆好子节点、之后才钳制，
+        // 内容变短的那一帧子节点会整体偏上（下一帧才纠正），看起来像"抖一下"。
+        self.offset = self.offset.clamp(0.0, self.max_offset());
+
         // 内容坐标系：子节点按未滚动的绝对高度排，屏幕位置靠平移得到
         let content_rect = Rect::new(
             self.inner.x,
@@ -195,8 +214,6 @@ impl Widget for ScrollView {
             self.content_h,
         );
         self.kids[0].arrange(content_rect, metrics, cache);
-
-        self.offset = self.offset.clamp(0.0, self.max_offset());
         // 粘底：内容变高后如果仍处于激活状态，跟到最底。
         // 用户上滚 → `stick_armed = false`；回到底部 → 自动重新激活。
         if self.stick_to_bottom {
