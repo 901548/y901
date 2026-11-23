@@ -382,10 +382,30 @@ impl MyFontEngine {
             let mut attempts = 0;
             while pos.is_none() && attempts < 64 {
                 if !self.evict_one() {
-                    break; // 全是热集，驱不动了
+                    break; // 驱不动了
                 }
                 attempts += 1;
                 pos = self.packer.insert(w + PADDING, h + PADDING);
+            }
+        }
+        if pos.is_none() {
+            // **驱逐救不了就重打包**：`SkylinePacker` 的空洞不会因为"删掉字形"而消失，
+            // 碎片化后无论驱逐多少次 `insert` 都会失败 —— 旧实现就在这一步
+            // `pos?` 直接返回 `None`，于是文本静默消失，而且每失败一次还顺手删掉
+            // 几十个刚缓存好的字形（抖动）。
+            self.compact_atlas();
+            pos = self.packer.insert(w + PADDING, h + PADDING);
+            if pos.is_none() {
+                // 重打包后仍装不下 ⇒ 图集确实太小：再驱逐一轮（此时驱逐有效，
+                // 因为布局是紧凑的），最后一搏。
+                let mut attempts = 0;
+                while pos.is_none() && attempts < 64 {
+                    if !self.evict_one() {
+                        break;
+                    }
+                    attempts += 1;
+                    pos = self.packer.insert(w + PADDING, h + PADDING);
+                }
             }
         }
         let (ax, ay) = pos?;
@@ -615,17 +635,96 @@ impl MyFontEngine {
         true
     }
 
+    /// **重新打包图集**：把仍缓存着的字形搬进一张紧凑的新图集。
+    ///
+    /// 为什么必须有：`SkylinePacker` 不回收空洞。驱逐只是把像素清零、
+    /// 把条目从缓存里删掉，**打包器的 skyline 一点没动** ——
+    /// 于是"删了字形却还是插不进新字形"，重试 64 次全部失败，
+    /// 最后 `insert_into_atlas` 返回 `None`：文本静默消失。
+    ///
+    /// 做法：新建一张全 0 的图集与全新打包器，按面积从大到小重放存活字形
+    /// （大块先放能把边角留给小块），逐个把像素块从旧图集抄过去并更新坐标；
+    /// 放不下的条目不进新缓存（它们本来也装不下）。
+    ///
+    /// 代价：一次 `O(图集大小)` 的内存与拷贝 + 一次整张上传，但只在"驱逐无效"时才发生。
+    /// mip 槽在移动后坐标失效，这里直接丢弃 —— 渲染侧会回落到 L0，正确性不受影响，
+    /// 需要时 `ensure_mips` 会重建。
+    fn compact_atlas(&mut self) {
+        let asz = self.atlas_size as usize;
+        let mut order: Vec<(GlyphKey, u8, u32)> = self.cache.keys().copied().collect();
+        // 大块优先：Skyline 下这是最有效的降碎片顺序
+        order.sort_by_key(|k| {
+            let g = &self.cache[k];
+            std::cmp::Reverse((g.width as u64) * (g.height as u64))
+        });
+        let mut packer = SkylinePacker::new(self.atlas_size);
+        let mut atlas = vec![0u8; self.atlas.len()];
+        let mut moved: Vec<((GlyphKey, u8, u32), u32, u32)> = Vec::new();
+        let mut dropped: Vec<(GlyphKey, u8, u32)> = Vec::new();
+        for key in order {
+            let (w, h, ox, oy) = {
+                let g = &self.cache[&key];
+                (g.width, g.height, g.atlas_x, g.atlas_y)
+            };
+            match packer.insert(w + PADDING, h + PADDING) {
+                Some((nx, ny)) => {
+                    for y in 0..h as usize {
+                        let src = ((oy as usize + y) * asz + ox as usize) * 4;
+                        let dst = ((ny as usize + y) * asz + nx as usize) * 4;
+                        let len = (w as usize) * 4;
+                        // 越界保护：图集被换过尺寸/损坏时宁可丢字形也不写越界
+                        if src + len <= self.atlas.len() && dst + len <= atlas.len() {
+                            atlas[dst..dst + len].copy_from_slice(&self.atlas[src..src + len]);
+                        }
+                    }
+                    moved.push((key, nx, ny));
+                }
+                None => dropped.push(key),
+            }
+        }
+        for key in &dropped {
+            self.cache.remove(key);
+        }
+        for (key, nx, ny) in moved {
+            if let Some(g) = self.cache.get_mut(&key) {
+                g.atlas_x = nx;
+                g.atlas_y = ny;
+                g.mips = [None, None, None];
+            }
+        }
+        self.packer = packer;
+        self.atlas = atlas;
+        // 整张重建：一次全量上传，比拼几十个互相覆盖的脏区更省事也更安全
+        self.dirty.clear();
+        self.dirty.push(DirtyRect {
+            x: 0,
+            y: 0,
+            width: self.atlas_size,
+            height: self.atlas_size,
+        });
+    }
+
     /// 驱逐**一个**最久未用的字形（保留热集）。
     ///
     /// 返回：`false` = 没有可驱逐的候选（全在热集保护期内）。
     fn evict_one(&mut self) -> bool {
         let cutoff = self.frame.saturating_sub(PIN_LAST as u64);
+        // **热集保护不能变成"永不驱逐"**：`frame` 从 0 开始时 `cutoff == 0`，
+        // 而 `last_used >= 0` 恒成立，于是前 512 帧里一个都驱不掉 ——
+        // 图集一满，字形就永久丢失（会话刚开始、字号动画把图集填满就是这种场景）。
+        // 所以先按"冷集"挑，挑不到就退化为"全表最冷"，至少能腾出空间。
         let victim = self
             .cache
             .iter()
             .filter(|(_, g)| g.last_used < cutoff)
             .min_by_key(|(_, g)| g.last_used)
-            .map(|(c, _)| *c);
+            .map(|(c, _)| *c)
+            .or_else(|| {
+                self.cache
+                    .iter()
+                    .min_by_key(|(_, g)| g.last_used)
+                    .map(|(c, _)| *c)
+            });
         let Some(victim) = victim else {
             return false;
         };
@@ -1030,6 +1129,46 @@ mod mip_guard_tests {
             }
         }
         panic!("找不到合适的字形（below={below}），说明墨迹比分布与预期不同");
+    }
+
+    /// **回归（数据丢失）**：图集被填满后，后续字形不能永久消失。
+    ///
+    /// 旧实现的问题有两层：
+    /// 1. `evict_one` 用"最近 512 帧保护期"做筛选，`frame` 从 0 起算时
+    ///    `cutoff == 0`，前 512 帧一个都驱不掉；
+    /// 2. 就算驱掉了，`SkylinePacker` 的空洞不会回收 —— 重试 64 次必然全失败，
+    ///    `insert_into_atlas` 返回 `None`，文本静默消失，还顺手删掉刚缓存的字形。
+    ///
+    /// 现在：驱逐会退化到"全表最冷"，驱逐无效时重打包图集再重试。
+    #[test]
+    fn glyphs_never_vanish_when_the_atlas_fills() {
+        // 64² 极小图集：一两百个字形就会填满
+        let mut e = engine(64);
+        let chars: Vec<char> = ('A'..='Z')
+            .chain('a'..='z')
+            .chain('0'..='9')
+            .chain([
+                '.', ',', '-', '_', '+', '=', '/', '\\', '|', '~', '^', '*', '#', '@', '$', '%',
+            ])
+            .collect();
+        let mut missing = Vec::new();
+        for round in 0..3 {
+            for ch in &chars {
+                // 每轮推进帧号：让"最近使用"变化，覆盖 LRU 与保护期两条路径
+                e.begin_frame();
+                if e.glyph(*ch).is_none() {
+                    missing.push((*ch, round));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "有 {} 个字形取不到（图集 64²，三轮）：{:?}",
+            missing.len(),
+            &missing[..missing.len().min(8)]
+        );
+        // 图集仍然能用：占有率不应超过 100%
+        assert!(e.occupancy() <= 1.0);
     }
 
     #[test]
