@@ -375,6 +375,12 @@ impl TextArea {
     /// （CJK/全角 = 2 倍宽，其它 = 1 倍宽）。它只影响点击落点与光标 x，
     /// 真实绘制仍走 `RenderCtx::draw_text` 的度量 —— 两者误差被限制在半个字符内。
     fn char_w(&self, ch: char) -> f32 {
+        // **零宽组合记号不占格**：`TextBuffer::char_width` 对组合记号返回 0
+        // （`Grid::width_of_char`），排版按 0 走；若这里仍按一格算，
+        // 光标与点击在 NFD/天城文这类文本上会逐字累计偏移。
+        if is_zero_width_mark(ch) {
+            return 0.0;
+        }
         if (ch as u32) >= 0x2E80 {
             self.wide_w
         } else {
@@ -1050,6 +1056,57 @@ impl Widget for TextArea {
     }
 }
 
+/// 是否为**不占格**的组合记号（近似判定：覆盖主要组合区段）。
+///
+/// 为什么用区段而不是 Unicode 类别表：框架不引入 `unicode-properties` 这类依赖，
+/// 而这些区段已经涵盖实战中会遇到的组合记号（拉丁附加、希腊、希伯来点、阿拉伯元音、
+/// 天城文/泰文附标、通用组合符号）。误判的代价是"少算一格"，比"多算一格"轻。
+fn is_zero_width_mark(ch: char) -> bool {
+    matches!(ch as u32,
+        0x0300..=0x036F   // Combining Diacritical Marks
+        | 0x0483..=0x0489 // Cyrillic 组合
+        | 0x0591..=0x05BD | 0x05BF | 0x05C1..=0x05C2 | 0x05C4..=0x05C5 | 0x05C7
+        | 0x0610..=0x061A | 0x064B..=0x065F | 0x0670 | 0x06D6..=0x06DC
+        | 0x06DF..=0x06E4 | 0x06E7..=0x06E8 | 0x06EA..=0x06ED
+        | 0x0711 | 0x0730..=0x074A
+        | 0x07A6..=0x07B0 | 0x07EB..=0x07F3
+        | 0x0816..=0x0819 | 0x081B..=0x0823 | 0x0825..=0x0827 | 0x0829..=0x082D
+        | 0x0859..=0x085B | 0x08D3..=0x08E1 | 0x08E3..=0x0903
+        | 0x093A..=0x093C | 0x093E..=0x094F | 0x0951..=0x0957 | 0x0962..=0x0963
+        | 0x0981..=0x0983 | 0x09BC | 0x09BE..=0x09C4 | 0x09C7..=0x09C8
+        | 0x09CB..=0x09CD | 0x09D7 | 0x09E2..=0x09E3
+        | 0x0A01..=0x0A03 | 0x0A3C | 0x0A3E..=0x0A42 | 0x0A47..=0x0A48
+        | 0x0A4B..=0x0A4D | 0x0A51 | 0x0A70..=0x0A71 | 0x0A75
+        | 0x0A81..=0x0A83 | 0x0ABC | 0x0ABE..=0x0AC5 | 0x0AC7..=0x0AC9
+        | 0x0ACB..=0x0ACD | 0x0AE2..=0x0AE3
+        | 0x0B01..=0x0B03 | 0x0B3C | 0x0B3E..=0x0B44 | 0x0B47..=0x0B48
+        | 0x0B4B..=0x0B4D | 0x0B56..=0x0B57 | 0x0B62..=0x0B63
+        | 0x0BBE..=0x0BC2 | 0x0BC6..=0x0BC8 | 0x0BCA..=0x0BCD | 0x0BD7
+        | 0x0C00..=0x0C04 | 0x0C3E..=0x0C44 | 0x0C46..=0x0C48 | 0x0C4A..=0x0C4D
+        | 0x0C55..=0x0C56 | 0x0C62..=0x0C63
+        | 0x0D00..=0x0D03 | 0x0D3B..=0x0D3C | 0x0D3E..=0x0D44 | 0x0D46..=0x0D48
+        | 0x0D4A..=0x0D4D | 0x0D57 | 0x0D62..=0x0D63
+        | 0x0E31 | 0x0E34..=0x0E3A | 0x0E47..=0x0E4E
+        | 0x0EB1 | 0x0EB4..=0x0EBC | 0x0EC8..=0x0ECD
+        | 0x0F18..=0x0F19 | 0x0F35 | 0x0F37 | 0x0F39 | 0x0F71..=0x0F7E
+        | 0x0F80..=0x0F84 | 0x0F86..=0x0F87
+        | 0x102B..=0x103E | 0x1056..=0x1059
+        | 0x135D..=0x135F
+        | 0x1712..=0x1714 | 0x1732..=0x1734 | 0x1752..=0x1753
+        | 0x1772..=0x1773 | 0x17B4..=0x17D3
+        | 0x180B..=0x180D | 0x1885..=0x1886
+        | 0x1A17..=0x1A1B | 0x1AB0..=0x1AFF
+        | 0x1B00..=0x1B04 | 0x1B34..=0x1B44
+        | 0x1DC0..=0x1DFF // Combining Diacritical Marks Supplement
+        | 0x20D0..=0x20F0 // Combining Diacritical Marks for Symbols
+        | 0x2CEF..=0x2CF1 | 0x2D7F | 0x2DE0..=0x2DFF
+        | 0xA66F..=0xA672 | 0xA674..=0xA67D | 0xA69E..=0xA69F
+        | 0xA6F0..=0xA6F1 | 0xA802 | 0xA806 | 0xA80B | 0xA823..=0xA827
+        | 0xFE00..=0xFE0F // Variation Selectors
+        | 0xFE20..=0xFE2F // Combining Half Marks
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1315,6 +1372,32 @@ mod tests {
     ///
     /// `lines` 只在 `relayout`（arrange/render）里重建，而编辑只回 `Redraw`；
     /// 一帧里"先删字、再点击"时行表还是旧的，切片 `text[start..end]` 会越界。
+    /// **回归**：组合记号不占格，光标 x 不应把它算成一整格。
+    ///
+    /// 排版用的是 `TextBuffer::char_width`（组合记号 = 0 格），旧 `char_w`
+    /// 却给它一整格 —— NFD/天城文里点击与光标会逐字累计偏移。
+    #[test]
+    fn combining_marks_do_not_advance_the_caret() {
+        let mut area = TextArea::new("a").with_text("e\u{0301}x");
+        mount(&mut area, 240.0, 100.0);
+        // 光标放在 "e" 之后（字节 1），此时 x 应为一格宽（"e" 本身）
+        area.buffer.set_cursor(1);
+        let at_e = area.x_in_line(&area.lines[0], 1);
+        assert!((at_e - area.cell_w).abs() < 0.01, "e 之后应为一格：{at_e}");
+        // 越过后面的组合记号（字节 3，即 "e"+U+0301 之后）仍是同一格
+        let after_mark = area.x_in_line(&area.lines[0], 3);
+        assert!(
+            (after_mark - area.cell_w).abs() < 0.01,
+            "组合记号不应推进光标：{after_mark}"
+        );
+        // 到 "x" 之后才是两格
+        let after_x = area.x_in_line(&area.lines[0], 4);
+        assert!(
+            (after_x - 2.0 * area.cell_w).abs() < 0.01,
+            "x 之后应为两格：{after_x}"
+        );
+    }
+
     #[test]
     fn click_right_after_shrinking_edit_does_not_panic() {
         let mut area = TextArea::new("a").with_text("abc");

@@ -549,7 +549,8 @@ impl SoftBackend {
             // 背景按**行盒**刷（含 haw 的整行高度），与 cell 路径一致。
             // 背景总是从行首原点开始铺（RTL 也一样：origin.x 已是行左边界）。
             let bg_x = origin.x;
-            self.fill_rect(
+            // 设备坐标（`origin` 已在入口映射过）→ 用 `fill_rect_device`，别再映射一次。
+            self.fill_rect_device(
                 Rect::new(bg_x, origin.y, width.max(cell_w), cell_h),
                 style.bg,
             );

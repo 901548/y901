@@ -110,4 +110,7 @@
 # Measured at 2026-11-23 (审查修复 5：shaped 文本字号 + 回退面缓存失效):
 #   default cargo test --workspace --no-fail-fast   passed 1159, failed 0, ignored 65 / 159 个测试目标
 #   (新增 1 条 glyph_keyed_at_uses_the_requested_size；passed 1158 → 1159)
-1159
+# Measured at 2026-11-23 (审查修复 6：组合记号宽度 + Tabs 越界钳制 + shaped 背景):
+#   default cargo test --workspace --no-fail-fast   passed 1160, failed 0, ignored 65 / 159 个测试目标
+#   (新增 1 条 combining_marks_do_not_advance_the_caret；passed 1159 → 1160)
+1160

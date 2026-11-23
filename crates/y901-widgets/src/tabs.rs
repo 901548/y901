@@ -1,4 +1,4 @@
-﻿//! Tabs：标签栏 + 内容区，切换带 200ms 过渡。
+//! Tabs：标签栏 + 内容区，切换带 200ms 过渡。
 //!
 //! ## 设计取舍：**叶子控件 + 绘制回调**
 //!
@@ -91,11 +91,19 @@ impl Tabs {
     }
 
     /// 当前选中索引。
+    ///
+    /// **会钳到有效范围内**：`selection()` 交出去的是 `Rc<Cell<usize>>`，
+    /// 应用可以写进任意值（包括 `usize::MAX`）。若这里原样返回，画内容时
+    /// 应用自己的 painter 就会按越界下标取数据 —— 那是应用侧 panic。
     pub fn selected(&self) -> usize {
-        self.selected.get()
+        self.selected.get().min(self.items.len().saturating_sub(1))
     }
 
-    /// 选中索引的共享句柄（只读观察用；写请走 `select` / 交互）。
+    /// 选中索引的共享句柄（**约定为只读观察**；写请走 `select` / 交互）。
+    ///
+    /// 之所以仍然交出 `Rc<Cell<usize>>`：这是既有 API，改成只读观察器会破坏调用方。
+    /// 代价是应用可以直接写越界值，所以所有**读**路径（`selected()`、painter、
+    /// 无障碍标签）都做了钳制 —— 越界写入只会表现成"停在最后一个标签"，不会 panic。
     pub fn selection(&self) -> Rc<Cell<usize>> {
         self.selected.clone()
     }
@@ -377,7 +385,9 @@ impl Widget for Tabs {
             let eased = 1.0 - p; // p=0 → 完全透明
             let dx = SLIDE_PX * eased;
             ctx.push_transform(Pos::new(content.x - dx, content.y), 1.0);
-            (self.painter)(self.selected.get(), ctx, content, p);
+            // 同上：painter 拿到的一定是有效下标（`selection()` 可能被应用写成越界值）
+            let active = self.selected();
+            (self.painter)(active, ctx, content, p);
             ctx.pop_transform();
             ctx.pop_clip();
             if eased > 0.0 {
