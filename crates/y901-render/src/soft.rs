@@ -509,39 +509,61 @@ impl SoftBackend {
         let (cell_w, cell_h) = crate::font::cell_metrics_for(px_final);
         let ascent = ascent_at_size(self.text.ascent(), self.text.size_px(), px_final);
 
-        // **按字体面切段**：一句话里可能既主字体有、又有只有回退字体才有的字符。
-        // 整段用一个面会让"主字体本来就有的部分"也用回退字体，字宽与字形都不对。
-        let segments = crate::text::face_segments(text, |ch| self.text.face_for(ch));
-        // 先确认每一段都有字节可用，任何一段没有就整体退回 cell 路径（不做半截渲染）。
+        // **先按 Bidi 视觉 run 切，再按字体面切**（两级切分，缺一不可）：
+        //
+        // * 只按字体面切：`"hello שלום"` 通常全在主字体里 → 变成**一段**，
+        //   整段交给 shaper 会按同一方向排（希伯来段被当拉丁段），跨段视觉顺序也无从体现；
+        // * 只按 Bidi 切：一句话里"主字体有的部分 + 只有回退字体才有的部分"会用错字体，
+        //   字宽与字形都不对。
+        //
+        // `visual_runs_of` 返回的区间**已按视觉顺序排列**，所以下面按顺序摆放即可。
         let mut planned: Vec<(u16, std::ops::Range<usize>, Vec<u8>)> = Vec::new();
-        for seg in &segments {
-            let Some(data) = self.text.font_data_for(seg.face).map(<[u8]>::to_vec) else {
-                return self.draw_text_sized(origin, text, style, base_px);
-            };
-            planned.push((seg.face, seg.range.clone(), data));
+        for (run_range, _rtl) in crate::text::visual_runs_of(text) {
+            let slice = &text[run_range.clone()];
+            for seg in crate::text::face_segments(slice, |ch| self.text.face_for(ch)) {
+                let range = (run_range.start + seg.range.start)..(run_range.start + seg.range.end);
+                // 任何一段没有字体字节就整体退回 cell 路径（不做半截渲染）
+                let Some(data) = self.text.font_data_for(seg.face).map(<[u8]>::to_vec) else {
+                    return self.draw_text_sized(origin, text, style, base_px);
+                };
+                planned.push((seg.face, range, data));
+            }
         }
-        let rtl = crate::text::paragraph_level(text);
 
-        // 逐段 shape 并铺到行上。RTL 时从行右边界往左推进，LTR 从左往右。
-        let mut laid: Vec<crate::text::LaidGlyph> = Vec::new();
-        let mut pen = 0.0f32; // 已排布宽度（相对行首）
+        // **先全部 shape，再按视觉顺序摆放**（两遍）。
+        //
+        // 为什么必须两遍：RTL 段落的视觉顺序是逻辑顺序的反向，而"反向摆放"
+        // 需要知道每段宽度（要先 shape 出来）。旧实现用"负 pen + 事后整体平移"
+        // 模拟右对齐，只有一个段时凑巧正确，**混排就错**：
+        // `"hello שלום"`（LTR 段落）里希伯来段拿到 `rtl_base = pen`，
+        // `place_run` 会把它翻到 `pen - width` —— 也就是**画到英文前面**，
+        // 与英文重叠。
+        let mut runs: Vec<(crate::text::ShapedRun, f32)> = Vec::with_capacity(planned.len());
         let mut total = 0.0f32;
         for (face, range, data) in &planned {
             let slice = &text[range.clone()];
             let Ok(run) = crate::text::shape_run(data, slice, px_final, *face) else {
                 return self.draw_text_sized(origin, text, style, base_px);
             };
-            // 段内字形已按该段的赋值方向排好；跨段顺序由 `rtl` 决定。
-            let pen_x = if rtl { -pen } else { pen };
-            let (mut seg_glyphs, width) = crate::text::place_run(&run, pen_x);
+            total += run.width;
+            runs.push((run, total));
+        }
+
+        // `planned` 已经是视觉顺序，直接按序摆放。
+        let mut laid: Vec<crate::text::LaidGlyph> = Vec::new();
+        let mut pen = 0.0f32;
+        for (run, _) in &runs {
+            let w = run.width;
+            // `place_run` 的约定：`rtl_base` 是**该段右边界**（它内部做 `base - width`）。
+            // RTL 段给右边界，LTR 段给左边界。
+            let base = if run.rtl { pen + w } else { pen };
+            let (mut seg_glyphs, width) = crate::text::place_run(run, base);
             laid.append(&mut seg_glyphs);
             pen += width;
-            total += width;
         }
-        // 把相对偏移平移到绝对坐标。
-        let base_x = if rtl { origin.x + total } else { origin.x };
+        // 把相对偏移平移到绝对坐标（`origin.x` 已是行左边界，两种方向都一样）。
         for g in &mut laid {
-            g.x += base_x;
+            g.x += origin.x;
         }
         let width = total;
 
@@ -612,11 +634,8 @@ impl SoftBackend {
                 }
             }
         }
-        if rtl {
-            origin.x + width - origin.x
-        } else {
-            width
-        }
+        // 推进量就是整行宽度（两种段落方向都一样：`origin` 已是行左边界）
+        width
     }
     fn draw_text_sized(&mut self, origin: Pos, text: &str, style: &TextStyle, px: f32) -> f32 {
         let mapped = self.map_point(origin);

@@ -45,6 +45,30 @@ pub fn reorder_visual(text: &str) -> Vec<usize> {
     out
 }
 
+/// 把一段文字按 **Bidi 视觉 run** 切分，返回 `(字节区间, 是否 RTL)`，**已按视觉顺序排列**。
+///
+/// 用途：shaping 之前必须先按方向切段 —— 一段里既有 LTR 又有 RTL 时，
+/// 整段交给 shaper 会把它们按同一方向排（`"hello שלום"` 会把希伯来段当成拉丁段排），
+/// 跨段的视觉顺序也无从体现。`unicode_bidi` 的 `visual_runs` 正好给出这个切分。
+///
+/// 返回的区间在**逻辑**上连续且互不重叠；顺序就是视觉顺序（从左到右）。
+pub fn visual_runs_of(text: &str) -> Vec<(std::ops::Range<usize>, bool)> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    let info = BidiInfo::new(text, None);
+    let Some(para) = info.paragraphs.first() else {
+        return vec![(0..text.len(), false)];
+    };
+    let (levels, runs) = info.visual_runs(para, para.range.clone());
+    runs.iter()
+        .map(|r| {
+            let rtl = levels.get(r.start).map(|l| l.is_rtl()).unwrap_or(false);
+            (r.clone(), rtl)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,6 +111,32 @@ mod tests {
         let mut expected: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
         expected.reverse();
         assert_eq!(visual, expected, "RTL run 内部按视觉顺序反转");
+    }
+
+    #[test]
+    fn visual_runs_split_mixed_directions_in_visual_order() {
+        let text = "hello שלום";
+        let runs = visual_runs_of(text);
+        assert!(runs.len() >= 2, "混排应至少切成两段，实际 {runs:?}");
+        // 视觉顺序：拉丁在前、希伯来在后
+        assert!(!runs[0].1, "第一段应是 LTR：{runs:?}");
+        assert!(runs.last().unwrap().1, "最后一段应是 RTL：{runs:?}");
+        // 区间必须覆盖整串且不重叠
+        let mut pos = 0usize;
+        let mut logical: Vec<_> = runs.iter().map(|(r, _)| r.clone()).collect();
+        logical.sort_by_key(|r| r.start);
+        for r in &logical {
+            assert_eq!(r.start, pos, "区间应连续覆盖：{logical:?}");
+            pos = r.end;
+        }
+        assert_eq!(pos, text.len(), "区间应覆盖到末尾");
+    }
+
+    #[test]
+    fn pure_rtl_is_one_rtl_run() {
+        let runs = visual_runs_of("שלום");
+        assert_eq!(runs.len(), 1, "单方向应只有一段：{runs:?}");
+        assert!(runs[0].1, "应为 RTL");
     }
 
     #[test]

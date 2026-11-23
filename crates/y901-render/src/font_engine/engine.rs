@@ -944,6 +944,43 @@ impl FontEngine for MyFontEngine {
     fn cell_height(&self) -> f32 {
         self.cell.h
     }
+
+    // ---- shaping / 回退链：**必须逐个转发** ----
+    //
+    // 这组方法以前只作为**固有方法**存在于 `MyFontEngine` 上，trait 侧没有覆盖 ——
+    // 而 `SoftBackend` 持有的是 `Box<dyn FontEngine>`，所以调用落到 trait 的默认实现：
+    //   * `font_data()` 默认返回 `None` → `font_data_for(0)` 也返回 `None`
+    //     → `draw_text_shaped` 一检测到"没有字体字节"就整体退回 cell 路径。
+    //   也就是说 **shaping 路径在多行文本之外从未真正跑过**（阿拉伯/希伯来/组合记号
+    //   全部静默走 cell 路径），所有 shaping 相关的修复都成了死代码。
+    fn font_data(&self) -> Option<&[u8]> {
+        Some(&self.data)
+    }
+
+    fn font_data_for(&self, face: u16) -> Option<&[u8]> {
+        self.face_data(face)
+    }
+
+    fn face_for(&self, ch: char) -> Option<u16> {
+        MyFontEngine::face_for(self, ch)
+    }
+
+    fn glyph_keyed(
+        &mut self,
+        key: crate::text::GlyphKey,
+        phase: u8,
+    ) -> Option<&crate::font::GlyphInfo> {
+        MyFontEngine::glyph_keyed(self, key, phase)
+    }
+
+    fn glyph_keyed_at(
+        &mut self,
+        key: crate::text::GlyphKey,
+        phase: u8,
+        px: f32,
+    ) -> Option<&crate::font::GlyphInfo> {
+        MyFontEngine::glyph_keyed_at(self, key, phase, px)
+    }
 }
 
 #[cfg(test)]

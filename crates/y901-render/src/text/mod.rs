@@ -38,7 +38,7 @@ pub mod layout;
 #[cfg(feature = "shaping")]
 mod shape;
 
-pub use bidi::{paragraph_level, reorder_visual};
+pub use bidi::{paragraph_level, reorder_visual, visual_runs_of};
 pub use cluster::{cluster_boundaries, visual_to_logical};
 
 /// 组合记号判定（布局层用它识别必须 shaping 的文字）。
