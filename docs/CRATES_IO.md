@@ -154,6 +154,13 @@ foreach ($c in $order) {
 | 签名级兼容 | CI 的 `semver-checks` job（`cargo-semver-checks --baseline-rev <上一 tag>`）应为绿；发布后新 tag 成为下一轮基线 |
 | 版本号已占用 | 发布后**不能重发同一版本**；修复必须升版（0.2.6…） |
 
+### 发布记录
+
+| 版本 | 日期 | 结果 | 证据 |
+|---|---|---|---|
+| `0.4.0` | 2026-11-23 | 12 个 crate 全部上传，均未 yank，tag `v0.4.0` 已推送 | `crates.io/api/v1/crates/<name>` 返回 `0.4.0`；`scripts/check-consumer.ps1 -Version 0.4.0` 通过（下游从 registry 拉包编译成功） |
+| `0.3.0` | 2026-11-20 | 12 个 crate 上传 | 同上一版流程 |
+
 ## 4. 出错怎么办
 
 | 症状 | 处理 |
