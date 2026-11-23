@@ -34,6 +34,24 @@ jobs:
           toolchain: "1.92.0"
       - uses: Swatinem/rust-cache@v2
 
+      # **先把依赖抓全，再跑基准**。
+      #
+      # 为什么单独一步：基准脚本为本地速度会先试 `--offline`，而 CI runner 的
+      # registry 缓存可能是冷的 —— 之前就因此整条 Perf gate 红过
+      # （4 项全报 `failed to download`，看起来像性能退化）。
+      # 这一步把"网络/依赖"问题隔离出来，红了就是网络，而不是性能。
+      - name: cargo fetch（预热依赖，失败会单独报错）
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            cargo fetch --locked
+            if ($LASTEXITCODE -eq 0) { Write-Host "cargo fetch ok (attempt $i)"; exit 0 }
+            Write-Host "cargo fetch 失败（第 $i 次），10s 后重试"
+            Start-Sleep -Seconds 10
+          }
+          Write-Host "::error::cargo fetch 连续 3 次失败：这是网络/依赖问题，不是性能退化"
+          exit 1
+
       # release 构建才有意义（debug 阈值留了 10~20 倍余量，只能挡"数量级退化"）
       #
       # **与本地共用同一个脚本**：这里不再逐个列 cargo 命令，

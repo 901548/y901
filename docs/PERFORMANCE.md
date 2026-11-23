@@ -222,7 +222,17 @@ GameViewer / ToDesk 两个虚拟显示适配器，窗口实际合成在虚拟显
 powershell -NoProfile -File scripts/perf-gate.ps1          # 4 项，默认强制阈值
 powershell -NoProfile -File scripts/perf-gate.ps1 -Only grid
 powershell -NoProfile -File scripts/perf-gate.ps1 -NoEnforce  # 只打数字，不断言
+powershell -NoProfile -File scripts/perf-gate.ps1 -Offline    # 强制只用本地缓存
 ```
+
+> **"红了不等于变慢了"**：脚本会先试 `--offline`（本地最快），失败且判定是
+> **依赖/网络**问题时自动联网重试；若仍失败，汇总里那一项标 `ERROR` 而不是
+> `FAIL`，并明确打印"不是性能退化"。
+>
+> 这条是踩坑之后加的：CI 的 `Perf gate` 曾经整条红过一次，4 项全报
+> `failed to download` —— 看起来像性能回退，实际是 runner 的 registry 缓存是冷的
+> 而脚本写死了 `--offline`。现在 workflow 里先跑一步 `cargo fetch`（带 3 次重试），
+> 网络问题会在那一步单独报错，不会再冒充性能问题。
 
 单项手动跑（了解每个基准在测什么时用）：
 

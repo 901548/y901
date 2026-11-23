@@ -22,7 +22,14 @@
 param(
     [ValidateSet('all', 'grid', 'layout', 'dirty', 'soft')]
     [string]$Only = 'all',
-    [switch]$NoEnforce
+    [switch]$NoEnforce,
+    # 强制只用本地缓存（不联网）。
+    #
+    # 默认**不**强制：本脚本会先试 `--offline`（本地最快），一旦发现是
+    # "依赖没下载"就自动联网重试。CI runner 首次运行时 registry 缓存是冷的，
+    # 写死 `--offline` 会让 4 项基准一起红，看起来像性能退化 ——
+    # 真实发生过一次（Perf gate run 45174360573，全部报 `failed to download`）。
+    [switch]$Offline
 )
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
@@ -39,12 +46,38 @@ Write-Host "enforce  : $(if ($NoEnforce) { 'no（只测数字）' } else { 'yes�
 Write-Host ""
 
 $results = @()
+
+# "这次失败到底是不是性能问题"——必须区分开：
+# 依赖下载失败/工具链问题都**不是**性能退化，但退出码一样是 1，
+# 混在一起报就会误导人（上一次 Perf gate 红就是这么来的）。
+$script:dependencyErrors = 0
+$networkPattern = 'failed to download|Unable to update|no matching package named|offline mode|spurious network|Couldn''t resolve hostname|failed to fetch|Connection refused|timed out|network failure|registry index'
+
 function Invoke-Bench([string]$name, [string]$package, [string]$test, [string]$filter = '') {
     Write-Host "=== $name ==="
-    $cargoArgs = @('test', '-p', $package, '--test', $test, '--release', '--offline', '--', '--include-ignored', '--nocapture')
-    if ($filter) { $cargoArgs += $filter }
-    $out = & cargo @cargoArgs 2>&1 | Out-String
-    $code = $LASTEXITCODE
+    $base = @('test', '-p', $package, '--test', $test, '--release')
+    $tail = @('--', '--include-ignored', '--nocapture')
+    if ($filter) { $tail += $filter }
+
+    # 先离线（本地命中缓存最快、断网也不会卡），不在 `-Offline` 时再允许联网重试。
+    $attempts = @(, @('--offline'))
+    if (-not $Offline) { $attempts += , @() }
+
+    $out = ''
+    $code = 1
+    for ($i = 0; $i -lt $attempts.Count; $i++) {
+        $cargoArgs = $base + $attempts[$i] + $tail
+        $out = & cargo @cargoArgs 2>&1 | Out-String
+        $code = $LASTEXITCODE
+        if ($code -eq 0) { break }
+        if ($out -notmatch $networkPattern) { break }
+        # 只有"后面还有一次联网尝试"时才说这句（`-Offline` 下不该出现）
+        if ($i + 1 -lt $attempts.Count) { Write-Host "  （依赖下载失败，改为联网重试）" }
+    }
+    if ($code -ne 0 -and $out -match $networkPattern) {
+        Write-Host "  !! 这次失败是**依赖/网络**问题，不是性能退化。"
+        $script:dependencyErrors += 1
+    }
     # 只打印带含语义数字的行：这些基准都把结果 eprintln! 出来。
     # 同时滤掉 PowerShell 把 cargo 的 stderr 当异常回显时插入的那一堆噪声行
     # （`At F:\…char:12`、`CategoryInfo`、`+ CategoryInfo` …），它们不带信息只有干扰。
@@ -54,7 +87,7 @@ function Invoke-Bench([string]$name, [string]$package, [string]$test, [string]$f
     if ($code -ne 0) {
         ($out -split "`n" | Select-Object -Last 12) | ForEach-Object { Write-Host "  $_" }
     }
-    $script:results += [pscustomobject]@{ Name = $name; Code = $code }
+    $script:results += [pscustomobject]@{ Name = $name; Code = $code; Dependency = ($code -ne 0 -and $out -match $networkPattern) }
     Write-Host ""
 }
 
@@ -65,10 +98,19 @@ if ($Only -in @('all', 'soft'))   { Invoke-Bench 'soft_fill_rate_1280x800（软�
 
 Write-Host "=== 汇总 ==="
 $failed = @($results | Where-Object { $_.Code -ne 0 })
-foreach ($r in $results) { Write-Host ("{0,-6} {1}" -f $(if ($r.Code -eq 0) { 'PASS' } else { 'FAIL' }), $r.Name) }
+foreach ($r in $results) {
+    # 依赖/网络导致的失败标成 ERROR，不冒充"性能退化"
+    $label = if ($r.Code -eq 0) { 'PASS' } elseif ($r.Dependency) { 'ERROR' } else { 'FAIL' }
+    Write-Host ("{0,-6} {1}" -f $label, $r.Name)
+}
 Pop-Location
 if ($failed.Count -gt 0) {
-    Write-Host "PERF GATE: FAILED（$($failed.Count) 项）"
+    if ($dependencyErrors -gt 0) {
+        Write-Host "PERF GATE: FAILED —— 其中 $dependencyErrors 项是**依赖下载/网络**问题，不是性能退化。"
+        Write-Host "           先跑一次 `cargo fetch`（或联网）再重试；本脚本默认会自动联网重试。"
+    } else {
+        Write-Host "PERF GATE: FAILED（$($failed.Count) 项）"
+    }
     exit 1
 }
 Write-Host "PERF GATE: OK"
