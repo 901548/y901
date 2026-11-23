@@ -107,4 +107,7 @@
 # Measured at 2026-11-23 (审查修复 4：图集驱逐失效 + 碎片不回收):
 #   default cargo test --workspace --no-fail-fast   passed 1158, failed 0, ignored 65 / 159 个测试目标
 #   (新增 1 条 glyphs_never_vanish_when_the_atlas_fills；passed 1157 → 1158)
-1158
+# Measured at 2026-11-23 (审查修复 5：shaped 文本字号 + 回退面缓存失效):
+#   default cargo test --workspace --no-fail-fast   passed 1159, failed 0, ignored 65 / 159 个测试目标
+#   (新增 1 条 glyph_keyed_at_uses_the_requested_size；passed 1158 → 1159)
+1159

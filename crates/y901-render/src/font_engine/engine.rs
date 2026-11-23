@@ -257,6 +257,11 @@ impl MyFontEngine {
         self.fallbacks.push(data);
         // 新面可能覆盖旧缺字：清掉记忆表，让查询重新判定。
         self.gid_cache.clear();
+        // **图集缓存也要整体作废**：字形缓存的键里带 `face`，而"面号未知时退回主字体"
+        // 那条路径会把**主字体的位图**存进 `face = N` 的条目里。一旦 N 号面真的注册进来，
+        // 同一个键就会永久命中那张错位图（`cache` 没人清）。清空图集最省事也最安全：
+        // 少画一帧的字形，换正确的字形来源。
+        self.clear_atlas();
         true
     }
 
@@ -351,16 +356,29 @@ impl MyFontEngine {
     ///
     /// `key.face` 目前只有 0（单字体）；将来的回退链会用到它，键里已经带了。
     pub fn glyph_keyed(&mut self, key: GlyphKey, phase: u8) -> Option<&GlyphInfo> {
-        let cache_key = (key, phase & 3, self.px_key());
+        self.glyph_keyed_at(key, phase, self.size)
+    }
+
+    /// 同 [`Self::glyph_keyed`]，但**显式指定像素字号**。
+    ///
+    /// 为什么需要：shaping 路径按 `px_final = 字号 × DPI × 缩放` 算推进与偏移，
+    /// 若位图仍按引擎基准字号取，字会"按 30px 排版、用 15px 的图"——
+    /// 字符间距翻倍、字形只有一半大（而 cell 路径一直是对的）。
+    pub fn glyph_keyed_at(&mut self, key: GlyphKey, phase: u8, px: f32) -> Option<&GlyphInfo> {
+        let px = px.max(1.0);
+        let cache_key = (key, phase & 3, px.round() as u32);
         if !self.cache.contains_key(&cache_key) {
             let bitmap = rasterize_gid_phased(
                 // 面号未知时退回主字体（shaping 可能先于 `push_fallback` 给出面号）。
                 self.face_data(key.face).unwrap_or(&self.data),
                 u16::try_from(key.glyph).unwrap_or(0),
-                self.size,
+                px,
                 phase,
             )?;
             let info = self.insert_into_atlas(key, &bitmap)?;
+            // 面号未知时这份位图来自主字体，**看起来**会污染缓存；由
+            // `push_fallback` 里的 `clear_atlas()` 整体作废来兜住 ——
+            // 这样既保持了"先 shaping 后注册"的可用性，也不会留下错位缓存。
             self.cache.insert(cache_key, info);
         }
         if let Some(g) = self.cache.get_mut(&cache_key) {
@@ -1037,6 +1055,37 @@ mod glyph_key_tests {
             (g.atlas_x, g.atlas_y)
         };
         assert_ne!(p0, p1, "不同 face 的同号字形必须分开缓存");
+    }
+
+    /// **回归**：同一个字形键在不同 `px` 下必须是**不同位图**。
+    ///
+    /// shaping 路径按 `px_final` 排布，旧实现取位图时不带字号，于是 30px 的阿拉伯文
+    /// 会"按 30px 排、用 15px 的图"：字符间距翻倍、字形只有一半大。
+    #[test]
+    fn glyph_keyed_at_uses_the_requested_size() {
+        let mut e = engine();
+        let data = font();
+        let gid = super::super::glyph_id_of(&data, 'A').expect("A") as u32;
+        let small = e
+            .glyph_keyed_at(GlyphKey::new(0, gid), 0, 15.0)
+            .expect("15px")
+            .clone();
+        let big = e
+            .glyph_keyed_at(GlyphKey::new(0, gid), 0, 30.0)
+            .expect("30px")
+            .clone();
+        assert!(
+            big.height > small.height,
+            "30px 的字形应比 15px 高：{} vs {}",
+            big.height,
+            small.height
+        );
+        assert!(
+            big.width > small.width,
+            "30px 的字形应比 15px 宽：{} vs {}",
+            big.width,
+            small.width
+        );
     }
 
     #[test]

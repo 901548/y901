@@ -557,9 +557,11 @@ impl SoftBackend {
 
         let atlas_size = self.text.atlas_size() as usize;
         for g in &laid {
+            // **按 `px_final` 取位图**：shaping 用 `px_final` 算推进/偏移，
+            // 位图也必须按同一字号光栅化，否则"按 30px 排版、用 15px 的图"。
             let glyph = self
                 .text
-                .glyph_keyed(crate::text::GlyphKey::new(g.face, g.glyph), 0)
+                .glyph_keyed_at(crate::text::GlyphKey::new(g.face, g.glyph), 0, px_final)
                 .cloned();
             let Some(gi) = glyph else { continue };
             if gi.width == 0 || gi.height == 0 {

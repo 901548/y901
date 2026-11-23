@@ -229,6 +229,20 @@ pub trait FontEngine {
         self.glyph(ch)
     }
 
+    /// **按字形键 + 像素字号取字形**（shaping 路径）。
+    ///
+    /// 默认实现忽略字号、退回 [`Self::glyph_keyed`]：第三方引擎不必立刻实现，
+    /// 行为与加参数前一致。`MyFontEngine` 覆盖它，按 `px` 光栅化并分开缓存 ——
+    /// 否则 shaping 用 `px_final` 排布、位图却按引擎基准字号出图
+    /// （字号 30px 时字符间距翻倍、字形只有一半大）。
+    fn glyph_keyed_at(
+        &mut self,
+        key: crate::text::GlyphKey,
+        phase: u8,
+        _px: f32,
+    ) -> Option<&crate::font::GlyphInfo> {
+        self.glyph_keyed(key, phase)
+    }
     /// 按**变换栈缩放比**取字形（mip 降采样链）。
     fn glyph_at_scale(&mut self, ch: char, _scale: f32) -> Option<ScaledGlyph> {
         let g = self.glyph(ch)?.clone();
