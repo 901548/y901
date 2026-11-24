@@ -965,6 +965,25 @@ impl FontEngine for MyFontEngine {
         MyFontEngine::face_for(self, ch)
     }
 
+    /// **shaped 推进宽度**：与 `draw_text_shaped` 同源（同样切面、同样 shaping、
+    /// 同样按 `run.width` 求和），保证"量出来的宽度 == 画出来的宽度"。
+    #[cfg(feature = "shaping")]
+    fn shaped_width(&self, text: &str, px: f32) -> Option<f32> {
+        let px = px.max(1.0);
+        let mut total = 0.0f32;
+        // 与绘制路径一致：先按 Bidi 视觉 run 切、再在 run 内按字体面切。
+        for (run_range, _rtl) in crate::text::visual_runs_of(text) {
+            let slice = &text[run_range.clone()];
+            for seg in crate::text::face_segments(slice, |ch| self.face_for(ch)) {
+                let data = self.font_data_for(seg.face)?;
+                let run =
+                    crate::text::shape_run(data, &slice[seg.range.clone()], px, seg.face).ok()?;
+                total += run.width;
+            }
+        }
+        Some(total)
+    }
+
     fn glyph_keyed(
         &mut self,
         key: crate::text::GlyphKey,

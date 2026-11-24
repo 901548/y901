@@ -442,6 +442,23 @@ impl TextMetrics for SoftBackend {
             }
             _ => self.cell,
         };
+        // **复杂脚本按 shaping 结果量宽度**（feature `shaping`）。
+        //
+        // 为什么必须：`draw_text` 对复杂脚本走 shaped 路径，实际推进是 shaping 给出的
+        // advance 之和；若这里仍按"字符数 × 格宽"算，量出来的宽度与画出来的宽度不一致 ——
+        // 表现为标签被裁 / 留白、折行按错误宽度断句。
+        #[cfg(feature = "shaping")]
+        {
+            if crate::text::needs_shaping(text) {
+                let px = match style.size {
+                    Some(px) if px.is_finite() && px > 0.0 => px * self.dpi_scale,
+                    _ => self.text.size_px() * self.dpi_scale,
+                };
+                if let Some(w) = self.text.shaped_width(text, px) {
+                    return Size::new(w, cell.h);
+                }
+            }
+        }
         // 格数的**唯一来源**是 `y901_core::Grid::width_of_char`（经 `cell_span`），
         // 此处**不做二次加工**：零宽/组合字符就是 0 格（控制字符由 core 的 `unwrap_or(1)` 兵底为 1）。
         if self.proportional_text {

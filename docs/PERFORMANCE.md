@@ -442,6 +442,26 @@ self.children.iter().find(|c| c.rect() == cell_rect)   // 线性扫描！
 3. `auto_cells` 改**惰性**（`cells_dirty`）：`place`/`span`/`children_mut` 置脏，
    正常帧直接返回。占用位图从 `Vec<Vec<bool>>`（100×100 = 101 次分配）压成
    扁平 `Vec<bool>`（1 次），并加 `first_row` 游标避免每次从第 0 行重扫。
+### shaped 文本的"量"与"画"对齐（feature `shaping`）
+
+`draw_text` 对复杂脚本走 shaping，返回推进 = shaping advance 之和；而 `measure_text`
+一直按"字符数 × 格宽"算。两者不一致的后果是**布局按错的宽度排**：标签裁字/留白、
+折行在错的宽度断句。
+
+新增 `FontEngine::shaped_width(text, px)`（默认 `None`，不支持 shaping 的实现行为不变），
+`MyFontEngine` 用与绘制**同一条路径**实现（先 Bidi 视觉 run、再按字体面切、再 shape，
+最后把 `run.width` 求和），`SoftBackend::measure_text` 在 `needs_shaping(text)` 时优先用它。
+
+实测差异（16px，测试字体）：`"שלום"` 格路径 **32 px**、shaping **36.76 px** —— 差 15%，
+足够把一行文字裁掉一个字符。
+
+回归用例 `crates/y901-render/tests/shaped_measure_matches_draw.rs`：
+- `measure_text` 必须等于 `draw_text` 的推进（±0.5px）；
+- 且必须**不等于**格数宽度（否则说明测量仍走格路径，用例失去意义）；
+- 纯 ASCII / CJK 仍按格数度量（默认构建像素基线不变）。
+
+变异验证：把 shaped 测量关掉，立刻报
+`שלום: measure_text=32 与 draw_text 推进=36.757813 不一致`。
 ### 复跑方式
 
 ```powershell

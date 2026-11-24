@@ -188,6 +188,18 @@ pub trait FontEngine {
     ) -> Option<&crate::font::GlyphInfo> {
         None
     }
+    /// **shaped 文本的推进宽度**（像素）：复杂脚本必须按 shaping 结果量，不能按格数。
+    ///
+    /// 为什么必须与绘制同源：`draw_text` 对复杂脚本走 shaped 路径，实际推进是
+    /// shaping 给出的 advance 之和；而 `measure_text` 若仍按"字符数 × 格宽"算，
+    /// **量出来的宽度与画出来的宽度不一致** —— 表现为标签被裁、留白，
+    /// 折行按错误的宽度断句。
+    ///
+    /// 默认 `None` = 该实现不做 shaping（调用方退回逐字符度量，行为不变）。
+    fn shaped_width(&self, _text: &str, _px: f32) -> Option<f32> {
+        None
+    }
+
     /// **覆盖该字符的第一个字体面**（0 = 主字体，>0 = 回退链）。
     ///
     /// 默认 `Some(0)` = 只有主字体：不支持回退的实现据此永远走主字体。
