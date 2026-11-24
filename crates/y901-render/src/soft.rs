@@ -689,6 +689,13 @@ impl SoftBackend {
         // 而不是按 cell_h / self.cell.h（可能是整数取整后的格高）近似换算。
         let ascent = ascent_at_size(self.text.ascent(), self.text.size_px(), px_final);
         let atlas_size = self.text.atlas_size() as usize;
+        // 覆盖率 → 像素的查找表（见 `draw_text` 里的说明）：逐位等价，且把浮点运算
+        // 从"每像素"降到"每绘制一次"。
+        let opacity = self.state.current_opacity();
+        let mut lut = [0u32; 256];
+        for (i, slot) in lut.iter_mut().enumerate() {
+            *slot = pack(style.fg, i as f32 / 255.0, opacity);
+        }
         let mut pen_x = origin.x;
         let start = pen_x;
         for ch in text.chars() {
@@ -735,22 +742,22 @@ impl SoftBackend {
                                 let ax = g.atlas_x as usize + gx as usize;
                                 let ay = g.atlas_y as usize + gy as usize;
                                 let si = (ay * atlas_size + ax) * 4;
-                                let mut cov =
-                                    self.text.atlas().get(si).copied().unwrap_or(0) as f32 / 255.0;
+                                // 覆盖率保持 **u8**（不再转 f32）：查表下标就是它，
+                                // 省掉每像素一次除法与后续的浮点乘/round。
+                                let mut cov_u8 = self.text.atlas().get(si).copied().unwrap_or(0);
                                 if style.bold {
                                     // 与旧路径同：取右侧邻居覆盖度取 max → 向右拓宽 1px
                                     let right = if (gx as u32) + 1 < g.width {
-                                        self.text.atlas().get(si + 4).copied().unwrap_or(0) as f32
-                                            / 255.0
+                                        self.text.atlas().get(si + 4).copied().unwrap_or(0)
                                     } else {
-                                        0.0
+                                        0
                                     };
-                                    cov = cov.max(right);
+                                    cov_u8 = cov_u8.max(right);
                                 }
-                                if cov <= 0.0 {
+                                if cov_u8 == 0 {
                                     continue;
                                 }
-                                let px_src = pack(style.fg, cov, self.state.current_opacity());
+                                let px_src = lut[cov_u8 as usize];
                                 let di = dy as u32 * self.width + dx as u32;
                                 if let Some(dst) = self.buf.get_mut(di as usize) {
                                     *dst = blend(*dst, px_src);
@@ -1101,6 +1108,17 @@ impl RenderCtx for SoftBackend {
         let start = pen_x;
         let cell_w = self.cell.w;
         let ascent = self.text.ascent();
+        // **覆盖率 → 像素的 256 项查找表**（每次 `draw_text` 建一次，约 256 次 pack）。
+        //
+        // 为什么要它：字形贴图逐像素都要 `pack(fg, cov, opacity)` —— 那是 4 次 clamp +
+        // 4 次乘 + 4 次 round，而**只有 alpha 随覆盖率变**、RGB 是常量。查表后每像素
+        // 只剩"读一个 u8 → 查表"，浮点运算从内层循环里彻底消失。
+        // 表项就是用**同一个 `pack`** 对 256 个覆盖率算出来的，所以逐位等价。
+        let opacity = self.state.current_opacity();
+        let mut lut = [0u32; 256];
+        for (i, slot) in lut.iter_mut().enumerate() {
+            *slot = pack(style.fg, i as f32 / 255.0, opacity);
+        }
         for ch in text.chars() {
             // 格数只有一个来源（`width_of_char`）。**span = 0 时仍绘制字形、pen 不推进** ——
             // 组合字符（如 U+0301）必须画在前一个字上面才能显示重音。
@@ -1152,6 +1170,68 @@ impl RenderCtx for SoftBackend {
                         // 基线 = origin.y + ascent × scale；字形高度按 scale 缩放。
                         // `bearing_y` 是底边偏移，不能当顶部用。
                         let by = glyph_top(origin.y, ascent * scale, bear_y, dh as f32) as i32;
+                        // **1:1 直贴快路**：无变换缩放、取到 L0 位图、目标尺寸等于位图尺寸时，
+                        // 源像素与目标像素一一对应。内层循环因此可以：
+                        // * 跳过 `center_sample_index`（每像素两次浮点除 + floor）；
+                        // * 把裁剪/视口检查**提到循环外**（先把 x/y 区间夹好）；
+                        // * 目标行用切片，不再逐像素 `get_mut`。
+                        // 不满足条件时（有缩放 / 取了 mip / 裁剪是分数）仍走下面的通用路径。
+                        if sg.level == 0
+                            && (scale - 1.0).abs() < 1e-6
+                            && sw as i32 == dw
+                            && sh as i32 == dh
+                        {
+                            let mut x_from = bx.max(0);
+                            let mut x_to = (bx + dw).min(self.width as i32);
+                            let mut y_from = by.max(0);
+                            let mut y_to = (by + dh).min(self.height as i32);
+                            // 裁剪：`contains` 语义是"像素中心落在 [左,右)"，换算成整数区间
+                            if let Some(clip) = self.state.current_clip() {
+                                x_from = x_from.max((clip.x - 0.5).ceil() as i32);
+                                x_to = x_to.min((clip.right() - 0.5).ceil() as i32);
+                                y_from = y_from.max((clip.y - 0.5).ceil() as i32);
+                                y_to = y_to.min((clip.bottom() - 0.5).ceil() as i32);
+                            }
+                            if x_from < x_to && y_from < y_to {
+                                let ax0 = sg.slot.atlas_x as usize + (x_from - bx) as usize;
+                                let ay0 = sg.slot.atlas_y as usize + (y_from - by) as usize;
+                                let run = (x_to - x_from) as usize;
+                                let atlas = self.text.atlas();
+                                for row in 0..(y_to - y_from) as usize {
+                                    let src_row = (ay0 + row) * atlas_size + ax0;
+                                    let dst_row = (y_from as usize + row) * self.width as usize
+                                        + x_from as usize;
+                                    let Some(dst) = self.buf.get_mut(dst_row..dst_row + run) else {
+                                        continue;
+                                    };
+                                    for (i, d) in dst.iter_mut().enumerate() {
+                                        let mut cov_u8 =
+                                            atlas.get((src_row + i) * 4).copied().unwrap_or(0);
+                                        if style.bold {
+                                            cov_u8 = cov_u8.max(
+                                                atlas
+                                                    .get((src_row + i + 1) * 4)
+                                                    .copied()
+                                                    .unwrap_or(0),
+                                            );
+                                        }
+                                        if cov_u8 != 0 {
+                                            *d = blend(*d, lut[cov_u8 as usize]);
+                                        }
+                                    }
+                                }
+                            }
+                            // 下划线在**推进之前**画（与通用路径同序）：画在"当前字符"的
+                            // x 上，先推进就会整体右移一格。
+                            if style.underline {
+                                self.fill_rect_device(
+                                    Rect::new(pen_x, origin.y + self.cell.h - 2.0, adv, 1.0),
+                                    style.fg,
+                                );
+                            }
+                            pen_x += adv;
+                            continue;
+                        }
                         let g = crate::GlyphInfo {
                             width: dw as u32,
                             height: dh as u32,
@@ -1187,8 +1267,9 @@ impl RenderCtx for SoftBackend {
                                 let ax = sg.slot.atlas_x as usize + sx as usize;
                                 let ay = sg.slot.atlas_y as usize + sy as usize;
                                 let si = (ay * atlas_size + ax) * 4;
-                                let mut cov =
-                                    self.text.atlas().get(si).copied().unwrap_or(0) as f32 / 255.0;
+                                // 覆盖率保持 **u8**（不再转 f32）：查表下标就是它，
+                                // 省掉每像素一次除法与后续的浮点乘/round。
+                                let mut cov_u8 = self.text.atlas().get(si).copied().unwrap_or(0);
                                 if style.bold {
                                     // 合成粗体（synthetic bold）：把当前像素与"左侧一列"的覆盖度取最大值，
                                     // 等价于把字形向右拓宽 1px。
@@ -1198,17 +1279,16 @@ impl RenderCtx for SoftBackend {
                                     // 取**右侧邻居**的覆盖度取最大值 → 字形向右拓宽 1px。
                                     // （取左邻居是错的：它只会把已有的墨再加深，字形几乎不变宽）。
                                     let right = if (gx as u32) + 1 < g.width && sx + 1 < sw {
-                                        self.text.atlas().get(si + 4).copied().unwrap_or(0) as f32
-                                            / 255.0
+                                        self.text.atlas().get(si + 4).copied().unwrap_or(0)
                                     } else {
-                                        0.0
+                                        0
                                     };
-                                    cov = cov.max(right);
+                                    cov_u8 = cov_u8.max(right);
                                 }
-                                if cov <= 0.0 {
+                                if cov_u8 == 0 {
                                     continue;
                                 }
-                                let px = pack(style.fg, cov, self.state.current_opacity());
+                                let px = lut[cov_u8 as usize];
                                 let di = dy as u32 * self.width + dx as u32;
                                 if let Some(dst) = self.buf.get_mut(di as usize) {
                                     *dst = blend(*dst, px);

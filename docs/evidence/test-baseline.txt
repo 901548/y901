@@ -145,4 +145,7 @@
 # Measured at 2026-11-24 (软光栅圆角矩形内部快路):
 #   default cargo test --workspace --no-fail-fast   passed 1180, failed 0, ignored 68 / 167 个测试目标
 #   (新增 4 条 round_rect_golden 像素金标；passed 1176 → 1180)
+# Measured at 2026-11-24 (软光栅文字：覆盖率查表 + 1:1 直贴):
+#   default cargo test --workspace --no-fail-fast   passed 1180, failed 0, ignored 68 / 167 个测试目标
+#   (本轮只改实现 + 扩了 soft_fill_rate 基准的一项；测试数与目标数不变)
 1180

@@ -242,6 +242,21 @@ fn soft_fill_rate_1280x800() {
         best3 = best3.min(t.elapsed().as_secs_f64() * 1e3);
     }
     eprintln!("[soft] round_rect 400x300 (SDF): {best3:.2} ms");
+
+    // 4) 整屏文字（80 列 × 40 行 ASCII）：文本光栅是 GUI 的另一条主路径
+    let style = TextStyle::fg(color);
+    let line = "The quick brown fox jumps over 0123456789 lazy dog";
+    let mut best4 = f64::MAX;
+    for _ in 0..10 {
+        b.clear();
+        let t = Instant::now();
+        for row in 0..40 {
+            b.draw_text(Pos::new(8.0, 8.0 + row as f32 * 18.0), line, &style);
+        }
+        best4 = best4.min(t.elapsed().as_secs_f64() * 1e3);
+    }
+    eprintln!("[soft] text 40x55 chars 1280x800: {best4:.2} ms");
+    assert!(best4 < 50.0, "文字太慢，需降级");
     assert!(best < 50.0 && best2 < 50.0 && best3 < 50.0, "太慢，需降级");
 }
 
