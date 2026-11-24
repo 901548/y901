@@ -1690,9 +1690,6 @@ impl UiTree {
         // per-node 墨迹边距：只有**真的重排**时才重采。
         // 若放在 `is_fresh` 快路径外面，每帧 layout 都会白走一遍全树（O(n)），
         // 与"约束未变时 layout 是 O(1)"的契约冲突。
-        if !self.layout_stats().skipped {
-            self.collect_ink_margins(metrics, node_hint);
-        }
 
         // 浮层摆放：先量尺寸（浮层自己决定内容高），再用 `place_popup`
         // 把它放在锚点旁且不超出视口。绘制与命中都用这个 rect。
@@ -1728,7 +1725,7 @@ impl UiTree {
             // 这样"布局前快照"的语义保持不变，而 `rects` 在任何时刻都不会被丢弃。
             let mut old = std::mem::take(&mut self.spare);
             std::mem::swap(&mut old, &mut self.rects);
-            self.rebuild_indices();
+            self.rebuild_indices(metrics, node_hint);
             if !viewport_changed {
                 // 视口变化时整窗已经是脏的，不需要逐节点对比。
                 self.mark_moved_map(&old);
@@ -1759,46 +1756,6 @@ impl UiTree {
         for popup in &self.popups {
             walk_rects(popup.widget.as_ref(), &mut self.rects);
         }
-    }
-
-    /// 采集每个节点的墨迹边距（布局后调用一次）。
-    ///
-    /// 输入：字体度量。副作用：重建 `node_ink_margin`。
-    /// 为何在布局后：`Widget::ink_overflow` 需要 `metrics` 与节点**当前**字号，
-    /// 而字号可能来自刚生效的 `TextStyle`（例如 Signal 驱动的字号切换）。
-    fn collect_ink_margins(&mut self, metrics: &dyn TextMetrics, node_hint: usize) {
-        fn walk(
-            node: &dyn Widget,
-            metrics: &dyn TextMetrics,
-            default: f32,
-            out: &mut FastMap<u64, f32>,
-        ) {
-            let margin = node.ink_overflow(metrics).unwrap_or(default);
-            out.insert(crate::layout::key_of(node), margin);
-            if !node.is_open() {
-                return;
-            }
-            for child in node.children() {
-                walk(child.as_ref(), metrics, default, out);
-            }
-        }
-        let default = self.ink_margin;
-        // **复用同一张表，不每次新建**：这张表是"节点键 → 边距"，节点集合在一次
-        // 重排里几乎不变；老实现每次都 `HashMap::new()` 再灌 11k 项，实测 11k 节点
-        // 的一次重排里约一半的分配与字节都花在它的反复 rehash 上。
-        //
-        // 顺序也不能颠倒：先把旧值清掉但**保留容量**，再灌新值 —— 这样只有在节点数
-        // 增长时才扩容。`clear()` 不清容量正是我们要的语义。
-        let mut out = std::mem::take(&mut self.node_ink_margin);
-        out.clear();
-        // `node_hint` 是**搬运前**记下的节点数（调用点在 `layout()` 里）：
-        // 搬走 `rects` 之后 `self.rects.len()` 恒为 0，用它会退化成"不预留"。
-        out.reserve(node_hint);
-        walk(self.root.as_ref(), metrics, default, &mut out);
-        for popup in &self.popups {
-            walk(popup.widget.as_ref(), metrics, default, &mut out);
-        }
-        self.node_ink_margin = out;
     }
 
     /// 对比布局前后的 rect：变了就标记 `旧 ∪ 新`（键是缓存键，零字符串哈希）。
@@ -1847,16 +1804,27 @@ impl UiTree {
     }
 
     /// 布局后重建两套索引：id → rect，以及绘制/命中顺序。
-    fn rebuild_indices(&mut self) {
+    ///
+    /// **同一趟还采集 per-node 墨迹边距**：这三样都需要一次全树前序遍历，
+    /// 分成两次（旧实现：`collect_ink_margins` + `rebuild_indices`）等于把
+    /// `is_open()` / `children()` / 递归开销做两遍，实测多花 ~90µs。
+    fn rebuild_indices(&mut self, metrics: &dyn TextMetrics, node_hint: usize) {
         self.rects.clear();
         self.paint_order.clear();
         self.modal_root = None;
 
-        // 把四个可变的输出目标打包：既避免 8 参数，也明确"它们是一起写的"
+        let mut ink = std::mem::take(&mut self.node_ink_margin);
+        ink.clear();
+        ink.reserve(node_hint);
+
+        // 把输出目标打包：既避免过多参数，也明确"它们是一起写的"
         struct Outputs<'a> {
             rects: &'a mut FastMap<u64, Rect>,
             order: &'a mut Vec<PaintEntry>,
             modal_root: &'a mut Option<Vec<usize>>,
+            ink: &'a mut FastMap<u64, f32>,
+            default_ink: f32,
+            metrics: &'a dyn TextMetrics,
         }
 
         /// 前序遍历建索引：关闭的子树整棵跳过；clip 沿祖先累积。
@@ -1884,6 +1852,12 @@ impl UiTree {
             // 这样"某个控件返回自定义键"不会变成"它的矩形永远查不到/永远不被标脏"。
             let key = crate::layout::key_of(node);
             out.rects.insert(key, rect);
+            // 墨迹边距：`ink_overflow` 需要 metrics 与节点**当前**字号，
+            // 而字号可能刚由 Signal 改过 —— 所以必须在布局之后采（这里正好在之后）。
+            out.ink.insert(
+                key,
+                node.ink_overflow(out.metrics).unwrap_or(out.default_ink),
+            );
             // 自己在 `order` 里的下标：子节点要用它当 parent
             let me = out.order.len();
 
@@ -1907,14 +1881,45 @@ impl UiTree {
             }
         }
 
+        let ink_default = self.ink_margin;
         let mut path = Vec::new();
         let mut outputs = Outputs {
             rects: &mut self.rects,
             order: &mut self.paint_order,
             modal_root: &mut self.modal_root,
+            ink: &mut ink,
+            default_ink: ink_default,
+            metrics,
         };
         walk(self.root.as_ref(), &mut path, None, None, &mut outputs);
 
+        // 浮层里的控件也要有墨迹边距（它们不在树里，主 walk 走不到）。
+        // 浮层的 **rects** 由 `layout()` 末尾补进来（那里还能覆盖"跳过的布局"），
+        // 这里只负责墨迹表。
+        fn ink_popups(
+            node: &dyn Widget,
+            metrics: &dyn TextMetrics,
+            default_ink: f32,
+            ink: &mut FastMap<u64, f32>,
+        ) {
+            if !node.is_open() {
+                return;
+            }
+            ink.insert(
+                crate::layout::key_of(node),
+                node.ink_overflow(metrics).unwrap_or(default_ink),
+            );
+            for child in node.children() {
+                ink_popups(child.as_ref(), metrics, default_ink, ink);
+            }
+        }
+        let ink_default = self.ink_margin;
+        for popup in &self.popups {
+            ink_popups(popup.widget.as_ref(), metrics, ink_default, outputs.ink);
+        }
+        // **必须写回**：否则 `node_ink_margin` 一直是旧的（首帧为空 ⇒ 全部退回树级默认），
+        // 大字号文本的局部重绘就会漏扩、留残影。
+        self.node_ink_margin = std::mem::take(outputs.ink);
         self.rebuild_focus_order();
     }
 
@@ -2944,6 +2949,16 @@ fn broadcast(
     }
 }
 
+/// 绘制轨迹诊断开关（`Y901_PAINT_TRACE=1`）。
+///
+/// **必须缓存**：这行判断曾经直接写在 `render_pass` 的"要不要画这个节点"分支里，
+/// 于是**每个节点每帧**都做一次 `env::var_os`（一次环境变量查找，几十到两百纳秒）。
+/// 11k 节点的整帧重绘因此多花约 1ms —— 比整个布局还贵，而且完全不可见
+/// （它看起来只是"渲染慢"）。**任何 per-node / per-frame 路径都不许调 `env::var*`。**
+fn paint_trace_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("Y901_PAINT_TRACE").is_some())
+}
 /// 一个绘制/命中条目：路径 + 包围盒 + 生效层级。
 #[derive(Clone, Debug)]
 struct PaintEntry {
@@ -3066,7 +3081,7 @@ fn render_pass(
     if (paint_all || node.needs_paint(dirty) || ink_hits) && !node_rect.is_empty() {
         // 诊断开关：按**真实绘制顺序**打印每个节点的 id/矩形/裁切，
         // 用于定位"文字被后画的背景盖掉"这类问题。
-        if std::env::var_os("Y901_PAINT_TRACE").is_some() {
+        if paint_trace_on() {
             let r = node.rect();
             eprintln!(
                 "[paint] {:<24} rect=({:.0},{:.0} {:.0}x{:.0}) clip={:?}",

@@ -45,6 +45,17 @@ struct Entry {
     constraints: Constraints,
     version: u64,
     size: Size,
+    /// 父节点的键（脏传播沿它向上走）。没有父 = 根。
+    ///
+    /// 放在条目里而不是单独的 `parents` 表：每个被测节点因此少一次哈希插入
+    /// （11k 节点 × 每帧一次，实测是笔不小的开销），内存也少一张表。
+    parent: Option<u64>,
+    /// 在哪个"脏世代"被标脏；`<= finish_serial` 表示已在本轮消耗掉。
+    ///
+    /// 用世代号替代 `dirty: HashSet<u64>`：清理脏标记从"每帧 clear 一个集合"
+    /// 变成 `finish_serial = serial` 一次赋值（O(1)），`is_fresh` 也从
+    /// "查集合 + 查条目"两次哈希降到**一次查条目**。
+    dirty_serial: u64,
 }
 
 /// 节点 id → 64 位缓存键（FNV-1a）。
@@ -92,9 +103,15 @@ pub(crate) fn key_of(node: &dyn crate::widget::Widget) -> u64 {
 /// 布局缓存：记忆化 + 脏传播。
 pub struct LayoutCache {
     entries: FastMap<u64, Entry>,
-    dirty: FastSet<u64>,
-    /// 子 → 父（脏传播用）。键是 id_key 的结果。
-    parents: FastMap<u64, u64>,
+    /// **还没有条目**就被标脏的节点（首帧、新挂载）。
+    ///
+    /// 它们本来就不可能 fresh（无条目 ⇒ 未测量），所以不参与 `is_fresh`；
+    /// 只在 `is_dirty()` 查询与 `finish_layout` 里用到。
+    unseen_dirty: FastSet<u64>,
+    /// 脏世代号（只增不减）。
+    serial: u64,
+    /// 已消耗到的世代号：`entry.dirty_serial <= finish_serial` ⇒ 干净。
+    finish_serial: u64,
     /// 当前正在测量的祖先链（用于填写 `parents`）。
     stack: Vec<u64>,
     stats: LayoutStats,
@@ -111,8 +128,9 @@ impl LayoutCache {
     pub fn new() -> Self {
         Self {
             entries: fast_map(),
-            dirty: fast_set(),
-            parents: fast_map(),
+            unseen_dirty: fast_set(),
+            serial: 1,
+            finish_serial: 0,
             stack: Vec::new(),
             stats: LayoutStats::default(),
         }
@@ -125,13 +143,30 @@ impl LayoutCache {
 
     /// 标记某节点的尺寸可能变化：它自己和所有祖先都要重测。
     pub fn mark_dirty(&mut self, id: &str) {
-        let mut cursor = Some(id_key(id));
-        let mut guard = 0;
+        self.mark_dirty_key(id_key(id));
+    }
+
+    /// 同 [`Self::mark_dirty`]，但直接收 64 位键（内部走这条，省一次散列）。
+    pub fn mark_dirty_key(&mut self, key: u64) {
+        let serial = self.serial;
+        let mut cursor = Some(key);
+        let mut guard = 0usize;
         while let Some(current) = cursor {
-            if !self.dirty.insert(current) {
-                break; // 已在脏集合里，祖先必然也已标记
+            match self.entries.get_mut(&current) {
+                Some(entry) => {
+                    if entry.dirty_serial > self.finish_serial {
+                        // 已经是脏的：祖先在上次标脏时必然也标过（脏传播是整条链）
+                        break;
+                    }
+                    entry.dirty_serial = serial;
+                    cursor = entry.parent;
+                }
+                None => {
+                    // 没有条目 ⇒ 本来就无法 fresh；只为 `is_dirty()` 记一笔
+                    self.unseen_dirty.insert(current);
+                    break;
+                }
             }
-            cursor = self.parents.get(&current).copied();
             guard += 1;
             if guard > 4096 {
                 break; // 防御错误数据形成环
@@ -142,14 +177,13 @@ impl LayoutCache {
     /// 整棵树失效（主题变更、字体变化等）。
     pub fn mark_all_dirty(&mut self) {
         self.entries.clear();
-        self.dirty.clear();
+        self.unseen_dirty.clear();
     }
 
     /// 清空缓存；主题或字体变化后必须调用，否则旧度量会被复用。
     pub fn clear(&mut self) {
         self.entries.clear();
-        self.dirty.clear();
-        self.parents.clear();
+        self.unseen_dirty.clear();
     }
 
     /// **忘掉一个节点**：子树被卸载时调用（`UiTree::remove_node`）。
@@ -164,8 +198,7 @@ impl LayoutCache {
     /// id 复用后甚至可能形成环，让 `mark_dirty` 提前停下、根部不被标脏。
     pub fn forget(&mut self, key: u64) {
         self.entries.remove(&key);
-        self.dirty.remove(&key);
-        self.parents.remove(&key);
+        self.unseen_dirty.remove(&key);
     }
 
     /// 某节点上次测得的尺寸（不管约束）。arrange 阶段复用。
@@ -175,7 +208,11 @@ impl LayoutCache {
 
     /// 某节点在本次布局里是否需要重新测量。
     pub fn is_dirty(&self, id: &str) -> bool {
-        self.dirty.contains(&id_key(id))
+        let key = id_key(id);
+        match self.entries.get(&key) {
+            Some(entry) => entry.dirty_serial > self.finish_serial,
+            None => self.unseen_dirty.contains(&key),
+        }
     }
 
     fn is_fresh(&self, id: &str, constraints: Constraints, version: u64) -> bool {
@@ -183,12 +220,15 @@ impl LayoutCache {
     }
 
     /// 同 [LayoutCache::is_fresh]，但直接收 u64 键（measure 路径少做一次哈希）。
+    ///
+    /// **只查一次表**（旧实现先查 `dirty` 集合再查 `entries`，每个节点两次哈希）。
     fn is_fresh_by_key(&self, key: u64, constraints: Constraints, version: u64) -> bool {
-        if self.dirty.contains(&key) {
-            return false;
-        }
         match self.entries.get(&key) {
-            Some(entry) => entry.version == version && entry.constraints == constraints,
+            Some(entry) => {
+                entry.dirty_serial <= self.finish_serial
+                    && entry.version == version
+                    && entry.constraints == constraints
+            }
             None => false,
         }
     }
@@ -206,13 +246,23 @@ impl LayoutCache {
         let key = key_of(widget);
         let version = widget.layout_version();
 
+        // **一次查表**完成"是否可跳过"判断
         if self.is_fresh_by_key(key, constraints, version) {
             return self.entries.get(&key).map(|e| e.size).unwrap_or(Size::ZERO);
         }
 
-        if let Some(parent) = self.stack.last().copied() {
-            self.parents.insert(key, parent);
-        }
+        // 父键取自测量栈（根没有父）；写进条目，省掉单独的 `parents` 表。
+        //
+        // **深度 0 的测量要保留已记录的父**：有些控件在 `arrange` 里直接调子控件的
+        // `Widget::measure`（不经过本缓存，于是测量栈是空的），那条路径会把
+        // "父 = None" 写进条目、把原本正确的父链抹掉 —— 之后 `mark_dirty` 沿父链
+        // 上溯时在第一层就断了，根永远不失效、布局被错误跳过。
+        // 旧实现用独立的 `parents` 表时天然没这个坑（表只在栈非空时才写），
+        // 这里显式保留同样的语义。
+        let parent = match self.stack.last().copied() {
+            Some(p) => Some(p),
+            None => self.entries.get(&key).and_then(|e| e.parent),
+        };
 
         self.stats.measured += 1;
         self.stack.push(key);
@@ -225,9 +275,11 @@ impl LayoutCache {
                 constraints,
                 version,
                 size,
+                parent,
+                // 0 = 本世代已消耗（刚测完就是干净的）
+                dirty_serial: 0,
             },
         );
-        self.dirty.remove(&key);
         size
     }
 
@@ -249,8 +301,20 @@ impl LayoutCache {
     }
 
     fn finish_layout(&mut self) {
-        // 本次没被访问到的脏节点不会影响后续布局，清掉。
-        self.dirty.clear();
+        // 把这一轮的所有脏标记**一次性消费掉**：`dirty_serial <= finish_serial` ⇒ 干净。
+        //
+        // 旧实现在这里 `dirty.clear()`：虽然也是 O(1)，但每个被测节点都要
+        // `dirty.remove(&key)` 一次哈希（11k 节点 = 11k 次）。换成世代号后
+        // 这两次哈希（remove + is_fresh 的 contains）都消失了。
+        self.finish_serial = self.serial;
+        self.unseen_dirty.clear();
+        self.serial = self.serial.wrapping_add(1);
+        if self.serial == 0 {
+            // 极端情况（u64 回绕）：清表重来，避免"世代号撞上历史值"导致漏重测
+            self.entries.clear();
+            self.serial = 1;
+            self.finish_serial = 0;
+        }
     }
 }
 
@@ -513,26 +577,34 @@ pub fn flex_arrange_with(
     };
 
     // 第一遍：固定尺寸 + flex 因子（全部走缓存）
+    //
+    // **正常路径不再分配 `sizes`**：`measured.len() == children.len()` 时
+    // "第 i 个子项解析后的尺寸"就是 `measured[i].0`，没必要再拷一份到新 Vec。
+    // 旧实现每个容器都 `Vec::with_capacity(n)` —— 11k 节点的树有 1113 个容器，
+    // 一次重排就是 1113 次分配（`perf_alloc` 的 `cold_allocs` 正好也是 1113）。
+    // 只有"测量快照与子项数量不一致"（增删子节点的那一帧）才临时建一份。
     let mut fixed_total = 0.0f32;
     let mut flex_total = 0.0f32;
-    let mut sizes: Vec<Size> = Vec::with_capacity(children.len());
-
     let reuse = measured.len() == children.len();
+    let mut fallback: Vec<Size> = Vec::new();
+    if !reuse {
+        fallback.reserve(children.len());
+    }
+
     for (idx, child) in children.iter_mut().enumerate() {
         // 复用 measure 阶段的成果：省掉一次 id 哈希 + 一次 flex() 虚调用
         let (size, item) = if reuse {
             measured[idx]
         } else {
-            (
-                cache.size_for_arrange(child.as_mut(), metrics, Constraints::loose(inner.size())),
-                child.flex(),
-            )
+            let s =
+                cache.size_for_arrange(child.as_mut(), metrics, Constraints::loose(inner.size()));
+            fallback.push(s);
+            (s, child.flex())
         };
         let main_dim = match axis {
             Axis::Horizontal => item.width,
             Axis::Vertical => item.height,
         };
-        sizes.push(size);
 
         if let Some(factor) = main_dim.flex_factor() {
             flex_total += factor;
@@ -544,6 +616,7 @@ pub fn flex_arrange_with(
             };
         }
     }
+    let size_of = |i: usize| if reuse { measured[i].0 } else { fallback[i] };
 
     let gaps = if children.len() > 1 {
         gap * (children.len() - 1) as f32
@@ -573,7 +646,7 @@ pub fn flex_arrange_with(
         // 否则 `justify` 的偏移来自一次取值、几何来自另一次取值，
         // 对"`flex()` 是计算出来的"控件就会自相矛盾。
         let item = if reuse { measured[idx].1 } else { child.flex() };
-        let size = sizes[idx];
+        let size = size_of(idx);
         let (main_dim, cross_dim) = match axis {
             Axis::Horizontal => (item.width, item.height),
             Axis::Vertical => (item.height, item.width),

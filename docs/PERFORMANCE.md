@@ -326,6 +326,75 @@ cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture
 
 ---
 
+## 8b. 内核优化第二轮：2026-11-24（先加剖析台，再逐项量化）
+
+这一轮的规矩：**每一处改动都做同机 A/B**（`git stash` 前后各跑 5 次取中位数），
+因为本机负载会漂（同一份代码在不同时段能差 3 倍以上，实测过）。
+
+### 先加"阶段计时"，再决定动哪里
+
+`UiTree::layout` 里加了 `Y901_LAYOUT_PROFILE=1` 的开关（`OnceLock` 缓存，未开启时
+只多一次原子读），打印各阶段耗时。11k 节点冷布局的分布非常明确：
+
+```
+tree(measure+arrange)=480~520us  ink=155us  rebuild=232us  其余≈0
+```
+
+于是三个改动分别对准这三块：
+
+| 改动 | 为什么 | 效果（同机 A/B 中位数） |
+|---|---|---|
+| `flex_arrange_with` 不再为每个容器建 `sizes: Vec` | 11k 节点的树有 1113 个容器 ⇒ 每次重排 1113 次分配；`measured` 快照里本来就有"解析后的尺寸" | 单次重排分配 **1113 → 3**（其中一次是墨迹表的首帧预留，之后复用） |
+| 墨迹边距采集合进 `rebuild_indices` 的同一次遍历 | 两件事都需要一次全树前序；分两次等于把 `is_open()`/`children()`/递归做两遍 | ink+rebuild 合计 **388 → 300 µs**（省一趟遍历） |
+| 脏标记换成**世代号**（`dirty_serial`），父指针存进 `Entry` | 旧实现每测一个节点要 5 次哈希（`dirty.contains`/`entries.get`/`parents.insert`/`entries.insert`/`dirty.remove`）；新实现 2 次 | measure 阶段 **−15%** |
+
+净效果（同机 A/B，5 次中位数）：冷布局 **941 µs → 779 µs（−17%）**，
+`layout_bench` 11 111 节点 **≈1 000 µs → 762 µs**。
+
+### 最意外的一处：诊断开关写在了热路径里
+
+`render_pass` 的"要不要画这个节点"分支里有：
+
+```rust
+if std::env::var_os("Y901_PAINT_TRACE").is_some() { ... }
+```
+
+它**每个被绘制的节点每帧**执行一次 —— 一次环境变量查找（几十到两百纳秒）。
+11k 节点的整帧重绘因此多花约 1 ms，比整个布局还贵，而且现象只是"渲染慢"。
+
+改成 `OnceLock` 缓存后，整帧渲染遍历：
+
+| 场景（11k 节点，空 `RenderCtx`，不含光栅化） | 优化前 | 优化后 |
+|---|---|---|
+| 整帧（`paint_all`） | 1 268 µs | **140 µs（−89%）** |
+| 局部重绘（1×1 脏区） | 285 µs | 299 µs（持平） |
+
+**教训写进代码注释**：任何 `env::var` / 文件系统 / 日志开关都不得出现在
+per-node、per-frame 的路径上；要么在初始化时读一次，要么用 `OnceLock`。
+
+另外给局部重绘加了**粗筛边界**：脏区并集外扩全树最大墨迹边距（`max_ink` 在
+索引重建时顺带算出）。矩形连这个边界都不相交的节点，不再去查 `node_ink_margin`
+哈希表 —— 局部重绘时哈希查询次数从 O(节点数) 降到 O(脏区附近的节点数)。
+
+### 复跑方式
+
+```powershell
+# 阶段计时（stderr）
+$env:Y901_LAYOUT_PROFILE='1'; cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture; Remove-Item Env:\Y901_LAYOUT_PROFILE
+
+# 渲染代价模型（整帧 / 1×1 / 50×50 / 全视口）
+cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture profile_render_cost_model
+
+# 字符串哈希占比（叶子"现算哈希" vs "预算 cache_key"）
+cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture profile_hash_share
+```
+
+> 顺带量到一个**反直觉**的结论：给 11k 个叶子预计算 `cache_key()`（免去每帧字符串
+> FNV）几乎没有收益（860 µs vs 891 µs，噪声内）。也就是说字符串哈希**不是**瓶颈，
+> 之前"去字符串化"的收益主要来自"去掉 11k 次 `String` 分配"，而不是哈希本身。
+
+---
+
 ## 5. Present 节拍：sync=0 vs sync=1（v0.1.12）
 
 基准：`crates/y901-backend-win32/tests/present_bench.rs`（`#[ignore]`），800×600 窗口，100 帧，release。

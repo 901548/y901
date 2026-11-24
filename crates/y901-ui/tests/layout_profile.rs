@@ -73,11 +73,17 @@ impl TextMetrics for Mono {
 struct Leaf {
     id: String,
     rect: Rect,
+    /// `Some` = 像真实控件那样在构造时预算好 `id_key`（`cache_key()`），
+    /// `None` = 每次布局都现算字符串 FNV（本合成树的默认，最悲观）。
+    key: Option<u64>,
 }
 
 impl Widget for Leaf {
     fn id(&self) -> &str {
         &self.id
+    }
+    fn cache_key(&self) -> Option<u64> {
+        self.key
     }
     fn measure(
         &mut self,
@@ -108,22 +114,53 @@ impl Widget for Leaf {
 }
 
 fn build(width: usize, depth: usize) -> UiTree {
-    fn layer(prefix: &str, width: usize, depth: usize) -> Box<dyn Widget> {
+    build_with(width, depth, false)
+}
+
+/// 同 [`build`]，但可以让叶子像**真实控件**那样在构造时预算好 `cache_key()`。
+///
+/// 用途：量化"每帧现算字符串 FNV"在 11k 节点上占多少 —— 真实控件
+/// （`Flex`/`Label`/`Button`…）都覆盖了 `cache_key()`，而本合成树的 `Leaf`
+/// 默认不覆盖，所以默认数字是**偏悲观**的上界。
+fn build_with(width: usize, depth: usize, precomputed_keys: bool) -> UiTree {
+    fn layer(prefix: &str, width: usize, depth: usize, precomputed_keys: bool) -> Box<dyn Widget> {
         if depth == 0 {
+            let id = format!("{prefix}_leaf");
+            let key = precomputed_keys.then(|| y901_ui::layout::id_key(&id));
             return Box::new(Leaf {
-                id: format!("{prefix}_leaf"),
+                id,
                 rect: Rect::ZERO,
+                key,
             });
         }
         let mut col = Flex::column(prefix).flex_item(FlexItem::default());
         for i in 0..width {
-            col = col.push(layer(&format!("{prefix}_{i}"), width, depth - 1));
+            col = col.push(layer(
+                &format!("{prefix}_{i}"),
+                width,
+                depth - 1,
+                precomputed_keys,
+            ));
         }
         Box::new(col)
     }
-    let mut tree = UiTree::new(layer("n", width, depth));
+    let mut tree = UiTree::new(layer("n", width, depth, precomputed_keys));
     tree.layout(Size::new(2000.0, 2000.0), &Mono);
     tree
+}
+
+/// **量化哈希占比**：同一棵树，叶子分别"每帧现算字符串哈希"与"构造时预算键"。
+#[test]
+#[ignore = "剖析台：cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture"]
+fn profile_hash_share() {
+    let viewport = Size::new(2000.0, 2000.0);
+    for (label, pre) in [("leaf-现算字符串哈希", false), ("leaf-预算cache_key", true)] {
+        let mut tree = build_with(10, 4, pre);
+        // 预热一轮，让缓存表就位
+        let _ = time_layout(&mut tree, viewport, 2);
+        let (avg, _) = time_layout(&mut tree, viewport, 6);
+        eprintln!("[hash-share] {label}: cold_avg={avg:.1}us");
+    }
 }
 
 fn time_layout(tree: &mut UiTree, viewport: Size, rounds: usize) -> (f64, f64) {
@@ -344,4 +381,45 @@ fn profile_10k_layout() {
     );
 
     assert!(cold_avg > 0.0);
+}
+/// 渲染遍历的**代价模型**：整帧 vs 局部（不同脏区大小）。
+/// 用来判断"遍历本身"与"每个节点实际 draw"各占多少。
+#[test]
+#[ignore = "剖析台：cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture"]
+fn profile_render_cost_model() {
+    let viewport = Size::new(2000.0, 2000.0);
+    let mut tree = build(10, 4);
+    tree.layout(viewport, &Mono);
+    let mut sink = Sink::default();
+    tree.invalidate_all();
+    tree.render(&mut sink);
+
+    // (a) 整帧
+    let mut full = 0.0;
+    for _ in 0..10 {
+        tree.invalidate_all();
+        let t = Instant::now();
+        tree.render(&mut sink);
+        full += t.elapsed().as_secs_f64() * 1e6;
+    }
+    full /= 10.0;
+
+    // (b) 局部：脏区大小不同
+    let cases = [
+        ("1x1", Rect::new(100.0, 100.0, 1.0, 1.0)),
+        ("50x50", Rect::new(100.0, 100.0, 50.0, 50.0)),
+        ("全视口", Rect::new(0.0, 0.0, 2000.0, 2000.0)),
+    ];
+    let mut out = format!("[render-model] full={full:.1}us");
+    for (label, r) in cases {
+        let mut acc = 0.0;
+        for _ in 0..10 {
+            tree.invalidate_rect(r);
+            let t = Instant::now();
+            tree.render(&mut sink);
+            acc += t.elapsed().as_secs_f64() * 1e6;
+        }
+        out.push_str(&format!(" {label}={:.1}us", acc / 10.0));
+    }
+    eprintln!("{out}");
 }

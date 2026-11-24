@@ -125,4 +125,7 @@
 # Measured at 2026-11-23 (审查修复 10：TextInput 同帧点击 + 逐帧状态栈清理):
 #   default cargo test --workspace --no-fail-fast   passed 1172, failed 0, ignored 65 / 163 个测试目标
 #   (新增 2 条：TextInput click-after-edit、soft 跨帧泄漏；passed 1170 → 1172)
+# Measured at 2026-11-24 (内核优化第二轮：分配复用 + 墨迹合并 + 世代脏标记 + 渲染热路径修 env):
+#   default cargo test --workspace --no-fail-fast   passed 1172, failed 0, ignored 67 / 163 个测试目标
+#   (新增 2 条 #[ignore] 剖析用例：profile_hash_share / profile_render_cost_model；ignored 65 → 67)
 1172
