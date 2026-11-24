@@ -519,6 +519,28 @@ cov = 1  ⇔  d ≤ -0.5  ⇔  像素中心落在内缩 0.5px 的矩形里（中
 
 像素等价性：`scripts/hash-gate.ps1` 的 `font_3c_pixels` 基线 `0xF7455CCE7781A864`
 **未变** —— 文字像素逐字节相同。`fill_rect` / `gradient` / `round_rect` 不受影响。
+### 索引表合一 + 整帧走稠密索引
+
+**两张表合成一张**：原来 `rects`（`键 → 矩形`）与 `node_ink_margin`（`键 → 墨迹边距`）
+分开维护，每节点两次哈希插入、两次查询，而且**漏写其中一张**是真实发生过的 bug
+（墨迹表没写回 → 大字号文本局部重绘留残影）。现在合成 `nodes: 键 → NodeData{rect, ink}`：
+每节点一次插入、一次查询，状态不可能不同步。
+
+**整帧也走 `paint_order`**：递归遍历（`render_pass`）每层都要 `is_open()` / `rect()` /
+`children()` / `needs_paint()` 等虚调用，且每节点查一次墨迹哈希。`paint_order` 本来就是
+前序（= 绘制顺序），且每条记录带**祖先累积裁切**，所以整帧也能像局部重绘那样
+"扫一遍数组 + 按 `(parent, slot)` 还原路径"。
+
+| 场景（11k 节点，空 `RenderCtx`） | 优化前 | 优化后 |
+|---|---|---|
+| 整帧（`paint_all`） | 155.6–168.4 µs | **115.6–124.5 µs（−23%）** |
+| 局部重绘 1×1 | 285–300 µs → 44 µs | 44–68 µs（不变） |
+
+**过程中抓到的真 bug（局部重绘早就有）**：递归版对每个子节点 push 的是
+`node.children_clip(child_rect) ∩ node.rect()`（Grid 的格子裁剪），而索引里只累积了
+`node.clip()`。于是"按索引单独重绘"时 Grid 的格子裁剪根本没生效 —— 整帧改用稠密索引后
+`grid_clip` 用例立刻红。修法：建索引时把 `children_clip` 也并进子节点的继承裁切，
+现在稠密路径与递归路径**逐像素一致**（`ui_partial_vs_full`、`grid_clip`、GPU 快照 10/10 全绿）。
 ### 复跑方式
 
 ```powershell

@@ -227,6 +227,17 @@ impl Popup {
     }
 }
 
+/// 索引表里的一条：布局后的矩形 + 该节点的墨迹边距（像素）。
+///
+/// 两者总是一起被读写（脏区外扩要用墨迹、命中/绘制要用矩形），合成一张表省掉
+/// 每节点一次哈希插入与一次查询，也不会再出现"漏写其中一张"的状态不同步。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NodeData {
+    /// 布局后的屏幕矩形。
+    pub rect: Rect,
+    /// 墨迹边距（`Widget::ink_overflow` 的结果，拿不到时退回树级常数）。
+    pub ink: f32,
+}
 /// UI 树：持有根节点、索引、焦点、脏区、浮层与动画。**所有状态变更都从这里发起**，组件本身不持有跨帧状态。
 pub struct UiTree {
     /// 待释放的纹理（卸载时收集，下一帧渲染时交给后端）。
@@ -242,12 +253,7 @@ pub struct UiTree {
     /// 有 id 的路径一律走 `node_ink_margin` 里的 per-node 值 —— 树级常数套到 24/48px
     /// 标题上会不够（实测 48px 需要 13.9px，而树级只有 4.63px）。
     ink_margin: f32,
-    /// **per-node 墨迹边距**（`id_key → margin`），在 `layout()` 里随布局刷新。
-    ///
-    /// 为什么不标脏时现算：标脏发生在事件分发/布局阶段，那里拿不到 `metrics`
-    /// （`Widget::ink_overflow` 需要字体度量），而现查树是 O(n)。
-    /// 布局已经递归过整棵树，顺手采一遍是零额外遍历。
-    node_ink_margin: FastMap<u64, f32>,
+
     /// **上一次 Tick 广播时 `wants_tick() == true` 的节点数**。
     ///
     /// 为何要存：`run_loop` 要据此决定 Tick 节拍（16ms 还是 idle_wait）。
@@ -261,10 +267,15 @@ pub struct UiTree {
     popups: Vec<Popup>,
     focus: Option<String>,
     viewport: Size,
-    /// id -> rect 的缓存，避免每次 RPC 都走一遍树。
-    rects: FastMap<u64, Rect>,
-    /// 上一轮索引表的**备用缓冲**（布局末尾与 `rects` 交换，零分配）。
-    spare: FastMap<u64, Rect>,
+    /// **节点索引表**：`缓存键 → (矩形, 墨迹边距)`。
+    ///
+    /// 为什么两张表合成一张：`rect_of` / 命中测试 / 脏区外扩 / 绘制剪枝**都按同一个键**
+    /// 查，原来要维护 `rects` 与 `node_ink_margin` 两份、每节点两次哈希插入；合成一张后
+    /// 每节点一次插入、一次查询，而且不会出现"一张更新了另一张忘了"（墨迹表写回曾漏过，
+    /// 表现为大字号文本局部重绘留残影）。
+    nodes: FastMap<u64, NodeData>,
+    /// 上一轮索引表的**备用缓冲**（布局末尾与 `nodes` 交换，零分配）。
+    spare: FastMap<u64, NodeData>,
     /// 组件在本轮分发中产生的命令，等待 `drain_commands` 处理。
     pending: Vec<crate::command::Command>,
     /// 布局记忆化 + 脏传播。
@@ -285,17 +296,6 @@ pub struct UiTree {
     captured_path: Option<Vec<usize>>,
     /// 复用的事件路径缓冲，避免每次鼠标移动都分配。
     path_buf: Vec<usize>,
-    /// `render_pass` 的临时缓存：子节点矩形。
-    ///
-    /// **为何要复用**：`render_pass` 是**每帧每节点**都跑的热路径，
-    /// 每次都 `Vec::new()` 会产生大量短命分配（churn）。
-    render_rects: Vec<Rect>,
-    /// `render_pass` 的临时缓存：子节点裁切（每层用一段，用完 truncate）。
-    ///
-    /// **panic 安全性**：`render_pass` 如果 panic，scratch 不会被放回
-    /// （`self.render_rects = rects` 在 `render_pass` 返回后才执行），
-    /// 下次 `render` 会重新分配。**这是性能退化，不是正确性问题**。
-    render_clips: Vec<Option<Rect>>,
     /// 组件请求的 IME 候选窗位置（应用层取走后清空）。
     pending_ime: Option<Pos>,
     /// 焦点变更重入保护。
@@ -469,12 +469,11 @@ impl UiTree {
             pending_texture_releases: Vec::new(),
             scale: 1.0,
             ink_margin: 0.0,
-            node_ink_margin: fast_map(),
             root,
             popups: Vec::new(),
             focus: None,
             viewport: Size::ZERO,
-            rects: fast_map(),
+            nodes: fast_map(),
             spare: fast_map(),
             pending: Vec::new(),
             cache: crate::layout::LayoutCache::new(),
@@ -487,8 +486,6 @@ impl UiTree {
             focus_path: None,
             captured_path: None,
             path_buf: Vec::new(),
-            render_rects: Vec::new(),
-            render_clips: Vec::new(),
             pending_ime: None,
             in_focus_change: false,
             focus_order: Vec::new(),
@@ -541,7 +538,7 @@ impl UiTree {
     /// 副作用：累加脏区；不影响布局。若该节点已关闭（不在索引里）同样无效——
     /// 关闭浮层的重绘应由 `EventResult::Relayout` 触发全窗重绘。
     pub fn invalidate(&mut self, id: &str) {
-        if let Some(rect) = self.rects.get(&crate::layout::id_key(id)).copied() {
+        if let Some(rect) = self.nodes.get(&crate::layout::id_key(id)).map(|d| d.rect) {
             self.add_dirty_rect_for(id, rect);
         }
     }
@@ -585,9 +582,9 @@ impl UiTree {
     /// 若先转成字符串再哈希回来，等于每次布局都白做一遍节点数 × 一次 FNV。
     fn add_dirty_rect_for_key(&mut self, key: u64, rect: Rect) {
         let margin = self
-            .node_ink_margin
+            .nodes
             .get(&key)
-            .copied()
+            .map(|d| d.ink)
             .unwrap_or(self.ink_margin);
         self.add_dirty_rect_with_margin(rect, margin);
     }
@@ -1305,7 +1302,7 @@ impl UiTree {
         let mut need_full = false;
         for id in &ids {
             self.cache.mark_dirty(id);
-            match self.rects.get(&crate::layout::id_key(id)).copied() {
+            match self.nodes.get(&crate::layout::id_key(id)).map(|d| d.rect) {
                 // 局部标脏：只加该节点的矩形。
                 // 之前这里无条件 `dirty = full()`，把"响应式更新"变成了"整窗重绘"——
                 // 那是为了兼容"变值可能带来重排"的保守做法。
@@ -1680,7 +1677,7 @@ impl UiTree {
         // `node_hint`：`collect_ink_margins` 要用它预留容量。
         // （**不能**在换出 `rects` 之后再读 `self.rects.len()` —— 那时恒为 0，
         // `reserve(0)` 是个静默失效的"优化"。）
-        let node_hint = self.rects.len();
+        let node_hint = self.nodes.len();
         // **布局期间不动 `rects`**：`layout_tree` 只改各节点自己的 rect 字段，
         // 索引表由末尾的 `rebuild_indices` 整体重建。这样即使 `layout_tree` 或
         // `collect_ink_margins` panic，"上一轮每个节点的 rect" 仍然是完整的 ——
@@ -1724,7 +1721,7 @@ impl UiTree {
             // `rebuild_indices` 往（已腾空的）`rects` 写新内容，随后两表对比。
             // 这样"布局前快照"的语义保持不变，而 `rects` 在任何时刻都不会被丢弃。
             let mut old = std::mem::take(&mut self.spare);
-            std::mem::swap(&mut old, &mut self.rects);
+            std::mem::swap(&mut old, &mut self.nodes);
             self.rebuild_indices(metrics, node_hint);
             if !viewport_changed {
                 // 视口变化时整窗已经是脏的，不需要逐节点对比。
@@ -1744,17 +1741,29 @@ impl UiTree {
         // 为什么"跳过的布局也要做"：浮层同样在跳过路径里被重新摆放（上面那段循环
         // 是无条件执行的），几何可能已经变了。
         // 只进 `rects`、**不进 `paint_order`**：命中测试与路径重建依赖树路径。
-        fn walk_rects(node: &dyn Widget, out: &mut FastMap<u64, Rect>) {
+        fn walk_rects(
+            node: &dyn Widget,
+            metrics: &dyn TextMetrics,
+            default_ink: f32,
+            out: &mut FastMap<u64, NodeData>,
+        ) {
             if !node.is_open() {
                 return;
             }
-            out.insert(crate::layout::key_of(node), node.rect());
+            out.insert(
+                crate::layout::key_of(node),
+                NodeData {
+                    rect: node.rect(),
+                    ink: node.ink_overflow(metrics).unwrap_or(default_ink),
+                },
+            );
             for child in node.children() {
-                walk_rects(child.as_ref(), out);
+                walk_rects(child.as_ref(), metrics, default_ink, out);
             }
         }
+        let ink_default = self.ink_margin;
         for popup in &self.popups {
-            walk_rects(popup.widget.as_ref(), &mut self.rects);
+            walk_rects(popup.widget.as_ref(), metrics, ink_default, &mut self.nodes);
         }
     }
 
@@ -1766,16 +1775,16 @@ impl UiTree {
     /// 为什么用 `u64` 而不是 id 字符串：字符串版本每次布局都要
     /// `id().to_string()` + 反查 `id_key` 各一遍，11k 节点上是两次全树哈希；
     /// 索引表本来就用 `Widget::cache_key()` 预算好的键。
-    fn mark_moved_map(&mut self, before: &FastMap<u64, Rect>) {
+    fn mark_moved_map(&mut self, before: &FastMap<u64, NodeData>) {
         for (key, old) in before {
-            let Some(new) = self.rects.get(key).copied() else {
+            let Some(new) = self.nodes.get(key).map(|d| d.rect) else {
                 // 节点消失了（弹窗关闭、列表删行、子树被隐藏）：
                 // **旧矩形必须重绘**，否则原来的内容留在屏幕上（弹窗残影）。
-                self.add_dirty_rect_for_key(*key, *old);
+                self.add_dirty_rect_for_key(*key, old.rect);
                 continue;
             };
-            if new != *old {
-                self.add_dirty_rect_for_key(*key, old.union(new));
+            if new != old.rect {
+                self.add_dirty_rect_for_key(*key, old.rect.union(new));
             }
         }
         // **反向**：本轮**新出现**的节点（`before` 里没有它）也要标脏。
@@ -1789,13 +1798,13 @@ impl UiTree {
         // 为什么只在**节点数变化**时才做这一遍：稳态下两张表键集合相同，
         // 多走一遍 11k 次哈希纯属浪费；而"有无增删"正是键集合变化最常见的形态
         // （增删接口本身还会 `dirty = full`，所以这里只是兜底）。
-        if before.len() != self.rects.len() {
-            // 先收集再标脏：`add_dirty_rect_for_key` 要 `&mut self`，不能与遍历 `self.rects` 并存。
+        if before.len() != self.nodes.len() {
+            // 先收集再标脏：`add_dirty_rect_for_key` 要 `&mut self`，不能与遍历 `self.nodes` 并存。
             let appearing: Vec<(u64, Rect)> = self
-                .rects
+                .nodes
                 .iter()
                 .filter(|(key, _)| !before.contains_key(key))
-                .map(|(key, rect)| (*key, *rect))
+                .map(|(key, data)| (*key, data.rect))
                 .collect();
             for (key, rect) in appearing {
                 self.add_dirty_rect_for_key(key, rect);
@@ -1809,20 +1818,17 @@ impl UiTree {
     /// 分成两次（旧实现：`collect_ink_margins` + `rebuild_indices`）等于把
     /// `is_open()` / `children()` / 递归开销做两遍，实测多花 ~90µs。
     fn rebuild_indices(&mut self, metrics: &dyn TextMetrics, node_hint: usize) {
-        self.rects.clear();
+        self.nodes.clear();
+        self.nodes.reserve(node_hint);
         self.paint_order.clear();
+        self.paint_order.reserve(node_hint);
         self.modal_root = None;
-
-        let mut ink = std::mem::take(&mut self.node_ink_margin);
-        ink.clear();
-        ink.reserve(node_hint);
 
         // 把输出目标打包：既避免过多参数，也明确"它们是一起写的"
         struct Outputs<'a> {
-            rects: &'a mut FastMap<u64, Rect>,
+            nodes: &'a mut FastMap<u64, NodeData>,
             order: &'a mut Vec<PaintEntry>,
             modal_root: &'a mut Option<Vec<usize>>,
-            ink: &'a mut FastMap<u64, f32>,
             default_ink: f32,
             metrics: &'a dyn TextMetrics,
         }
@@ -1851,11 +1857,17 @@ impl UiTree {
             // 统一走 `key_of`：契约（cache_key == id_key(id)）在调试构建里被断言，
             // 这样"某个控件返回自定义键"不会变成"它的矩形永远查不到/永远不被标脏"。
             let key = crate::layout::key_of(node);
-            out.rects.insert(key, rect);
             // 墨迹边距：`ink_overflow` 需要 metrics 与节点**当前**字号，
             // 而字号可能刚由 Signal 改过 —— 所以必须在布局之后采（这里正好在之后）。
             let node_ink = node.ink_overflow(out.metrics).unwrap_or(out.default_ink);
-            out.ink.insert(key, node_ink);
+            // **矩形与墨迹一次插入**（同一张表，同一趟遍历）
+            out.nodes.insert(
+                key,
+                NodeData {
+                    rect,
+                    ink: node_ink,
+                },
+            );
             // 自己在 `order` 里的下标：子节点要用它当 parent
             let me = out.order.len();
 
@@ -1876,8 +1888,23 @@ impl UiTree {
             });
 
             for (i, child) in node.children().iter().enumerate() {
+                // **子节点继承的裁切要含"逐子剪裁"**（例如 Grid 的每个格子）。
+                //
+                // 递归绘制 `render_pass` 里对每个子节点 push 两样东西：
+                // 1. 归本节点所有的 `node.clip()`（滚动视口，`clip` 已含）；
+                // 2. `node.children_clip(child_rect) ∩ node.rect()`（格子等）。
+                // 稠密绘制必须复现同一份累积值，否则"格子外的内容"不会被裁掉
+                //（实测：Grid 溢出内容整块画到格子外面，`grid_clip` 用例直接红）。
+                let child_rect = child.rect();
+                let extra = node.children_clip(child_rect).map(|c| c.intersect(rect));
+                let child_inherited = match (clip, extra) {
+                    (Some(a), Some(b)) => Some(a.intersect(b)),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                };
                 path.push(i);
-                walk(child.as_ref(), path, Some(me), clip, out);
+                walk(child.as_ref(), path, Some(me), child_inherited, out);
                 path.pop();
             }
         }
@@ -1885,42 +1912,14 @@ impl UiTree {
         let ink_default = self.ink_margin;
         let mut path = Vec::new();
         let mut outputs = Outputs {
-            rects: &mut self.rects,
+            nodes: &mut self.nodes,
             order: &mut self.paint_order,
             modal_root: &mut self.modal_root,
-            ink: &mut ink,
             default_ink: ink_default,
             metrics,
         };
         walk(self.root.as_ref(), &mut path, None, None, &mut outputs);
 
-        // 浮层里的控件也要有墨迹边距（它们不在树里，主 walk 走不到）。
-        // 浮层的 **rects** 由 `layout()` 末尾补进来（那里还能覆盖"跳过的布局"），
-        // 这里只负责墨迹表。
-        fn ink_popups(
-            node: &dyn Widget,
-            metrics: &dyn TextMetrics,
-            default_ink: f32,
-            ink: &mut FastMap<u64, f32>,
-        ) {
-            if !node.is_open() {
-                return;
-            }
-            ink.insert(
-                crate::layout::key_of(node),
-                node.ink_overflow(metrics).unwrap_or(default_ink),
-            );
-            for child in node.children() {
-                ink_popups(child.as_ref(), metrics, default_ink, ink);
-            }
-        }
-        let ink_default = self.ink_margin;
-        for popup in &self.popups {
-            ink_popups(popup.widget.as_ref(), metrics, ink_default, outputs.ink);
-        }
-        // **必须写回**：否则 `node_ink_margin` 一直是旧的（首帧为空 ⇒ 全部退回树级默认），
-        // 大字号文本的局部重绘就会漏扩、留残影。
-        self.node_ink_margin = std::mem::take(outputs.ink);
         self.rebuild_focus_order();
     }
 
@@ -2019,26 +2018,9 @@ impl UiTree {
                 // 局部：按索引稠密扫描候选（只画脏区附近）
                 Some(r) => this.render_candidates(ctx, r),
                 // 整帧：整树一次遍历（顺序即绘制顺序）
-                None => {
-                    let mut path: Vec<usize> = Vec::new();
-                    // scratch 用 `mem::take` 取出（避免 `&mut self` 字段与 `this.root` 同时借用），用完放回。
-                    let mut rects = std::mem::take(&mut this.render_rects);
-                    let mut clips = std::mem::take(&mut this.render_clips);
-                    render_pass(
-                        this.root.as_mut(),
-                        ctx,
-                        &dirty,
-                        &this.node_ink_margin,
-                        paint_all,
-                        &mut path,
-                        &mut rects,
-                        &mut clips,
-                    );
-                    this.render_rects = rects;
-                    this.render_clips = clips;
-                }
+                // 整帧：按稠密索引顺序绘制（与递归遍历同序、同裁切，像素一致）
+                None => this.render_full(ctx),
             }
-
             if !this.popups.is_empty() {
                 let viewport = Rect::new(0.0, 0.0, this.viewport.w, this.viewport.h);
                 ctx.push_clip(viewport);
@@ -2080,7 +2062,7 @@ impl UiTree {
                             popup.widget.as_mut(),
                             ctx,
                             &dirty,
-                            &this.node_ink_margin,
+                            &this.nodes,
                             paint_all,
                             &mut popup_path,
                             &mut popup_rects,
@@ -2101,7 +2083,7 @@ impl UiTree {
                             popup.widget.as_mut(),
                             ctx,
                             &dirty,
-                            &this.node_ink_margin,
+                            &this.nodes,
                             paint_all,
                             &mut popup_path,
                             &mut popup_rects,
@@ -2149,6 +2131,43 @@ impl UiTree {
     ///    多选只会在脏区内多画几笔（仍被脏区裁掉），不会漏画。
     ///
     /// 局部重绘本来就把画面剪到脏区，所以"多画"的代价只是脏区内的重复填充。
+    /// **整帧按稠密索引绘制**：按 `paint_order` 顺序逐个渲染，不再递归遍历整棵树。
+    ///
+    /// 为什么等价：`paint_order` 是前序（= 绘制顺序：父背景先于子、兄弟按树序），
+    /// 且每条记录都带着该节点绘制时的**祖先累积裁切**（`render_clip`）。递归版做的事
+    /// 正是"沿路径逐层 push 祖先 `clip()`、画自己、再 pop"；稠密版一次 push 累积结果，
+    /// 对该节点的有效裁切完全相同 ⇒ 像素一致。
+    ///
+    /// 收益：递归版每层都要走 `is_open()` / `rect()` / `children()` / `needs_paint()`
+    /// 等虚调用，且每节点查一次墨迹哈希；稠密版只是数组扫描 + 按 `(parent, slot)` 还原
+    /// 路径（复用缓冲，零分配）。
+    fn render_full(&mut self, ctx: &mut dyn RenderCtx) {
+        let count = self.paint_order.len();
+        let mut path = std::mem::take(&mut self.path_buf);
+        for idx in 0..count {
+            let entry = self.paint_order[idx];
+            if entry.rect.is_empty() {
+                continue;
+            }
+            path.clear();
+            let mut cur = idx;
+            while let Some(parent) = self.paint_order[cur].parent {
+                path.push(self.paint_order[cur].slot);
+                cur = parent;
+            }
+            path.reverse();
+            if let Some(clip) = entry.render_clip {
+                ctx.push_clip(clip);
+            }
+            if let Some(node) = self.node_at_mut(&path) {
+                node.render(ctx);
+            }
+            if entry.render_clip.is_some() {
+                ctx.pop_clip();
+            }
+        }
+        self.path_buf = path;
+    }
     fn render_candidates(&mut self, ctx: &mut dyn RenderCtx, rect: Rect) {
         if rect.is_empty() {
             return;
@@ -2207,7 +2226,7 @@ impl UiTree {
 
     /// 按 id 取矩形（来自最近一次 layout）。
     pub fn rect_of(&self, id: &str) -> Option<Rect> {
-        self.rects.get(&crate::layout::id_key(id)).copied()
+        self.nodes.get(&crate::layout::id_key(id)).map(|d| d.rect)
     }
 
     /// 命中位置处最内层的非默认光标形状（应用层据此设置系统光标）。
@@ -3121,10 +3140,10 @@ fn render_pass(
     node: &mut dyn Widget,
     ctx: &mut dyn RenderCtx,
     dirty: &DirtyRegion,
-    // per-node 墨迹边距：判断"要不要重绘"时必须用 **rect ∪ 墨迹**。
+    // 节点索引表（矩形 + 墨迹边距）：判断"要不要重绘"时必须用 **rect ∪ 墨迹**。
     // 只看 rect 会让"墨迹压到脏区里的邻居"被漏画：脏区清屏把它的笔画擦掉，
     // 而它自己又没被重绘 → 局部刷新后笔画消失（StyledText 放宽裁剪后才暴露）。
-    ink: &FastMap<u64, f32>,
+    nodes: &FastMap<u64, NodeData>,
     // `paint_all`：**强制整树绘制**。局部重绘时画面被剪到脏区，脏区内必须按
     // **完整绘制顺序**重画（父背景 → 子 → 文字），否则会出现"父背景没画"的黑块。
     paint_all: bool,
@@ -3145,9 +3164,9 @@ fn render_pass(
     // 而这次查表要 `id_key(node.id())`（字符串 FNV）+ 一次 map 查询 ——
     // 每帧每节点一次，11k 节点上实测就是白白多花一百多微秒。
     let ink_hits = !paint_all && !node_rect.is_empty() && {
-        let margin = ink
+        let margin = nodes
             .get(&crate::layout::key_of(node))
-            .copied()
+            .map(|d| d.ink)
             .unwrap_or(0.0);
         // `needs_paint` 只看 rect；这里补一条"墨迹与脏区相交"的判据。
         // 扩展量很小（通常 2~14px），不会明显增加绘制量，但能消除邻居擦除笔画的问题。
@@ -3210,7 +3229,7 @@ fn render_pass(
                 child.as_mut(),
                 ctx,
                 dirty,
-                ink,
+                nodes,
                 paint_all,
                 path,
                 rects,
