@@ -900,6 +900,9 @@ fn parse_error(buf: &[u8]) -> X11Error {
     }
 }
 
+/// 回复附加数据的**合理性上限**（单位：4 字节）。16 MiB 足够覆盖 4K 截图；
+/// 超出说明长度字段损坏，不能拿它去 `vec![0u8; n]`。
+const MAX_REPLY_UNITS: usize = 4 * 1024 * 1024;
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -964,7 +967,3 @@ mod tests {
         assert!(first.is_ok(), "units=0 的 reply 不应导致错误：{first:?}");
     }
 }
-
-/// 回复附加数据的**合理性上限**（单位：4 字节）。16 MiB 足够覆盖 4K 截图；
-/// 超出说明长度字段损坏，不能拿它去 `vec![0u8; n]`。
-const MAX_REPLY_UNITS: usize = 4 * 1024 * 1024;
