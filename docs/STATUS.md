@@ -8,6 +8,22 @@
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
 
+## 2026-11-24：内核优化第四~六轮（全部有同机 A/B 与像素金标）
+
+这一轮的规矩：**先量再改**，每处改动都做同机 A/B（`git stash` 前后各跑数次取中位数），
+像素级改动一律用"旧实现录 `frame_hash` → 新实现逐位比对 → 钉成金标"验证。
+
+| 项 | 优化前 | 优化后 | 证据 |
+|---|---|---|---|
+| Grid 整帧渲染（100×100 网格，含索引重建） | 59 300–60 900 µs | **203–215 µs** | `profile_grid_in_tree`；`children_clip` 的 O(n²) 线性查找改游标顺序查找 + 裁切矩形缓存 |
+| `grid_perf`（10k，measure+arrange） | 1 196 µs | **770 µs** | 前缀和替代逐子累加、`auto_cells` 惰性 + 扁平占用位图 |
+| 软光栅整屏渐变（1280×800） | 4.50–4.53 ms | **0.09–0.10 ms** | `gradient_golden.rs` 四个金标，新旧逐位相同 |
+| 软光栅圆角矩形（400×300，SDF） | 0.68–0.72 ms | **0.09 ms** | `round_rect_golden.rs` 四个金标（含分数坐标/半透明/r=40） |
+| shaped 文本量宽 | 按格数（`"שלום"`=32px） | **按 shaping（36.76px）** | `shaped_measure_matches_draw.rs`：量宽必须等于绘制推进 |
+| shaped 文本绘制 | 每帧克隆整份字体（≈1 MB） | **零克隆** | `shaped_no_font_copy.rs`（计数分配器） |
+
+细节与复跑命令见 [PERFORMANCE.md §8b](PERFORMANCE.md)。像素基线 `0xF7455CCE7781A864`
+全程未变，真机 GPU 快照 10/10。
 ## 2026-11-19：第二轮审查收尾 + Grid+Image 整帧空白修复
 
 ### A. Grid + Image 在 D3D 下整帧空白 —— 已修复（根因：draw 参数传错位）
