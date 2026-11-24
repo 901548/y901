@@ -256,7 +256,13 @@ fn soft_fill_rate_1280x800() {
         best4 = best4.min(t.elapsed().as_secs_f64() * 1e3);
     }
     eprintln!("[soft] text 40x55 chars 1280x800: {best4:.2} ms");
-    assert!(best4 < 50.0, "文字太慢，需降级");
+    // **debug 放宽**：字形逐像素工作在 debug 里慢一个量级（实测 release 1.3ms /
+    // debug 70ms 以上），用同一阈值会把"调试构建"误判成性能退化。
+    let limit4 = if cfg!(debug_assertions) { 300.0 } else { 12.0 };
+    assert!(
+        best4 < limit4,
+        "文字太慢：{best4:.2}ms > {limit4}ms（release 预算 12ms，实测约 1.3ms），需降级"
+    );
     assert!(best < 50.0 && best2 < 50.0 && best3 < 50.0, "太慢，需降级");
 }
 

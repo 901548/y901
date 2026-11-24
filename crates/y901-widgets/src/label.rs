@@ -197,12 +197,10 @@ impl Widget for TextLabel {
         // 高度必须是行数 × 行高），而不是"只有超宽才折"。未开启时行为与以前逐像素相同
         // （一行画到底，溢出交给父容器裁）。
         if self.wrap {
-            let lines = y901_ui::wrap(&text, c.max.w, |s| metrics.measure_text(s, &style).w);
-            let w = lines
-                .iter()
-                .map(|l| metrics.measure_text(&l.text, &style).w)
-                .fold(0.0f32, f32::max);
-            return c.constrain(Size::new(w, line_h * lines.len() as f32));
+            // **走 `TextMetrics::measure_with`**：它内部就是渲染用的 `y901_ui::wrap`
+            //（同一份规则），所以"量出的行数 == 画出的行数"是构造保证，而不是巧合。
+            // 后端若自定义了折行（例如按 shaping 的 cluster 断行），控件自动跟随。
+            return c.constrain(metrics.measure_with(&text, &style, c.max.w));
         }
         c.constrain(Size::new(full_w, line_h))
     }

@@ -541,6 +541,29 @@ cov = 1  ⇔  d ≤ -0.5  ⇔  像素中心落在内缩 0.5px 的矩形里（中
 `node.clip()`。于是"按索引单独重绘"时 Grid 的格子裁剪根本没生效 —— 整帧改用稠密索引后
 `grid_clip` 用例立刻红。修法：建索引时把 `children_clip` 也并进子节点的继承裁切，
 现在稠密路径与递归路径**逐像素一致**（`ui_partial_vs_full`、`grid_clip`、GPU 快照 10/10 全绿）。
+### 文本度量补上 `measure_with(avail_width)`（"量"与"画"同源）
+
+roadmap 里遗留的一项：控件要知道"这段文字在宽度 W 下要多高"，而框架只有单行测量。
+`TextLabel` 以前自己实现了一遍折行（`y901_ui::wrap`），应用侧再想要同样的数字就得再写
+一遍 —— 两份规则必然分叉（典型症状：量出 2 行、画成 3 行，文字被裁或留白）。
+
+现在：
+
+* `TextMetrics` 新增 **`measure_with(text, style, avail_width) -> Size`**；
+* 默认实现**直接用 `y901_ui::wrap`**（= 渲染端同一个折行函数），因此"量出的行数 ==
+  画出的行数"是**构造保证**；
+* 支持 shaping 的后端**不需要额外实现**：`measure_text` 内部已按 shaping 推进量宽，
+  折行判断自然用真实字宽（阿拉伯/希伯来文本按 shaping 宽度断行，而不是格数）；
+* `TextLabel` 的 `wrap` 测量改为调用它 —— 后端若自定义折行规则，控件自动跟随。
+
+回归用例：
+* `crates/y901-render/tests/measure_with.rs`（5 条）：放得下=一行、长文本折行且
+  最宽行 ≤ 可用宽度、显式 `\n` 强制成行、超宽词按渲染端规则按字符断、无界宽度退回单行；
+* `crates/y901-widgets/tests/label_measure_with.rs`：**`TextLabel::measure` 必须逐位等于
+  `measure_with`**（5 段文本 × 4 种可用宽度）。
+
+变异验证：把默认实现退回"单行 `measure_text`"，立刻 4 条红，其中跨层那条直接指出分叉：
+`控件测量 Size { w: 40, h: 16 } 与 measure_with Size { w: 184, h: 16 } 不一致`。
 ### 复跑方式
 
 ```powershell

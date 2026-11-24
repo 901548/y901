@@ -454,6 +454,28 @@ pub trait TextMetrics {
     }
     /// DPI 缩放，1.0 = 100%。
     fn scale(&self) -> f32;
+
+    /// **按可用宽度量文本**：返回折行后的尺寸（`w ≤ avail_width`，`h` = 行数 × 行高）。
+    ///
+    /// 这是"先量后排"的入口：调用方拿它决定控件要多高（`TextLabel` 的自动高度、
+    /// 聊天气泡、表格行高等），而不必自己再实现一套折行规则 —— 那必然与渲染时的
+    /// 折行不一致（同一段文字量出 2 行、画成 3 行）。
+    ///
+    /// 默认实现 = **用 [`crate::wrap()`] 按词贪心折行**（`TextLabel` 渲染时用同一个函数），
+    /// 于是"量"与"画"在构造上一致；后端只要保证 `measure_text` / `line_height` 正确，
+    /// 折行测量就自动正确 —— 支持 shaping 的后端也不需要额外实现（`measure_text`
+    /// 内部按 shaping 推进量宽，折行判断自然用真实字宽）。
+    ///
+    /// `avail_width` 非有限/非正时**不折行**（每段一行），与 `wrap` 的语义一致。
+    fn measure_with(&self, text: &str, style: &TextStyle, avail_width: f32) -> Size {
+        let line_h = self.line_height(style);
+        let lines = crate::wrap(text, avail_width, |s| self.measure_text(s, style).w);
+        let w = lines
+            .iter()
+            .map(|l| self.measure_text(&l.text, style).w)
+            .fold(0.0f32, f32::max);
+        Size::new(w, line_h * lines.len() as f32)
+    }
 }
 
 /// 墨迹边距的唯一算法：`max(ink_depth − line_height, 2px)`，上限一行。
