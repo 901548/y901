@@ -2090,6 +2090,19 @@ mod present_sync_tests {
         let mut window = match Window::create(&opts) {
             Ok(w) => w,
             Err(e) => {
+                // **必须留痕**：只 `eprintln!` 的话，`cargo test` 默认捕获 stdout/stderr，
+                // 门禁看不到这行，于是"没跑"会被当成"通过"（gate 会把 3 条用例算进
+                // passed，而它们一个断言都没执行）。写在临时目录的标记文件里，
+                // 门禁启动前删除、跑完数行数 —— 与 `tests/d3d_*.rs` 同一口径。
+                let path = std::env::temp_dir().join("y901-test-skips.txt");
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                {
+                    use std::io::Write as _;
+                    let _ = writeln!(f, "SKIP: window sync assertions: no D3D11 device ({e})");
+                }
                 eprintln!("SKIP: no D3D11 device ({e})");
                 return None;
             }

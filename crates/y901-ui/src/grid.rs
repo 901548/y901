@@ -131,6 +131,12 @@ pub struct Grid {
     ///
     /// 为什么不能每帧无条件重算：`auto_cells` 要建"行×列占用位图"并给每个子控件
     /// 找空格，是**布局里最贵的一段**；而绝大多数帧的落位根本没变。
+    /// 落位缓存**重算次数**（诊断用）。
+    ///
+    /// 为什么需要：落位重算是 Grid 最贵的一段（O(子控件数 × 行数)），而"被无关遍历
+    /// 标脏"这类退化**不改变任何几何**，光看渲染结果看不出来。暴露计数后测试可以直接
+    /// 断言"只读操作不应让它增长"。
+    placement_revision: u64,
     cells_dirty: bool,
 }
 
@@ -172,6 +178,7 @@ impl Grid {
             auto_effective: Vec::new(),
             auto_cache: Vec::new(),
             cells_dirty: true,
+            placement_revision: 0,
             clip_cursor: std::cell::Cell::new(0),
             child_clip_rects: Vec::new(),
         }
@@ -242,6 +249,7 @@ impl Grid {
             return;
         }
         self.cells_dirty = false;
+        self.placement_revision = self.placement_revision.wrapping_add(1);
 
         // **扁平占用位图**：`rows × cols` 的 bool 放在一个 Vec 里。
         // 旧实现 `vec![vec![false; cols]; rows]` 是 rows+1 次分配（100×100 网格 = 101 次），
@@ -870,6 +878,14 @@ impl Grid {
         Ok(())
     }
 
+    /// 落位缓存的**重算次数**（诊断用；单调递增，溢出回绕）。
+    ///
+    /// 用途：确认"只读操作（渲染 / 事件分发）不会让网格重算落位"。正常应用里它
+    /// 应只在子节点集合或 `place` / `span` 真的变化时增长。
+    pub fn placement_revision(&self) -> u64 {
+        self.placement_revision
+    }
+
     /// 自动流子控件声明的跨格尺寸（未声明则 `None`）。
     pub fn span_of(&self, id: &str) -> Option<(u32, u32)> {
         self.auto_spans.get(id).copied()
@@ -938,6 +954,24 @@ impl Widget for Grid {
         self.index_dirty = true;
         self.cells_dirty = true;
         Some(&mut self.children)
+    }
+
+    /// 框架内部只读遍历：**不标脏**。
+    ///
+    /// 为什么必须覆盖：渲染/事件分发每帧都会沿路径下钻（`node_at_mut` 等），
+    /// 若走 `children_mut()` 就会每帧把这棵网格的落位缓存标脏，下一次布局白跑
+    /// 一遍 `auto_cells()`（O(子控件数 × 行数)）。这里只给借用，不动任何标记。
+    fn children_mut_for_traversal(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        Some(&mut self.children)
+    }
+
+    /// 向下转型：`UiTree::with_node_mut("grid-id", ..)` 能拿到 `&mut Grid`。
+    ///
+    /// 为什么容器必须支持：运行时调整网格（`place` / `span` / 换子节点）只能从
+    /// `&mut Grid` 发起。没有这条，`with_node_mut` 对 Grid **静默无效**（返回 `true`
+    /// 但闭包里 `downcast_mut` 永远是 `None`），调用方以为改成功了。
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     fn padding(&self) -> Edges {

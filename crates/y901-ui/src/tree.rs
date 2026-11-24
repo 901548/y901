@@ -2349,7 +2349,7 @@ impl UiTree {
     fn node_at_mut<'a>(&'a mut self, path: &[usize]) -> Option<&'a mut dyn Widget> {
         let mut node: &mut dyn Widget = self.root.as_mut();
         for &idx in path {
-            node = node.children_mut()?.get_mut(idx)?.as_mut();
+            node = node.children_mut_for_traversal()?.get_mut(idx)?.as_mut();
         }
         Some(node)
     }
@@ -2994,7 +2994,7 @@ fn find_in_mut<'a>(node: &'a mut dyn Widget, id: &str) -> Option<&'a mut dyn Wid
     if node.id() == id {
         return Some(node);
     }
-    match node.children_mut() {
+    match node.children_mut_for_traversal() {
         Some(children) => children
             .iter_mut()
             .find_map(|c| find_in_mut(c.as_mut(), id)),
@@ -3028,7 +3028,7 @@ fn broadcast(
         redraw_rects.push(node.rect());
     }
     *acc = acc.merge(r);
-    if let Some(children) = node.children_mut() {
+    if let Some(children) = node.children_mut_for_traversal() {
         for child in children.iter_mut() {
             broadcast(
                 child.as_mut(),
@@ -3105,7 +3105,7 @@ fn dispatch_rec(
     // 下潜
     let mut child_result = EventResult::Ignored;
     let mut child_stopped = false;
-    if let Some(children) = node.children_mut() {
+    if let Some(children) = node.children_mut_for_traversal() {
         if let Some(child) = children.get_mut(rest[0]) {
             let (r, s) = dispatch_rec(child.as_mut(), &rest[1..], ctx, event);
             child_result = r;
@@ -3217,7 +3217,7 @@ fn render_pass(
     }
     let count = clips.len() - base;
 
-    if let Some(children) = node.children_mut() {
+    if let Some(children) = node.children_mut_for_traversal() {
         for (i, child) in children.iter_mut().enumerate().take(count) {
             // 先拷出值，避免递归期间持有 `clips` 的引用。
             let child_clip = clips[base + i];
@@ -3343,7 +3343,7 @@ fn unmount_recursive(mut node: Box<dyn Widget>, releases: &mut Vec<crate::image:
 fn mount_recursive(node: &mut dyn Widget, invalidation: &crate::signal::Invalidation) {
     let mut ctx = crate::widget::MountCtx::new(node.id().to_string(), invalidation.clone());
     node.on_mount(&mut ctx);
-    if let Some(children) = node.children_mut() {
+    if let Some(children) = node.children_mut_for_traversal() {
         for child in children.iter_mut() {
             mount_recursive(child.as_mut(), invalidation);
         }

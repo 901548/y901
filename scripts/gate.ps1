@@ -117,6 +117,7 @@ if (-not $SkipTest) {
     if ($passed -lt $expected) {
         Fail "test count dropped: expected >= $expected, got $passed (a test was removed or #[ignore]d)"
     }
+
     if ($skipCount -gt 0) {
         if (-not $SkipGpu) {
             Fail "$skipCount test(s) were SKIPPED (D3D device missing?). Re-run on a GPU machine, or pass -SkipGpu to allow it."
@@ -136,6 +137,33 @@ Step "test inventory fingerprint (per-binary test names)"
 if ($LASTEXITCODE -ne 0) { Fail "test inventory mismatch (see [inv] lines above)" }
 Write-Host "[gate] ok: test inventory matches"
 
+# ---------------------------------------------------------------- 2b. SKIP 留痕（静态检查）
+# 为什么必须有这一步：GPU 用例在没有设备时会"留痕跳过"，约定是**两件事**——
+# 打印 `SKIP:` 到 stderr，并写进 `%TEMP%\y901-test-skips.txt`（门禁删文件→跑测试→数行数）。
+# 问题在于 `cargo test` 默认**捕获**输出，门禁只能看到失败用例的 stderr，所以"只打印
+# 不写文件"的跳过是**完全不可见**的：它被算进 passed，实际一个断言都没执行。
+# 实测 5 处跳过点里有 1 处（`window.rs` 的 sync 断言）就漏了文件写入。
+# 这里做静态检查：每个 printing SKIP 的位置附近必须出现文件路径。
+Step "SKIP bookkeeping (every 'SKIP:' print must also write the marker file)"
+$skipBad = @()
+$rsFiles = Get-ChildItem (Join-Path $root 'crates') -Recurse -Filter '*.rs' -File
+foreach ($f in $rsFiles) {
+    $lines = @([System.IO.File]::ReadAllLines($f.FullName))
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -notmatch 'eprintln!\(\s*"SKIP') { continue }
+        $from = [Math]::Max(0, $i - 25)
+        $to = [Math]::Min($lines.Count - 1, $i + 25)
+        $near = ($lines[$from..$to] -join "`n")
+        if ($near -notmatch 'y901-test-skips\.txt') {
+            $skipBad += ("{0}:{1}" -f $f.FullName.Substring($root.Length + 1), ($i + 1))
+        }
+    }
+}
+if ($skipBad.Count -gt 0) {
+    Write-Host ("打印 SKIP 但没有写标记文件：" + ($skipBad -join ', '))
+    Fail "SKIP 未留痕：这些测试在没有 GPU 等条件下会静默通过（门禁看不见），请改写成同时写 y901-test-skips.txt"
+}
+Write-Host "[gate] ok: every SKIP print also records the marker file"
 Step "cargo clippy (exit code must be 0 AND warnings must be 0)"
 $clippyArgs = @('clippy', '--workspace', '--all-targets', '--message-format=json') + $cargoOffline
 $clippyJson = & cargo @clippyArgs 2>&1 | Out-String
