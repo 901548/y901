@@ -482,6 +482,25 @@ self.children.iter().find(|c| c.rect() == cell_rect)   // 线性扫描！
 `frame_hash()` 在**旧实现**上录下来（`git stash` A/B），现在钉成金标
 `crates/y901-render/tests/gradient_golden.rs` —— 新旧哈希**逐位相同**，
 任何快路算错都会立刻红。
+### 软光栅圆角矩形：内部区免开方（0.68 ms → 0.09 ms，逐像素不变）
+
+`fill_round_rect` 每像素算一次 SDF，而 `rounded_rect_distance` 里有 `sqrt`：
+400×300 要 0.68 ms。圆角矩形的**中间带**（`|py-cy| ≤ hh-r`）根本没有曲率，
+那里"离边界 ≥0.5px"的像素覆盖率恒为 1 —— 区间可以直接算：
+
+```text
+cov = 1  ⇔  d ≤ -0.5  ⇔  像素中心落在内缩 0.5px 的矩形里（中间带截面是直线）
+```
+
+于是中间带一次 `pack`（颜色恒定）+ 逐像素 `blend`，只有左右边界列和上下圆角行
+才走 SDF —— 400×300 的 120k 像素里约 107k 用不上开方。
+
+| `soft_fill_rate_1280x800` | 优化前 | 优化后 |
+|---|---|---|
+| `round_rect` 400×300（SDF） | 0.68–0.72 ms | **0.09 ms（≈7.5×）** |
+
+像素等价性同样用 A/B 录金标（`crates/y901-render/tests/round_rect_golden.rs`）：
+不透明 / 半透明（含分数坐标）/ r=40 / r=3 四个场景，新旧 `frame_hash()` **逐位相同**。
 ### 复跑方式
 
 ```powershell

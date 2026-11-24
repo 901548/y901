@@ -1273,19 +1273,59 @@ impl RenderCtx for SoftBackend {
         let y1 = area.bottom().ceil() as i32;
         let x0 = area.x.floor() as i32;
         let x1 = area.right().ceil() as i32;
+        let opacity = self.state.current_opacity();
+        // **"确定内部"快路**：中间带（`|py-cy| <= hh - r`，没有圆角曲率）里，
+        // 像素中心离边界 ≥0.5px 的那些点覆盖率恒为 1，于是**整段一次 pack + 逐像素 blend**，
+        // 不必每个像素算一次 SDF（`rounded_rect_distance` 里有 sqrt）。
+        //
+        // 为什么覆盖率恒为 1：`cov = (0.5 - d)` 且 d 是"到圆角矩形边界的有符号距离"，
+        // 内部为负；`d <= -0.5` ⇔ 在"内缩 0.5px 的圆角矩形"里。中间带的截面是直线，
+        // 内缩后左右边界就是 `cx ± (hw - 0.5)`，所以区间可以直接算出来，无需开方。
+        let cov1_px = pack(color, 1.0, opacity);
+        let band_top = cy - (hh - r);
+        let band_bottom = cy + (hh - r);
+        let full_left = cx - (hw - 0.5);
+        let full_right = cx + (hw - 0.5);
         for y in y0..y1 {
             let row = (y as u32 * self.width) as usize;
             let py = y as f32 + 0.5;
-            for x in x0..x1 {
-                let px_pos = x as f32 + 0.5;
-                let d = round_sdf(px_pos, py, cx, cy, hw, hh, r);
-                let cov = (0.5 - d / soft).clamp(0.0, 1.0);
+            let in_band = py >= band_top && py <= band_bottom;
+            // 确定内部的 x 区间（像素中心落在 `[full_left, full_right]` 内）
+            let (fx0, fx1) = if in_band && hw > 0.5 && r > 0.5 {
+                let a = (full_left - 0.5).ceil() as i32;
+                let b = (full_right - 0.5).floor() as i32;
+                (a.max(x0), (b + 1).min(x1))
+            } else {
+                (x0, x0)
+            };
+            for x in x0..fx0 {
+                let cov =
+                    (0.5 - round_sdf(x as f32 + 0.5, py, cx, cy, hw, hh, r) / soft).clamp(0.0, 1.0);
                 if cov <= 0.0 {
                     continue;
                 }
-                let px = pack(color, cov, self.state.current_opacity());
-                let i = row + x as usize;
-                if let Some(dst) = self.buf.get_mut(i) {
+                let px = pack(color, cov, opacity);
+                if let Some(dst) = self.buf.get_mut(row + x as usize) {
+                    *dst = blend(*dst, px);
+                }
+            }
+            if fx1 > fx0 {
+                let start = row + fx0 as usize;
+                let end = row + fx1 as usize;
+                if let Some(dst) = self.buf.get_mut(start..end) {
+                    for d in dst {
+                        *d = blend(*d, cov1_px);
+                    }
+                }
+            }
+            for x in fx1.max(fx0)..x1 {
+                let cov =
+                    (0.5 - round_sdf(x as f32 + 0.5, py, cx, cy, hw, hh, r) / soft).clamp(0.0, 1.0);
+                if cov <= 0.0 {
+                    continue;
+                }
+                let px = pack(color, cov, opacity);
+                if let Some(dst) = self.buf.get_mut(row + x as usize) {
                     *dst = blend(*dst, px);
                 }
             }

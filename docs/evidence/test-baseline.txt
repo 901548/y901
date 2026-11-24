@@ -142,4 +142,7 @@
 # Measured at 2026-11-24 (软光栅渐变轴对齐快路):
 #   default cargo test --workspace --no-fail-fast   passed 1176, failed 0, ignored 68 / 166 个测试目标
 #   (新增 4 条 gradient_golden：垂直/水平/半透明/斜向 的像素金标；passed 1172 → 1176)
-1176
+# Measured at 2026-11-24 (软光栅圆角矩形内部快路):
+#   default cargo test --workspace --no-fail-fast   passed 1180, failed 0, ignored 68 / 167 个测试目标
+#   (新增 4 条 round_rect_golden 像素金标；passed 1176 → 1180)
+1180
