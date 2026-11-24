@@ -128,4 +128,8 @@
 # Measured at 2026-11-24 (内核优化第二轮：分配复用 + 墨迹合并 + 世代脏标记 + 渲染热路径修 env):
 #   default cargo test --workspace --no-fail-fast   passed 1172, failed 0, ignored 67 / 163 个测试目标
 #   (新增 2 条 #[ignore] 剖析用例：profile_hash_share / profile_render_cost_model；ignored 65 → 67)
+# Measured at 2026-11-24 (内核优化第三轮：局部重绘走索引 + shaped 不再克隆字体):
+#   default cargo test --workspace --no-fail-fast   passed 1172, failed 0, ignored 67 / 164 个测试目标
+#   (新增 1 个测试目标 shaped_no_font_copy，但它 `#![cfg(feature = "shaping")]`：
+#    默认 feature 下该二进制为空，所以 passed 不变；`--all-features` 下才计入)
 1172

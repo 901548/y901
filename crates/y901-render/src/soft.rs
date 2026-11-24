@@ -520,16 +520,22 @@ impl SoftBackend {
         //   字宽与字形都不对。
         //
         // `visual_runs_of` 返回的区间**已按视觉顺序排列**，所以下面按顺序摆放即可。
-        let mut planned: Vec<(u16, std::ops::Range<usize>, Vec<u8>)> = Vec::new();
+        // **只收集 (face, range)，不要克隆字体字节**。
+        //
+        // 旧实现在这里 `.map(<[u8]>::to_vec)`：每画一次 shaped 文本就把**整份字体**
+        // 复制一遍（常见测试字体 0.5~5 MB）。阿拉伯/希伯来/组合记号的每一帧、每一段都要付这个代价 ——
+        // 那是"渲染慢"里最容易被忽略的一项。真要复制只是为了绕开"先借 &self.text、
+        // 再 &mut self.text 取字形"的借用冲突，用**作用域**就能解决（下面 shape 的循环里）。
+        let mut planned: Vec<(u16, std::ops::Range<usize>)> = Vec::new();
         for (run_range, _rtl) in crate::text::visual_runs_of(text) {
             let slice = &text[run_range.clone()];
             for seg in crate::text::face_segments(slice, |ch| self.text.face_for(ch)) {
                 let range = (run_range.start + seg.range.start)..(run_range.start + seg.range.end);
                 // 任何一段没有字体字节就整体退回 cell 路径（不做半截渲染）
-                let Some(data) = self.text.font_data_for(seg.face).map(<[u8]>::to_vec) else {
+                if self.text.font_data_for(seg.face).is_none() {
                     return self.draw_text_sized(origin, text, style, base_px);
-                };
-                planned.push((seg.face, range, data));
+                }
+                planned.push((seg.face, range));
             }
         }
 
@@ -543,9 +549,15 @@ impl SoftBackend {
         // 与英文重叠。
         let mut runs: Vec<(crate::text::ShapedRun, f32)> = Vec::with_capacity(planned.len());
         let mut total = 0.0f32;
-        for (face, range, data) in &planned {
+        for (face, range) in &planned {
             let slice = &text[range.clone()];
-            let Ok(run) = crate::text::shape_run(data, slice, px_final, *face) else {
+            // 借 `&self.text` 只活在这一小段里，shape 出的是**自有**的 `ShapedRun`，
+            // 后面再 `&mut self.text` 取字形就不冲突了（无需克隆字体字节）。
+            let shaped = self
+                .text
+                .font_data_for(*face)
+                .map(|data| crate::text::shape_run(data, slice, px_final, *face));
+            let Some(Ok(run)) = shaped else {
                 return self.draw_text_sized(origin, text, style, base_px);
             };
             total += run.width;

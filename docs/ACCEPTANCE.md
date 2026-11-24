@@ -57,7 +57,7 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **1172 passed / 0 failed / 67 ignored**（163 个测试目标） |
+| 默认测试 | **1172 passed / 0 failed / 67 ignored**（164 个测试目标） |
 | `--include-ignored` | **1239 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |

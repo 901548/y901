@@ -399,6 +399,20 @@ per-node、per-frame 的路径上；要么在初始化时读一次，要么用 `
 不会漏画）。像素级回归用 `crates/y901-render/tests/ui_partial_vs_full.rs`：
 "只按脏区重绘"与"整窗重绘"必须逐字节相等。
 
+### shaped 文本：每次绘制都在克隆整份字体
+
+`draw_text_shaped` 收集字体段时写的是
+`self.text.font_data_for(face).map(<[u8]>::to_vec)` —— **每画一次 shaped 文本就把
+整份字体复制一遍**（测试字体接近 1 MB）。阿拉伯/希伯来/组合记号在每一帧的每一次
+`draw_text` 都要付这个代价，而它看起来只是"渲染慢"。
+
+那份克隆只是为了绕开"先借 `&self.text` 取字体字节、再 `&mut self.text` 取字形"的
+借用冲突 —— 用**作用域**即可：`font_data_for` 的借用只活在"shape 出 `ShapedRun`"
+那一小段里，`ShapedRun` 是自有的，后面再可变借用就不冲突。
+
+回归用例 `crates/y901-render/tests/shaped_no_font_copy.rs`（计数分配器）：
+一次绘制里单次最大分配必须远小于字体大小、总分配必须小于字体大小。
+变异验证：把 `.to_vec()` 加回去，立刻报"出现了 960 076 字节的单次分配"。
 ### 复跑方式
 
 ```powershell
