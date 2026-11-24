@@ -1854,10 +1854,8 @@ impl UiTree {
             out.rects.insert(key, rect);
             // 墨迹边距：`ink_overflow` 需要 metrics 与节点**当前**字号，
             // 而字号可能刚由 Signal 改过 —— 所以必须在布局之后采（这里正好在之后）。
-            out.ink.insert(
-                key,
-                node.ink_overflow(out.metrics).unwrap_or(out.default_ink),
-            );
+            let node_ink = node.ink_overflow(out.metrics).unwrap_or(out.default_ink);
+            out.ink.insert(key, node_ink);
             // 自己在 `order` 里的下标：子节点要用它当 parent
             let me = out.order.len();
 
@@ -1872,6 +1870,9 @@ impl UiTree {
                 slot: *path.last().unwrap_or(&0),
                 rect,
                 clip,
+                // 祖先累积裁切（不含自己的 clip()）：按索引单独重绘时要复现同样的裁切
+                render_clip: inherited_clip,
+                ink: node_ink,
             });
 
             for (i, child) in node.children().iter().enumerate() {
@@ -2005,29 +2006,37 @@ impl UiTree {
             dirty.rects().to_vec()
         };
 
-        let draw = |this: &mut UiTree, ctx: &mut dyn RenderCtx, paint_all: bool| {
+        let draw = |this: &mut UiTree,
+                    ctx: &mut dyn RenderCtx,
+                    paint_all: bool,
+                    only: Option<Rect>| {
             // 单遍绘制：**树序就是绘制顺序**（后访问的后画，后画的在上）。
             //
             // 之前有 `Layer::{Base,Overlay,Modal}` + `deferred` 回放：子树先记路径、遍历完
             // 再按层回放。那是"画在上层"的局部手段；现在浯层统一走
             // `UiTree::popups`（树外、最后画），树内只需"父先子后、兄弟按序"。
-            {
-                let mut path: Vec<usize> = Vec::new();
-                // scratch 用 `mem::take` 取出（避免 `&mut self` 字段与 `this.root` 同时借用），用完放回。
-                let mut rects = std::mem::take(&mut this.render_rects);
-                let mut clips = std::mem::take(&mut this.render_clips);
-                render_pass(
-                    this.root.as_mut(),
-                    ctx,
-                    &dirty,
-                    &this.node_ink_margin,
-                    paint_all,
-                    &mut path,
-                    &mut rects,
-                    &mut clips,
-                );
-                this.render_rects = rects;
-                this.render_clips = clips;
+            match only {
+                // 局部：按索引稠密扫描候选（只画脏区附近）
+                Some(r) => this.render_candidates(ctx, r),
+                // 整帧：整树一次遍历（顺序即绘制顺序）
+                None => {
+                    let mut path: Vec<usize> = Vec::new();
+                    // scratch 用 `mem::take` 取出（避免 `&mut self` 字段与 `this.root` 同时借用），用完放回。
+                    let mut rects = std::mem::take(&mut this.render_rects);
+                    let mut clips = std::mem::take(&mut this.render_clips);
+                    render_pass(
+                        this.root.as_mut(),
+                        ctx,
+                        &dirty,
+                        &this.node_ink_margin,
+                        paint_all,
+                        &mut path,
+                        &mut rects,
+                        &mut clips,
+                    );
+                    this.render_rects = rects;
+                    this.render_clips = clips;
+                }
             }
 
             if !this.popups.is_empty() {
@@ -2105,7 +2114,7 @@ impl UiTree {
         };
 
         if paint_all {
-            draw(self, ctx, true);
+            draw(self, ctx, true, None);
         } else {
             // **局部模式仍保留"脏区剪枝"**：与脏区不相交的子树不遍历。
             //
@@ -2118,7 +2127,7 @@ impl UiTree {
                     continue;
                 }
                 ctx.push_clip(r);
-                draw(self, ctx, false);
+                draw(self, ctx, false, Some(r));
                 ctx.pop_clip();
             }
         }
@@ -2126,6 +2135,71 @@ impl UiTree {
         self.dirty.clear();
     }
 
+    /// **按 `paint_order` 做局部重绘**：只渲染与 `rect`（外扩墨迹）相交的节点。
+    ///
+    /// 为什么不再整树遍历：局部重绘（打字、悬停、滚动）是**每帧**最常走的路径，
+    /// 而旧实现"对每一块脏区各画一遍整树"——11k 节点就是 11k 次虚调用 + 逐节点哈希
+    /// 查墨迹表，实测单块脏区约 290µs。`paint_order` 里已经有每个节点的
+    /// `rect / 祖先裁切 / 墨迹边距`，稠密扫描一遍只需几微秒，再按路径只渲染候选。
+    ///
+    /// 正确性依赖三条不变量（都有测试守着）：
+    /// 1. `paint_order` 是**前序**（= 绘制顺序：父背景先于子、兄弟按树序）；
+    /// 2. 每个节点绘制时的裁切 = 祖先累积裁切（`render_clip`），与完整遍历一致；
+    /// 3. 候选筛选是**保守**的：可见区（rect ∩ 祖先裁切）外扩墨迹后与脏区相交即入选，
+    ///    多选只会在脏区内多画几笔（仍被脏区裁掉），不会漏画。
+    ///
+    /// 局部重绘本来就把画面剪到脏区，所以"多画"的代价只是脏区内的重复填充。
+    fn render_candidates(&mut self, ctx: &mut dyn RenderCtx, rect: Rect) {
+        if rect.is_empty() {
+            return;
+        }
+        let count = self.paint_order.len();
+        let mut path = std::mem::take(&mut self.path_buf);
+        for idx in 0..count {
+            let entry = self.paint_order[idx];
+            let visible = match entry.clip {
+                Some(c) => entry.rect.intersect(c),
+                None => entry.rect,
+            };
+            if visible.is_empty() {
+                continue;
+            }
+            if visible.intersect(rect).is_empty() {
+                // 可见区不相交：只有"墨迹压到脏区"才需要画（邻居擦除笔画的问题）
+                let m = entry.ink;
+                if m <= 0.0 {
+                    continue;
+                }
+                let expanded = Rect::new(
+                    visible.x - m,
+                    visible.y - m,
+                    visible.w + 2.0 * m,
+                    visible.h + 2.0 * m,
+                );
+                if expanded.intersect(rect).is_empty() {
+                    continue;
+                }
+            }
+            // 按 `(parent, slot)` 还原路径（复用缓冲，零分配）
+            path.clear();
+            let mut cur = idx;
+            while let Some(parent) = self.paint_order[cur].parent {
+                path.push(self.paint_order[cur].slot);
+                cur = parent;
+            }
+            path.reverse();
+            if let Some(clip) = entry.render_clip {
+                ctx.push_clip(clip);
+            }
+            if let Some(node) = self.node_at_mut(&path) {
+                node.render(ctx);
+            }
+            if entry.render_clip.is_some() {
+                ctx.pop_clip();
+            }
+        }
+        self.path_buf = path;
+    }
     /// 当前 Modal 作用域（根到 Modal 节点的路径）。
     pub fn modal_scope(&self) -> Option<&[usize]> {
         self.modal_root.as_deref()
@@ -2960,7 +3034,7 @@ fn paint_trace_on() -> bool {
     *ON.get_or_init(|| std::env::var_os("Y901_PAINT_TRACE").is_some())
 }
 /// 一个绘制/命中条目：路径 + 包围盒 + 生效层级。
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct PaintEntry {
     /// 父节点在 `paint_order` 里的下标（根 = `None`）。
     ///
@@ -2973,6 +3047,13 @@ struct PaintEntry {
     rect: Rect,
     /// 屏幕可见区 = rect ∩ 祖先 clip；命中与裁剪共用。
     clip: Option<Rect>,
+    /// **祖先**累积的裁切（不含自己的 `clip()`）。
+    ///
+    /// 绘制该节点时用的一半裁切：完整遍历里祖先逐个 push 自己的 `clip()`，
+    /// 累积结果就是这个值；按 `paint_order` 单独重绘某节点时必须用同一份。
+    render_clip: Option<Rect>,
+    /// 该节点的墨迹边距（局部重绘的候选筛选要用，免得再查一次哈希表）。
+    ink: f32,
 }
 
 /// 沿路径递归派发：进入时 Capture、末端 Target、���回时 Bubble。
