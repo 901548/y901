@@ -21,6 +21,7 @@
 | 软光栅圆角矩形（400×300，SDF） | 0.68–0.72 ms | **0.09 ms** | `round_rect_golden.rs` 四个金标（含分数坐标/半透明/r=40） |
 | shaped 文本量宽 | 按格数（`"שלום"`=32px） | **按 shaping（36.76px）** | `shaped_measure_matches_draw.rs`：量宽必须等于绘制推进 |
 | shaped 文本绘制 | 每帧克隆整份字体（≈1 MB） | **零克隆** | `shaped_no_font_copy.rs`（计数分配器） |
+| 软光栅整屏文字（40 行 × 55 字符） | 2.94–3.12 ms | **1.26–1.53 ms** | 覆盖率查表 + 1:1 直贴；`font_3c_pixels` 哈希未变 |
 
 细节与复跑命令见 [PERFORMANCE.md §8b](PERFORMANCE.md)。像素基线 `0xF7455CCE7781A864`
 全程未变，真机 GPU 快照 10/10。
