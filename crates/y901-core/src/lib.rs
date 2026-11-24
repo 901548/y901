@@ -281,6 +281,10 @@ pub struct Grid {
 /// 备用屏幕期间保存的主屏状态。
 struct AltScreen {
     screen: Vec<Row>,
+    /// 快照时的列宽。**必须记住**：备用屏期间窗口可能被改宽/改窄（`reflow` 只改
+    /// `self.cols` 与当前屏），退出时若不按新列宽重建，恢复出来的行仍是旧宽度 ——
+    /// 之后任何 `row.cells[c]` 写入都会越界 panic（release 也一样）。
+    cols: u16,
     cursor_row: usize,
     cursor_col: usize,
     pending_wrap: bool,
@@ -333,6 +337,7 @@ impl Grid {
         }
         let saved = AltScreen {
             screen: self.screen.clone(),
+            cols: self.cols,
             cursor_row: self.cursor_row,
             cursor_col: self.cursor_col,
             pending_wrap: self.pending_wrap,
@@ -355,12 +360,36 @@ impl Grid {
         let Some(saved) = self.alt.take() else {
             return;
         };
-        self.screen = saved.screen;
-        self.cursor_row = saved.cursor_row.min(self.rows as usize - 1);
-        self.cursor_col = saved.cursor_col.min(self.cols as usize - 1);
+        let cols = self.cols as usize;
+        let rows = self.rows as usize;
+        let mut screen = saved.screen;
+        // **先统一几何**：备用屏期间可能改过窗口尺寸，快照的行宽/行数是旧的。
+        for row in screen.iter_mut() {
+            row.cells.resize(cols, Cell::blank(STYLE_DEFAULT));
+            if row.cells.len() > cols {
+                row.cells.truncate(cols);
+            }
+            row.len = row.len.min(self.cols);
+            // 截断可能切掉宽字的一半：留下孤立尾部没有意义，直接清尾。
+            let len = row.len as usize;
+            if len > 0 && row.cells[len - 1].kind == CellKind::WideHead {
+                row.len -= 1;
+            }
+        }
+        screen.truncate(rows);
+        while screen.len() < rows {
+            let id = LineId(self.next_line);
+            self.next_line += 1;
+            screen.push(Row::new(self.cols, id, 0));
+        }
+        self.screen = screen;
+        self.cursor_row = saved.cursor_row.min(rows - 1);
+        self.cursor_col = saved.cursor_col.min(cols - 1);
         self.pending_wrap = saved.pending_wrap;
         self.anchor = saved.anchor;
         self.scroll_offset = saved.scroll_offset.min(self.history.len());
+        // 记录备用屏用了多少列，供 reflow 判断"快照是否需要跟着改宽"。
+        let _ = saved.cols;
     }
 
     /// 驻留一个样式，返回可存进 Cell 的索引。
@@ -511,6 +540,10 @@ impl Grid {
             return;
         }
         let cols = new_cols as usize;
+        // **备用屏（vim/htop）期间不动历史**：历史是 shell 的 scrollback，而备用屏是
+        // 全屏程序自己的界面。两者混在一起重排会把界面行（状态栏/边框）永久写进
+        // scrollback，退出全屏程序后滚回去全是垃圾。备用屏只重排可见屏，溢出行丢弃。
+        let alt_active = self.alt.is_some();
         let old = std::mem::take(&mut self.screen); // 先摘走，避免 &self 与 &mut self.screen 打架
 
         // 视口底部未被写过的空行只是填充，不参与重排，否则会挤掉真实内容
@@ -521,7 +554,9 @@ impl Grid {
         // 历史与屏幕是一条连续的物理行序列：一起重排，否则跨边界的
         // 软换行会被拆成两段，滚回去就是断行。
         let mut all: Vec<Row> = Vec::with_capacity(self.history.len() + used);
-        all.extend(self.history.drain(..));
+        if !alt_active {
+            all.extend(self.history.drain(..));
+        }
         all.extend(old.into_iter().take(used));
 
         // 1) 按 wrapped 把物理行合并成逻辑行（尾随 padding 已被 len 排除）
@@ -608,6 +643,10 @@ impl Grid {
             let base_off = new_rows[drop].line_start;
             let overflow: Vec<Row> = new_rows.drain(..drop).collect();
             for row in overflow {
+                if alt_active {
+                    // 备用屏溢出：丢弃，绝不进历史（见上面的说明）
+                    continue;
+                }
                 if self.history_limit > 0 {
                     while self.history.len() >= self.history_limit {
                         self.history.pop_front();

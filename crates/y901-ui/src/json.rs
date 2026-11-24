@@ -84,6 +84,7 @@ impl Json {
         let mut p = Parser {
             bytes: text.as_bytes(),
             pos: 0,
+            depth: 0,
         };
         p.skip_ws();
         let value = p.value()?;
@@ -172,10 +173,18 @@ fn write_json(value: &Json, out: &mut String) {
         Json::Null => out.push_str("null"),
         Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         Json::Num(n) => {
-            if n.fract() == 0.0 && n.is_finite() {
+            // **非有限值必须写成 `null`**：`inf`/`NaN` 不是合法 JSON，写出去之后
+            // `parse(dump(x))` 直接失败（协议层会看到"数据损坏"而不是"值是无穷"）。
+            if !n.is_finite() {
+                out.push_str("null");
+            } else if n.fract() == 0.0 && n.abs() <= 9.007_199_254_740_992e15 {
+                // 只有落在 f64 精确整数范围内才走整数快路：
+                // 否则 `*n as i64` 会**饱和**（1e300 → i64::MAX），数值被悄悄改掉。
                 let _ = write!(out, "{}", *n as i64);
             } else {
-                let _ = write!(out, "{n}");
+                // `{:?}` 给的是能往返的最短表示（`{}` 对 1e300 会输出 `1e300`，
+                // 解析回来虽然相等，但旧版整数快路的饱和问题更严重，这里一并收紧）。
+                let _ = write!(out, "{n:?}");
             }
         }
         Json::Str(s) => write_str(s, out),
@@ -225,7 +234,16 @@ fn write_str(s: &str, out: &mut String) {
 struct Parser<'a> {
     bytes: &'a [u8],
     pos: usize,
+    /// 当前递归深度。
+    ///
+    /// **必须有上限**：`value → array/object → value` 是递归下降，`[[[[…` 这种输入
+    /// 每层占一个栈帧，几万个括号就能把栈打穿 —— 而栈溢出是 **abort**（不可捕获），
+    /// 整个 UI 进程直接死。RPC 入口（`Json::parse`）面对的正是外部输入。
+    depth: usize,
 }
+
+/// JSON 嵌套深度上限（RFC 8259 不限定，但任何真实协议都用不到这么深）。
+const MAX_DEPTH: usize = 128;
 
 impl<'a> Parser<'a> {
     fn peek(&self) -> Option<u8> {
@@ -253,9 +271,22 @@ impl<'a> Parser<'a> {
 
     fn value(&mut self) -> Result<Json, String> {
         self.skip_ws();
+        if self.depth > MAX_DEPTH {
+            return Err(format!("nesting deeper than {MAX_DEPTH}"));
+        }
         match self.peek() {
-            Some(b'{') => self.object(),
-            Some(b'[') => self.array(),
+            Some(b'{') => {
+                self.depth += 1;
+                let r = self.object();
+                self.depth -= 1;
+                r
+            }
+            Some(b'[') => {
+                self.depth += 1;
+                let r = self.array();
+                self.depth -= 1;
+                r
+            }
             Some(b'"') => Ok(Json::Str(self.string()?)),
             Some(b't') => self.literal("true", Json::Bool(true)),
             Some(b'f') => self.literal("false", Json::Bool(false)),
@@ -306,8 +337,28 @@ impl<'a> Parser<'a> {
                     Some(b'f') => out.push('\u{c}'),
                     Some(b'u') => {
                         let hex = self.take_hex(4)?;
-                        if let Some(c) = char::from_u32(hex) {
-                            out.push(c);
+                        // **代理对**：BMP 之外的字符在 JSON 里是两个 `\uXXXX`
+                        // （高位 D800-DBFF + 低位 DC00-DFFF）。只取低 16 位会把
+                        // emoji / 扩展 CJK 静默丢掉（Python/JS 的默认序列化就是这种）。
+                        let cp = if (0xD800..=0xDBFF).contains(&hex)
+                            && self.bytes.get(self.pos) == Some(&b'\\')
+                            && self.bytes.get(self.pos + 1) == Some(&b'u')
+                        {
+                            let save = self.pos;
+                            self.pos += 2;
+                            let lo = self.take_hex(4)?;
+                            if (0xDC00..=0xDFFF).contains(&lo) {
+                                0x1_0000 + ((hex - 0xD800) << 10) + (lo - 0xDC00)
+                            } else {
+                                self.pos = save;
+                                return Err("lone high surrogate".to_string());
+                            }
+                        } else {
+                            hex
+                        };
+                        match char::from_u32(cp) {
+                            Some(c) => out.push(c),
+                            None => return Err(format!("invalid unicode escape \\u{cp:04X}")),
                         }
                     }
                     other => return Err(format!("bad escape {other:?}")),

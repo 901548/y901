@@ -103,8 +103,9 @@ fn wrap_paragraph(
         }
         last_break = None;
         cur_end = line_start;
-        i = 0; // 从新行首重新扫（简单、正确；折行不是热路径）
-               // 对齐 i 到 line_start
+        // **不要回到 0 重扫**：那会让折行退化成 O(n²)（粘贴 1 MiB 单行文本时
+        // 几十亿次比较，UI 直接卡死）。切点 `cut >= 上一个 i`，只需把游标对齐到
+        // 新行首即可，语义完全一致。
         while i < chars.len() && chars[i].0 < line_start {
             i += 1;
         }

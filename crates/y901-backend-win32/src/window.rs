@@ -51,7 +51,9 @@ use windows_sys::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, GetDpiForSystem, GetDpiForWindow, SetProcessDpiAwarenessContext,
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_ESCAPE};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    GetKeyState, ReleaseCapture, SetCapture, VK_ESCAPE,
+};
 use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, DragQueryPoint};
 use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -235,10 +237,17 @@ fn modifiers() -> Modifiers {
     // 它读的是**调用线程**的键盘状态队列，所以必须在本 GUI 线程调用（跨线程读到的是别的队列）。
     // 违反后果：跨线程读到错误/恒为 0 的状态 —— 修饰键永远不放映，界面表现为按键行为异常。
     unsafe {
+        let shift = GetKeyState(0x10) < 0;
+        let ctrl = GetKeyState(0x11) < 0;
+        let alt = GetKeyState(0x12) < 0;
+        // **AltGr 不是 Ctrl+Alt**：德语/波兰语等布局用 AltGr 输入 `ą`/`@`，
+        // Windows 把它合成"右 Alt + 假左 Ctrl"（MSDN: Keyboard Input）。
+        // 不区分的话 `AltGr+A` 会被上层当成 Ctrl+A（全选），输入字符的同时触发快捷键。
+        let altgr = GetKeyState(0x12) < 0 && GetKeyState(0xA2) < 0; // VK_RMENU
         Modifiers {
-            shift: GetKeyState(0x10) < 0,
-            ctrl: GetKeyState(0x11) < 0,
-            alt: GetKeyState(0x12) < 0,
+            shift,
+            ctrl: ctrl && !altgr,
+            alt,
         }
     }
 }
@@ -619,6 +628,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN
         | WM_MBUTTONUP => {
+            // **鼠标捕获**：不捕获时 `WM_*BUTTONUP` 只发给"松手处下面的窗口"，
+            // 拖拽一旦拖出客户区就再也收不到抬起事件 —— 控件会永久停在
+            // `dragging = true`（滑块/分隔条/文本选区全中招，表现为鼠标一动就继续拖）。
+            // MSDN: Mouse Input / SetCapture。
+            unsafe {
+                match msg {
+                    WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
+                        SetCapture(hwnd);
+                    }
+                    _ => {
+                        ReleaseCapture();
+                    }
+                }
+            }
             // **先取事件再 push**：`push` 会再次加 `TABLE` 锁，
             // 而 std 的 `Mutex` **不可重入** —— 在闭包里 `push` 会直接死锁。
             let ev = with_shared(hwnd, None, |shared| {

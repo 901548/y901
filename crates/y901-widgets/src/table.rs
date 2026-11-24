@@ -565,6 +565,12 @@ impl Table {
 }
 
 impl Widget for Table {
+    /// **键盘导航可达**：`UiTree` 只把 `Key` 发给焦点节点，且 `set_focus` 拒绝
+    /// 非 `focusable` 节点。不声明这一条，`event` 里整套 ↓/↑/Home/End/PageUp/PageDown
+    /// 与 `scroll_selected_into_view` 永远不会被调用（模块文档承诺的键盘导航是死的）。
+    fn focusable(&self) -> bool {
+        true
+    }
     fn cache_key(&self) -> Option<u64> {
         Some(self.key)
     }

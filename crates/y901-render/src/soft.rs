@@ -529,6 +529,11 @@ impl SoftBackend {
         style: &TextStyle,
         style_px: Option<f32>,
     ) -> f32 {
+        // **保留未映射的原点**：下面两条回退路径会转调 `draw_text_sized`，而它自己
+        // 入口会 `map_point`。如果这里把已经映射过的点传下去，变换就被应用两次
+        // （`p → o + (p−o)·s²`）：有缩放动画时复杂文本会整体偏移
+        // （s=0.8、距变换原点 300px 时偏约 48px），而恒等变换下完全看不出来。
+        let user_origin = origin;
         let mapped = self.map_point(origin);
         let origin = Pos::new(mapped.x, mapped.y);
         let scale = self.map_scale();
@@ -558,7 +563,7 @@ impl SoftBackend {
                 let range = (run_range.start + seg.range.start)..(run_range.start + seg.range.end);
                 // 任何一段没有字体字节就整体退回 cell 路径（不做半截渲染）
                 if self.text.font_data_for(seg.face).is_none() {
-                    return self.draw_text_sized(origin, text, style, base_px);
+                    return self.draw_text_sized(user_origin, text, style, base_px);
                 }
                 planned.push((seg.face, range));
             }
@@ -583,7 +588,7 @@ impl SoftBackend {
                 .font_data_for(*face)
                 .map(|data| crate::text::shape_run(data, slice, px_final, *face));
             let Some(Ok(run)) = shaped else {
-                return self.draw_text_sized(origin, text, style, base_px);
+                return self.draw_text_sized(user_origin, text, style, base_px);
             };
             total += run.width;
             runs.push((run, total));
@@ -1207,7 +1212,11 @@ impl RenderCtx for SoftBackend {
                                     for (i, d) in dst.iter_mut().enumerate() {
                                         let mut cov_u8 =
                                             atlas.get((src_row + i) * 4).copied().unwrap_or(0);
-                                        if style.bold {
+                                        // 合成粗体：取右侧邻居。**必须守住字形右边界** ——
+                                        // 越界会读到"槽位 padding / 图集下一行首像素"，
+                                        // 那是依赖"padding 恰好为 0"的隐式假设（图集一旦复用
+                                        // 区域就不再成立），表现为最右一列亮边。
+                                        if style.bold && i + 1 < run {
                                             cov_u8 = cov_u8.max(
                                                 atlas
                                                     .get((src_row + i + 1) * 4)
@@ -1334,6 +1343,10 @@ impl RenderCtx for SoftBackend {
 
     fn fill_round_rect(&mut self, rect: Rect, color: Color, radius: f32) {
         let rect = self.map_rect(rect);
+        // **半径必须同样跟随变换缩放**：`map_rect` 已经把矩形乘过缩放，
+        // 若半径不乘，缩放动画（弹层 0.8）里填充的圆角与描边的圆角就不一致 ——
+        // `stroke_round_rect` / `fill_gradient_round_rect` 都乘了，这里漏了。
+        let radius = radius * self.map_scale();
         let r = radius.clamp(0.0, rect.w.min(rect.h) * 0.5);
         if r <= 0.5 {
             self.fill_rect(rect, color);

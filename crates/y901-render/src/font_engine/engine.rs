@@ -316,8 +316,14 @@ impl MyFontEngine {
         if !self.cache.contains_key(&key) {
             // 按目标字号光栅化；**不生成 mip**（mip 按基准字号算的级尺寸不适用）。
             let gid = u16::try_from(gk.glyph).ok()?;
-            let face_data = self.face_data(gk.face).unwrap_or(&self.data).to_vec();
-            let bitmap = rasterize_gid_phased(&face_data, gid, k as f32, 0)?;
+            // **借用而不是 `.to_vec()`**：只为绕开"`&self.data` 与 `&mut self` 冲突"
+            // 就克隆整份字体，等于每次冷缓存字形都 memcpy 1.4~10 MB
+            //（三种字号 × 60 个字 ≈ 250 MB 拷贝，才画出第一屏）。作用域即可解决：
+            // `rasterize_gid_phased` 返回**自有**位图，借用在此语句后即结束。
+            let bitmap = {
+                let face_data = self.face_data(gk.face).unwrap_or(&self.data);
+                rasterize_gid_phased(face_data, gid, k as f32, 0)?
+            };
             let info = self.insert_into_atlas(gk, &bitmap)?;
             self.cache.insert(key, info);
         }
@@ -337,8 +343,10 @@ impl MyFontEngine {
         let key = (gk, phase & 3, self.px_key());
         if !self.cache.contains_key(&key) {
             let gid = u16::try_from(gk.glyph).ok()?;
-            let face_data = self.face_data(gk.face).unwrap_or(&self.data).to_vec();
-            let bitmap = rasterize_gid_phased(&face_data, gid, self.size, phase)?;
+            let bitmap = {
+                let face_data = self.face_data(gk.face).unwrap_or(&self.data);
+                rasterize_gid_phased(face_data, gid, self.size, phase)?
+            };
             let info = self.insert_into_atlas(gk, &bitmap)?;
             self.cache.insert(key, info);
         }
@@ -371,7 +379,9 @@ impl MyFontEngine {
             let bitmap = rasterize_gid_phased(
                 // 面号未知时退回主字体（shaping 可能先于 `push_fallback` 给出面号）。
                 self.face_data(key.face).unwrap_or(&self.data),
-                u16::try_from(key.glyph).unwrap_or(0),
+                // 越界 glyph id 返回 `None`（走调用方的"缺字形"处理），
+                // **不能**退化成 0：那会把 `.notdef` 方框按错误键缓存一辈子。
+                u16::try_from(key.glyph).ok()?,
                 px,
                 phase,
             )?;

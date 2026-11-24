@@ -176,6 +176,13 @@ impl ListView {
             return false;
         }
         self.len = n;
+        // 选中项必须夹进新长度：否则 `selected_index()` 报一个不存在的行，
+        // 语义面与 `state("selected", …)` 一起说谎，`invalidate_row` 静默无效。
+        if let Some(i) = self.selected {
+            if i >= n {
+                self.selected = None;
+            }
+        }
         self.prefix_dirty = true;
         self.ensure_prefix();
         self.offset = self.offset.clamp(0.0, self.max_offset());

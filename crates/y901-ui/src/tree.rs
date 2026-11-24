@@ -770,10 +770,15 @@ impl UiTree {
             return false;
         };
         let rect = self.popups[pos].rect;
+        let was_modal = self.popups[pos].modal;
         let prev = self.popups[pos].prev_focus.clone();
         self.popups.remove(pos);
         self.restore_focus(prev);
-        if !rect.is_empty() {
+        // **模态遮罩盖的是整个视口**（绘制时 `fill_rect(viewport, 55% 黑)`），
+        // 只重绘浮层自身矩形会让遮罩残留在屏幕上，直到某次偶然的整窗刷新。
+        if was_modal {
+            self.invalidate_all();
+        } else if !rect.is_empty() {
             self.add_dirty_rect(rect);
         }
         true
@@ -785,9 +790,22 @@ impl UiTree {
         // 最早弹出的那个记录了"弹出前的焦点"，它才是要还回去的目标。
         let restore = self.popups.first().and_then(|p| p.prev_focus.clone());
         // 先收集再看（`drain` 持有 `self.popups` 的可变借用，期间不能调 `&mut self` 的方法）
-        let popped: Vec<Rect> = self.popups.drain(..).map(|p| p.rect).collect();
-        for rect in popped {
-            self.add_dirty_rect(rect);
+        let mut was_modal = false;
+        let popped: Vec<Rect> = self
+            .popups
+            .drain(..)
+            .map(|p| {
+                was_modal |= p.modal;
+                p.rect
+            })
+            .collect();
+        // 同 `close_popup`：关掉过模态浮层就必须整窗重绘（遮罩覆盖视口）。
+        if was_modal {
+            self.invalidate_all();
+        } else {
+            for rect in popped {
+                self.add_dirty_rect(rect);
+            }
         }
         self.restore_focus(restore);
         n
@@ -1921,8 +1939,15 @@ impl UiTree {
         walk(self.root.as_ref(), &mut path, None, None, &mut outputs);
 
         self.rebuild_focus_order();
+        // **重解析索引路径缓存**：`focus_path` / `captured_path` 存的是子索引序列，
+        // 任何同层增删都会让它们指向别的节点（`focus()` 仍报旧 id，键盘事件却发给
+        // 邻居）。结构变化必然让布局不再跳过，所以在这里统一重算一次是零额外开销。
+        self.focus_path = self.focus.as_deref().and_then(|f| self.find_path(f));
+        self.captured_path = self
+            .captured_pointer
+            .as_deref()
+            .and_then(|c| self.find_path(c));
     }
-
     /// 前序遍历一遍，收集所有 focusable 节点；Modal 存在时只看它子树。
     fn rebuild_focus_order(&mut self) {
         fn walk(node: &dyn Widget, path: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
@@ -2768,6 +2793,11 @@ impl UiTree {
         // 记录"谁请求了重排"：Relayout 的脏区要标在它身上（见 dispatch 分支）
         self.relayout_from = ctx.relayout_from.take();
         let merged = ctx.finish(result);
+        // `Redraw` 也必须落到脏区：`dispatch` 后面有兜底，但 `dispatch_to`（RPC /
+        // 自动化）直接返回这个结果 —— 不标脏的话控件状态变了、屏幕却不刷新。
+        if merged.needs_redraw() && !merged.needs_relayout() && !target.is_empty() {
+            self.invalidate(&target);
+        }
         if merged.needs_relayout() && !target.is_empty() {
             self.cache.mark_dirty(&target);
             // 同上：只标目标矩形，其余交给布局后的 `mark_moved` 补并集。

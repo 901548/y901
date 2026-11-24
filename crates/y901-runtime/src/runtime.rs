@@ -30,11 +30,27 @@ use crate::window::{RenderOutcome, WindowBackend};
 ///
 /// 与两个后端原先各自读取 `Y901_IDLE_WAIT_MS` 的行为一致：
 /// 默认 100ms，`0` 表示"不限时等待、由 waker 唤醒"。
+///
+/// **两个实现细节都是 bug 修出来的**：
+/// 1. 解析结果用 `OnceLock` 缓存：这个函数每帧至少调两次（一处在 `run_loop` 的
+///    idle 分支、一处在 `wait_message` 的超时），而 `env::var` 每次都要拿全局锁 + 分配；
+/// 2. 文档说 `0` = 不限时等待，但把 0 直接交给 `MsgWaitForMultipleObjectsEx` /
+///    `poll` 是**立即返回** —— 于是"0 = 阻塞到 waker"变成"0 = 100% CPU 空转"。
+///    这里把 0 映射成一个足够大的上限，真正的唤醒仍由 waker 负责
+///    （调用方还会再与 `tick_due_ms` 取 min，所以不会错过 Tick）。
 fn idle_wait_ms() -> u32 {
-    std::env::var("Y901_IDLE_WAIT_MS")
-        .ok()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(100)
+    static CACHE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *CACHE.get_or_init(|| {
+        match std::env::var("Y901_IDLE_WAIT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+        {
+            // 30s：远大于任何合理的唤醒间隔，又不会让"没有 waker 的实现"卡死退出。
+            Some(0) => 30_000,
+            Some(ms) => ms,
+            None => 100,
+        }
+    })
 }
 
 /// Remaining portion of a 16 ms busy-frame budget, rounded down to wait granularity.

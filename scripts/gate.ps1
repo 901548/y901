@@ -164,6 +164,29 @@ if ($skipBad.Count -gt 0) {
     Fail "SKIP 未留痕：这些测试在没有 GPU 等条件下会静默通过（门禁看不见），请改写成同时写 y901-test-skips.txt"
 }
 Write-Host "[gate] ok: every SKIP print also records the marker file"
+# ---------------------------------------------------------------- 3b. 文档相对链接
+# 为什么要有：`.md` 里的相对链接是用户第一手入口，断链在 GitHub 上就是 404，
+# 而任何测试都不会发现。实测 README.zh-CN.md 的 12 条 "docs/xxx" 链接 href 全写成了
+# 裸文件名（少了 `docs/` 前缀）—— 整段文档索引全是死链，长期没人发现。
+Step "markdown relative links resolve (no 404s in the docs index)"
+$mdBad = @()
+$mdFiles = Get-ChildItem (Join-Path $root '*.md'), (Join-Path $root 'docs'), (Join-Path $root 'crates') -Recurse -Filter '*.md' -File -ErrorAction SilentlyContinue
+foreach ($f in $mdFiles) {
+    if ($f.FullName -match '\\target\\') { continue }
+    $txt = [System.IO.File]::ReadAllText($f.FullName)
+    foreach ($m in [regex]::Matches($txt, '\]\(([^)#]+?)(#[^)]*)?\)')) {
+        $link = $m.Groups[1].Value
+        if ($link -match '^(https?:|mailto:|#)') { continue }
+        if (-not (Test-Path (Join-Path $f.DirectoryName $link))) {
+            $mdBad += ("{0} -> {1}" -f $f.FullName.Substring($root.Length + 1), $link)
+        }
+    }
+}
+if ($mdBad.Count -gt 0) {
+    ($mdBad | Select-Object -First 15) | ForEach-Object { Write-Host "  broken: $_" }
+    Fail "$($mdBad.Count) markdown link(s) point at files that do not exist"
+}
+Write-Host "[gate] ok: markdown links resolve"
 Step "cargo clippy (exit code must be 0 AND warnings must be 0)"
 $clippyArgs = @('clippy', '--workspace', '--all-targets', '--message-format=json') + $cargoOffline
 $clippyJson = & cargo @clippyArgs 2>&1 | Out-String

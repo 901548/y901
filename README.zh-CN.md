@@ -37,7 +37,7 @@ fn main() -> Result<(), String> {
 
 ## 状态与平台支持
 
-**实验性（experimental）**。平台分层见 [docs/PLATFORMS.md](PLATFORMS.md)，简要版：
+**实验性（experimental）**。平台分层见 [docs/PLATFORMS.md](docs/PLATFORMS.md)，简要版：
 
 | Tier | 平台 | 承诺 |
 |---|---|---|
@@ -58,7 +58,7 @@ fn main() -> Result<(), String> {
 
 ## 快速开始
 
-5 分钟上手路径见 [docs/QUICKSTART.md](QUICKSTART.md)（英文；公开入口统一英文）。
+5 分钟上手路径见 [docs/QUICKSTART.md](docs/QUICKSTART.md)（英文；公开入口统一英文）。
 
 ```bash
 # 只看单一入口怎么写（只依赖 y901 一个 crate）
@@ -129,11 +129,11 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 
 ## 构建与测试
 
-数字与证据以 [`docs/STATUS.md`](STATUS.md) 和 [`docs/evidence/`](evidence/) 为准（由脚本生成，不手写）。
+数字与证据以 [`docs/STATUS.md`](docs/STATUS.md) 和 [`docs/evidence/`](docs/evidence/) 为准（由脚本生成，不手写）。
 
 ```bash
 cargo check --workspace --all-targets      # 0 warning
-cargo test --workspace                     # 1188 passed / 0 failed / 68 ignored（170 个测试目标）
+cargo test --workspace                     # 1201 passed / 0 failed / 68 ignored（175 个测试目标）
 powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0xF7455CCE7781A864，400x220）
 powershell -File scripts/gate.ps1          # 完整门禁（发布前必跑）
 ```
@@ -143,16 +143,16 @@ powershell -File scripts/gate.ps1          # 完整门禁（发布前必跑）
 
 ## 文档
 
-- [docs/QUICKSTART.md](QUICKSTART.md)：5 分钟上手（英文）
-- [docs/PLATFORMS.md](PLATFORMS.md)：平台分层与出范围声明（英文）
-- [docs/ROADMAP.md](ROADMAP.md)：复杂文本/无障碍/API/组件的整改路线图
-- [docs/RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)：0.4.0 发布说明（已发布）
-- [docs/RELEASE_NOTES_v0.3.0.md](RELEASE_NOTES_v0.3.0.md)：0.3.0 发布说明（已发布）
-- [docs/MIGRATION_0.3.md](MIGRATION_0.3.md)：0.2.x → 0.3.0 迁移说明
-- [docs/CRATES_IO.md](CRATES_IO.md)：发布流程与踩过的坑
-- [docs/FRAMEWORK.md](FRAMEWORK.md)：架构、组件模型、坐标系与裁剪、已知限制
-- [docs/CROSS_PLATFORM_PLAN.md](CROSS_PLATFORM_PLAN.md)：X11 / macOS 路线
-- [docs/evidence/hash-baseline.txt](evidence/hash-baseline.txt)：像素门禁基线
+- [docs/QUICKSTART.md](docs/QUICKSTART.md)：5 分钟上手（英文）
+- [docs/PLATFORMS.md](docs/PLATFORMS.md)：平台分层与出范围声明（英文）
+- [docs/ROADMAP.md](docs/ROADMAP.md)：复杂文本/无障碍/API/组件的整改路线图
+- [docs/RELEASE_NOTES_v0.4.0.md](docs/RELEASE_NOTES_v0.4.0.md)：0.4.0 发布说明（已发布）
+- [docs/RELEASE_NOTES_v0.3.0.md](docs/RELEASE_NOTES_v0.3.0.md)：0.3.0 发布说明（已发布）
+- [docs/MIGRATION_0.3.md](docs/MIGRATION_0.3.md)：0.2.x → 0.3.0 迁移说明
+- [docs/CRATES_IO.md](docs/CRATES_IO.md)：发布流程与踩过的坑
+- [docs/FRAMEWORK.md](docs/FRAMEWORK.md)：架构、组件模型、坐标系与裁剪、已知限制
+- [docs/CROSS_PLATFORM_PLAN.md](docs/CROSS_PLATFORM_PLAN.md)：X11 / macOS 路线
+- [docs/evidence/hash-baseline.txt](docs/evidence/hash-baseline.txt)：像素门禁基线
 
 ## 许可
 

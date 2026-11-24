@@ -344,7 +344,7 @@ impl Widget for Tabs {
         let mut labels: Vec<(String, Rect, TextStyle)> = Vec::with_capacity(n);
         for i in 0..n {
             let r = self.tab_rect(i, ctx.scale());
-            let active = i == self.selected.get();
+            let active = i == self.selected();
             let s = if active { selected_style } else { normal_style };
             if active {
                 ctx.fill_rect(r, s.bg);
@@ -405,7 +405,7 @@ impl Widget for Tabs {
         Semantics::default()
             .exposed(true)
             .label(self.items[self.selected.get().min(self.items.len() - 1)].clone())
-            .value(self.selected.get().to_string())
+            .value(self.selected().to_string())
             .action("select")
             .prop("count", self.items.len().to_string())
             .prop("selected", self.selected.get().to_string())

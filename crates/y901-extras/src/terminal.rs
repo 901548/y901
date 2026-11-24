@@ -262,6 +262,11 @@ impl TerminalWidget {
     /// 启动 shell 并把 PTY 接上。
     #[cfg(not(target_arch = "wasm32"))]
     pub fn attach_shell(&mut self) -> Result<(), String> {
+        // **重入保护**：重复 attach 会丢掉旧的 `PtySession`（第一个 shell 的子进程与
+        // 读线程变成孤儿、两个 shell 同时往同一个 VT 写）。这里直接拒绝。
+        if self.pty.is_some() {
+            return Err("PTY 已连接：请先 detach/kill 再重新 attach".to_string());
+        }
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -297,7 +302,20 @@ impl TerminalWidget {
                 let mut buf = [0u8; 8192];
                 loop {
                     match reader.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
+                        // `Ok(0)` = 对端关闭（shell 退出）：发一个空块作为 EOF 哨兵，
+                        // 让 `pump()` 能把"进程结束"上报给 UI（否则界面永远显示 pty）。
+                        Ok(0) => {
+                            let _ = tx.send(Vec::new());
+                            break;
+                        }
+                        // **EINTR 不是 EOF**：旧实现把 `Err(_)` 一律当结束，一个信号
+                        // 就能让读线程永久退出（终端冻住而 `has_shell()` 仍是 true）。
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                        // 其它错误（EIO 等）= 真的没了
+                        Err(_) => {
+                            let _ = tx.send(Vec::new());
+                            break;
+                        }
                         Ok(n) => {
                             if tx.send(buf[..n].to_vec()).is_err() {
                                 break;
@@ -336,8 +354,14 @@ impl TerminalWidget {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn pump(&mut self) -> bool {
         let mut any = false;
+        let mut eof = false;
         if let Some(pty) = self.pty.as_ref() {
             while let Ok(bytes) = pty.rx.try_recv() {
+                // 空块是 EOF 哨兵（读线程在 `Ok(0)`/不可恢复错误时发的）
+                if bytes.is_empty() {
+                    eof = true;
+                    continue;
+                }
                 // 顺路追踪 bracketed paste 开关（shell 会发 `ESC[?2004h`）
                 self.paste_detect.feed(&bytes);
                 feed_bytes(
@@ -348,6 +372,12 @@ impl TerminalWidget {
                 );
                 any = true;
             }
+        }
+        if eof {
+            // **shell 退出必须让 UI 知道**：不清理的话 `has_shell()` 永远为 true，
+            // 应用会一直显示一个已经死掉的终端（输入写到死 fd）。
+            self.pty = None;
+            any = true;
         }
         if any {
             // 任何输出都算一次语义变化（哪怕屏幕最后看起来一样）
@@ -595,6 +625,13 @@ impl Widget for TerminalWidget {
                 if self.paste(text) {
                     return EventResult::Redraw;
                 }
+                // **消毒后再写**：`paste()` 在"消毒后为空"时返回 false（例如剪贴板里
+                // 只有 `\x1b`），旧实现在这里回落到 `write(text.as_bytes())` ——
+                // 把刚被丢弃的控制字符**原样**送进 PTY，等于绕过粘贴消毒。
+                let clean = crate::paste::sanitize(text);
+                if clean.is_empty() {
+                    return EventResult::Ignored;
+                }
                 self.grid.reset_scroll_on_input();
                 if self.read_only {
                     // 只读演示：直接喂给 VT 解析器，不碰 PTY
@@ -602,10 +639,10 @@ impl Widget for TerminalWidget {
                         &mut self.text,
                         &mut self.pending_utf8,
                         &mut self.grid,
-                        &text.clone().into_bytes(),
+                        &clean.into_bytes(),
                     );
                 } else {
-                    self.write(text.as_bytes());
+                    self.write(clean.as_bytes());
                 }
                 EventResult::Redraw
             }

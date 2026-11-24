@@ -156,6 +156,19 @@ impl Widget for ScrollView {
     }
 
     fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        // **结构性容器：子节点槽位固定（恰好 1 个内容节点）**。
+        //
+        // 为什么返回 `None`：`UiTree::add_node` / `remove_node` 会走这条路径。
+        // 允许外部增删会破坏不变量 —— 删掉唯一子节点后 `measure`/`arrange` 里的
+        // `kids[0]` 直接越界 panic；加第二个子节点则永远不会被布局（静默无效）。
+        // 返回 `None` 让这些接口**干净地失败**（返回 false），而不是留下坏状态。
+        //
+        // 换内容请整棵替换 Scroll，或改内容控件自身的状态。
+        None
+    }
+
+    /// 框架内部只读遍历仍可下钻（`node_at_mut` / `render_pass` 需要）。
+    fn children_mut_for_traversal(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
         Some(&mut self.kids)
     }
 
@@ -166,11 +179,16 @@ impl Widget for ScrollView {
         cache: &mut y901_ui::layout::LayoutCache,
     ) -> Size {
         // 主轴无界：问内容到底多高
-        let content = cache.measure(
-            self.kids[0].as_mut(),
-            metrics,
-            Constraints::unbounded_main(y901_ui::Axis::Vertical, c.max),
-        );
+        // （`kids` 正常恰好 1 个；这里用 `first_mut` 而不是 `[0]`，
+        //   把"不变量被破坏"从 panic 降级成"内容高度为 0"。）
+        let content = match self.kids.first_mut() {
+            Some(kid) => cache.measure(
+                kid.as_mut(),
+                metrics,
+                Constraints::unbounded_main(y901_ui::Axis::Vertical, c.max),
+            ),
+            None => Size::new(c.max.w.min(0.0), 0.0),
+        };
         self.content_h = content.h;
         // 视口自身取父容器给的尺寸
         c.constrain(Size::new(content.w.min(c.max.w), c.max.h))
@@ -194,12 +212,14 @@ impl Widget for ScrollView {
         // 但 `max_offset` 用的是旧的 `content_h` —— 最后一段永远滚不到。
         // 代价可接受：约束不变时 `cache.measure` 直接命中，只有宽度真的变了才重测。
         if self.show_bar {
-            let again = cache.measure(
-                self.kids[0].as_mut(),
-                metrics,
-                Constraints::unbounded_main(y901_ui::Axis::Vertical, self.inner.size()),
-            );
-            self.content_h = again.h;
+            if let Some(kid) = self.kids.first_mut() {
+                let again = cache.measure(
+                    kid.as_mut(),
+                    metrics,
+                    Constraints::unbounded_main(y901_ui::Axis::Vertical, self.inner.size()),
+                );
+                self.content_h = again.h;
+            }
         }
 
         // **先钳制偏移，再摆内容**：旧实现先按旧 offset 摆好子节点、之后才钳制，
@@ -213,7 +233,9 @@ impl Widget for ScrollView {
             self.inner.w,
             self.content_h,
         );
-        self.kids[0].arrange(content_rect, metrics, cache);
+        if let Some(kid) = self.kids.first_mut() {
+            kid.arrange(content_rect, metrics, cache);
+        }
         // 粘底：内容变高后如果仍处于激活状态，跟到最底。
         // 用户上滚 → `stick_armed = false`；回到底部 → 自动重新激活。
         if self.stick_to_bottom {

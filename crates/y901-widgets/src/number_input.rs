@@ -204,7 +204,18 @@ impl NumberInput {
         match ch {
             '0'..='9' => buf.push(ch),
             '.' if self.decimals > 0 && !buf.contains('.') => buf.push('.'),
-            '-' if buf.is_empty() => buf.push('-'),
+            // **负号**：缓冲在聚焦时会被预填成当前值（例如 "0"），若只允许"空缓冲"
+            // 才能输入负号，用户永远打不出负数（`-5` 变成 `05`）。
+            // 规则：缓冲为空、或只有一个 '0'、或已经全是前导零时，把负号放到最前面。
+            '-' if buf.is_empty() || buf.chars().all(|c| c == '0' || c == '-') => {
+                if let Some(rest) = buf.strip_prefix('-') {
+                    *buf = rest.to_string();
+                } else if buf.trim_start_matches('0').is_empty() {
+                    buf.insert(0, '-');
+                } else {
+                    return false;
+                }
+            }
             _ => return false,
         }
         true
@@ -218,7 +229,18 @@ impl NumberInput {
         }
         let delta = self.step * if fast { 10.0 } else { 1.0 } * dir;
         let next = self.clamp(self.round(self.value + delta));
-        self.set_value(next)
+        if !self.set_value(next) {
+            return false;
+        }
+        // **步进也必须通知应用**：`commit` 会发命令，而 ↑/↓ 只改内部值的话，
+        // 单向数据流的应用仍持有旧值，下一次重建会把控件"弹回"原值。
+        if let Some(cmd) = self.command.clone() {
+            ctx.emit_command(crate::command_with_args(
+                &cmd,
+                y901_ui::json::Json::obj().set("value", next),
+            ));
+        }
+        true
     }
 }
 

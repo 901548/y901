@@ -169,6 +169,11 @@ impl MenuBar {
 }
 
 impl Widget for MenuBar {
+    /// **键盘可达**：菜单栏在 `event` 里实现 ←/→/Enter 与 `Focus(true)` 初始化，
+    /// 但 `set_focus` 只接受 `focusable` 节点 —— 不声明就整段逻辑不可达。
+    fn focusable(&self) -> bool {
+        true
+    }
     fn id(&self) -> &str {
         &self.id
     }

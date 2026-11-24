@@ -175,7 +175,13 @@ impl TextInput {
     /// 运行时开关密码模式（**不自动标脏**：调用方随后必须 `invalidate(id)`，
     /// 因为渲染结果变了但尺寸不变，不需要 `mark_layout_dirty`）。
     pub fn set_password(&mut self, on: bool) {
+        if self.password == on {
+            return;
+        }
         self.password = on;
+        // **布局表必须重建**：密码模式画的是 `*`，字宽与明文不同（CJK 尤其明显）。
+        // 只让调用方 `invalidate(id)` 只能刷新像素，命中测试/光标位置仍按明文宽度算。
+        self.layout_dirty = true;
     }
 
     /// 占位提示（构建器）：**不进 `TextBuffer`**，只在

@@ -350,10 +350,23 @@ impl TextArea {
     ///
     /// 这里只做**钳制**，不试图修正映射：旧行边界至多让指针落点偏一个字符，
     /// 而 panic 会让整个进程崩溃 —— 两害相权。
+    /// 可视行的字节区间（**两端都对齐到 UTF-8 边界**）。
+    ///
+    /// 为什么必须对齐：`VisLine` 是**上一次** `relayout` 的结果，而编辑只返回 `Redraw`
+    /// （重排发生在下一次 `render`）。同一批事件里点击会拿旧表去切**新**文本 ——
+    /// 把起点 clamp 到 `len` 并不够：`len` 可能落在某个多字节字符中间，
+    /// `&text[start..end]` 直接 panic（"byte index N is not a char boundary"）。
     fn line_range(&self, line: &VisLine) -> std::ops::Range<usize> {
-        let len = self.buffer.text().len();
-        let start = line.start.min(len);
-        let end = line.end.min(len).max(start);
+        let text = self.buffer.text();
+        let len = text.len();
+        let mut start = line.start.min(len);
+        let mut end = line.end.min(len).max(start);
+        while start > 0 && !text.is_char_boundary(start) {
+            start -= 1;
+        }
+        while end > start && !text.is_char_boundary(end) {
+            end -= 1;
+        }
         start..end
     }
 

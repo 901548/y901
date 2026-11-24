@@ -199,6 +199,16 @@ impl Widget for SplitView {
     }
 
     fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        // **结构性容器：恰好两个槽位（两侧面板）**。
+        //
+        // 返回 `None` 的理由同 `Scroll`：`add_node` / `remove_node` 走这条路径，
+        // 允许外部增删会让 `arrange` 里的 `kids[0]` / `kids[1]` 越界 panic，
+        // 或让第三个子节点永远不被布局（静默无效）。这里让它干净失败。
+        None
+    }
+
+    /// 框架内部只读遍历仍可下钻。
+    fn children_mut_for_traversal(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
         Some(&mut self.kids)
     }
 
@@ -237,8 +247,14 @@ impl Widget for SplitView {
             ),
         };
 
-        self.kids[0].arrange(a, m, cache);
-        self.kids[1].arrange(b, m, cache);
+        // 正常恰好两个孩子；用 `get_mut` 把"不变量被破坏"降级为"少排一个"，
+        // 不让库代码在公共路径上 panic。
+        if let Some(kid) = self.kids.get_mut(0) {
+            kid.arrange(a, m, cache);
+        }
+        if let Some(kid) = self.kids.get_mut(1) {
+            kid.arrange(b, m, cache);
+        }
     }
 
     fn rect(&self) -> Rect {

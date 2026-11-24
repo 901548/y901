@@ -587,11 +587,19 @@ impl Connection {
     fn read_packet(&mut self) -> Result<([u8; 32], Vec<u8>), String> {
         let mut head = [0u8; 32];
         self.read_exact(&mut head)?;
+        // **reply length 是 CARD32**（Reply 头：1 type | 1 data | 2 seq | 4 length）。
+        // 旧实现只读低 16 位：任何附加数据超过 65 535 单位（262 140 字节）的回复
+        // （典型：`GetImage` 读回 1080p、大段剪贴板 `GetProperty`）只会被读掉一部分，
+        // 剩下的字节留在流里 → 之后每个包都从错位处解析，界面卡死/花屏。
         let units = if head[0] == 1 || head[0] == 35 {
-            u16::from_le_bytes([head[4], head[5]]) as usize
+            u32::from_le_bytes([head[4], head[5], head[6], head[7]]) as usize
         } else {
             0
         };
+        // 防御：损坏的长度不应让我们尝试分配几个 GB
+        if units > MAX_REPLY_UNITS {
+            return Err(format!("reply length {units} units exceeds sanity limit"));
+        }
         let mut extra = vec![0u8; units * 4];
         if !extra.is_empty() {
             self.read_exact(&mut extra)?;
@@ -750,7 +758,13 @@ impl Connection {
                             //
                             // 选**drain 而不是报错**：poll_events 的调用方只想要事件，
                             // reply 对它没用；报错会让一个"无害的并发"升级成启动失败。
-                            let units = u16::from_le_bytes([buf[4], buf[5]]) as usize;
+                            let units =
+                                u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
+                            if units > MAX_REPLY_UNITS {
+                                return Err(format!(
+                                    "poll_events: reply length {units} units exceeds sanity limit"
+                                ));
+                            }
                             let mut extra = vec![0u8; units * 4];
                             if !extra.is_empty() {
                                 self.stream.read_exact(&mut extra).map_err(|e| {
@@ -950,3 +964,7 @@ mod tests {
         assert!(first.is_ok(), "units=0 的 reply 不应导致错误：{first:?}");
     }
 }
+
+/// 回复附加数据的**合理性上限**（单位：4 字节）。16 MiB 足够覆盖 4K 截图；
+/// 超出说明长度字段损坏，不能拿它去 `vec![0u8; n]`。
+const MAX_REPLY_UNITS: usize = 4 * 1024 * 1024;
