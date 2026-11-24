@@ -22,6 +22,9 @@
 | shaped 文本量宽 | 按格数（`"שלום"`=32px） | **按 shaping（36.76px）** | `shaped_measure_matches_draw.rs`：量宽必须等于绘制推进 |
 | shaped 文本绘制 | 每帧克隆整份字体（≈1 MB） | **零克隆** | `shaped_no_font_copy.rs`（计数分配器） |
 | 软光栅整屏文字（40 行 × 55 字符） | 2.94–3.12 ms | **1.26–1.53 ms** | 覆盖率查表 + 1:1 直贴；`font_3c_pixels` 哈希未变 |
+| 整帧渲染（11k 节点，空 RenderCtx） | 155.6–168.4 µs | **115.6–124.5 µs** | 整帧改走稠密 `paint_order`；`render_pass` 只留给浮层 |
+| 索引表 | `rects` + `node_ink_margin` 两张表 | **一张 `nodes`** | 每节点一次插入/查询；消掉"墨迹表漏写回"这类不同步 |
+| 文本度量 | 只有单行 `measure_text` | **新增 `measure_with(avail_width)`** | 默认实现就是渲染端 `wrap()`，`TextLabel` 已改用它；量=画由构造保证 |
 
 细节与复跑命令见 [PERFORMANCE.md §8b](PERFORMANCE.md)。像素基线 `0xF7455CCE7781A864`
 全程未变，真机 GPU 快照 10/10。
