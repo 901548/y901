@@ -112,6 +112,26 @@ pub struct Grid {
     /// 为什么要缓存：`auto_cells` 本身是 O(n·rows·cols)。若 `cell_of(i)`
     /// 每次都重算，布局就退化为 **O(n²·rows·cols)**——实测在 10k 节点上直接卡死。
     auto_cache: Vec<(usize, usize)>,
+    /// 列宽 / 行高的**前缀和**（长度 = n+1，`prefix[i]` = 前 i 条轨道的总长）。
+    /// `children_clip` 的**顺序访问游标**：上次命中的子控件下标。
+    ///
+    /// 为什么需要：`children_clip(&self, child_rect)` 只拿到矩形，旧实现用
+    /// `children.iter().find(|c| c.rect() == cell_rect)` 线性扫描 —— 每个子节点一次，
+    /// 整棵树建索引/绘制时是 **O(n²)**。实测 100×100 网格每帧整树重绘 **64 ms**
+    /// （10k × 10k 次矩形比较）。调用方都按 `children` 顺序传 rect，所以从上次命中的
+    /// 位置往后扫是**均摊 O(1)**；找不到再回退整圈（语义与原实现一致）。
+    clip_cursor: std::cell::Cell<usize>,
+    /// 每个子控件的**裁切矩形**（格矩形；跨格控件是区间并集），与 `children` 下标对齐。
+    ///
+    /// 在 `arrange` 里由 `child_rects()` 的结果缓存：`children_clip` 每帧每子控件都会
+    /// 读它。若在里边现算"跨格并集"，就要建前缀和 + 查哈希 —— 实测 100×100 网格的
+    /// 整帧重绘会从 0.2ms 涨回几十毫秒。
+    child_clip_rects: Vec<Rect>,
+    /// 落位缓存是否失效（`place` / `span` / `children_mut` 改过）。
+    ///
+    /// 为什么不能每帧无条件重算：`auto_cells` 要建"行×列占用位图"并给每个子控件
+    /// 找空格，是**布局里最贵的一段**；而绝大多数帧的落位根本没变。
+    cells_dirty: bool,
 }
 
 impl Grid {
@@ -151,6 +171,9 @@ impl Grid {
             warned_span_ids: HashSet::new(),
             auto_effective: Vec::new(),
             auto_cache: Vec::new(),
+            cells_dirty: true,
+            clip_cursor: std::cell::Cell::new(0),
+            child_clip_rects: Vec::new(),
         }
     }
 
@@ -170,6 +193,7 @@ impl Grid {
     pub fn with_children(mut self, children: Vec<Box<dyn Widget>>) -> Self {
         self.children = children;
         self.rebuild_index();
+        self.cells_dirty = true;
         self
     }
 
@@ -204,28 +228,51 @@ impl Grid {
         self.auto_cache.get(index).copied().unwrap_or((0, 0))
     }
 
-    /// 计算所有子控件的**自动**落位（显式定位的跳过）。
+    /// 保证落位缓存是最新的（两个输出：`auto_cache` / `auto_effective`）。
     ///
-    /// 返回的下标与 `children` 对齐；被显式定位的位置写 `(0,0)`（不会被用到）。
-    fn auto_cells(&mut self) -> Vec<(usize, usize)> {
+    /// `place` / `span` / `children_mut` 会置 `cells_dirty`；正常布局帧里这条路径
+    /// **直接返回**，不再重复 O(n·rows) 的找空格。
+    fn ensure_cells(&mut self) {
         let cols = self.cols.len().max(1);
         let rows = self.rows.len().max(1);
+        if !self.cells_dirty
+            && self.auto_cache.len() == self.children.len()
+            && self.auto_effective.len() == self.children.len()
+        {
+            return;
+        }
+        self.cells_dirty = false;
 
-        // 每行一个占用位图：点查询 O(1)（不用 `IntervalSet::contains`——它是线性扫描）。
-        let mut taken: Vec<Vec<bool>> = vec![vec![false; cols]; rows];
+        // **扁平占用位图**：`rows × cols` 的 bool 放在一个 Vec 里。
+        // 旧实现 `vec![vec![false; cols]; rows]` 是 rows+1 次分配（100×100 网格 = 101 次），
+        // 每次重排都付一遍。扁平版只有 1 次分配，缓存局部性也更好。
+        let mut taken = vec![false; rows * cols];
         for (r, set) in self.occupancy.iter().enumerate().take(rows) {
             for (a, b) in set.spans() {
                 let from = (a as usize).min(cols);
                 let to = (b as usize).min(cols);
                 if from < to {
-                    taken[r][from..to].fill(true);
+                    let base = r * cols;
+                    taken[base + from..base + to].fill(true);
                 }
             }
         }
 
+        // 每行游标 + `first_row`：`first_row` 之前的行**全满**。
+        //
+        // 为什么必须有 `first_row`：1×1 快路每次都从 r=0 开始扫，行满了就
+        // `continue` —— 10k 子控件 × 100 行 = 100 万次空循环（实测就是 Grid 布局
+        // 1.2ms 里最大的一块）。有了它，被扫过的满行不会再看第二遍。
         let mut cursor = vec![0usize; rows];
-        let mut out = Vec::with_capacity(self.children.len());
-        let mut effective: Vec<(u32, u32)> = Vec::with_capacity(self.children.len());
+        let mut first_row = 0usize;
+
+        // 直接写进既有缓冲：不再 `out.clone()`（那是一次 O(n) 分配 + 拷贝）。
+        let mut out = std::mem::take(&mut self.auto_cache);
+        out.clear();
+        out.reserve(self.children.len());
+        let mut effective = std::mem::take(&mut self.auto_effective);
+        effective.clear();
+        effective.reserve(self.children.len());
         // 警告先收集，循环结束后再写（否则与 `&self.children` 的借用冲突）
         let mut to_warn: Vec<String> = Vec::new();
 
@@ -240,29 +287,39 @@ impl Grid {
 
             let mut placed = None;
             if w == 1 && h == 1 {
-                // 快路：单格用游标，列只增不减
-                for r in 0..rows {
+                // 快路：单格用游标，列只增不减；从 `first_row` 开始扫（之前的行全满）
+                let mut r = first_row;
+                while r < rows {
                     let mut c = cursor[r];
-                    while c < cols && taken[r][c] {
+                    while c < cols && taken[r * cols + c] {
                         c += 1;
                     }
                     cursor[r] = c;
                     if c < cols {
-                        taken[r][c] = true;
+                        taken[r * cols + c] = true;
                         placed = Some((c, r));
                         break;
+                    }
+                    r += 1;
+                }
+                // 维护 `first_row`（只前进，不回退）
+                if placed.is_some() {
+                    while first_row < rows && cursor[first_row] >= cols {
+                        first_row += 1;
                     }
                 }
             } else {
                 // 跨格：找"连续 w 列 × h 行全空"的起点（行优先）
                 'search: for r in 0..=rows.saturating_sub(h) {
                     for c in 0..=cols.saturating_sub(w) {
-                        let free = taken[r..r + h]
-                            .iter()
-                            .all(|row| !row[c..c + w].iter().any(|x| *x));
+                        let free = (r..r + h).all(|row| {
+                            let base = row * cols;
+                            !taken[base + c..base + c + w].iter().any(|x| *x)
+                        });
                         if free {
-                            for row in taken[r..r + h].iter_mut() {
-                                row[c..c + w].fill(true);
+                            for row in r..r + h {
+                                let base = row * cols;
+                                taken[base + c..base + c + w].fill(true);
                             }
                             placed = Some((c, r));
                             break 'search;
@@ -272,17 +329,19 @@ impl Grid {
                 if placed.is_none() {
                     // 放不下：退化 1×1（不动态加行），并警告一次
                     to_warn.push(child.id().to_string());
-                    for r in 0..rows {
+                    let mut r = first_row;
+                    while r < rows {
                         let mut c = cursor[r];
-                        while c < cols && taken[r][c] {
+                        while c < cols && taken[r * cols + c] {
                             c += 1;
                         }
                         cursor[r] = c;
                         if c < cols {
-                            taken[r][c] = true;
+                            taken[r * cols + c] = true;
                             placed = Some((c, r));
                             break;
                         }
+                        r += 1;
                     }
                 }
             }
@@ -303,11 +362,9 @@ impl Grid {
             }
         }
 
-        self.auto_cache = out.clone();
+        self.auto_cache = out;
         self.auto_effective = effective;
-        out
     }
-
     /// 计算轨道长度。
     ///
     /// 规则：Fixed 先占，Auto 取该轨道内容最大值，剩余按 Fraction 权重分配。
@@ -452,30 +509,38 @@ impl Grid {
     /// 为什么公开：它是纯函数（输入轨道尺寸 + 定位，输出矩形），
     /// 几何断言比像素断言精确得多，错了能直接报出哪个数字不对。
     pub fn child_rects(&self) -> Vec<Rect> {
+        // 前缀和现算一次（O(列数 + 行数)），下面每个子控件就是一次减法。
+        let colp = Self::prefixes(&self.col_widths);
+        let rowp = Self::prefixes(&self.row_heights);
         (0..self.children.len())
             .map(|i| {
                 if let Some(span) = self.placements.get(self.children[i].id()) {
-                    return self.rect_for_span(*span);
+                    return self.rect_for_span_ps(*span, &colp, &rowp);
                 }
                 let (col, row) = self.cell_of(i);
                 // 自动流但声明了跨格：用"**生效**"尺寸算并集
                 if let Some((w, h)) = self.auto_effective.get(i).copied() {
                     if w > 1 || h > 1 {
-                        return self.rect_for_span(GridSpan {
-                            col_start: col as u32,
-                            col_end: col as u32 + w,
-                            row_start: row as u32,
-                            row_end: row as u32 + h,
-                        });
+                        return self.rect_for_span_ps(
+                            GridSpan {
+                                col_start: col as u32,
+                                col_end: col as u32 + w,
+                                row_start: row as u32,
+                                row_end: row as u32 + h,
+                            },
+                            &colp,
+                            &rowp,
+                        );
                     }
                 }
+                // **前缀和一次减法**（旧实现每个子控件都把前面所有轨道累加一遍）
                 let x = self.rect.x
                     + self.padding.left
-                    + self.col_widths.iter().take(col).sum::<f32>()
+                    + Self::prefix_of(&colp, col)
                     + self.gap.0 * col as f32;
                 let y = self.rect.y
                     + self.padding.top
-                    + self.row_heights.iter().take(row).sum::<f32>()
+                    + Self::prefix_of(&rowp, row)
                     + self.gap.1 * row as f32;
                 let w = self.col_widths.get(col).copied().unwrap_or(0.0).max(0.0);
                 let h = self.row_heights.get(row).copied().unwrap_or(0.0).max(0.0);
@@ -485,6 +550,38 @@ impl Grid {
     }
 
     /// 没有 `measure` 结果时，按 rect 直接推算轨道（`arrange` 的兜底）。
+    /// 按当前 `col_widths` / `row_heights` 重建前缀和。
+    /// 轨道尺寸的**前缀和**（`out[i]` = 前 i 条轨道的总长，长度 = n+1）。
+    ///
+    /// 为什么要前缀和：算第 i 个子控件的位置要"前面所有轨道的和"，旧实现每个子控件
+    /// 都 `col_widths.iter().take(col).sum()` —— 100 列 × 10k 子控件 ≈ 50 万次浮点累加，
+    /// 全是重复计算。前缀和把它压成一次减法。
+    ///
+    /// 为什么**按需现算**而不是存字段：存字段就得在每一处改轨道尺寸的地方同步刷新，
+    /// 而白盒测试会直接写 `col_widths`（真实踩过：9 条单元测试因此全红）。
+    /// 一次 O(n) 现算换"永不失效"，划算。
+    fn prefixes(tracks: &[f32]) -> Vec<f32> {
+        let mut out = Vec::with_capacity(tracks.len() + 1);
+        let mut acc = 0.0f32;
+        out.push(acc);
+        for v in tracks {
+            acc += v.max(0.0);
+            out.push(acc);
+        }
+        out
+    }
+
+    /// 前 `n` 条轨道的前缀和（越界取末尾）。
+    fn prefix_of(prefix: &[f32], n: usize) -> f32 {
+        if prefix.is_empty() {
+            return 0.0;
+        }
+        prefix
+            .get(n)
+            .copied()
+            .unwrap_or_else(|| prefix.last().copied().unwrap_or(0.0))
+    }
+
     fn fallback_tracks(&mut self, rect: Rect) {
         let cols = self.cols.len().max(1);
         let inner_w = (rect.w - self.padding.left - self.padding.right).max(0.0);
@@ -700,6 +797,7 @@ impl Grid {
             let _ = self.occupancy[r as usize].insert(span.col_start, span.col_end);
         }
         self.placements.insert(id, span);
+        self.cells_dirty = true;
         self.version = self.version.wrapping_add(1);
         Ok(())
     }
@@ -767,6 +865,7 @@ impl Grid {
             return Ok(());
         }
         self.auto_spans.insert(id, (cols, rows));
+        self.cells_dirty = true;
         self.version = self.version.wrapping_add(1);
         Ok(())
     }
@@ -802,24 +901,19 @@ impl Grid {
     }
 
     /// 一个跨格区间对应的屏幕矩形（含区间内的间距）。
-    fn rect_for_span(&self, span: GridSpan) -> Rect {
+    fn rect_for_span_ps(&self, span: GridSpan, colp: &[f32], rowp: &[f32]) -> Rect {
         let c0 = span.col_start as usize;
         let c1 = span.col_end as usize;
         let r0 = span.row_start as usize;
         let r1 = span.row_end as usize;
 
-        let x = self.rect.x
-            + self.padding.left
-            + self.col_widths.iter().take(c0).sum::<f32>()
-            + self.gap.0 * c0 as f32;
-        let y = self.rect.y
-            + self.padding.top
-            + self.row_heights.iter().take(r0).sum::<f32>()
-            + self.gap.1 * r0 as f32;
+        let x =
+            self.rect.x + self.padding.left + Self::prefix_of(colp, c0) + self.gap.0 * c0 as f32;
+        let y = self.rect.y + self.padding.top + Self::prefix_of(rowp, r0) + self.gap.1 * r0 as f32;
 
-        let w: f32 = self.col_widths.iter().take(c1).skip(c0).sum::<f32>()
+        let w: f32 = Self::prefix_of(colp, c1) - Self::prefix_of(colp, c0)
             + self.gap.0 * span.col_span().saturating_sub(1) as f32;
-        let h: f32 = self.row_heights.iter().take(r1).skip(r0).sum::<f32>()
+        let h: f32 = Self::prefix_of(rowp, r1) - Self::prefix_of(rowp, r0)
             + self.gap.1 * span.row_span().saturating_sub(1) as f32;
         Rect::new(x, y, w.max(0.0), h.max(0.0))
     }
@@ -842,6 +936,7 @@ impl Widget for Grid {
         // 外部可以直接改这个 Vec，索引必须标脏；
         // 标脏代价是 O(1)，而"拿到错下标"会定位到错的控件。
         self.index_dirty = true;
+        self.cells_dirty = true;
         Some(&mut self.children)
     }
 
@@ -857,7 +952,7 @@ impl Widget for Grid {
     ) -> Size {
         let cols = self.cols.len().max(1);
         // 先算一次自动落位并缓存：`cell_of` 后续被 O(n) 次调用，不能每次重算。
-        let _ = self.auto_cells();
+        self.ensure_cells();
         let inner_w = (constraints.max.w - self.padding.left - self.padding.right).max(0.0);
         let rows = self
             .children
@@ -1017,6 +1112,9 @@ impl Widget for Grid {
             self.fallback_tracks(rect);
         }
         let rects = self.child_rects();
+        // 缓存裁切矩形：`children_clip` 每帧每子控件都会读它（见字段注释）
+        self.child_clip_rects.clear();
+        self.child_clip_rects.extend_from_slice(&rects);
         for (child, r) in self.children.iter_mut().zip(rects) {
             child.arrange(r, metrics, cache);
         }
@@ -1034,25 +1132,27 @@ impl Widget for Grid {
         EventResult::Ignored
     }
 
-    /// 每个子控件裁到自己的格子里。
-    ///
-    /// 这是 Grid 存在的意义之一：固定列宽就应该是硬约束，
-    /// 内容太大就裁掉，而不是把整个布局撞开。
-    fn layout_version(&self) -> u64 {
-        self.version
-    }
-
     fn children_clip(&self, cell_rect: Rect) -> Option<Rect> {
         // 跨格控件：裁剪到**区间并集**（含区间内的间距），而不是它起始那一格。
         // 否则"跨三列"的控件只能画在第一列里，跨格就白跨了。
-        if let Some(id) = self
-            .children
-            .iter()
-            .find(|c| c.rect() == cell_rect)
-            .map(|c| c.id())
-        {
-            if let Some(span) = self.placements.get(id) {
-                return Some(self.rect_for_span(*span));
+        //
+        // **按游标顺序查找（均摊 O(1)）**：调用方（建索引 / 绘制遍历）都按 `children`
+        // 顺序传 rect，从上次命中的下标往后扫即可；找不到才整圈回退扫描一遍 ——
+        // 语义与原来的线性查找完全一致，但把 O(n²) 降成 O(n)。
+        let n = self.children.len();
+        if n > 0 {
+            let start = self.clip_cursor.get() % n;
+            for k in 0..n {
+                let i = (start + k) % n;
+                if self.children[i].rect() == cell_rect {
+                    self.clip_cursor.set(i);
+                    // 裁切矩形在 `arrange` 里已按"格 / 跨格并集"算好并缓存，
+                    // 这里只读数组 —— 不再现算前缀和、也不再查 placements 哈希。
+                    if let Some(r) = self.child_clip_rects.get(i).copied() {
+                        return Some(r);
+                    }
+                    break;
+                }
             }
         }
         Some(cell_rect)
@@ -1581,7 +1681,7 @@ mod tests {
         g.row_heights = vec![20.0, 20.0];
         g.place("a", 0..2, 0..1).expect("a");
         g.span("b", 2, 1).expect("b 要 2 列");
-        let _ = g.auto_cells(); // 生产中由 measure 调用；单元测试需显式跑一次
+        g.ensure_cells(); // 生产中由 measure 调用；单元测试需显式跑一次
         let rects = g.child_rects();
         // x = 0 + (50+10)*2 = 120
         assert_eq!(
@@ -1608,7 +1708,7 @@ mod tests {
         g.row_heights = vec![20.0, 20.0];
         g.place("a", 0..2, 0..1).expect("a");
         g.span("b", 2, 1).expect("b 要 2 列");
-        let _ = g.auto_cells();
+        g.ensure_cells();
         let rects = g.child_rects();
         assert_eq!(
             rects[1],
@@ -1635,7 +1735,7 @@ mod tests {
         g.row_heights = vec![20.0];
         g.span("a", 2, 1).expect("a 占满两列");
         g.span("b", 2, 1).expect("b 也要两列，应退化");
-        let _ = g.auto_cells();
+        g.ensure_cells();
         let rects = g.child_rects();
         assert_eq!(rects[0], Rect::new(0.0, 0.0, 100.0, 20.0), "a 应占满");
         assert_eq!(
@@ -1656,7 +1756,7 @@ mod tests {
         g.col_widths = vec![50.0, 50.0];
         g.row_heights = vec![20.0];
         g.span("a", 2, 1).expect("ok");
-        let _ = g.auto_cells();
+        g.ensure_cells();
         assert!(g.warned_span_ids.is_empty(), "能放下时不应警告");
 
         // 再放一个放不下的
@@ -1673,9 +1773,9 @@ mod tests {
         g2.row_heights = vec![20.0];
         g2.span("a", 2, 1).expect("ok");
         g2.span("b", 2, 1).expect("ok");
-        let _ = g2.auto_cells();
-        let _ = g2.auto_cells();
-        let _ = g2.auto_cells();
+        g2.ensure_cells();
+        g2.ensure_cells();
+        g2.ensure_cells();
         assert_eq!(g2.warned_span_ids.len(), 1, "同一 id 只警告一次");
     }
 

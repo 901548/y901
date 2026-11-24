@@ -413,6 +413,35 @@ per-node、per-frame 的路径上；要么在初始化时读一次，要么用 `
 回归用例 `crates/y901-render/tests/shaped_no_font_copy.rs`（计数分配器）：
 一次绘制里单次最大分配必须远小于字体大小、总分配必须小于字体大小。
 变异验证：把 `.to_vec()` 加回去，立刻报"出现了 960 076 字节的单次分配"。
+### Grid：`children_clip` 的 O(n²) 与每子控件的重复累加
+
+`grid_perf` 只测 `Grid::measure/arrange`，不含 `UiTree` 的索引重建 —— 而后者对
+**每个子控件**调一次 `Grid::children_clip(child_rect)`。旧实现里它是：
+
+```rust
+self.children.iter().find(|c| c.rect() == cell_rect)   // 线性扫描！
+```
+
+于是 100×100 网格每次建索引/整帧重绘都是 **10k × 10k 次矩形比较**：
+
+| 场景（100×100 网格，10 001 节点） | 优化前 | 优化后 |
+|---|---|---|
+| 整帧渲染（含索引重建） | **59 300–60 900 µs** | **203–215 µs（≈290×）** |
+| `UiTree` 里的冷布局 | 583 µs | **434 µs** |
+| `grid_perf`（measure+arrange） | 1 196 µs | **770 µs（−36%）** |
+
+三处改动：
+
+1. `children_clip` 改**游标顺序查找**：调用方（建索引 / 绘制遍历）都按 `children`
+   顺序传 rect，从上次命中的下标往后扫 → **均摊 O(1)**；找不到才整圈回退（语义不变）。
+   另外把"每子控件裁切矩形"在 `arrange` 里缓存到 `child_clip_rects`，`children_clip`
+   只读数组，不再现算跨格并集。
+2. `child_rects` / `rect_for_span` 用**前缀和**算位置：旧实现每个子控件都
+   `col_widths.iter().take(col).sum()`，100 列 × 10k 子控件 ≈ 50 万次重复累加。
+   前缀和**按需现算**（不进字段）：白盒测试会直接写 `col_widths`，存字段必然失效。
+3. `auto_cells` 改**惰性**（`cells_dirty`）：`place`/`span`/`children_mut` 置脏，
+   正常帧直接返回。占用位图从 `Vec<Vec<bool>>`（100×100 = 101 次分配）压成
+   扁平 `Vec<bool>`（1 次），并加 `first_row` 游标避免每次从第 0 行重扫。
 ### 复跑方式
 
 ```powershell

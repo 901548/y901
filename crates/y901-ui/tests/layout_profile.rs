@@ -423,3 +423,51 @@ fn profile_render_cost_model() {
     }
     eprintln!("{out}");
 }
+/// **Grid 在真实树里的代价**：`grid_perf` 只测 `Grid::measure/arrange`，
+/// 不含 `UiTree` 的索引重建（那里会逐子调用 `children_clip`）。
+#[test]
+#[ignore = "剖析台：cargo test -p y901-ui --release --test layout_profile -- --ignored --nocapture"]
+fn profile_grid_in_tree() {
+    use y901_ui::grid::{Grid, GridTrack};
+
+    fn make() -> UiTree {
+        let (cols, rows) = (100usize, 100usize);
+        let mut children: Vec<Box<dyn Widget>> = Vec::with_capacity(cols * rows);
+        for i in 0..cols * rows {
+            children.push(Box::new(Leaf {
+                id: format!("c{i}"),
+                rect: Rect::ZERO,
+                key: None,
+            }));
+        }
+        let grid = Grid::new(
+            "grid",
+            vec![GridTrack::Auto; cols],
+            vec![GridTrack::Auto; rows],
+        )
+        .gap(1.0, 1.0)
+        .with_children(children);
+        UiTree::new(Box::new(grid))
+    }
+
+    let viewport = Size::new(4000.0, 2000.0);
+    let mut tree = make();
+    tree.layout(viewport, &Mono);
+
+    // 冷路径（视口交替 1px → 必须全量重排）
+    let (cold, worst) = time_layout(&mut tree, viewport, 10);
+    eprintln!("[grid-tree] nodes=10001 cold_avg={cold:.1}us worst={worst:.1}us");
+
+    // 整帧渲染
+    let mut sink = Sink::default();
+    tree.invalidate_all();
+    tree.render(&mut sink);
+    let mut full = 0.0;
+    for _ in 0..10 {
+        tree.invalidate_all();
+        let t = Instant::now();
+        tree.render(&mut sink);
+        full += t.elapsed().as_secs_f64() * 1e6;
+    }
+    eprintln!("[grid-tree] render_full_avg={:.1}us", full / 10.0);
+}

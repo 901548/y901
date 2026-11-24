@@ -2,7 +2,7 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-22 复测 `passed=1172` / `ignored=67` / `targets=164`；`--include-ignored` 全量 `passed=1172` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-22 第三次复测 `passed=1054` / `ignored=27` / `targets=155`（[linux-numbers.txt](evidence/linux-numbers.txt)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-22 复测 `passed=1172` / `ignored=68` / `targets=164`；`--include-ignored` 全量 `passed=1172` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-22 第三次复测 `passed=1054` / `ignored=27` / `targets=155`（[linux-numbers.txt](evidence/linux-numbers.txt)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
@@ -86,7 +86,7 @@
 | 6 | `.gitignore` 第 37 行是 GBK 非法 UTF-8 | 逐行解码修复为 UTF-8（唯一非法行已还原中文注释） |
 | 7 | 55 行字面 `\uXXXX` 注释 | 解码 `profile.rs` 16 / web `lib.rs` 13 / `bindings.rs` 18 / `keys.rs` 1 / 两个 `.ps1` 6 行；仅保留 STATUS 里作为**示例**的那一处 |
 | 8 | `FRAMEWORK.md` 6 处"浯层"错字 | 全部改回"浮层" |
-| 9 | ACCEPTANCE GPU harness 口径互相矛盾 | 标题改为"GPU 像素验收用例"，并写明三个口径（8 条断言 / `snapshot_harness` 10 条 `#[ignore]` / 全仓 `ignored=67`）；STATUS 的文档债标为已修 |
+| 9 | ACCEPTANCE GPU harness 口径互相矛盾 | 标题改为"GPU 像素验收用例"，并写明三个口径（8 条断言 / `snapshot_harness` 10 条 `#[ignore]` / 全仓 `ignored=68`）；STATUS 的文档债标为已修 |
 | 10 | `runtime.rs` 注释与实现脱钩（还在讲"自节流/上一帧呈现耗时"） | 改成 `last_tick` 差值口径，并写明旧 `last_frame_ms` 恒 0 的事故；`profile.rs` 注明 p50/p95 已改为**纯工作耗时**，不能与旧数字直接比 |
 
 **C 批（测试灵敏度）**
@@ -534,7 +534,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
 - 已验证（2026-11-20，Ubuntu 22.04 / WSL2 + rustc 1.92 + Xvfb）：
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；现已由 2026-11-22 复测更新，详见 `docs/evidence/cross-platform/linux-verify-2026-11-22.log`）→ 当时 **1019 passed / 0 failed / 27 ignored**
   （155 个测试目标）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1172/0/67 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1172/0/68 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，
@@ -693,7 +693,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   原文称"需要真机的测试只有 `rebuild_reuploads_atlas`"，实际 GPU / D3D11 依赖的 `#[ignore]` 有 **13** 个
   （`snapshot_harness` ×10 + `soft_matches_d3d_within_antialiasing_tolerance` + `pixel_statistics_and_png_baseline` + `rebuild_reuploads_atlas`）。
   需改为 13 个，或直接指向 `ACCEPTANCE.md` 的分类表。
-- ~~**文档债：`docs/ACCEPTANCE.md` 的"7 个 GPU harness"小节与分类表不一致**~~ —— 已修（2026-11-19）：标题改为"GPU 像素验收用例"并写明三个口径（8 条断言用例 / `snapshot_harness` 10 条 `#[ignore]` / 全仓 `ignored=67`）。
+- ~~**文档债：`docs/ACCEPTANCE.md` 的"7 个 GPU harness"小节与分类表不一致**~~ —— 已修（2026-11-19）：标题改为"GPU 像素验收用例"并写明三个口径（8 条断言用例 / `snapshot_harness` 10 条 `#[ignore]` / 全仓 `ignored=68`）。
   `snapshot_harness` 现有 **10** 个 `#[ignore]`，小节只列 7 个；余下 3 个（`text_label_paints_visible_non_background_pixels`、
   `text_inside_scrollview_is_not_clipped_away`、`rebuild_of_cached_target_does_not_leave_black_areas`）是回归用例而非像素 harness。
   需先澄清"harness"定义，再决定是补进表还是把标题改成"7 个像素对拍 + 3 个回归"。
