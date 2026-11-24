@@ -139,4 +139,7 @@
 #   default cargo test --workspace --no-fail-fast   passed 1172, failed 0, ignored 68 / 165 个测试目标
 #   (新增 1 个测试目标 shaped_measure_matches_draw，`#![cfg(feature = "shaping")]`：
 #    默认构建下该二进制为空，所以 passed 不变；`--all-features` 下才计入)
-1172
+# Measured at 2026-11-24 (软光栅渐变轴对齐快路):
+#   default cargo test --workspace --no-fail-fast   passed 1176, failed 0, ignored 68 / 166 个测试目标
+#   (新增 4 条 gradient_golden：垂直/水平/半透明/斜向 的像素金标；passed 1172 → 1176)
+1176

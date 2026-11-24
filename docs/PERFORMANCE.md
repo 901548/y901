@@ -462,6 +462,26 @@ self.children.iter().find(|c| c.rect() == cell_rect)   // 线性扫描！
 
 变异验证：把 shaped 测量关掉，立刻报
 `שלום: measure_text=32 与 draw_text 推进=36.757813 不一致`。
+### 软光栅渐变：轴对齐快路（4.5 ms → 0.09 ms，逐像素不变）
+
+`fill_gradient_rect_dir` 原来逐像素算 lerp + 三次 clamp。1280×800 整屏要 **4.5 ms**，
+是同尺寸 `fill_rect` 的 **50 倍** —— 而主题背景（`WidgetStyle::paint_bg`）几乎全是
+**轴对齐**渐变，垂直占绝大多数。
+
+快路：垂直渐变（`ux == 0`）每行颜色恒定 → 一行算一次颜色、`fill` 整行；
+水平渐变（`uy == 0`）每列恒定 → 算一遍列颜色到复用缓冲 `grad_lut`、再按行铺。
+斜向仍走原通用路径。颜色计算抽成单一闭包 `px_at`，保证快路与通用路**逐位一致**。
+
+| `soft_fill_rate_1280x800` | 优化前 | 优化后 |
+|---|---|---|
+| `fill_rect` | 0.09–0.10 ms | 0.09 ms（不变） |
+| `gradient` | **4.50–4.53 ms** | **0.09–0.10 ms（≈50×）** |
+| `round_rect`(SDF) | 0.68–0.72 ms | 0.68 ms（不变） |
+
+**像素等价性怎么证**：四个场景（垂直整屏 / 水平 / 半透明垂直 / 斜向）的
+`frame_hash()` 在**旧实现**上录下来（`git stash` A/B），现在钉成金标
+`crates/y901-render/tests/gradient_golden.rs` —— 新旧哈希**逐位相同**，
+任何快路算错都会立刻红。
 ### 复跑方式
 
 ```powershell

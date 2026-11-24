@@ -85,6 +85,12 @@ pub struct SoftBackend {
     /// 默认 `false` = **格宽布局**（所有 ASCII 占 1 格）——桌面与 GPU 路径因此逐像素不变。
     /// web 端启用后字符按字体自身的 `hmtx` 推进，比例字体才不会挤在一起。
     proportional_text: bool,
+
+    /// 水平渐变的**每列颜色缓存**（复用，避免每次绘制都分配）。
+    ///
+    /// 只在 `fill_gradient_rect_dir` 的"水平渐变"快路里用：那里的颜色逐列恒定，
+    /// 算一遍再按行铺即可（行数通常远多于列数）。
+    grad_lut: Vec<u32>,
 }
 
 use crate::font::glyph_top;
@@ -186,6 +192,7 @@ impl SoftBackend {
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
             dpi_scale: 1.0,
             proportional_text: false,
+            grad_lut: Vec::new(),
         })
     }
 
@@ -211,6 +218,7 @@ impl SoftBackend {
             clear_color: Color::rgba(0.02, 0.02, 0.03, 1.0),
             dpi_scale: 1.0,
             proportional_text: false,
+            grad_lut: Vec::new(),
         })
     }
 
@@ -1309,29 +1317,85 @@ impl RenderCtx for SoftBackend {
         let y1 = area.bottom().ceil() as i32;
         let x0 = area.x.floor() as i32;
         let x1 = area.right().ceil() as i32;
+        let opacity = self.state.current_opacity();
+        let opaque = a0 >= 1.0 && da == 0.0 && opacity >= 1.0;
+
+        // 像素颜色只由 `t` 决定；**单独一个函数**保证快路与通用路逐位一致。
+        let px_at = |tt: f32, opaque: bool| -> Px {
+            let r = (r0 + dr * tt).clamp(0.0, 1.0);
+            let g = (g0 + dg * tt).clamp(0.0, 1.0);
+            let b = (b0 + db * tt).clamp(0.0, 1.0);
+            if opaque {
+                // 不透明渐变是常见情况：直接写，省掉混合的三次除法
+                (255u32 << 24)
+                    | ((r * 255.0 + 0.5) as u32) << 16
+                    | ((g * 255.0 + 0.5) as u32) << 8
+                    | (b * 255.0 + 0.5) as u32
+            } else {
+                pack(Color::rgba(r, g, b, a0 + da * tt), 1.0, opacity)
+            }
+        };
+
+        // ---- **轴对齐快路** ----
+        //
+        // 垂直渐变（`ux == 0`）每一行的颜色**完全相同**，水平渐变（`uy == 0`）每一列相同。
+        // 主题背景几乎都是这种形状，而旧实现照样逐像素算 lerp + 三次 clamp ——
+        // 1280×800 整屏要 4.2 ms，是同尺寸 `fill_rect` 的 45 倍。
+        if ux.abs() < 1e-6 {
+            let width = (x1 - x0).max(0) as usize;
+            for y in y0..y1 {
+                let ly = (y as f32 + 0.5 - rect.y) * inv_h;
+                let tt = (ly * uy).clamp(0.0, 1.0);
+                let px = px_at(tt, opaque);
+                let row = (y as u32 * self.width) as usize;
+                let start = row + x0 as usize;
+                let end = start + width;
+                if opaque {
+                    if let Some(dst) = self.buf.get_mut(start..end) {
+                        dst.fill(px);
+                    }
+                } else if let Some(dst) = self.buf.get_mut(start..end) {
+                    for d in dst {
+                        *d = blend(*d, px);
+                    }
+                }
+            }
+            return;
+        }
+        if uy.abs() < 1e-6 {
+            // 每一列一个颜色：**算一遍**，再按行铺（行数远多于列数时省掉大量浮点运算）
+            let mut lut = std::mem::take(&mut self.grad_lut);
+            lut.clear();
+            lut.reserve((x1 - x0).max(0) as usize);
+            for x in x0..x1 {
+                let tt = (((x as f32 + 0.5 - rect.x) * inv_w) * ux).clamp(0.0, 1.0);
+                lut.push(px_at(tt, opaque));
+            }
+            for y in y0..y1 {
+                let row = (y as u32 * self.width) as usize;
+                let start = row + x0 as usize;
+                let end = start + lut.len();
+                if opaque {
+                    if let Some(dst) = self.buf.get_mut(start..end) {
+                        dst.copy_from_slice(&lut);
+                    }
+                } else if let Some(dst) = self.buf.get_mut(start..end) {
+                    for (d, s) in dst.iter_mut().zip(lut.iter()) {
+                        *d = blend(*d, *s);
+                    }
+                }
+            }
+            self.grad_lut = lut;
+            return;
+        }
+
+        // ---- 通用（斜向）路径 ----
         for y in y0..y1 {
             let row = (y as u32 * self.width) as usize;
             let ly = (y as f32 + 0.5 - rect.y) * inv_h;
             let mut t = ((x0 as f32 + 0.5 - rect.x) * inv_w) * ux + ly * uy;
-            let opaque = a0 >= 1.0 && da == 0.0 && self.state.current_opacity() >= 1.0;
             for x in x0..x1 {
-                let tt = t.clamp(0.0, 1.0);
-                let r = (r0 + dr * tt).clamp(0.0, 1.0);
-                let g = (g0 + dg * tt).clamp(0.0, 1.0);
-                let b = (b0 + db * tt).clamp(0.0, 1.0);
-                let px = if opaque {
-                    // 不透明渐变是常见情况：直接写，省掉混合的三次除法
-                    (255u32 << 24)
-                        | ((r * 255.0 + 0.5) as u32) << 16
-                        | ((g * 255.0 + 0.5) as u32) << 8
-                        | (b * 255.0 + 0.5) as u32
-                } else {
-                    pack(
-                        Color::rgba(r, g, b, a0 + da * tt),
-                        1.0,
-                        self.state.current_opacity(),
-                    )
-                };
+                let px = px_at(t.clamp(0.0, 1.0), opaque);
                 let i = row + x as usize;
                 if let Some(dst) = self.buf.get_mut(i) {
                     if opaque {
