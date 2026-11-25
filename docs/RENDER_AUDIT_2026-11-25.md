@@ -256,6 +256,48 @@ ctx.put_image_data(&image_data, 0.0, 0.0);
 
 ---
 
+#### 4.3.1 Web/WASM 深读补充（独立审计返回，已逐条回源码核对）
+
+**最重要的更正**：Web 后端**没有任何 Canvas 2D 绘制调用**。`bindings.rs` 只绑定了
+`putImageData` / `createImageData`（[bindings.rs:132-162](../crates/y901-backend-web/src/bindings.rs)），
+全仓 grep `fillRect|strokeRect|fillText|setTransform|globalAlpha|roundRect` **零命中**。
+所以 Web 的"渲染器"就是**同一个 CPU 软光栅 + 一次整帧像素上传**，不存在"命令映射"这一层。
+之前若有文档暗示 web 走 canvas 图元，那是错的。
+
+已核对的具体成本与缺陷：
+
+1. **`bgra_to_rgba` 逐像素 4 次 `push`**（[present.rs:53-62](../crates/y901-backend-web/src/present.rs)）：
+   800×600 = **192 万次 push**，外加一个新 `Vec<u8>`。改成 `chunks_exact(4)` 直接写
+   `out[i..i+4]`（或复用缓冲）是一行级优化。
+2. **每帧新建 `ImageData`**（`create_image_data`，[present.rs:42](../crates/y901-backend-web/src/present.rs)），
+   没有复用/双缓冲 → 每帧约 1.9 MB JS 堆垃圾（800×600 @60fps ≈ 115 MB/s GC 压力）。
+3. **每帧新建并丢弃一个 rAF `Closure`**（`lib.rs:974-1079`："先 drop 旧闭包，再 wrap 新闭包"），
+   外加每帧一次 `global_window()` 构造 `JsValue`、一次 `drain(..).collect()`。
+4. **atlas 记账在软光栅路径上从不推进**（本轮确认）：`text.begin_frame()` / `text.take_dirty()`
+   只有 D3D 后端调用（[backend/mod.rs:236,246](../crates/y901-backend-win32/src/backend/mod.rs)），
+   `SoftBackend` **从不调用**。后果：`MyFontEngine.frame` 停在 0 →
+   `evict_one` 的"热集保护"退化（只能走"全表最冷"分支，
+   [engine.rs:738-755](../crates/y901-render/src/font_engine/engine.rs)），
+   且 `dirty: Vec<DirtyRect>` 只增不减（每个被光栅化的字形一条，**不随帧增长**，
+   但永不释放）。**这条同时影响 Win32 `--force-soft`、X11、Web 三条软渲染路径**，
+   是目前唯一"共享渲染代码在不同后端行为分叉"的实例。
+5. **DPR 恒为 1.0**：全仓无 `devicePixelRatio` 读取，`canvas.width = client_width`（CSS 像素）；
+   `SoftBackend::set_dpi_scale` 在 web 上从不调用。这是 `docs/WASM.md:103` **明确声明的取舍**，
+   应记为"已知限制"而非缺陷（HiDPI 下整页被浏览器放大，偏糊）。
+6. **`present` 没有任何长度校验**：`ImageData` 用 `canvas` 属性尺寸、
+   像素来自 `soft.pixels()`，两者只靠"`apply_pending` 是唯一同时改它们的入口"这一隐式不变式。
+   一旦不同步（例如 zoom 未触发 `resize`），`TypedArray.set` 会**留半帧**或抛 `RangeError`
+   （wasm trap）。**未复现，标 uncertain**，但缺少防御是事实。
+7. **Canvas 上下文丢失无恢复**：`Present::new` 只取一次 `getContext("2d")`，
+   `None` 就永远静默跳过上屏（[present.rs:20-26](../crates/y901-backend-web/src/present.rs)），
+   没有 `console.error`、没有重试。GPU reset / 标签页丢弃恢复后，应用会继续 60Hz 空转、画面不动。
+8. **字体加载前是"空字形引擎"**：`font_engine.rs:48-60` 的 fallback 画不出任何字形，
+   `y901_font_loaded` 才换真引擎 + 重排 + 整帧重画（[wasm_entry.rs:135-176](../crates/y901-shell/src/wasm_entry.rs)）。
+   首屏到字体 fetch 完成之间**文字不可见**（当前 demo 字体 19.7 MB，首屏窗口很长）。
+   这是已知设计，但对"首屏体验"是硬伤。
+9. **rAF 无条件自续**：即使没有任何脏区也每 vsync 唤醒一次（`render` 才返回 `Skipped`），
+   空闲功耗固定 60 Hz；且 wasm 侧没有任何计时仪器（`y901_runtime::profile` 只服务 `run_loop`），
+   `lib.rs:269` 里"release 下 800×600 全帧约 15ms"这句话**在仓库内找不到测量依据**（标 uncertain）。
 ## 5. 已经完成的性能优化（有实测、可复跑）
 
 | 项 | 前 | 后 | 证据 |
@@ -295,6 +337,8 @@ ctx.put_image_data(&image_data, 0.0, 0.0);
 | B10 | D3D 图集上传**每帧整张 4 MiB 克隆** + 每脏区 patch 分配 | `self.atlas_data = data.to_vec()`（d3d11.rs:2223）、`vec![0u8; row_pitch*height]`（:2245） | 任何一帧有字形被光栅化就付一次；D3D 侧本来只需要区域更新 |
 | B11 | D3D 热路径里的 `env::var`：`Y901_GAMMA` 每帧、`Y901_DEBUG_BATCHES` **每脏区** | d3d11.rs:2496 / :1957 | 全局锁 + 分配；与本轮已修的软光栅 `Y901_PAINT_TRACE` 同类 |
 | B12 | **实例上限 10 000，超出静默截断**（进程级只告警一次） | `instances.len().min(INSTANCE_CAPACITY)`（d3d11.rs:2504） | 富 UI（100×100 网格带文字）可达；越界后"后半帧消失"且无后续日志 —— 正确性问题，不只是性能 |
+| B13 | Web 每帧：`bgra_to_rgba`（192 万次 `push` + 新 `Vec`）+ 新 `ImageData` + 新 rAF `Closure` + `global_window()` `JsValue` | present.rs:53-62、:42；lib.rs:974-1079 | 800×600 @60fps ≈ 115 MB/s JS 堆垃圾；GC 抖动会直接吃掉帧预算 |
+| B14 | **软渲染路径不推进图集记账**：`begin_frame`/`take_dirty` 只有 D3D 调用 | backend/mod.rs:236,246 vs `SoftBackend` 从不调用；engine.rs:738-755 | 影响 Win32 `--force-soft` / X11 / Web：LRU 热集保护退化、`dirty` 列表永不释放 |
 
 **不可确认/需要仪器才能判断**：GPU 侧真实耗时（D3D 没有 GPU timestamp query / disjoint query）；
 X11 IPC 占比（只有整帧基准，无分段）；Web 上 `putImageData` vs 光栅各自占比。
@@ -482,6 +526,20 @@ for scene in SCENES {                 // move / delete / hide / show / clip / z-
 | **B** | `render_bench` 统一入口 + JSON 输出，先只接 **soft + D3D**，场景 5 个 | 低 | RENDER-01 的骨架；顺便把"现有 4 条预算"变成结构化基线 |
 | **C** | `PacketRecorder` + `PaintCommand`（**只收集、不执行**）+ 一条"命令序列快照"测试 | 低（纯新增文件） | RENDER-02 的最小可用版本；能立刻量化"一个控件画了多少条命令"，为 RENDER-03 立靶 |
 
+**深读后新增的"零风险清单"**（不改变任何像素、不改公开 API，可在批准后并入 A/B/C 任一提交，
+每条都能独立回滚；建议**先做这 6 条**，因为它们让后面的性能数字变干净）：
+
+| # | 改动 | 位置 | 预期收益 |
+|---|---|---|---|
+| Z1 | `Y901_GAMMA`/`Y901_DEBUG_BATCHES`/`Y901_GAMMA_AB`/`Y901_SCISSOR_TEST`/`Y901_SNAPSHOT` → `OnceLock` 缓存 | d3d11.rs:1957,2496,2586,2639,2693 | 去掉每帧/每脏区的 `env::var`（全局锁 + 分配） |
+| Z2 | `update_atlas` 去掉 `data.to_vec()`，改复用缓冲 | d3d11.rs:2223 | 每上传帧省 4 MiB 拷贝 |
+| Z3 | `bgra_to_rgba` 改就地写/复用缓冲，去掉每像素 4 次 `push` | web/present.rs:53-62 | 800×600 省 192 万次 push + 1.9 MB 分配 |
+| Z4 | Web `ImageData` 复用（一次性建，按帧 `set_from`） | web/present.rs:42 | 每帧省一个 1.9 MB JS 对象 |
+| Z5 | 软渲染路径补 `text.begin_frame()`（帧首）并周期性 `take_dirty()` 丢弃 | soft.rs 各渲染入口 | 修 B14：LRU 热集保护生效、`dirty` 不再只增不减 |
+| Z6 | `build_batches()` 与 `self.dirty.clone()` 改复用 `Vec` | mod.rs:339/868、d3d11.rs:2551 | 每帧省 2 次分配 |
+
+> 这 6 条**不做**任何架构改动，但必须先跑 `hash-gate` 与本批新增的 partial oracle 确认像素不变；
+> 其中 Z5 会改变图集淘汰时机，属于"行为可能变化"的一项，必须单独提交、单独验证。
 **明确不做**（这一批）：
 - 不动 D3D/X11/Web 的执行路径（避免同时红三个平台）；
 - 不改 `Widget::render` 签名；
@@ -514,9 +572,9 @@ for scene in SCENES {                 // move / delete / hide / show / clip / z-
 - 未审计 `backend/font.rs`（1192 行）的图集上传细节，只确认了 `sync_atlas` 是增量的；
 - 未审计 `d3d11.rs` 的 COM 引用计数与设备丢失恢复全路径（已有 FINDINGS 在
   `docs/AUDIT_2026-11-25.md` 第 4 条）；
-- 三个只读审计子代理中，**D3D11 与 X11 的深读已返回并逐条回源码核对后并入**
-  （§4.1.1、§4.2.1，以及 B9–B12）；**Web/WASM 深读在本轮结束时仍未返回**，
-  §4.3 的 Web 结论只基于我本人读的 `lib.rs` / `present.rs`。
+- 三个只读审计子代理（D3D11 / X11 / Web 深读）**均已返回**，且每条都在并入前回到源码核对过
+  （§4.1.1、§4.2.1、§4.3.1，以及 B9–B14）。子代理报告里标 `uncertain` 的项我在文中保持
+  `uncertain`，没有升级成结论。
 - 子代理报告里标 `uncertain` 的三项（图集 `compact_atlas` 在渲染中途改 UV 是否可见、
   设备重建后 `self.images` 里的旧纹理行为、X11 非 TrueColor visual 的颜色错乱范围）
   我**没有**验证，本文也按 `uncertain` 保留，不能当成结论引用。
