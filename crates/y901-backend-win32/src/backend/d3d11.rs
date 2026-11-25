@@ -93,6 +93,42 @@ pub const INSTANCE_CAPACITY: usize = 10_000;
 /// 实例超限告警的"只打一次"开关（跨进程级；避免每帧刷屏）。
 static INSTANCE_OVERFLOW_WARNED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+// ---------------------------------------------------------------------------
+// 诊断开关：进程级缓存（Z1）
+// ---------------------------------------------------------------------------
+//
+// 为什么缓存：这两个开关原来直接读环境变量，而读取点都在**热路径**里 ——
+// `Y901_GAMMA` 每帧一次（`Gfx::render_batched` 开头），`Y901_DEBUG_BATCHES`
+// **每块脏区一次**（`draw_scene` 内，因为 `draw_scene` 是逐脏区调用的）。
+// `env::var` / `var_os` 每次都要拿环境块锁，`env::var` 还要分配一个 `String`。
+//
+// 语义为什么不变：这两个都是**诊断开关**，语义是"进程启动时决定"。
+// 运行中改它们本来也不会让已经建好的管线状态（gamma 常量缓冲、批次的
+// `Debug` 打印格式）回溯生效；而仓库里没有任何代码在运行中改这两个键
+// （测试里唯一 `set_var` 的键是 `Y901_FONT`，且它走的是冷路径、本轮不动）。
+// 用 `OnceLock` 把"启动时决定"这件事显式化，顺带把读取降到一次。
+//
+// 与 `Y901_SIMULATE_PRESENT_FAIL`（`backend/mod.rs`）同一写法，风格一致。
+
+/// `Y901_DEBUG_BATCHES` 是否设置（进程级缓存）。
+fn debug_batches_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("Y901_DEBUG_BATCHES").is_some())
+}
+
+/// `Y901_GAMMA` 的解析值（进程级缓存）；未设置或解析失败时回退 `1/2.2`。
+///
+/// 表达式与缓存前**逐字相同**（`var().ok().and_then(parse).unwrap_or(1.0/2.2)`），
+/// 只是把结果存起来；`NaN`/`inf` 之类的可解析值行为也保持一致。
+fn gamma_from_env() -> f32 {
+    static GAMMA: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *GAMMA.get_or_init(|| {
+        std::env::var("Y901_GAMMA")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(1.0 / 2.2)
+    })
+}
 
 /// 一个绘制实例（轴对齐四边形）。
 ///
@@ -1954,7 +1990,7 @@ unsafe fn draw_scene(
     // 批次循环：没有批次信息时行为与改动前**完全一致**（单次 draw）。
     // 诊断开关（`Y901_DEBUG_BATCHES=1`）：打印每帧的批次切分与 draw 实参。
     // 有意留在生产代码里 —— Grid+Image 空白这个 bug 就是靠它定位的，见 FRAMEWORK §16。
-    let debug_batches = std::env::var_os("Y901_DEBUG_BATCHES").is_some();
+    let debug_batches = debug_batches_on();
     if batches.is_empty() {
         if debug_batches {
             eprintln!("[batches] empty: single draw_instances(count={count})");
@@ -2493,10 +2529,7 @@ impl Gfx {
 
         let (w, h) = (self.width as f32, self.height as f32);
         // padding.x 用作 ClearType gamma 指数（可用 Y901_GAMMA 覆盖，便于 A/B）
-        let gamma = std::env::var("Y901_GAMMA")
-            .ok()
-            .and_then(|v| v.parse::<f32>().ok())
-            .unwrap_or(1.0 / 2.2);
+        let gamma = gamma_from_env();
         let globals = [w, h, gamma, 0.0];
         context
             .update_constant_buffer(&pipeline.constant_buffer, globals.as_ptr() as *const c_void);
@@ -3177,6 +3210,140 @@ fn render_preconditions_ok(atlas_ready: bool, width: u32, height: u32) -> bool {
     atlas_ready && width > 0 && height > 0
 }
 
+#[cfg(test)]
+mod env_cache_tests {
+    use super::{debug_batches_on, gamma_from_env};
+
+    /// 缓存值必须与"直接读环境变量"逐位一致（语义不变的最直接证据）。
+    ///
+    /// 前提：本进程内没有任何代码修改这两个键 —— 仓库里唯一 `set_var` 的是
+    /// `Y901_FONT`（见 `tests/font_3c_pixels.rs` 的 `EnvGuard`），与此无关。
+    #[test]
+    fn cached_debug_flag_matches_a_fresh_read() {
+        let fresh = std::env::var_os("Y901_DEBUG_BATCHES").is_some();
+        assert_eq!(
+            debug_batches_on(),
+            fresh,
+            "缓存值必须与直接读取一致（Y901_DEBUG_BATCHES）"
+        );
+        // 再读一次：缓存必须稳定，不能每次重新读环境
+        assert_eq!(debug_batches_on(), fresh);
+    }
+
+    /// `Y901_GAMMA`：缓存值的比特必须与**原表达式**的结果完全相同。
+    ///
+    /// 用 `to_bits()` 比较而不是 `==`：`NaN`/`-0.0` 在 `==` 下会给出误导结果，
+    /// 而这两个值恰好是 `parse::<f32>()` 能接受、shader 也能收到的输入。
+    #[test]
+    fn cached_gamma_matches_a_fresh_parse() {
+        let fresh = std::env::var("Y901_GAMMA")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(1.0 / 2.2);
+        assert_eq!(
+            gamma_from_env().to_bits(),
+            fresh.to_bits(),
+            "缓存值必须与原表达式逐位一致（Y901_GAMMA）"
+        );
+    }
+
+    /// 微基准：`env` 直读 vs 缓存读取，以及"直读 + 解析"vs 缓存（gamma 的真实开销）。
+    ///
+    /// 跑法：
+    /// ```text
+    /// cargo test -p y901-backend-win32 --lib env_cache -- --ignored --nocapture
+    /// ```
+    /// 输出为 `ns/op`（每轮 100 万次，取 5 轮中位数），只在本机比较，不跨机器引用。
+    #[test]
+    #[ignore = "微基准：cargo test -p y901-backend-win32 --lib env_cache -- --ignored --nocapture"]
+    fn bench_env_lookup_vs_cached() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        const N: usize = 1_000_000;
+        let mut var_os_ns = Vec::with_capacity(5);
+        let mut cached_flag_ns = Vec::with_capacity(5);
+        let mut var_parse_ns = Vec::with_capacity(5);
+        let mut cached_gamma_ns = Vec::with_capacity(5);
+
+        for _ in 0..5 {
+            let t = Instant::now();
+            for _ in 0..N {
+                black_box(std::env::var_os("Y901_DEBUG_BATCHES"));
+            }
+            var_os_ns.push(t.elapsed().as_nanos() as f64 / N as f64);
+
+            let t = Instant::now();
+            for _ in 0..N {
+                black_box(debug_batches_on());
+            }
+            cached_flag_ns.push(t.elapsed().as_nanos() as f64 / N as f64);
+
+            let t = Instant::now();
+            for _ in 0..N {
+                black_box(
+                    std::env::var("Y901_GAMMA")
+                        .ok()
+                        .and_then(|v| v.parse::<f32>().ok())
+                        .unwrap_or(1.0 / 2.2),
+                );
+            }
+            var_parse_ns.push(t.elapsed().as_nanos() as f64 / N as f64);
+
+            let t = Instant::now();
+            for _ in 0..N {
+                black_box(gamma_from_env());
+            }
+            cached_gamma_ns.push(t.elapsed().as_nanos() as f64 / N as f64);
+        }
+
+        // 补充一个"键确实存在"的对照：上面两次 `var_os/var("Y901_*")` 在未设置时
+        // 走的是"找不到"快路径（不分配）；`PATH` 一定存在，能代表"设置了开关"的真实开销。
+        let mut var_existing_ns = Vec::with_capacity(5);
+        for _ in 0..5 {
+            let t = Instant::now();
+            for _ in 0..N {
+                black_box(std::env::var("PATH").is_ok());
+            }
+            var_existing_ns.push(t.elapsed().as_nanos() as f64 / N as f64);
+        }
+
+        fn median(v: &mut [f64]) -> f64 {
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v[v.len() / 2]
+        }
+        let (a, b, c, d) = (
+            median(&mut var_os_ns),
+            median(&mut cached_flag_ns),
+            median(&mut var_parse_ns),
+            median(&mut cached_gamma_ns),
+        );
+        eprintln!(
+            "[env-cache] Y901_DEBUG_BATCHES: var_os={a:.1}ns cached={b:.2}ns ({:.0}x)",
+            a / b.max(f64::MIN_POSITIVE)
+        );
+        eprintln!(
+            "[env-cache] Y901_GAMMA:        var+parse={c:.1}ns cached={d:.2}ns ({:.0}x)",
+            c / d.max(f64::MIN_POSITIVE)
+        );
+        let e = median(&mut var_existing_ns);
+        eprintln!("[env-cache] 对照（长值键 PATH，上界）: var={e:.1}ns");
+        // 短值键：`OS` 在 Windows 上恒为 `Windows_NT`，与 `Y901_GAMMA=1` 同量级，
+        // 是"开关确实被设置"时更贴近真实开销的对照。
+        let mut var_short_ns = Vec::with_capacity(5);
+        for _ in 0..5 {
+            let t = Instant::now();
+            for _ in 0..N {
+                black_box(std::env::var("OS").is_ok());
+            }
+            var_short_ns.push(t.elapsed().as_nanos() as f64 / N as f64);
+        }
+        let f = median(&mut var_short_ns);
+        eprintln!(
+            "[env-cache] 对照（短值键 OS，贴近 Y901_GAMMA=1）: var={f:.1}ns → 设为开时每帧/每脏区曾付这个量级"
+        );
+    }
+}
 #[cfg(test)]
 mod render_guard_tests {
     use super::{render_preconditions_ok, rgba_atlas_subresource};

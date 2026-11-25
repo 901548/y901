@@ -162,4 +162,7 @@
 # Measured at 2026-11-25 (复审第三批：DPI 上下界 / 视图几何 / 真空断言):
 #   default cargo test --workspace --no-fail-fast   passed 1215, failed 0, ignored 68 / 177 个测试目标
 #   (新增 dpi_minmax 4 / widget_geometry 6 / scroll 内部 4；passed 1201 → 1215)
-1215
+# Measured at 2026-11-25 (Z1 环境变量缓存：D3D11 诊断开关 OnceLock):
+#   default cargo test --workspace --no-fail-fast   passed 1217, failed 0, ignored 69 / 177 个测试目标
+#   (新增 d3d11::env_cache_tests：2 条正确性用例 + 1 条 #[ignore] 微基准；passed 1215 → 1217，ignored 68 → 69)
+1217
