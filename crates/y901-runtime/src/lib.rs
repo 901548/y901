@@ -22,6 +22,11 @@ pub mod runtime;
 /// 事件循环需要的最小窗口抽象（原 y901-backend-common::window）。
 pub mod window;
 
+// 模块自带 `//!` 文档（含 intra-doc 链接）。**不要在这里加 `///`**：
+// 外层文档与内层文档会被合并，而链接按**父作用域**（crate 根）解析，
+// 于是 `[Stage]` / `[enabled]` 这些模块内条目会全部变成断链（rustdoc -D warnings 会红）。
+pub mod render_stats;
+
 /// 业务侧回调：App 与 Demo 实现它。
 ///
 /// 运行时不认识任何业务，只在合适的时机回调这些方法。
