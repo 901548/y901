@@ -2483,7 +2483,7 @@ impl Gfx {
     /// 崩溃点在绘制调用内部，而不是调用者。
     pub unsafe fn render(&mut self, instances: &[Instance], sync_interval: u32) -> Hresult {
         // 没有图片时走这条：等价于改动前的单次 draw。
-        self.render_batched(instances, &[], sync_interval)
+        self.render_batched_timed(instances, &[], sync_interval, None)
     }
 
     /// 带批次的提交：同一帧内按 `batches` 逐段绑纹理并绘制。
@@ -2499,6 +2499,22 @@ impl Gfx {
         batches: &[Batch],
         sync_interval: u32,
     ) -> Hresult {
+        // **公开签名保持不变**（已发布 crate 的兼容性）：计时走 crate 内的
+        // `render_batched_timed`，避免把后端私有类型 `BackendAcc` 泄到公开面。
+        self.render_batched_timed(instances, batches, sync_interval, None)
+    }
+
+    /// 带分阶段计时的提交实现（crate 内部；`acc == None` 时零计时开销）。
+    pub(crate) unsafe fn render_batched_timed(
+        &mut self,
+        instances: &[Instance],
+        batches: &[Batch],
+        sync_interval: u32,
+        mut acc: Option<&mut crate::backend::BackendAcc>,
+    ) -> Hresult {
+        // 统计关闭时 `acc == None`：下面所有 `Option` 操作都不成立，
+        // **一次 `Instant::now()` 都不会调用**。
+        let submit_start = acc.as_ref().map(|_| std::time::Instant::now());
         // 把 # Safety 里"图集已同步"的承诺在 debug 构建下变成可执行断言。
         debug_assert!(
             render_preconditions_ok(
@@ -2535,6 +2551,9 @@ impl Gfx {
             .update_constant_buffer(&pipeline.constant_buffer, globals.as_ptr() as *const c_void);
 
         let count = instances.len().min(INSTANCE_CAPACITY);
+        if let Some(a) = acc.as_deref_mut() {
+            a.drawn = Some(count as u32);
+        }
         // **绝不静默丢实例**：以前超出 `INSTANCE_CAPACITY` 的部分直接被 `min()` 截掉，
         // 画面上表现为"后半帧的控件整体消失"，且没有任何日志可查（排查代价极高）。
         // 这里改为：超限时明确告警（每个进程只打一次，避免刷屏），并如实报告丢弃数量。
@@ -2759,6 +2778,13 @@ impl Gfx {
             self.snapshot_requested = false;
         }
 
+        // ---- 提交段收口（到 present 调用**之前**为止）----
+        // 这样 `backend_submit` 与 `present_blocking` 互斥：二者相加不会超过
+        // `window.render` 的实际墙钟，第 2 阶段的 `backend_stage_sum` 断言继续成立。
+        if let (Some(a), Some(t)) = (acc.as_deref_mut(), submit_start) {
+            a.submit.add(t.elapsed());
+        }
+
         // **无头模式**：渲染与回读照常做，但**不 Present**。
         //
         // 为什么需要它：CI 的 Windows runner 没有 GPU，只能走 WARP 软件设备；
@@ -2772,7 +2798,13 @@ impl Gfx {
             return 0; // S_OK：本帧"已呈现"给回读，不呈现给屏幕
         }
 
-        swap_chain.present(sync_interval)
+        // ---- `present_blocking`：只覆盖这一个调用 ----
+        let present_start = acc.as_ref().map(|_| std::time::Instant::now());
+        let hr = swap_chain.present(sync_interval);
+        if let (Some(a), Some(t)) = (acc.as_mut(), present_start) {
+            a.present.add(t.elapsed());
+        }
+        hr
     }
 
     /// 请求在**下一帧 present 之前**回读像素。

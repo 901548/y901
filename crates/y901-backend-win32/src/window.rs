@@ -12,6 +12,32 @@ use std::sync::{Mutex, OnceLock};
 /// 碎片化时 draw 次数会翻倍，反而比一次整帧更慢。
 const MAX_DIRTY_RECTS: usize = 16;
 
+/// 脏区计数（供统计）：`(块数, 覆盖像素数)`。
+///
+/// `full` = 本帧整窗重绘（含"碎片超限升级"的情况）→ 块数记 1、面积记整窗。
+/// 面积**不扣重叠**（各块之和），与 `FrameCounters::damaged_pixels` 的口径一致。
+fn dirty_stats(
+    list: Option<&[(i32, i32, i32, i32)]>,
+    full: bool,
+    viewport: (u32, u32),
+) -> (u32, u64) {
+    if full {
+        return (1, (viewport.0 as u64) * (viewport.1 as u64));
+    }
+    match list {
+        Some(rects) => (
+            rects.len() as u32,
+            rects
+                .iter()
+                .map(|&(l, t, r, b)| ((r - l).max(0) as u64) * ((b - t).max(0) as u64))
+                .sum(),
+        ),
+        // 既不是整窗、又没有矩形列表：不可能发生（`plan_dirty_rects` 的契约），
+        // 记 0 而不是猜。
+        None => (0, 0),
+    }
+}
+
 /// 把 `DirtyRegion` 转成后端要的矩形列表。
 ///
 /// 返回：`None` = 整窗重绘（`full` 或脏区碎片超过上限）；
@@ -1488,6 +1514,13 @@ impl Window {
         // 直接返回，于是 Present 出一个"零实例"的空帧 → 屏幕变黑；
         // 下次输入产生脏区才画一帧，然后又被下一帧冲掉（表现为"闪一下又黑"）。
         if tree.dirty().is_empty() {
+            // **跳过帧**：后端没有渲染，但统计对象照常交付（`frame_skipped=true`），
+            // 这样基准能区分"跳过"与"统计关闭/未接入"。Runtime 已测量的阶段
+            //（事件/layout/after_frame/after_present/total_frame）不受影响。
+            if let Some(backend) = self.backend.as_mut() {
+                backend.stats_begin_frame();
+                backend.stats_mark_skipped();
+            }
             return Ok(());
         }
         if let Some(soft) = self.soft.as_mut() {
@@ -1505,19 +1538,37 @@ impl Window {
         let Some(backend) = self.backend.as_mut() else {
             return Ok(());
         };
+        // ---- 分阶段统计：每帧开头重置（失败帧的残留不会带到下一帧）----
+        backend.stats_begin_frame();
+        // `render_prepare` 起点：脏区规划之前（含 `begin()` 的清实例/清裁剪栈）。
+        let t_prepare = backend.stats_mark();
+
         // 必须在 tree.render 之前取脏区（render 会清空它）
         let dirty = tree.dirty();
         // 按**列表**传给后端：不相邻的脏区不能合并成包围盒
         // （包围盒会把中间空隙也清掉，而 CPU 侧剪枝已经跳过了那些节点）。
         let rects = plan_dirty_rects(dirty);
-        if rects.is_none() && !dirty.is_full() {
+        let was_full = dirty.is_full();
+        if rects.is_none() && !was_full {
             // 脏区碎片化（> MAX_DIRTY_RECTS）：升级为整窗重绘，
             // 并重新标脏以保证所有节点都被画。
             tree.invalidate_all();
         }
+        let (rect_count, damaged_px) =
+            dirty_stats(rects.as_deref(), rects.is_none(), self.viewport);
         backend.set_dirty_bounds(rects);
         backend.begin();
+        backend.stats_record(
+            y901_runtime::render_stats::StageId::RenderPrepare,
+            t_prepare,
+        );
+        backend.stats_dirty(rect_count, damaged_px);
+
+        // `command_gen` 起点：`tree.render()` 之前。
+        // **语义是混合的**：含实例生成 + 图片纹理上传 + 字形按需光栅化 + 纹理引用计数。
+        let t_command = backend.stats_mark();
         tree.render(backend);
+        backend.stats_record(y901_runtime::render_stats::StageId::CommandGen, t_command);
         let (w, h) = self.viewport;
         // SAFETY：`backend` 与 `self.hwnd` 都来自同一个 `Window`，`w`/`h` 取自当前客户区；
         // `present` 内部会重新校验设备状态，失败时返回 HRESULT 而不是 UB。
@@ -2341,6 +2392,25 @@ impl y901_runtime::window::WindowBackend for Window {
             host.on_snapshot(&pixels, w, h);
         }
     }
+
+    /// 只有 **D3D11 路径**接入统计；软渲染（`--force-soft`）本阶段返回 `None`。
+    ///
+    /// 为什么必须由窗口自报而不能让 runtime 猜：两条路径在同一个 `Window` 类型里
+    ///（`soft` / `backend` 二选一，见结构体字段），runtime 无法区分；而种类决定
+    /// 能力表（哪些阶段可测），能力表又是 `validate()` 拒绝伪造数据的依据。
+    /// 返回 `None` 时 runtime **不会创建统计对象**，因此也不会有任何计时开销。
+    fn render_stats_backend(&self) -> Option<y901_runtime::render_stats::BackendKind> {
+        if self.backend.is_some() {
+            Some(y901_runtime::render_stats::BackendKind::D3d11)
+        } else {
+            None
+        }
+    }
+
+    /// 取走后端本帧统计（取走语义；未接入/关闭统计时 `None`）。
+    fn take_render_stats(&mut self) -> Option<y901_runtime::render_stats::RenderStats> {
+        self.backend.as_mut()?.take_render_stats()
+    }
 }
 
 #[cfg(feature = "a11y")]
@@ -2459,5 +2529,44 @@ mod scale_from_dpi_tests {
     #[test]
     fn dpi_zero_falls_back_to_one() {
         assert_eq!(scale_from_dpi(0), 1.0);
+    }
+}
+
+#[cfg(test)]
+mod dirty_stats_tests {
+    use super::dirty_stats;
+
+    #[test]
+    fn full_frame_counts_one_rect_and_whole_viewport() {
+        // 整窗重绘：块数记 1，面积记整窗（`damaged_pixels` 的口径是"覆盖像素数"）。
+        assert_eq!(dirty_stats(None, true, (800, 600)), (1, 800 * 600));
+        // 有列表但被判定为整窗（碎片升级）：同样按整窗算。
+        let list = [(0, 0, 10, 10)];
+        assert_eq!(dirty_stats(Some(&list), true, (800, 600)), (1, 800 * 600));
+    }
+
+    #[test]
+    fn rect_list_counts_each_rect_area_without_de_duplication() {
+        let list = [(0, 0, 10, 20), (5, 5, 15, 15)];
+        // 10×20 + 10×10 = 300；重叠部分**不扣**（与 FrameCounters 文档一致）。
+        assert_eq!(dirty_stats(Some(&list), false, (800, 600)), (2, 300));
+    }
+
+    #[test]
+    fn degenerate_rects_contribute_zero_area_but_still_count() {
+        let list = [(4, 4, 4, 4), (0, 0, 2, 2)];
+        assert_eq!(dirty_stats(Some(&list), false, (10, 10)), (2, 4));
+    }
+
+    #[test]
+    fn inverted_rect_does_not_underflow() {
+        // 防御：右/下小于左/上时面积为 0，绝不能下溢成天文数字。
+        let list = [(10, 10, 4, 4)];
+        assert_eq!(dirty_stats(Some(&list), false, (10, 10)), (1, 0));
+    }
+
+    #[test]
+    fn empty_list_is_zero() {
+        assert_eq!(dirty_stats(Some(&[]), false, (10, 10)), (0, 0));
     }
 }

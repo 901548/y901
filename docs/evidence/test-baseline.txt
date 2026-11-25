@@ -173,4 +173,8 @@
 #   (新增 render_stats_lifecycle 9 条；passed 1233 → 1242；目标 177 → 178)
 #   注意：font_m3_prefetch::prefetch_removes_on_demand_rasterization 是时序敏感用例，
 #   并行满载时偶发（168.2ms vs 168.9ms）；单独重跑 3/3 通过，与本轮改动无关。
-1242
+# Measured at 2026-11-25 (A 阶段第 3 步：Win32 D3D11 统计接入 + B1 presented 归属):
+#   default cargo test --workspace --no-fail-fast   passed 1259, failed 0, ignored 69 / 181 个测试目标
+#   (新增 acc/dirty_stats 单测 12 条 + merge presented 1 条 +
+#    render_stats_enabled 2 / render_stats_disabled 1 / render_stats_headless 1；passed 1242 → 1259)
+1259

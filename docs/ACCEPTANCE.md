@@ -6,10 +6,10 @@
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1242 passed / 0 failed / 69 ignored** |
-| `cargo test --workspace --offline -- --include-ignored` | **1311 passed / 0 failed** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1259 passed / 0 failed / 69 ignored** |
+| `cargo test --workspace --offline -- --include-ignored` | **1328 passed / 0 failed** |
 
-`include_ignored=1311`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
+`include_ignored=1328`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -57,8 +57,8 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **1242 passed / 0 failed / 69 ignored**（178 个测试目标） |
-| `--include-ignored` | **1311 passed / 0 failed** |
+| 默认测试 | **1259 passed / 0 failed / 69 ignored**（181 个测试目标） |
+| `--include-ignored` | **1328 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
 | `cargo audit` | 0 漏洞 |

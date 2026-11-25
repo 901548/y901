@@ -14,6 +14,7 @@ pub mod font;
 
 use windows_sys::Win32::Foundation::HWND;
 
+use y901_runtime::render_stats::{BackendKind, RenderStats, StageId, StageTimes};
 use y901_ui::{Color, Pos, Rect, RenderCtx, Size, TextMetrics, TextStyle};
 // 字形顶部公式只有一份实现（软/硬后端共用，防止两边漂移）
 use y901_render::font::glyph_top;
@@ -42,6 +43,80 @@ fn default_font_config() -> y901_runtime::FontConfig {
     debug_assert_eq!(cfg.family, FONT_FAMILY, "默认族名不一致");
     debug_assert_eq!(cfg.size, FONT_SIZE, "默认字号不一致");
     cfg
+}
+
+// ---------------------------------------------------------------------------
+// 分阶段统计的累计器（后端私有）
+// ---------------------------------------------------------------------------
+//
+// 为什么需要「累计器」而不是直接 `StageTimes::set`：设备丢失时 `present` 会
+// 重建设备并**再跑一次** `render_batched`（`present` 里那两处调用），于是本帧的
+// submit / present 各有两个**不连续**区间。`StageTimes::set` 是覆盖写，
+// 第二次会吃掉第一次 —— 必须先在本地累加，帧末一次写入。
+//
+// **`Option` 的三态语义（不得用 `> ZERO` 推断）**：
+// - `None`          —— 本帧**从未执行**该阶段（保持未测量，`stage()` 给 Unavailable）；
+// - `Some(ZERO)`    —— 执行了，但计时粒度内为 0（**合法测量值**）；
+// - `Some(d)`, d>0  —— 执行了，耗时 d。
+
+/// 单阶段累计器。
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Acc(Option<std::time::Duration>);
+
+impl Acc {
+    /// 累加一段区间。`d` 允许为 0（时钟粒度），也允许被多次累加（重试路径）。
+    #[inline]
+    pub(crate) fn add(&mut self, d: std::time::Duration) {
+        self.0 = Some(self.0.map_or(d, |s| s + d));
+    }
+
+    /// 是否执行过（用于断言/统计，不用于决定"要不要写 0"）。
+    #[inline]
+    pub(crate) fn seen(self) -> bool {
+        self.0.is_some()
+    }
+
+    /// 帧末写入：**执行过就写（即使为 0）**；没执行过保持 `None`。
+    #[inline]
+    pub(crate) fn flush(self, times: &mut StageTimes, id: StageId) {
+        if let Some(sum) = self.0 {
+            times.set(id, sum);
+        }
+    }
+}
+
+/// 一帧的后端累计器（`BackendAcc::default()` 即"本帧什么都没执行"）。
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct BackendAcc {
+    /// 图集上传（`sync_atlas` + 设备重建后的全量重传，可能 2 段）。
+    pub(crate) upload: Acc,
+    /// CPU 提交（`build_batches` + `render_batched` 到 present 之前；重试时 2 段）。
+    pub(crate) submit: Acc,
+    /// `Present` 的 CPU 同步阻塞（重试时 2 段）。
+    pub(crate) present: Acc,
+    /// 本帧实际提交的实例数（受 `INSTANCE_CAPACITY` 截断）。
+    pub(crate) drawn: Option<u32>,
+    /// 本帧批次数。
+    pub(crate) batch_count: Option<u32>,
+    /// 本帧上传的图集字节数。
+    pub(crate) atlas_bytes: u64,
+}
+
+impl BackendAcc {
+    /// 把累计器写进 `RenderStats`（帧末、`take_render_stats` 之前调用一次）。
+    pub(crate) fn flush_into(&self, stats: &mut RenderStats) {
+        self.upload.flush(&mut stats.stages, StageId::Upload);
+        self.submit.flush(&mut stats.stages, StageId::BackendSubmit);
+        self.present
+            .flush(&mut stats.stages, StageId::PresentBlocking);
+        if let Some(n) = self.drawn {
+            stats.counters.instance_drawn = n;
+        }
+        if let Some(n) = self.batch_count {
+            stats.counters.batch_count = n;
+        }
+        stats.counters.atlas_upload_bytes = self.atlas_bytes;
+    }
 }
 
 /// D3D11 渲染后端：持有设备、交换链与实例缓冲；它不认识 UI 树，只认实例。
@@ -82,6 +157,15 @@ pub struct D3dBackend {
     cell: Size,
     /// 变换栈。第 1 步只建空栈：所有出图路径都过 `map_pos`/`map_size`，
     /// 但**栈为空时纯透传**——先证明恒等（像素哈希不变），再接真变换。
+    /// **分阶段统计**（`Y901_RENDER_STATS` 开启且本帧有渲染时才有值）。
+    ///
+    /// `None` = 统计关闭 / 本帧未产生统计。每帧由 `stats_begin_frame` 重置，
+    /// 由 `take_render_stats` 取走（取走语义 ⇒ 每帧最多消费一次）。
+    stats: Option<RenderStats>,
+    /// 本帧的后端私有累计器（设备丢失重试时可能有多段）。
+    acc: BackendAcc,
+    /// 后端统计的帧号（仅用于 JSON 可读性，Runtime 侧另有自己的帧号）。
+    stats_frame: u64,
     /// 仅测试：每次 `present` 前记下的 `sync_interval`。
     #[cfg(test)]
     pub present_sync_log: std::sync::Arc<std::sync::Mutex<Vec<u32>>>,
@@ -163,8 +247,11 @@ impl D3dBackend {
             state: y901_render::render_state::RenderState::new(theme),
             cell: Size::new(cell_w, cell_h),
             dpi_scale: 1.0,
+            stats: None,
+            acc: BackendAcc::default(),
+            stats_frame: 0,
         };
-        backend.sync_atlas()?;
+        let _ = backend.sync_atlas()?;
         Ok(backend)
     }
 
@@ -236,23 +323,127 @@ impl D3dBackend {
         self.text.begin_frame();
     }
 
+    // ---- 分阶段统计（A 阶段；`pub(crate)`，不是公开面）----
+
+    /// 每帧开始：清空累计器；统计开启时复用/新建统计对象，关闭时**清空且不分配**。
+    ///
+    /// 关闭时只做一次 `Option` 赋值（不读时钟、不分配）；`enabled()` 内部是
+    /// `OnceLock`，所以这里每帧的代价是一次原子读 + 一次分支。
+    pub(crate) fn stats_begin_frame(&mut self) {
+        self.acc = BackendAcc::default();
+        if y901_runtime::render_stats::enabled() {
+            self.stats_frame = self.stats_frame.wrapping_add(1);
+            match self.stats.as_mut() {
+                // 复用上一帧的对象（零分配），并清掉上一帧的阶段/计数器。
+                Some(s) => s.reset_for_next_frame(self.stats_frame),
+                None => self.stats = Some(RenderStats::new(self.stats_frame, BackendKind::D3d11)),
+            }
+        } else {
+            // 关闭统计：连对象都不留（`take_render_stats` 因此返回 `None`）。
+            self.stats = None;
+        }
+    }
+
+    /// 打点起点；**统计关闭时返回 `None` 且不读时钟**。
+    #[inline]
+    pub(crate) fn stats_mark(&self) -> Option<std::time::Instant> {
+        if self.stats.is_some() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        }
+    }
+
+    /// 记录**单区间**阶段（`render_prepare` / `command_gen`）。
+    ///
+    /// 只有这两个阶段走单区间；`upload` / `backend_submit` / `present_blocking`
+    /// 可能有多段（设备丢失重试），走 [`BackendAcc`] 累计。
+    #[inline]
+    pub(crate) fn stats_record(&mut self, id: StageId, start: Option<std::time::Instant>) {
+        if let (Some(s), Some(t)) = (self.stats.as_mut(), start) {
+            s.stages.set(id, t.elapsed());
+        }
+    }
+
+    /// 记录脏区计数（块数 + 覆盖像素数）。
+    #[inline]
+    pub(crate) fn stats_dirty(&mut self, rects: u32, pixels: u64) {
+        if let Some(s) = self.stats.as_mut() {
+            s.counters.dirty_rect_count = rects;
+            s.counters.damaged_pixels = pixels;
+        }
+    }
+
+    /// 跳过帧（`dirty` 为空）：后端**没有渲染**，但统计对象照常交付。
+    ///
+    /// `frame_skipped=true` 只表示"后端跳过渲染"；Runtime 侧已测量的阶段
+    /// （事件/layout/after_frame/after_present/total_frame）不受影响。
+    pub(crate) fn stats_mark_skipped(&mut self) {
+        if let Some(s) = self.stats.as_mut() {
+            s.counters.frame_skipped = true;
+        }
+        self.acc = BackendAcc::default();
+    }
+
+    /// 帧末：把累计器与计数器写进统计对象，然后**取走**（`take` 语义）。
+    ///
+    /// 调用点：`D3dBackend::present` 的成功出口。错误出口**不调用**它，
+    /// 而是直接丢弃 `stats`（失败帧不交付统计，见 `present` 的注释）。
+    fn stats_finish(&mut self, occluded: bool) {
+        let Some(mut s) = self.stats.take() else {
+            self.acc = BackendAcc::default();
+            return;
+        };
+        self.acc.flush_into(&mut s);
+        s.counters.instance_pushed = self.instances.len() as u32;
+        if !self.acc.submit.seen() {
+            // 本帧没执行过提交（例如整帧被跳过）→ 明确写 0，而不是沿用上一帧的值。
+            s.counters.instance_drawn = 0;
+        }
+        s.counters.occluded = occluded;
+        s.counters.frame_skipped = false;
+        self.stats = Some(s);
+        self.acc = BackendAcc::default();
+    }
+
+    /// 取走本帧统计（**取走语义**：第二次调用必为 `None`）。
+    pub(crate) fn take_render_stats(&mut self) -> Option<RenderStats> {
+        self.stats.take()
+    }
+
     /// 把 CPU 图集的脏区同步到 GPU。首次调用会创建纹理。
     /// # Safety
     ///
     /// `self` 必须是**本线程且已初始化**的后端；图集、字形引擎与 D3D 设备已就绪。
     /// 违反后果：设备未就绪时会向空指针上传像素（崩溃点在驱动层）；
     /// 跨线程调用会让图集与上传命令交错，字形出现随机块状污点。
-    unsafe fn sync_atlas(&mut self) -> Result<(), String> {
+    /// 返回本帧**实际上传的字节数**（`None` = 没有需要上传的内容）。
+    ///
+    /// 为什么要返回字节数而不是 `()`：统计里 `atlas_upload_bytes` 是计数器，
+    /// 而"是否执行过 upload 阶段"也由它判定 —— `None` 表示阶段未执行，
+    /// 不能靠"耗时 > 0"去猜（那会把极快上传误判成没执行）。
+    unsafe fn sync_atlas(&mut self) -> Result<Option<u64>, String> {
         let (reset, dirty) = self.text.take_dirty();
         if !reset && dirty.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
+        let size = self.text.atlas_size() as u64;
+        let bytes: u64 = if reset {
+            // 整张重传：`size × size` 像素 × 4 字节
+            size * size * 4
+        } else {
+            dirty
+                .iter()
+                .map(|d| d.width as u64 * d.height as u64 * 4)
+                .sum()
+        };
         let rects: Vec<(u32, u32, u32, u32)> = dirty
             .iter()
             .map(|d| (d.x, d.y, d.width, d.height))
             .collect();
         self.gfx
             .update_atlas(self.text.atlas(), self.text.atlas_size(), reset, &rects)
+            .map(|()| Some(bytes))
     }
 
     /// 回读后备缓冲（BGRA）：供快照 / 像素数学验证使用。
@@ -317,18 +508,32 @@ impl D3dBackend {
         if *SIMULATE_PRESENT_FAIL
             .get_or_init(|| std::env::var_os("Y901_SIMULATE_PRESENT_FAIL").is_some())
         {
+            // 失败帧不交付统计：**丢弃残留**，避免下一次 `take_render_stats`
+            // 读到"有 Submit 但没有 Present/上屏状态"的半帧数据。
+            self.stats = None;
             return Err("模拟 present 失败（Y901_SIMULATE_PRESENT_FAIL）".to_string());
         }
 
         if self.gfx.is_empty() {
             if let Err(err) = self.gfx.rebuild(hwnd, width, height) {
                 // **首次建设备失败就是真失败**：没有后备路径，上层必须知道。
+                self.stats = None;
                 return Err(format!("初始化 D3D11 设备失败：{err}"));
             }
         }
 
-        if let Err(err) = self.sync_atlas() {
-            eprintln!("[y901] atlas sync failed: {err}");
+        // ---- ① 图集上传（`Some(bytes)` 才表示本阶段真的执行了）----
+        let t_upload = self.stats_mark();
+        match self.sync_atlas() {
+            Ok(Some(bytes)) => {
+                if let Some(t) = t_upload {
+                    self.acc.upload.add(t.elapsed());
+                }
+                self.acc.atlas_bytes += bytes;
+            }
+            // `None` = 本帧没有需要上传的内容 → `upload` 阶段保持未测量（不写 0）。
+            Ok(None) => {}
+            Err(err) => eprintln!("[y901] atlas sync failed: {err}"),
         }
 
         // sync_interval = 0：不阻塞在 vsync 上。
@@ -336,37 +541,77 @@ impl D3dBackend {
         // 用 1 时窗口被遮挡会让 Present 永久阻塞，把消息循环卡死。
         // 帧末把"图片区间"与"图集区间"交替排开。
         // 没有图片时 `batches` 为空 → `render_batched` 退化为单次 draw，与改动前一致。
+        // ---- ② 批次规划（CPU；并入 `backend_submit`）----
+        let t_build = self.stats_mark();
         let batches = self.build_batches();
+        if let Some(t) = t_build {
+            self.acc.submit.add(t.elapsed());
+        }
+        self.acc.batch_count = Some(batches.len() as u32);
         #[cfg(test)]
         self.present_sync_log.lock().unwrap().push(sync_interval);
+        // `render_batched` 内部自己记 submit 段（到 present 之前）与 present 段，
+        // 并回填 `drawn`（受 `INSTANCE_CAPACITY` 截断后的实际实例数）。
+        // 借用技巧：`acc` 只借 `self.acc`、`render_batched` 只借 `self.gfx` 与
+        // `self.instances` —— 三个**不同字段**，因此可以同时存在。
+        let acc = if self.stats.is_some() {
+            Some(&mut self.acc)
+        } else {
+            None
+        };
         let mut hr = self
             .gfx
-            .render_batched(&self.instances, &batches, sync_interval);
+            .render_batched_timed(&self.instances, &batches, sync_interval, acc);
 
         if Gfx::device_lost(hr) {
             eprintln!("[y901] device lost: 0x{:08X}, rebuilding", hr as u32);
+            // 设备重建计入 `backend_submit`（它在两次提交之间，属提交侧准备）。
+            let t_rebuild = self.stats_mark();
             if let Err(err) = self.gfx.rebuild(hwnd, width, height) {
+                // 设备丢失 + 重建失败 = 这个窗口已无法渲染：**丢弃残留统计**再上报。
+                self.stats = None;
                 return Err(format!("设备丢失后重建失败：{err}"));
             }
-            // 设备重建后纹理是空的：全量重传
-            if let Err(err) =
-                self.gfx
-                    .update_atlas(self.text.atlas(), self.text.atlas_size(), true, &[])
-            {
-                eprintln!("[y901] atlas re-upload failed: {err}");
+            if let Some(t) = t_rebuild {
+                self.acc.submit.add(t.elapsed());
             }
+            // 设备重建后纹理是空的：全量重传（**计入 upload 的第二段**）
+            let t_reupload = self.stats_mark();
+            match self
+                .gfx
+                .update_atlas(self.text.atlas(), self.text.atlas_size(), true, &[])
+            {
+                Ok(()) => {
+                    if let Some(t) = t_reupload {
+                        self.acc.upload.add(t.elapsed());
+                    }
+                    let size = self.text.atlas_size() as u64;
+                    self.acc.atlas_bytes += size * size * 4;
+                }
+                Err(err) => eprintln!("[y901] atlas re-upload failed: {err}"),
+            }
+            let acc = if self.stats.is_some() {
+                Some(&mut self.acc)
+            } else {
+                None
+            };
             hr = self
                 .gfx
-                .render_batched(&self.instances, &batches, sync_interval);
+                .render_batched_timed(&self.instances, &batches, sync_interval, acc);
         }
 
         if hr < 0 {
             // 设备丢失已在上面尝试重建；能到这里说明重建后仍失败。
+            self.stats = None;
             return Err(format!("Present 失败：0x{:08X}", hr as u32));
         }
         // `Ok(visible)`：`true` = 已上屏且未被遮挡；`false` = 已上屏但被遮挡（DXGI_STATUS_OCCLUDED）。
-        Ok(!Gfx::is_occluded(hr))
+        let visible = !Gfx::is_occluded(hr);
+        // ---- ③ 帧末收口（累计器 → RenderStats → take）----
+        self.stats_finish(!visible);
+        Ok(visible)
     }
+
     /// 返回至今为止记录的 `sync_interval` 序列（仅测试构建）。
     #[cfg(test)]
     pub fn take_present_sync_log(&self) -> Vec<u32> {
@@ -1538,5 +1783,129 @@ mod clip_quad_tests {
             Rect::new(0.0, 0.0, 100.0, 100.0)
         )
         .is_none());
+    }
+}
+
+#[cfg(test)]
+mod render_stats_tests {
+    use super::{Acc, BackendAcc};
+    use std::time::Duration;
+    use y901_runtime::render_stats::{BackendKind, RenderStats, StageId, StageTimes};
+
+    // ---- 累计器的三态语义（本轮核心：不得用 `> ZERO` 推断执行）----
+
+    #[test]
+    fn acc_not_seen_stays_unmeasured() {
+        let acc = Acc::default();
+        assert!(!acc.seen());
+        let mut times = StageTimes::default();
+        acc.flush(&mut times, StageId::Upload);
+        assert!(
+            times.get(StageId::Upload).is_none(),
+            "从未执行过的阶段必须保持 None（不能写 0）"
+        );
+    }
+
+    #[test]
+    fn acc_zero_duration_is_written_as_zero() {
+        let mut acc = Acc::default();
+        acc.add(Duration::ZERO);
+        assert!(acc.seen(), "执行过（哪怕耗时为 0）必须被标记为 seen");
+        let mut times = StageTimes::default();
+        acc.flush(&mut times, StageId::Upload);
+        assert_eq!(
+            times.get(StageId::Upload),
+            Some(Duration::ZERO),
+            "执行了但耗时为零 → 写成 Some(ZERO)，与 None 严格区分"
+        );
+    }
+
+    #[test]
+    fn acc_accumulates_disjoint_intervals() {
+        // 模拟设备丢失重试：两段不连续区间必须**相加**，不是取最后一段。
+        let mut acc = Acc::default();
+        acc.add(Duration::from_micros(7));
+        acc.add(Duration::from_micros(11));
+        let mut times = StageTimes::default();
+        acc.flush(&mut times, StageId::BackendSubmit);
+        assert_eq!(
+            times.get(StageId::BackendSubmit),
+            Some(Duration::from_micros(18))
+        );
+    }
+
+    #[test]
+    fn acc_zero_segment_inside_a_retry_does_not_lose_the_other_segment() {
+        // 首次 Present 在设备丢失时立即失败（≈0），第二段才是真实阻塞。
+        let mut acc = Acc::default();
+        acc.add(Duration::ZERO);
+        acc.add(Duration::from_micros(3));
+        let mut times = StageTimes::default();
+        acc.flush(&mut times, StageId::PresentBlocking);
+        assert_eq!(
+            times.get(StageId::PresentBlocking),
+            Some(Duration::from_micros(3)),
+            "0 段不得抹掉另一段"
+        );
+    }
+
+    // ---- 累计器 → RenderStats 的收口 ----
+
+    #[test]
+    fn flush_into_writes_only_executed_stages_and_all_counters() {
+        let mut acc = BackendAcc::default();
+        acc.submit.add(Duration::from_micros(5));
+        acc.atlas_bytes = 4096;
+        acc.drawn = Some(12);
+        acc.batch_count = Some(3);
+        let mut s = RenderStats::new(1, BackendKind::D3d11);
+        acc.flush_into(&mut s);
+
+        assert_eq!(
+            s.stages.get(StageId::BackendSubmit),
+            Some(Duration::from_micros(5))
+        );
+        // 没执行的两个阶段必须保持 None。
+        assert!(s.stages.get(StageId::Upload).is_none());
+        assert!(s.stages.get(StageId::PresentBlocking).is_none());
+        assert_eq!(s.counters.atlas_upload_bytes, 4096);
+        assert_eq!(s.counters.instance_drawn, 12);
+        assert_eq!(s.counters.batch_count, 3);
+    }
+
+    #[test]
+    fn flush_into_never_writes_an_unmeasurable_stage() {
+        // 直接证明：累计器不可能把 gpu_execute / compositor 变成 Measured
+        //（这两个 StageId 在 flush_into 里根本没出现）。
+        let mut acc = BackendAcc::default();
+        acc.submit.add(Duration::from_micros(1));
+        acc.present.add(Duration::from_micros(2));
+        acc.upload.add(Duration::from_micros(3));
+        let mut s = RenderStats::new(1, BackendKind::D3d11);
+        acc.flush_into(&mut s);
+        assert!(s.stages.get(StageId::GpuExecute).is_none());
+        assert!(s.stages.get(StageId::Compositor).is_none());
+        // 且整份数据能通过自检（说明没有自相矛盾）。
+        assert_eq!(s.validate(), Ok(()));
+    }
+
+    #[test]
+    fn acc_is_copy_and_default_is_empty() {
+        // 累计器必须能零成本重置（`BackendAcc::default()` 不分配、不读时钟）。
+        let acc = BackendAcc {
+            submit: {
+                let mut a = Acc::default();
+                a.add(Duration::from_micros(1));
+                a
+            },
+            ..BackendAcc::default()
+        };
+        let reset = BackendAcc::default();
+        assert!(acc.submit.seen());
+        assert!(!reset.submit.seen());
+        assert!(!reset.upload.seen());
+        assert!(!reset.present.seen());
+        assert!(reset.drawn.is_none());
+        assert_eq!(reset.atlas_bytes, 0);
     }
 }

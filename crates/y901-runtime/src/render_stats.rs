@@ -640,6 +640,13 @@ impl RenderStats {
 
     /// 合并后端上报的统计：**只取后端负责的阶段**，并做自检。
     ///
+    /// **字段所有权（B1 裁决）**：
+    /// - `stages`：仅 `BACKEND_STAGES` 里的 12 项由后端提供，Runtime 自己的阶段
+    ///   （`event_dispatch`/`layout`/`after_frame`/`after_present`/`total_frame`）不会被覆盖；
+    /// - `counters`：由后端提供（脏区数、实例数、图集字节等只有后端知道）；
+    /// - `presented`：**由 Runtime 独占**，本函数不复制（见下方注释）；
+    /// - `frame_unavailable`：由后端提供（该帧临时不可测的原因）。
+    ///
     /// 返回：`true` = 后端确实提供了数据；`false` = 未接入（所有后端阶段保持 `None`，
     /// **绝不伪造**）。
     ///
@@ -664,7 +671,11 @@ impl RenderStats {
             }
         }
         self.counters = src.counters;
-        self.presented = src.presented;
+        // **`presented` 不由后端提供**（设计裁决 B1）：它是 Runtime 统计，
+        // 真值由 `run_loop` 依据 `RenderOutcome` 写入。后端构造的 `RenderStats`
+        // 里该字段恒为 `false`，若在这里复制，就会让"后端说什么就是什么"，
+        // 与事实来源冲突（而且安全性只依赖 run_loop 里 merge 之后立刻覆写这个顺序）。
+        // 因此**不复制**：唯一写者是 Runtime。
         self.frame_unavailable = src.frame_unavailable;
         if let Err(err) = self.validate() {
             eprintln!("[y901] render_stats 自检失败，丢弃本帧后端数据：{err:?}");
@@ -940,6 +951,46 @@ mod tests {
         assert!(!s.presented);
     }
 
+    /// **B1 裁决**：`presented` 属 Runtime 独占，`merge_backend` 不得复制/覆盖。
+    ///
+    /// 这条用例同时钉住两件事：
+    /// 1. 后端把 `presented` 写成 `true` 也不会污染 Runtime 的值；
+    /// 2. Runtime 写的值不会被后端数据清掉。
+    #[test]
+    fn merge_backend_never_touches_presented() {
+        // Runtime 已判定"本帧未上屏"。
+        let mut runtime_stats = stats(BackendKind::D3d11);
+        runtime_stats.presented = false;
+
+        // 后端（错误地）声称自己上屏了。
+        let mut backend_stats = RenderStats::new(1, BackendKind::D3d11);
+        backend_stats.presented = true;
+        backend_stats
+            .stages
+            .set(StageId::BackendSubmit, Duration::from_micros(5));
+
+        assert!(runtime_stats.merge_backend(Some(backend_stats)));
+        assert!(
+            !runtime_stats.presented,
+            "merge_backend 不得用后端的 presented 覆盖 Runtime 的值"
+        );
+        // 后端阶段仍然合并成功（证明上面的断言不是"整个 merge 都没生效"）。
+        assert_eq!(
+            runtime_stats.stages.get(StageId::BackendSubmit),
+            Some(Duration::from_micros(5))
+        );
+
+        // 反向：Runtime 说已上屏，后端说没有 → 仍以 Runtime 为准。
+        let mut runtime_stats = stats(BackendKind::D3d11);
+        runtime_stats.presented = true;
+        let mut backend_stats = RenderStats::new(2, BackendKind::D3d11);
+        backend_stats.presented = false;
+        assert!(runtime_stats.merge_backend(Some(backend_stats)));
+        assert!(
+            runtime_stats.presented,
+            "merge_backend 不得把 Runtime 的 presented 清成 false"
+        );
+    }
     #[test]
     fn frame_unavailable_can_explain_a_measurable_stage_this_frame() {
         // 可测量，但本帧因为某种原因没测到（例如查询失败）→ 由 frame_unavailable 解释。
