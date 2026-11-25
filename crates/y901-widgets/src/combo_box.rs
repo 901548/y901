@@ -447,6 +447,11 @@ impl Widget for ComboList {
             let r = self.item_rect(i);
             if self.selected == Some(i) {
                 ctx.fill_rect(r, sel_bg);
+            } else if i == self.highlight {
+                // **键盘高亮必须画出来**：旧实现只改了 `highlight` 字段，屏幕上
+                // 唯一的标记是"已选中项"（或奇数行的斑马纹），用户按 ↓ 两次也看不见
+                // Enter 会选哪一项。这里把键盘游标画成 hover 底色。
+                ctx.fill_rect(r, hover_bg);
             } else if i % 2 == 1 {
                 ctx.fill_rect(r, hover_bg);
             }

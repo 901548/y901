@@ -343,13 +343,28 @@ pub fn flex_measure(
     )
 }
 
+/// 解析 min/max 用的 `Dimension`（**`Px` 要乘 DPI 缩放**）。
+///
+/// 为什么必须乘：`width: Px(100)` 这类"尺寸"在 `flex_measure_into` 里已经乘过
+/// `metrics.scale()`，而 min/max 若按原始 `Px` 解析，就等于"尺寸按逻辑像素、上下界
+/// 按物理像素"——125% DPI 下 `width(100).max_width(120)` 会被 120 卡住（本意是 125），
+/// 150%/200% 下更明显。`Percent` 的基数 `avail` 本来就是物理像素，`Auto` 与之无关。
+fn resolve_bound(d: Dimension, avail: f32, content: f32, scale: f32) -> f32 {
+    match d {
+        Dimension::Px(v) => v * scale,
+        other => other.resolve(avail, content),
+    }
+}
+
 /// 把某轴的尺寸 clamp 到 `[min, max]`；若 `avail` 有限则上限也不超过 `avail`
 /// （**`min > avail` 时退化为 `avail`**，不溢出父容器）。
-fn clamp_axis(v: f32, min: Dimension, max: Dimension, avail: f32) -> f32 {
-    let floor = min.resolve(avail, 0.0).max(0.0);
+///
+/// `scale`：`min`/`max` 里的 `Px` 是**逻辑像素**，要按 DPI 缩放（见 `resolve_bound`）。
+fn clamp_axis(v: f32, min: Dimension, max: Dimension, avail: f32, scale: f32) -> f32 {
+    let floor = resolve_bound(min, avail, 0.0, scale).max(0.0);
     let ceil = match max {
         Dimension::Auto => f32::INFINITY,
-        d => d.resolve(avail, v),
+        d => resolve_bound(d, avail, v, scale),
     };
     let mut out = v.max(floor).min(ceil);
     if !out.is_finite() {
@@ -369,6 +384,7 @@ fn clamp_pair(
     cross_avail: f32,
     main: f32,
     cross: f32,
+    scale: f32,
 ) -> (f32, f32) {
     let (mw, mh, cw, ch) = match axis {
         Axis::Horizontal => (
@@ -385,8 +401,8 @@ fn clamp_pair(
         ),
     };
     (
-        clamp_axis(main, mw, mh, main_avail),
-        clamp_axis(cross, cw, ch, cross_avail),
+        clamp_axis(main, mw, mh, main_avail, scale),
+        clamp_axis(cross, cw, ch, cross_avail, scale),
     )
 }
 
@@ -486,6 +502,7 @@ pub fn flex_measure_into(
             },
             main,
             cross,
+            scale,
         );
         main_total += main;
         cross_max = cross_max.max(cross);
@@ -564,9 +581,8 @@ pub fn flex_arrange_with(
     cache: &mut LayoutCache,
     measured: &[(Size, FlexItem)],
 ) {
-    // 注意：这里**不再**需要 `metrics.scale()` —— `Px` 的缩放已经在 measure 阶段
-    // 应用过了，arrange 一律消费解析后的尺寸（见 `flex_measure_into` 的 measured 说明）。
-    let _ = metrics;
+    // 尺寸本身消费的是 measure 阶段**已经缩放**的解析值；但 `min/max` 是 `Dimension`，
+    // 每次 clamp 都要用**同一个** DPI 缩放去解析（见 `resolve_bound`），所以这里仍需 metrics。
     if children.is_empty() {
         return;
     }
@@ -684,7 +700,17 @@ pub fn flex_arrange_with(
 
         let cross = if cross.is_finite() { cross } else { 0.0 };
         // **min/max clamp**（默认不改变任何值）。
-        let (main, cross) = clamp_pair(axis, item, main_avail, cross_avail, main, cross);
+        // arrange 里也要用**同一个** DPI 缩放：`measured` 存的是已缩放的尺寸，
+        // 若这里按未缩放的 min/max 再 clamp 一次，125% 下会被压回逻辑像素值。
+        let (main, cross) = clamp_pair(
+            axis,
+            item,
+            main_avail,
+            cross_avail,
+            main,
+            cross,
+            metrics.scale(),
+        );
         let cross = cross.min(cross_avail);
         // 交叉轴偏移（`Stretch` / `Start` 为 0）。
         let cross_off = match align {

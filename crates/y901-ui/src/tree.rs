@@ -3746,17 +3746,36 @@ mod dirty_clip_tests {
     fn t2_all_painting_is_clipped_to_dirty_rects() {
         let mut tree = laid_out_tree();
         tree.invalidate("child");
+        // **先快照脏区**：`render()` 结束时会 `dirty.clear()`，渲染后再读必然是空的。
+        let dirty_full = tree.dirty().is_full();
+        let dirty = tree.dirty().rects().to_vec();
         let mut ctx = RecordingCtx::new(200.0, 100.0);
         tree.render(&mut ctx);
 
         assert!(!ctx.ops.is_empty(), "应该至少有一次绘制");
+        // **真断言**：每一笔实际落笔区域（`op.rect ∩ clip`）都必须落在脏区并集内。
+        //
+        // 旧实现写的是 `... || !clip.is_empty()` —— 第三个析取恒真（push 的剪裁区
+        // 本来就非空），于是把"按脏区裁剪"整段删掉这条也会绿。真正的回归不是
+        // "clip 非空"，而是"画到脏区外面"。
+        assert!(!dirty_full, "前置：这条用例要验证局部重绘，脏区不应是整窗");
+        assert!(!dirty.is_empty(), "前置：应有一块脏区");
         for op in &ctx.ops {
             let clip = op.clip.expect("局部重绘的每次绘制都应带剪裁区");
+            let painted = clip.intersect(op.rect);
+            if painted.is_empty() {
+                continue; // 完全被裁掉 = 没落笔
+            }
+            // 落笔区域必须被某一块脏区覆盖（允许分数坐标，用面积判定）
+            // 落笔区域必须被某一块脏区覆盖（允许分数坐标，用面积判定）
+            let covered = dirty.iter().any(|d| {
+                let inter = d.intersect(painted);
+                // 面积相等 ⇒ 这一笔完全落在该脏区内（允许浮点误差）
+                !inter.is_empty() && ((inter.w * inter.h) - (painted.w * painted.h)).abs() < 0.01
+            });
             assert!(
-                clip.intersect(op.rect).is_empty()
-                    || clip.contains_rect(op.rect)
-                    || !clip.is_empty(),
-                "剪裁区必须非空"
+                covered,
+                "这笔画到了脏区外面：落笔 {painted:?}，脏区 {dirty:?}"
             );
         }
     }

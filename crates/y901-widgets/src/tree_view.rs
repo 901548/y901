@@ -143,6 +143,25 @@ impl TreeView {
         }
         let mut path = Vec::new();
         walk(&self.roots, 0, &mut path, &mut self.visible);
+        // **折叠/删节点后必须把滚动偏移夹回来**：否则 `scroll_offset` 仍指向
+        // 已经不存在的行，`visible_range()` 的 `first.min(len)..last` 变成空区间 ——
+        // 整个控件只画出背景，而且 `row_at()` 对所有像素返回 None，点击全失效。
+        self.clamp_scroll();
+    }
+
+    /// 把滚动偏移夹到 `[0, 内容高 - 视口高]`。
+    ///
+    /// 为什么单独抽出来：`rebuild()`（展开/折叠/增删）与 `arrange()`（窗口变高）
+    /// 都会改变"内容高/视口高"，两处都必须夹，否则表现不一致。
+    fn clamp_scroll(&mut self) {
+        let total = self.visible.len() as f32 * self.row_h;
+        let max = (total - self.rect.h).max(0.0);
+        if self.scroll_offset > max {
+            self.scroll_offset = max;
+        }
+        if !self.scroll_offset.is_finite() || self.scroll_offset < 0.0 {
+            self.scroll_offset = 0.0;
+        }
     }
 
     /// 视口内应绘制的行范围（虚拟化的核心）。
@@ -295,6 +314,8 @@ impl Widget for TreeView {
         _cache: &mut y901_ui::layout::LayoutCache,
     ) {
         self.rect = rect;
+        // 视口变高 → 可滚动距离变小：不夹的话滚到底后窗口拉高，内容会整体偏上留白。
+        self.clamp_scroll();
     }
 
     fn flex(&self) -> y901_ui::FlexItem {
@@ -391,7 +412,7 @@ impl Widget for TreeView {
             UiEvent::Wheel { delta, .. } => {
                 let total = self.visible.len() as f32 * self.row_h;
                 let max = (total - self.rect.h).max(0.0);
-                let next = (self.scroll_offset - delta * self.row_h).clamp(0.0, max);
+                let next = (self.scroll_offset - delta * self.row_h).clamp(0.0, max.max(0.0));
                 if (next - self.scroll_offset).abs() > 0.01 {
                     self.scroll_offset = next;
                     return EventResult::Redraw;

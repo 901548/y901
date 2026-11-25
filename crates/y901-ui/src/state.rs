@@ -31,7 +31,15 @@ pub struct State<T> {
 }
 
 impl<T: Clone + PartialEq + 'static> State<T> {
-    /// 新建一个状态（不会自动订阅；用 [`crate::UiTree::use_state`] 才会）。
+    /// 新建一个状态，**并立即订阅**（`Signal::set` 会通过 `queue` 标脏该 owner）。
+    ///
+    /// 旧文档写的是"不会自动订阅，要 `use_state` 才会" —— 与代码不符：构造函数本身
+    /// 就订阅了。按旧文档推断的调用方会以为"没订阅所以不用管"，而真实语义是
+    /// "已经订阅、随 `State` 一起销毁"：`State` 持有的 `Signal` 是它**私有**的，
+    /// `State` 析构时信号与订阅表一起消失，不会残留 listener。
+    ///
+    /// 需要"多个控件共享同一份数据"时，请把 `Signal` 克隆出去分别订阅
+    ///（`Signal::subscribe` 按 owner 去重，重复订阅只更新队列）。
     pub fn new(owner: impl Into<String>, initial: T, queue: Invalidation) -> Self {
         let signal = Signal::new(initial);
         let owner = owner.into();

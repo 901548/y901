@@ -69,7 +69,12 @@ pub enum MouseButton {
 /// 框架事件。
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiEvent {
-    /// 按键。`text` 是已经过 IME/键盘布局翻译的可打印文本（如果有）。
+    /// 按键（**只有键码与修饰键**；键入的文本请用 `Text` 事件）。
+    ///
+    /// 为什么不含 `text`：可打印字符必须等 IME/键盘布局翻译完成，而那时机由后端
+    /// 决定（`WM_CHAR` / `XLookupString` / DOM `keydown` 之后的 `input`），所以
+    /// 文本走单独的 `UiEvent::Text`。旧文档写着"`text` 是翻译后的可打印文本"，
+    /// 但结构体里没有这个字段 —— 按文档实现后端的人会卡住。
     Key {
         /// 按下的键值。
         key: Key,

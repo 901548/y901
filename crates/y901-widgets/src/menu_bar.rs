@@ -104,6 +104,23 @@ impl MenuBar {
         self.entries.is_empty()
     }
 
+    /// 清掉"某个菜单处于打开态"的视觉标记。
+    ///
+    /// **为什么需要应用调用**：菜单项被点中后 `Menu` 自己关闭浮层并发动作命令，
+    /// 而 `MenuBar` 收不到那个事件（浮层不是它的子节点），于是标题高亮会一直留着、
+    /// `active_index()` 也一直返回 `Some(i)`。框架目前没有"我的浮层还开着吗"的查询
+    /// API，所以在应用处理完菜单动作后显式调一次是唯一可靠的做法。
+    ///
+    /// 返回：`true` = 确实清掉了（需要重绘）。
+    pub fn clear_open_state(&mut self) -> bool {
+        if self.opened.is_none() && self.active.is_none() {
+            return false;
+        }
+        self.opened = None;
+        self.active = None;
+        true
+    }
+
     /// 当前打开（或键盘选中）的菜单下标。
     pub fn active_index(&self) -> Option<usize> {
         self.opened.or(self.active)
@@ -227,6 +244,10 @@ impl Widget for MenuBar {
                 if let Some(index) = self.title_at(*pos) {
                     ctx.request_focus(self.id.clone());
                     self.open_menu(ctx, index);
+                    return EventResult::Redraw;
+                }
+                // 点在标题之外：浮层多半已经被框架关掉了，标题高亮要跟着清
+                if self.clear_open_state() {
                     return EventResult::Redraw;
                 }
                 EventResult::Ignored

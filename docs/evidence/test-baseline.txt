@@ -159,4 +159,7 @@
 #   (新增 focus_path_stability 1 / json_robustness 5 / shaped_transform_consistency 3 /
 #    widget_reachability 4 / container_child_invariants 3 / grid_read_only_traversal 2；
 #    passed 1186 → 1201)
-1201
+# Measured at 2026-11-25 (复审第三批：DPI 上下界 / 视图几何 / 真空断言):
+#   default cargo test --workspace --no-fail-fast   passed 1215, failed 0, ignored 68 / 177 个测试目标
+#   (新增 dpi_minmax 4 / widget_geometry 6 / scroll 内部 4；passed 1201 → 1215)
+1215

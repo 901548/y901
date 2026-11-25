@@ -430,12 +430,25 @@ impl Scrollbar {
         self.rect = rect;
         self.visible = visible;
         self.thumb_ratio = thumb_ratio.clamp(0.05, 1.0);
-        self.start_ratio = start_ratio.clamp(0.0, 1.0 - self.thumb_ratio);
+        // **`start_ratio` 的语义是"滚动进度"（0 = 顶、1 = 底），不是"剩余行程比例"**。
+        // 旧实现把它夹到 `1 - thumb_ratio`，于是滚到底也只到 0.9 —— 滑块永远差一截
+        // 到不了轨道末端（轨道 100、内容 10 屏时差 7.6px），拖拽也拖不到真正的底部。
+        self.start_ratio = start_ratio.clamp(0.0, 1.0);
     }
 
     pub(crate) fn thumb(&self) -> Rect {
-        let h = (self.rect.h * self.thumb_ratio).max(24.0);
-        let y = self.rect.y + (self.rect.h - h) * self.start_ratio;
+        // **下限与位置夹紧必须用同一个高度**。
+        // 旧实现：滑块高取 `max(比例高, 24)`，但位置用 `start_ratio`（按**比例**夹到
+        // `1 - thumb_ratio`）算 —— 轨道 100、内容 10 屏时 `start_ratio` 最大 0.9，
+        // 滑块实际高 24 → 底边 = 0.9 × (100-24) + 24 = 92.4，**差 7.6px 到不了底**；
+        // 轨道比 24 还矮时滑块会直接画出轨道外。
+        let h = (self.rect.h * self.thumb_ratio)
+            .max(24.0)
+            .min(self.rect.h.max(0.0));
+        let travel = (self.rect.h - h).max(0.0);
+        // 把"比例位置"换算成"该比例下恰好贴底的像素位置"，再用像素夹紧保证不越界。
+        let ratio = self.start_ratio.clamp(0.0, 1.0);
+        let y = self.rect.y + (travel * ratio).clamp(0.0, travel);
         Rect::new(self.rect.x + 2.0, y, (self.rect.w - 4.0).max(2.0), h)
     }
 
@@ -546,7 +559,9 @@ impl Scrollbar {
             1.0
         };
         self.start_ratio = if max > 0.0 {
-            (self.offset / max).clamp(0.0, 1.0 - self.thumb_ratio)
+            // 进度就是 offset / max，夹到 [0,1]；不是 `1 - thumb_ratio`
+            //（那会让"滚到底"永远差一截，见 `arrange_at` 的说明）。
+            (self.offset / max).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -640,5 +655,72 @@ impl Widget for Scrollbar {
             .state("offset", self.offset)
             .state("total", self.total)
             .state("viewport", self.viewport)
+    }
+}
+
+#[cfg(test)]
+mod thumb_geometry_tests {
+    use super::*;
+
+    fn bar(track_h: f32, thumb_ratio: f32, start_ratio: f32) -> Scrollbar {
+        let mut b = Scrollbar::new("x.bar", "x");
+        b.arrange_at(
+            Rect::new(0.0, 0.0, 10.0, track_h),
+            thumb_ratio,
+            start_ratio,
+            true,
+        );
+        b
+    }
+
+    /// 滚到底时滑块**必须贴住轨道底边**（旧实现差 7.6px）。
+    #[test]
+    fn thumb_reaches_the_track_bottom_when_fully_scrolled() {
+        // 轨道 100、内容 10 屏 → 比例高 0.1，但画出来的最小高度是 24
+        let b = bar(100.0, 0.1, 1.0);
+        let t = b.thumb();
+        assert!(
+            (t.bottom() - 100.0).abs() < 0.01,
+            "滚到底时滑块底边应贴住轨道底边（100），实际 {}",
+            t.bottom()
+        );
+        assert!(
+            (t.y - (100.0 - 24.0)).abs() < 0.01,
+            "滑块顶部应为 76，实际 {}",
+            t.y
+        );
+    }
+
+    /// 顶部时贴顶。
+    #[test]
+    fn thumb_reaches_the_track_top_at_zero_scroll() {
+        let b = bar(100.0, 0.1, 0.0);
+        assert!((b.thumb().y - 0.0).abs() < 0.01);
+    }
+
+    /// 轨道比 24px 下限还矮时，滑块不能画到轨道外面。
+    #[test]
+    fn thumb_never_exceeds_a_short_track() {
+        for track in [10.0f32, 20.0, 24.0, 30.0] {
+            let b = bar(track, 1.0, 1.0);
+            let t = b.thumb();
+            assert!(
+                t.y >= -0.01 && t.bottom() <= track + 0.01,
+                "轨道高 {track}：滑块 {t:?} 超出了轨道"
+            );
+        }
+    }
+
+    /// 中间比例：位置与比例成正比，且始终落在 [0, travel] 内。
+    #[test]
+    fn thumb_position_is_monotonic_and_bounded() {
+        let mut last = -1.0;
+        for step in 0..=10 {
+            let r = step as f32 / 10.0;
+            let t = bar(100.0, 0.3, r).thumb();
+            assert!(t.y >= -0.01 && t.bottom() <= 100.01, "r={r}: {t:?} 越界");
+            assert!(t.y >= last, "r={r}: 位置应单调不减");
+            last = t.y;
+        }
     }
 }

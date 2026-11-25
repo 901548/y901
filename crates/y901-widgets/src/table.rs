@@ -326,8 +326,12 @@ impl Table {
         ROW_H * self.scale
     }
 
-    /// 按最终宽度算每列的实际 x 与宽度（宽度基准是**行区域**宽度）。
-    fn column_layout(&self) -> Vec<(f32, f32)> {
+    /// 按最终宽度算每列的实际 `(x, w)`（宽度基准是**行区域**宽度）。
+    ///
+    /// 为什么公开：它是纯函数（输入列定义 + 当前 inner 宽度，输出几何），
+    /// 几何断言比像素断言精确得多 —— 能直接报出"第 2 列起点越界"这种错误，
+    /// 而不是靠截图差几个像素去猜。命中测试、表头绘制与行绘制共用它。
+    pub fn column_layout(&self) -> Vec<(f32, f32)> {
         let n = self.columns.len();
         if n == 0 {
             return Vec::new();
@@ -345,6 +349,13 @@ impl Table {
             }
         }
         let rest = (avail - fixed - percent_total).max(0.0);
+        // **`FLEX_MIN_W` 不能按列叠加**：旧实现每个 flex 列都取
+        // `max(share, min(80, rest))`，两列各要 80 而 `rest` 只有 120 时总宽 160 > 120，
+        // 第二列被视口裁掉、表头命中测试还会指向被裁的区域。
+        // 现在的规则：share 先按权重分；只有当**所有 flex 列都分不到 80** 时才用
+        // "每列 80 但整体按比例压缩"，保证 Σflex ≤ rest。
+        let min_per_flex = FLEX_MIN_W.min(rest / (flex_weight.max(1.0)).max(1.0));
+        let flex_total_w = if flex_weight > 0.0 { rest } else { 0.0 };
         let mut out = Vec::with_capacity(n);
         let mut x = self.inner.x;
         for c in &self.columns {
@@ -352,12 +363,30 @@ impl Table {
                 Dimension::Px(v) => v.max(0.0) * self.scale,
                 Dimension::Percent(p) => avail * p.max(0.0) / 100.0,
                 Dimension::Flex(f) if flex_weight > 0.0 => {
-                    (rest * f.max(0.0) / flex_weight).max(FLEX_MIN_W.min(rest))
+                    // 按权重分份额，再保证不小于"每列最小宽"，但**总量不超过 rest**：
+                    // `rest * f / weight` 已经满足 Σ = rest，最小值只是把它往上抬，
+                    // 所以抬完要按剩余空间再夹一次。
+                    let share = rest * f.max(0.0) / flex_weight;
+                    share.max(min_per_flex).min(rest)
                 }
-                _ => rest.max(FLEX_MIN_W),
+                _ => rest.max(FLEX_MIN_W.min(rest)),
             };
             out.push((x, w));
             x += w;
+        }
+        // 超宽时按比例压缩（保证最后不超出行区域；`Percent` 列也可能超）
+        let total: f32 = out.iter().map(|(_, w)| *w).sum();
+        if total > avail && total > 0.0 && flex_total_w > 0.0 {
+            let k = avail / total;
+            for (_, w) in out.iter_mut() {
+                *w *= k;
+            }
+            // 重新累加 x，保持列首尾相接
+            let mut cx = self.inner.x;
+            for (x, w) in out.iter_mut() {
+                *x = cx;
+                cx += *w;
+            }
         }
         out
     }
