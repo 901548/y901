@@ -159,6 +159,38 @@ D3D 侧：[mod.rs:176](../crates/y901-backend-win32/src/backend/mod.rs) `push_in
 `K` 次状态设置、一次全屏 blit、`Present`。**Present 占绝对主导**
 （空帧 6.885 ms ≈ 满帧 6.887 ms）。
 
+#### 4.1.1 D3D11 深读补充（独立审计返回，已逐条回源码核对）
+
+1. **图集上传每帧整张 4 MiB 拷贝 + 每脏区一次 patch 分配。**
+   `update_atlas` 第一行就是 `self.atlas_data = data.to_vec()`
+   （[d3d11.rs:2223](../crates/y901-backend-win32/src/backend/d3d11.rs)），
+   图集固定 1024×1024×4 = **4 MiB**；随后每个脏区 `vec![0u8; row_pitch*height]`
+   再逐行拷（:2245）。D3D 侧本身已是 `UpdateSubresource` 区域更新（`D3D11_BOX`），
+   **浪费全在 CPU 侧的"整张克隆"**。只要这一帧有任何一个字形被光栅化就付一次。
+2. **每帧 `env::var("Y901_GAMMA")`，`Y901_DEBUG_BATCHES` 甚至每个脏区读一次。**
+   [d3d11.rs:2496](../crates/y901-backend-win32/src/backend/d3d11.rs)（每帧）、
+   `:1957`（`draw_scene` 内，**每块脏区一次**）。这与本轮早些时候在软光栅里修掉的
+   `Y901_PAINT_TRACE` 是同一类缺陷（诊断开关留在热路径），而且 `env::var` 要拿全局锁 + 分配。
+3. **实例上限 10 000，超出部分被静默截断。**
+   `let count = instances.len().min(INSTANCE_CAPACITY)`（:2504），
+   只在一个**进程级一次**的 `eprintln!` 里提过（:2508-2518）。
+   每个字形、每个下划线、每个背景矩形都是一条实例，**100×100 网格带文字就接近上限**；
+   一旦越界，画面"后半帧整体消失"，而日志只出现一次。这是**可达的正确性缺陷**，
+   不是纯性能问题（建议在 RENDER-04 里把它变成一个可观测计数器 + 超限策略）。
+4. **`RenderBackend::present` 硬编码 `sync_interval = 1`**（[mod.rs:805](../crates/y901-backend-win32/src/backend/mod.rs)），
+   而它上方 6 行的注释明确写着"sync_interval = 0：不阻塞在 vsync 上…用 1 时窗口被遮挡会让
+   Present 永久阻塞"（:334-344）。**注释与代码互相矛盾**，且这是 `Present` 计入帧时间的原因之一。
+5. **`y901-backend-win32` 里没有任何 `Instant`** —— CPU 准备 / GPU 提交 / Present 完全没分开。
+   唯一的仪器在 `y901-runtime`，而它的 `present_ms` 覆盖"事件分发 → layout → render →
+   after_present"整段（[profile.rs:32](../crates/y901-runtime/src/profile.rs) 把它定义成
+   "本帧实际耗时"）。**"D3D present 要多少 ms"目前没有任何代码依据。**
+6. `draw_scene` 每块脏区都重新绑定全套状态（RT/视口/VS+PS+Cb/VB/拓扑/混合/光栅/图集 SRV+sampler/scissor），
+   且每个图片批次前后各切一次 PS（:1990、:1994）。这些在"每块脏区重画全量实例"（B2）之上再乘 K。
+7. 图集淘汰会触发 `compact_atlas` → `reset_pending = true` → **下一帧整张重传**；
+   而 `compact_atlas` 是在 `draw_text` 内部被触发的（[font.rs:862-873](../crates/y901-backend-win32/src/backend/font.rs)），
+   即**渲染中途重排图集 UV**，此前已 push 的实例仍持旧 UV（是否有可见伪影**未验证**，标记 uncertain）。
+8. 设备重建路径（`Gfx::rebuild`）会丢 `pipeline/atlas/cached/rtv`，但 `self.images` 里的
+   纹理不清理（**未验证**旧设备纹理在下次 `PSSetShaderResources` 的行为）。
 ### 4.2 X11（Tier 2）
 
 `Window::render_tree`（[window.rs:778](../crates/y901-backend-x11/src/window.rs)）：
@@ -178,6 +210,34 @@ self.present(&frame, w, h);     // XShm / PutImage
 0.09–0.10 ms 级，但整棵树遍历 + 逐字形贴图仍在）+ `w*h*4` 拷贝（1080p ≈ 8.3 MB）+ IPC。
 `real_window.rs` 里已有 `benchmark_shm_vs_putimage_1080p`（真窗口基准，`#[ignore]`）。
 
+#### 4.2.1 X11 深读补充（独立审计返回，已逐条回源码核对）
+
+1. **X server 只当帧缓冲用，没有任何绘图请求。** 整个 crate 里没有 `POLY_*`/`PolyFillRectangle`/
+   `PolyText`/XRender/Xft 调用，opcode 表只有 `CREATE_WINDOW`/`CREATE_GC`/`CHANGE_PROPERTY`/
+   `PUT_IMAGE`/`SHM_*`（[lib.rs:74-127](../crates/y901-backend-x11/src/lib.rs)）。
+   所以"X11 渲染性能"= "软光栅性能 + 一次上传"，不存在服务端绘制优化空间。
+2. **`ConfigureNotify` 不更新缓存的窗口尺寸** —— 见下方 B9，这是本轮新发现的**最高危项**。
+3. **SHM 快路径把整帧参数写死。** `ShmPutImageArgs` 本身支持 `src_x/src_y/src_width/src_height`
+   + `dst_x/dst_y`（[encode.rs:655-666](../crates/y901-backend-x11/src/encode.rs)），
+   但调用点硬编码 `src=0,0,w,h`、`dst=0,0`（[window.rs:1118-1123](../crates/y901-backend-x11/src/window.rs)）。
+   **partial present 在协议层完全可行，只被调用方常量挡住。**
+4. **SHM 不可用时退化为分块 `PutImage`**：`PUT_IMAGE_MAX_BYTES = 262 116`，
+   1080p 一帧 = **32 个请求**、每块重新 `Vec::with_capacity` 分配 ≈262 KiB 并把像素再拷一遍
+   （[conn.rs:800-840](../crates/y901-backend-x11/src/conn.rs)）。`stream` 是裸 `UnixStream`
+   （无 `BufWriter`），每个 `send` 一次 `write_all`。
+5. **不校验视觉格式**：握手只解析 root/visual/depth，不查 `image-byte-order` /
+   `bits-per-pixel` / `red-green-blue masks`；正确性依赖"小端 + 24-bit TrueColor root"。
+   非 TrueColor / 奇数掩码的服务器会**静默颜色错乱**（无诊断）。
+6. **Expose 矩形被丢弃**：`Expose` 携带真实 `(x,y,w,h,count)`
+   （[decode.rs:151-157](../crates/y901-backend-x11/src/decode.rs)），但映射成
+   `RawEvent::Resize{ 当前窗口尺寸 }`（[window.rs:842-847](../crates/y901-backend-x11/src/window.rs)）。
+   于是**两个 damage 源（UI 脏区、服务端 Expose）都被压成"整帧"**。
+7. **没有把光栅与 IPC 分开计时**：唯一仪器 `Y901_PROFILE` 的 `present_ms` 覆盖
+   "事件分发 → layout → render → after_present"整段（[runtime.rs:227-257](../crates/y901-runtime/src/runtime.rs)），
+   无法区分"CPU 光栅慢"与"两次 8 MB 拷贝 + 32 次系统调用"。
+8. **dirty 被查了两次**：`window.rs:779`（`render_tree` 内）与 `window.rs:1192`
+   （`WindowBackend::render`），而 trait 文档（[window.rs:53-59](../crates/y901-runtime/src/window.rs)）
+   明确要求"唯一判定点"。当前行为无害，但违反了自述契约。
 ### 4.3 Web / WASM（Tier 3）
 
 `WasmWindow::render`（[lib.rs:259](../crates/y901-backend-web/src/lib.rs)）：
@@ -231,6 +291,10 @@ ctx.put_image_data(&image_data, 0.0, 0.0);
 | B6 | D3D `build_batches()` 每帧新建 `Vec` | mod.rs:339/865 | 每帧 1 次分配；图片多时更大 |
 | B7 | **Present/合成器节拍**吞掉一切 | 空帧=满帧=6.885 ms | 任何 CPU 优化在窗口模式下都测不出来 → 必须分层计时 |
 | B8 | X11 无脏区 → expose/resize 之外也全量重绘 | 源码 | 静止画面若被 invalidate 就整帧重来 |
+| B9 | **X11：WM 驱动的窗口 resize 不生效**（最高危，需真机确认） | `ConfigureNotify` → `RawEvent::Resize{w,h}`，但运行时只置 `need_layout = true`、**丢弃 w/h**（[runtime.rs:106-108](../crates/y901-runtime/src/runtime.rs)）；`relayout(tree)` 无尺寸参数、读缓存 `self.size()`（[x11/window.rs:1182-1187](../crates/y901-backend-x11/src/window.rs)）；`self.width/height` 只在 DPI 路径（window.rs:685）与 `Presenter::resize`（**生产代码永不调用**：`frame_step<W: WindowBackend>` 的 bound 不含 `Presenter`）被写；`present` 再 `width.min(self.width)` 钳制（window.rs:1102-1103） | resize 后软缓冲、布局视口、上传区域**全停在旧尺寸**，新区域显示未定义内容。这是 `WindowBackend::relayout` 缺尺寸参数暴露的契约裂缝；Win32 不受影响（自己处理 WM_SIZE） |
+| B10 | D3D 图集上传**每帧整张 4 MiB 克隆** + 每脏区 patch 分配 | `self.atlas_data = data.to_vec()`（d3d11.rs:2223）、`vec![0u8; row_pitch*height]`（:2245） | 任何一帧有字形被光栅化就付一次；D3D 侧本来只需要区域更新 |
+| B11 | D3D 热路径里的 `env::var`：`Y901_GAMMA` 每帧、`Y901_DEBUG_BATCHES` **每脏区** | d3d11.rs:2496 / :1957 | 全局锁 + 分配；与本轮已修的软光栅 `Y901_PAINT_TRACE` 同类 |
+| B12 | **实例上限 10 000，超出静默截断**（进程级只告警一次） | `instances.len().min(INSTANCE_CAPACITY)`（d3d11.rs:2504） | 富 UI（100×100 网格带文字）可达；越界后"后半帧消失"且无后续日志 —— 正确性问题，不只是性能 |
 
 **不可确认/需要仪器才能判断**：GPU 侧真实耗时（D3D 没有 GPU timestamp query / disjoint query）；
 X11 IPC 占比（只有整帧基准，无分段）；Web 上 `putImageData` vs 光栅各自占比。
@@ -246,6 +310,7 @@ X11 IPC 占比（只有整帧基准，无分段）；Web 上 `putImageData` vs �
 | `RenderPlanner` | **只有 D3D 的 `build_batches`**（图片/图集交替） | 缺 clip 传播、相邻合并、per-rect 实例列表、统计；且只在后端内、不可跨平台复用 |
 | `DamageTracker` | `DirtyRegion` 已在 `y901-ui`，质量不错（合并/上限/full 回退） | 缺"旧∪新"自动追踪（依赖 `mark_moved_map`，已实现但只在布局路径）；缺 damage 面积/计数统计 |
 | `ResourceCache` | `TextureId(u64)` + `retain/release` + 图集 `take_dirty` | 缺 **generation**（`TextureId` 是裸 u64，后端 `HashMap<u64, …>`，删后重用 id 会误引用）；图集/渐变无统一句柄 |
+| **后端尺寸权威** | Win32 自持（WM_SIZE 自己处理）、X11 **不更新**、Web 由 canvas 决定 | 缺统一契约："谁负责把窗口新尺寸告诉光栅器"。RENDER-02 的 `FramePacket.viewport` 必须由后端每帧提供，而不是让 `relayout` 猜（见 B9） |
 | `RenderStats` | `RenderOutcome{Skipped,Presented}` | 缺全部 12 项指标；`present_bench` 只测"一次 present 总时长" |
 | 跨后端视觉回归 | `hash-gate`（单场景、仅 D3D）+ 若干软光栅金标 | 缺"同一 FramePacket → 三后端 → 逐像素比较" |
 
@@ -358,6 +423,24 @@ pub struct RenderStats {
 在校验里做**上限断言**而不是性能断言。
 
 **完成条件**：`WindowBackend::render` 返回（或旁路暴露）`RenderStats`；
+
+**本轮深读暴露的、必须一起记录的点位**（否则统计不到真正的大头）：
+
+- `atlas_upload_bytes` 要在 `update_atlas` 里按 `reset ? size*size*4 : Σ(patch)` 记，
+  而不是按"脏区个数"（见 B10）；
+- `instance_count` 要同时记 `pushed` 与 `drawn` —— 后者受 `INSTANCE_CAPACITY` 截断（见 B12），
+  两者不等就说明这一帧**丢内容**了；
+- `present_time` 在 `swap_chain.present` 前后各取一次 `Instant`，并把"被遮挡"
+  （`DXGI_STATUS_OCCLUDED`）单独计一档（它与成功上屏的耗时语义不同）；
+- `cache_hits / cache_misses` 直接复用图集的 `take_dirty` 与字形缓存命中计数，不要另建一套。
+
+**顺带建议三个零风险修复**（都不改变渲染结果，可独立提交/独立回滚）：
+
+1. `Y901_GAMMA` / `Y901_DEBUG_BATCHES` / `Y901_GAMMA_AB` / `Y901_SCISSOR_TEST` /
+   `Y901_SNAPSHOT` 全部改成 `OnceLock` 缓存（与软光栅里修 `Y901_PAINT_TRACE` 完全同构）；
+2. `update_atlas` 去掉 `data.to_vec()`：改成复用缓冲（`clear + extend_from_slice`）；
+3. `build_batches()` 与 `self.dirty.clone()` 改成复用 `Vec`（`mem::take` + `clear`）。
+
 `render_bench` 把 12 个字段写进 JSON；文档说明每个字段的测量点。
 
 ### RENDER-05 Full-render correctness oracle
@@ -431,5 +514,9 @@ for scene in SCENES {                 // move / delete / hide / show / clip / z-
 - 未审计 `backend/font.rs`（1192 行）的图集上传细节，只确认了 `sync_atlas` 是增量的；
 - 未审计 `d3d11.rs` 的 COM 引用计数与设备丢失恢复全路径（已有 FINDINGS 在
   `docs/AUDIT_2026-11-25.md` 第 4 条）；
-- 三个只读审计子代理（D3D/X11/Web 深读）在本轮结束时尚未返回结果；本文结论
-  均出自我本人直接读取的源码，未依赖它们的未返回内容。
+- 三个只读审计子代理中，**D3D11 与 X11 的深读已返回并逐条回源码核对后并入**
+  （§4.1.1、§4.2.1，以及 B9–B12）；**Web/WASM 深读在本轮结束时仍未返回**，
+  §4.3 的 Web 结论只基于我本人读的 `lib.rs` / `present.rs`。
+- 子代理报告里标 `uncertain` 的三项（图集 `compact_atlas` 在渲染中途改 UV 是否可见、
+  设备重建后 `self.images` 里的旧纹理行为、X11 非 TrueColor visual 的颜色错乱范围）
+  我**没有**验证，本文也按 `uncertain` 保留，不能当成结论引用。
