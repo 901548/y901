@@ -26,10 +26,19 @@ pub struct FrameMeta {
     pub had_work: bool,
     /// 本帧是否重新布局。
     pub need_layout: bool,
+    /// 本帧**工作**耗时（微秒）：`wait_events` 之后到 `after_present` 结束。
+    ///
+    /// 口径修正（A 阶段）：这里曾经叫 `present_ms`，记的却是整帧工作耗时，
+    /// 名字与内容不符 —— 看到 6.9ms 会以为"Present 花了 6.9ms"，实际那是
+    /// 事件分发 + 布局 + 渲染 + 钩子的总和。现在如实拆成两项。
+    pub total_us: u64,
+    /// 后端**真实上报**的阻塞式上屏耗时（微秒）；`None` = 该后端未接入统计。
+    ///
+    /// 为什么不回退成 `total_us`：那样 `present` 又会等于整帧工作耗时（旧的错误口径）。
+    /// 宁可显示 `unavailable`，也不伪造。
+    pub present_us: Option<u64>,
     /// 本帧是否真正上屏（`Presented`）。
     pub presented: bool,
-    /// 本帧实际耗时（毫秒）。
-    pub present_ms: u64,
 }
 
 /// 环形缓冲 + 分位数报告。
@@ -94,19 +103,38 @@ impl FrameProfile {
             v[idx.min(n - 1)]
         };
         let m = self.max_meta;
-        eprintln!(
-            "[profile] n={} frames/2s={} p50={}us p95={}us p99={}us max={}us | max-frame: had_work={} need_layout={} presented={} frame_ms={}",
-            n,
-            self.window_frames,
-            pick(0.50),
-            pick(0.95),
-            pick(0.99),
-            self.max_us,
-            m.had_work,
-            m.need_layout,
-            m.presented,
-            m.present_ms,
-        );
+        // **口径修正**：`frame_us` 是整帧工作耗时（不含 `wait_events`），
+        // `present_us` 只有后端真实上报时才有值；未接入时打印 `unavailable`
+        // —— 不再用整帧耗时冒充 Present（旧字段名 `present_ms` 就是这么误导的）。
+        match m.present_us {
+            Some(us) => eprintln!(
+                "[profile] n={} frames/2s={} p50={}us p95={}us p99={}us max={}us | max-frame: had_work={} need_layout={} presented={} frame_us={} present_us={}",
+                n,
+                self.window_frames,
+                pick(0.50),
+                pick(0.95),
+                pick(0.99),
+                self.max_us,
+                m.had_work,
+                m.need_layout,
+                m.presented,
+                m.total_us,
+                us,
+            ),
+            None => eprintln!(
+                "[profile] n={} frames/2s={} p50={}us p95={}us p99={}us max={}us | max-frame: had_work={} need_layout={} presented={} frame_us={} present_us=unavailable",
+                n,
+                self.window_frames,
+                pick(0.50),
+                pick(0.95),
+                pick(0.99),
+                self.max_us,
+                m.had_work,
+                m.need_layout,
+                m.presented,
+                m.total_us,
+            ),
+        }
         self.window_frames = 0;
         self.max_us = 0;
         self.max_meta = FrameMeta::default();

@@ -609,6 +609,82 @@ impl RenderStats {
 }
 
 // ===========================================================================
+// 后端阶段的合并（runtime 每帧调用一次）
+// ===========================================================================
+
+/// 由**后端**负责填充的阶段（runtime 只填事件/布局/钩子/整帧）。
+///
+/// 为什么显式列出而不是"后端填了就算"：合并时必须能区分
+/// "后端没测"（保持 `None`）与"后端测了 0"（`Some(ZERO)`），
+/// 并且 runtime 自己的阶段不得被后端覆盖。
+pub const BACKEND_STAGES: [StageId; 12] = [
+    StageId::RenderPrepare,
+    StageId::CommandGen,
+    StageId::CpuRaster,
+    StageId::Upload,
+    StageId::BackendSubmit,
+    StageId::PixelConvert,
+    StageId::ImageAlloc,
+    StageId::PixelCopy,
+    StageId::CanvasBlit,
+    StageId::PresentBlocking,
+    StageId::GpuExecute,
+    StageId::Compositor,
+];
+
+impl RenderStats {
+    /// 某阶段是否由后端负责。
+    pub fn is_backend_stage(id: StageId) -> bool {
+        BACKEND_STAGES.contains(&id)
+    }
+
+    /// 合并后端上报的统计：**只取后端负责的阶段**，并做自检。
+    ///
+    /// 返回：`true` = 后端确实提供了数据；`false` = 未接入（所有后端阶段保持 `None`，
+    /// **绝不伪造**）。
+    ///
+    /// 自检失败（例如后端把 `gpu_execute` 填成 `Measured`）时不采纳该帧的后端数据，
+    /// 并打一条日志 —— 宁可少数据，也不要自相矛盾的数据。
+    pub fn merge_backend(&mut self, src: Option<RenderStats>) -> bool {
+        let Some(src) = src else {
+            return false;
+        };
+        if src.backend != self.backend {
+            // 后端自报种类与本帧能力表不一致：丢弃，避免用错的能力表解读数据。
+            eprintln!(
+                "[y901] render_stats: 后端自报种类 {} 与本帧 {} 不一致，丢弃",
+                src.backend.name(),
+                self.backend.name()
+            );
+            return false;
+        }
+        for id in BACKEND_STAGES {
+            if let Some(d) = src.stages.get(id) {
+                self.stages.set(id, d);
+            }
+        }
+        self.counters = src.counters;
+        self.presented = src.presented;
+        self.frame_unavailable = src.frame_unavailable;
+        if let Err(err) = self.validate() {
+            eprintln!("[y901] render_stats 自检失败，丢弃本帧后端数据：{err:?}");
+            self.frame_unavailable = &[];
+        }
+        true
+    }
+
+    /// 后端上报的阶段耗时之和（用于"不得超过 `window.render` 墙钟"的验收）。
+    pub fn backend_stage_sum(&self) -> Duration {
+        let mut sum = Duration::ZERO;
+        for id in BACKEND_STAGES {
+            if let Some(d) = self.stages.get(id) {
+                sum += d;
+            }
+        }
+        sum
+    }
+}
+// ===========================================================================
 // 开关与打点原语
 // ===========================================================================
 

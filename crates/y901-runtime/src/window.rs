@@ -96,4 +96,26 @@ pub trait WindowBackend {
     /// 放到渲染前去读只会得到**上一帧**的内容。两个钩子不是冗余：
     /// `after_frame` 可以改 `tree`，`after_present` 不会改——它只读取已提交的结果。
     fn after_present(&mut self, _tree: &mut UiTree, _host: &mut dyn crate::Host) {}
+
+    /// 本后端的分阶段统计**种类**；`None` = 该后端未接入统计（默认）。
+    ///
+    /// 为什么需要它：`render_stats::RenderStats` 构造时必须知道后端种类，
+    /// 而种类决定**能力表**（哪些阶段可测、哪些不可测），能力表又是
+    /// `validate()` 拒绝伪造数据的依据。runtime 无法从窗口对象猜出种类
+    ///（`--force-soft` 的 Win32 与 D3D11 是同一类型），所以由后端自报。
+    ///
+    /// 默认 `None`：测试替身与未接入的后端无需改动。
+    fn render_stats_backend(&self) -> Option<crate::render_stats::BackendKind> {
+        None
+    }
+
+    /// 取走**上一帧**的分阶段统计；`None` = 没有可用统计（默认）。
+    ///
+    /// 语义是"取走"：调用方每帧最多取一次，第二次调用必然得到 `None`，
+    /// 因此不存在重复消费；每帧由后端重新构造，因此不存在跨帧污染。
+    ///
+    /// 默认实现返回 `None` —— 这是**可选能力**，已有后端与测试替身无需修改即可编译。
+    fn take_render_stats(&mut self) -> Option<crate::render_stats::RenderStats> {
+        None
+    }
 }

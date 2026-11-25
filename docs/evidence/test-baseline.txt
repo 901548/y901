@@ -168,4 +168,9 @@
 # Measured at 2026-11-25 (A 阶段第 1 步：render_stats 数据模型 + 16 条单测):
 #   default cargo test --workspace --no-fail-fast   passed 1233, failed 0, ignored 69 / 177 个测试目标
 #   (新增 y901-runtime::render_stats::tests 16 条；passed 1217 → 1233)
-1233
+# Measured at 2026-11-25 (A 阶段第 2 步：Runtime 接入 + present 口径修正):
+#   default cargo test --workspace --no-fail-fast   passed 1242, failed 0, ignored 69 / 178 个测试目标
+#   (新增 render_stats_lifecycle 9 条；passed 1233 → 1242；目标 177 → 178)
+#   注意：font_m3_prefetch::prefetch_removes_on_demand_rasterization 是时序敏感用例，
+#   并行满载时偶发（168.2ms vs 168.9ms）；单独重跑 3/3 通过，与本轮改动无关。
+1242

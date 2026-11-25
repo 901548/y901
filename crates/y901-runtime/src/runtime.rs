@@ -24,6 +24,7 @@ use web_time::Instant;
 use crate::{translate, Host, RawEvent};
 use y901_ui::{Size, UiEvent, UiTree};
 
+use crate::render_stats::{self, RenderStats, StageId};
 use crate::window::{RenderOutcome, WindowBackend};
 
 /// 空闲时的默认等待上限（毫秒）。
@@ -60,8 +61,47 @@ fn busy_wait_ms(frame_elapsed: std::time::Duration) -> u32 {
         .as_millis() as u32
 }
 
+/// 毫秒取整。
+///
+/// 统计字段现在统一用微秒（避免 0.4ms 被记成 0），本函数不再用于生产路径；
+/// 保留它是为了不删既有测试 `elapsed_ms_reports_the_supplied_frame_duration`
+///（以及未来可能需要的"人读友好"输出）。
+///
+/// **不要**改成"仅测试构建可见"（`cfg(test)`）属性：
+/// `guard_tests::run_loop_never_queries_dirty_directly` 按源码里**第一个**
+/// 测试模块标记切分"生产代码"，在这里插入一个会让它把 `run_loop` 也切掉，
+/// 于是那条守卫测试会在**与真实问题无关的地方**报红（本轮实际踩到过）。
+#[allow(dead_code)]
 fn elapsed_ms(duration: std::time::Duration) -> u64 {
     duration.as_millis() as u64
+}
+
+/// 往统计里记一个阶段：`start` 为 `None`（关闭统计）时什么都不做。
+#[inline]
+fn rec(stats: &mut Option<&mut RenderStats>, id: StageId, start: Option<web_time::Instant>) {
+    if let Some(d) = render_stats::since(start) {
+        if let Some(s) = stats.as_deref_mut() {
+            s.stages.set(id, d);
+        }
+    }
+}
+
+/// 由统计构造 profile 的归因信息。
+///
+/// **口径修正**（本阶段核心）：旧实现把"事件分发 → render → after_present"整段
+/// 当成 `present`，于是 `present_ms` 看起来恒等于帧工作耗时。现在拆成两项：
+/// - `total_us`：整帧工作耗时（不含 `wait_events`）；
+/// - `present_us`：**只有**后端真实上报了 `present_blocking` 才有值，
+///   否则是 `None`（"该后端未接入"），不会再拿总时长顶替。
+fn frame_meta_from(total: std::time::Duration, stats: Option<&RenderStats>) -> profile::FrameMeta {
+    let present_us = stats
+        .and_then(|s| s.stages.get(StageId::PresentBlocking))
+        .map(|d| d.as_micros() as u64);
+    profile::FrameMeta {
+        total_us: total.as_micros() as u64,
+        present_us,
+        ..profile::FrameMeta::default()
+    }
 }
 
 /// 一帧的观测结果。
@@ -91,6 +131,25 @@ pub fn frame_step<W: WindowBackend>(
     events: &[RawEvent],
     dt: std::time::Duration,
 ) -> Result<FrameStats, String> {
+    frame_step_with_stats(window, tree, host, events, dt, None)
+}
+
+/// 与 [`frame_step`] 完全相同，但可顺带填充分阶段统计。
+///
+/// `stats == None` 时**与 `frame_step` 逐行等价**：`mark(None)` 直接返回 `None`，
+/// 一次 `Instant::now()` 都不会调用（`render_stats::mark` 内部先判 `started`）。
+///
+/// 为什么需要第二个入口而不是改签名：`frame_step` 是已发布的公开 API
+///（web 后端 `lib.rs` 与 `tests/typing_frames.rs` 都在调），改签名是破坏性变更。
+pub fn frame_step_with_stats<W: WindowBackend>(
+    window: &mut W,
+    tree: &mut UiTree,
+    host: &mut dyn Host,
+    events: &[RawEvent],
+    dt: std::time::Duration,
+    stats: Option<&mut RenderStats>,
+) -> Result<FrameStats, String> {
+    let mut stats = stats;
     let (w, h) = window.viewport();
     let viewport = Size::new(w as f32, h as f32);
     let mut need_layout = false;
@@ -98,6 +157,8 @@ pub fn frame_step<W: WindowBackend>(
     let mut close_requested = false;
 
     // ---- 1. 事件 ----
+    // 统计关闭时 `mark(false)` 返回 `None`，**不读时钟**。
+    let t_events = render_stats::mark(stats.is_some());
     for raw in events {
         if matches!(raw, RawEvent::Close) {
             close_requested = true;
@@ -129,11 +190,18 @@ pub fn frame_step<W: WindowBackend>(
         had_work = true;
     }
 
+    // `event_dispatch` 覆盖：事件消化 → 命令/idle → 动画推进。
+    // **主题切换与布局另计**（主题很罕见，不单列阶段，仍含在 `total_frame` 里）。
+    rec(&mut stats, StageId::EventDispatch, t_events);
+
     // ---- 3. 重排判定 ----
     let external = tree.drain_external_invalidations();
     let structural = tree.take_layout_request();
     if need_layout || external > 0 || structural {
+        // 只有真的重排才读时钟：没重排的帧该阶段保持 `None`（"本帧未经过"）。
+        let t_layout = render_stats::mark(stats.is_some());
         window.relayout(tree);
+        rec(&mut stats, StageId::Layout, t_layout);
     }
 
     // ---- 4. 主题 ----
@@ -146,11 +214,32 @@ pub fn frame_step<W: WindowBackend>(
     }
 
     // ---- 5. 后端收尾（IME / 光标 / 快照 / 字体）----
+    let t_after_frame = render_stats::mark(stats.is_some());
     window.after_frame(tree, host);
+    rec(&mut stats, StageId::AfterFrame, t_after_frame);
 
     // ---- 6. 渲染 ----
+    // `render` 只是个**边界**：内部分阶段由后端自己上报（见 `take_render_stats`）。
+    // 这里记下整段 `window.render` 的墙钟时间，用于验收"后端上报的各阶段之和
+    // 不得超过 render 总时长"——超过就说明有人把别的耗时算进来了。
+    let t_render = render_stats::mark(stats.is_some());
     let outcome = window.render(tree)?;
+    let render_span = render_stats::since(t_render);
+
+    let t_after_present = render_stats::mark(stats.is_some());
     window.after_present(tree, host);
+    rec(&mut stats, StageId::AfterPresent, t_after_present);
+
+    // 后端上报的阶段之和不得超过 `window.render` 的实际墙钟（防伪造/防重复计时）。
+    debug_assert!(
+        match (render_span, stats.as_deref()) {
+            (Some(span), Some(s)) => {
+                s.backend_stage_sum() <= span + std::time::Duration::from_micros(50)
+            }
+            _ => true,
+        },
+        "后端上报的分阶段耗时之和超过了 window.render 的实际耗时，说明统计口径有误"
+    );
 
     Ok(FrameStats {
         had_work,
@@ -176,6 +265,16 @@ pub fn run_loop<W: WindowBackend>(
     } else {
         None
     };
+    // ---- 分阶段统计的生命周期（关闭时全是 `None`，零分配、零时钟）----
+    // 只在**开启且后端自报种类**时才创建对象：不知道种类就无法构造能力表，
+    // 而能力表是 `validate()` 拒绝伪造数据的依据 —— 宁可没有统计，也不要错的统计。
+    let stats_backend = if render_stats::enabled() {
+        window.render_stats_backend()
+    } else {
+        None
+    };
+    let mut frame_stats: Option<RenderStats> = stats_backend.map(|b| RenderStats::new(0, b));
+    let mut frame_id: u64 = 0;
     let mut first_frame_done = false;
     // 上一帧是否有工作：有工作时不得等待，否则 Win32 会在每帧都“睡”一次。
     let mut was_busy = false;
@@ -226,7 +325,19 @@ pub fn run_loop<W: WindowBackend>(
         // Do not count event-wait time against the work budget or present_ms.
         let work_start = Instant::now();
         // ---- 1..6. 一帧的通用部分（与 wasm 共用）----
-        let stats = frame_step(window, tree, host, &raws, dt)?;
+        // 每帧先重置：上一帧的阶段/计数器不得残留（跨帧污染会让 p99 完全失真）。
+        if let Some(s) = frame_stats.as_mut() {
+            frame_id = frame_id.wrapping_add(1);
+            s.reset_for_next_frame(frame_id);
+        }
+        let stats = frame_step_with_stats(
+            window,
+            tree,
+            host,
+            &raws,
+            dt,
+            frame_stats.as_mut().map(|s| &mut *s),
+        )?;
         let (had_work, need_layout, presented) =
             (stats.had_work, stats.need_layout, stats.presented);
         if stats.close_requested {
@@ -242,19 +353,37 @@ pub fn run_loop<W: WindowBackend>(
         }
 
         // ---- 7. 统计 ----
-        // Measure frame work after render and after_present (excluding event wait)
-        // for the profiler's present_ms field.
+        // 口径：`work_start` 在 `wait_events` **之后**取，所以等待时间不计入。
         let frame_elapsed = work_start.elapsed();
+
+        // 分阶段统计：先取走后端上报（每帧最多一次，第二次必然是 None），
+        // 再补 runtime 自己的阶段，最后算 `total_frame`。
+        //
+        // 关闭统计时 `frame_stats` 是 `None`，**不会调用 `take_render_stats()`**，
+        // 后端因此也不会做任何统计相关的构造/分配。
+        let mut backend_present_us = None;
+        if let Some(s) = frame_stats.as_mut() {
+            let backend = window.take_render_stats();
+            s.merge_backend(backend);
+            s.presented = presented;
+            s.stages.set(StageId::TotalFrame, frame_elapsed);
+            backend_present_us = s
+                .stages
+                .get(StageId::PresentBlocking)
+                .map(|d| d.as_micros() as u64);
+            let mut line = String::with_capacity(640);
+            s.write_json(&mut line);
+            eprintln!("[stats] {line}");
+        }
+
         if let Some(p) = profiler.as_mut() {
-            p.record(
-                frame_elapsed.as_micros() as u64,
-                profile::FrameMeta {
-                    had_work,
-                    need_layout,
-                    presented,
-                    present_ms: elapsed_ms(frame_elapsed),
-                },
-            );
+            let mut meta = frame_meta_from(frame_elapsed, frame_stats.as_ref());
+            // 后端未提供 `present_blocking` 时保持 `None`（**不拿 total 顶替**）。
+            debug_assert_eq!(meta.present_us, backend_present_us);
+            meta.had_work = had_work;
+            meta.need_layout = need_layout;
+            meta.presented = presented;
+            p.record(frame_elapsed.as_micros() as u64, meta);
         }
 
         was_busy = had_work || presented;
