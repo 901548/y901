@@ -90,6 +90,18 @@ pub const INSTANCE_SIZE: usize = 96;
 /// 单帧实例上限。超出时按此截断而不是扩缓冲——每帧重分配缓冲比少画几个元素更糟。
 pub const INSTANCE_CAPACITY: usize = 10_000;
 
+/// 需要 `needed` 个实例时缓冲应该有多大。
+///
+/// 规则：**不小于** [`INSTANCE_CAPACITY`]，且向上取到 2 的幂 —— 扩容代价是一次
+/// `CreateBuffer`，取 2 的幂可以保证"每翻一倍才重建一次"，不会每帧重建。
+pub fn capacity_for(needed: usize) -> usize {
+    let mut cap = INSTANCE_CAPACITY;
+    while cap < needed {
+        cap = cap.saturating_mul(2);
+    }
+    cap
+}
+
 /// 实例超限告警的"只打一次"开关（跨进程级；避免每帧刷屏）。
 static INSTANCE_OVERFLOW_WARNED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
@@ -2128,6 +2140,11 @@ pub struct Gfx {
     images: std::collections::HashMap<u64, (Texture, ShaderResourceView, u32, u32, u32)>,
     /// 下一个图片索引（从 1 开始，0 = 无效）。
     next_image: u64,
+    /// **实例缓冲当前容量**（元素数）。
+    ///
+    /// 初始为 [`INSTANCE_CAPACITY`]；某一帧实例更多时按 2 的幂扩容
+    /// （RENDER-BUG-01 / issue #7：以前超出部分被 `min()` 静默截断）。
+    instance_capacity: usize,
 }
 
 impl Gfx {
@@ -2158,6 +2175,7 @@ impl Gfx {
             snapshot: None,
             images: std::collections::HashMap::new(),
             next_image: 0,
+            instance_capacity: INSTANCE_CAPACITY,
         };
         gfx.rebuild(hwnd, width, height)?;
         Ok(gfx)
@@ -2474,6 +2492,56 @@ impl Gfx {
         Ok((texture, srv))
     }
 
+    /// 实例数超过当前容量时**扩容实例缓冲**（RENDER-BUG-01 / issue #7）。
+    ///
+    /// 为什么扩容而不是分批提交：`Batch::start` 是**全局实例下标**，
+    /// `draw_instances(n, b.start)` 直接把它当 first-vertex 用；分批就得重映射
+    /// 所有 batch 区间，改动面大且容易引入"画错区间"这类难查的 bug。
+    /// 扩容只重建一个顶点缓冲，控制流不变。
+    ///
+    /// 失败时保持原缓冲（调用方仍会 `min()` 截断，但会打印告警）—— 宁可少画，
+    /// 不能在渲染路径上 panic。
+    ///
+    /// # Safety
+    ///
+    /// 同 [`Gfx::render_batched`]：必须在拥有本 D3D 设备的线程上调用。
+    unsafe fn ensure_instance_capacity(&mut self, needed: usize) -> bool {
+        if needed <= self.instance_capacity {
+            return true;
+        }
+        let new_cap = capacity_for(needed);
+        let Some(device) = self.device.as_ref() else {
+            return false;
+        };
+        let buffer = match device.create_buffer(&BufferDesc {
+            byte_width: (new_cap * INSTANCE_SIZE) as u32,
+            usage: D3D11_USAGE_DYNAMIC,
+            bind_flags: D3D11_BIND_VERTEX_BUFFER,
+            cpu_access_flags: D3D11_CPU_ACCESS_WRITE,
+            misc_flags: 0,
+            structure_byte_stride: 0,
+        }) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[y901] 实例缓冲扩容失败（{e}）；本帧仍按旧容量截断");
+                return false;
+            }
+        };
+        match self.pipeline.as_mut() {
+            Some(p) => {
+                p.instance_buffer = buffer;
+                self.instance_capacity = new_cap;
+                eprintln!(
+                    "[y901] 实例缓冲扩容：{} → {} 个实例（本次需要 {needed} 个）",
+                    INSTANCE_CAPACITY.min(new_cap / 2),
+                    new_cap
+                );
+                true
+            }
+            None => false,
+        }
+    }
+
     /// 提交一帧：上传实例、画一次 `DrawInstanced`、`Present`。
     ///
     /// # Safety
@@ -2530,6 +2598,10 @@ impl Gfx {
             eprintln!("[y901] cached RT 创建失败: {err}");
             return 0;
         }
+        // **先保证容量够**：不够就扩容（issue #7）。失败时退化为旧的截断行为，
+        // 但下面仍会打印告警，不会静默。
+        let capacity_ok = self.ensure_instance_capacity(instances.len());
+        let capacity = self.instance_capacity;
         let (Some(pipeline), Some(rtv), Some(context), Some(swap_chain), Some(cached)) = (
             self.pipeline.as_ref(),
             self.rtv.as_ref(),
@@ -2550,22 +2622,20 @@ impl Gfx {
         context
             .update_constant_buffer(&pipeline.constant_buffer, globals.as_ptr() as *const c_void);
 
-        let count = instances.len().min(INSTANCE_CAPACITY);
+        let count = instances.len().min(capacity);
         if let Some(a) = acc.as_deref_mut() {
             a.drawn = Some(count as u32);
         }
-        // **绝不静默丢实例**：以前超出 `INSTANCE_CAPACITY` 的部分直接被 `min()` 截掉，
+        // **绝不静默丢实例**：以前超出容量的部分直接被 `min()` 截掉，
         // 画面上表现为"后半帧的控件整体消失"，且没有任何日志可查（排查代价极高）。
-        // 这里改为：超限时明确告警（每个进程只打一次，避免刷屏），并如实报告丢弃数量。
-        if instances.len() > INSTANCE_CAPACITY
-            && !INSTANCE_OVERFLOW_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed)
-        {
+        // 现在先尝试**扩容**（issue #7）；只有扩容失败才截断，并且一定打印告警。
+        if instances.len() > count {
             eprintln!(
-                "[y901] 实例数 {} 超过单批上限 {}，本帧丢弃 {} 个实例（画面可能缺内容）。\
-                     如复现，请调大 INSTANCE_CAPACITY 或改为分批提交。",
+                "[y901] 实例数 {} 超过缓冲容量 {}（扩容{}），本帧丢弃 {} 个实例（画面可能缺内容）。",
                 instances.len(),
-                INSTANCE_CAPACITY,
-                instances.len() - INSTANCE_CAPACITY
+                capacity,
+                if capacity_ok { "成功" } else { "失败" },
+                instances.len() - count
             );
         }
         if count > 0 {

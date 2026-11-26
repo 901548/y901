@@ -1,8 +1,8 @@
 # DO NOT EDIT - regenerate with: pwsh -File scripts/sync-doc-numbers.ps1
-passed=1273
+passed=1276
 ignored=69
 # targets = number of test binaries ('test result:' lines in the default run)
-targets=186
+targets=187
 # include_ignored = observed passed count from a full --include-ignored run
-include_ignored=1342
-baseline=1273
+include_ignored=1345
+baseline=1276

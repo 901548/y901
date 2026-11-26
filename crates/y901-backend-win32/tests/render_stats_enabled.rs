@@ -121,9 +121,11 @@ fn d3d11_reports_stage_timings() {
         stats.counters.instance_pushed > 0,
         "本帧应推入实例（画面不是空的）"
     );
-    assert!(
-        stats.counters.instance_drawn <= 10_000,
-        "绘制数不得超过 INSTANCE_CAPACITY"
+    // 实例缓冲现在会按需扩容（issue #7），所以"不得超过容量"不再是正确断言；
+    // 正确不变量是"推入多少就画多少"（扩容失败才会截断并告警）。
+    assert_eq!(
+        stats.counters.instance_drawn, stats.counters.instance_pushed,
+        "推入的实例必须全部被绘制（超限时缓冲会扩容，而不是静默截断）"
     );
     assert!(stats.counters.dirty_rect_count > 0);
     assert!(stats.counters.damaged_pixels > 0);
