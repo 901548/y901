@@ -164,6 +164,22 @@ impl SoftBackend {
         self.textures.get(&id).map(|e| e.3)
     }
 
+    /// 字体图集当前帧号（**诊断用**）。
+    ///
+    /// 软路径每调一次 [`y901_ui::UiTree::render`] 应恰好 +1（见
+    /// [`y901_ui::RenderCtx::begin_frame`]）；若恒为 0，说明帧边界没接上，
+    /// LRU 的热集保护会失效（RENDER-BUG-02 / issue #8）。
+    pub fn font_frame(&self) -> u64 {
+        self.text.frame()
+    }
+
+    /// 尚未被消费的字体脏区数量（**诊断用**）。
+    ///
+    /// 软路径不上传图集，但必须每帧消费脏区；否则该值随"光栅化过的字形数"单调增长。
+    pub fn font_pending_dirty(&self) -> usize {
+        self.text.pending_dirty_len()
+    }
+
     /// 创建软后端（同时创建 DirectWrite 字形引擎）。
     ///
     /// # Safety
@@ -786,6 +802,21 @@ impl SoftBackend {
 }
 
 impl RenderCtx for SoftBackend {
+    /// **字体图集的帧边界**：软渲染路径的唯一挂载点（由 `UiTree::render` 调用）。
+    ///
+    /// 软后端没有 GPU 上传，所以"脏区"以前根本没人消费。后果不是花屏，而是：
+    /// 1. `MyFontEngine::frame` 恒为 0 → `evict_one` 的热集判定
+    ///    `g.last_used < cutoff`（`cutoff = frame - 512`，从 0 起算时为 0）永远为假，
+    ///    只能走"全表最冷"回退分支，图集满时可能淘汰**正在用**的字形（抖动）；
+    /// 2. `MyFontEngine::dirty` 只增不减（每个光栅化过的字形一条矩形，永不释放）。
+    ///
+    /// 每帧做两件事：推进帧号（LRU 时钟），再 `take_dirty()` 把上一帧累积的脏区
+    /// **取走丢弃**。软路径直接读 CPU 图集，不需要上传，关键是让增长停止。
+    fn begin_frame(&mut self) {
+        self.text.begin_frame();
+        let _ = self.text.take_dirty();
+    }
+
     fn size(&self) -> Size {
         Size::new(self.width as f32, self.height as f32)
     }

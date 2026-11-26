@@ -1985,6 +1985,12 @@ impl UiTree {
     /// Base 节点边遍历边画；Overlay / Modal 的子树先把路径记下来，
     /// 遍历结束后按层顺序回放。没有浮层时就是一次 O(n) 遍历。
     pub fn render(&mut self, ctx: &mut dyn RenderCtx) {
+        // **帧边界先交给后端**：字体图集的 LRU 时钟、上一帧脏区的消费都在这里推进。
+        //
+        // 放在 `dirty.is_empty()` 早退**之前**：帧号必须按"render 调用次数"单调递增，
+        // 若跳过空帧，LRU 的 `cutoff = frame - 512` 就会与真实时间脱节（软渲染路径
+        // 曾经完全没有这个入口，见 RENDER-BUG-02 / issue #8）。
+        ctx.begin_frame();
         // 卸载时收集到的纹理在这里交给后端。
         //
         // 为什么不在卸载当定就释放：那时手里没有 `RenderCtx`，

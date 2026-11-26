@@ -537,6 +537,17 @@ pub const AA_SAMPLES: usize = 4;
 
 /// 渲染上下文：框架唯一的出图接口。后端实现它（D3D11 / 软件 / 测试记录器），组件只往里画。为什么继承 `TextMetrics`：测量与绘制必须用**同一套字体度量**，否则文字会与布局错位。
 pub trait RenderCtx: TextMetrics {
+    /// **一帧的开始**：由 [`crate::UiTree::render`] 在每次渲染前调用一次。
+    ///
+    /// 为什么需要这个钩子，而不是让各后端自己找入口：软渲染有**三条**独立路径
+    /// （X11、Win32 `--force-soft`、Web）各自调 `tree.render`，任何一处漏调都会让
+    /// 同一份 `MyFontEngine` 在不同后端表现分叉——`begin_frame` / `take_dirty`
+    /// 以前只有 D3D11 后端调用，导致软路径的图集帧号恒为 0（LRU 热集保护失效）、
+    /// 脏区只增不减（RENDER-BUG-02 / issue #8）。挂在 trait 上就只有一个入口。
+    ///
+    /// 默认空实现：GPU 后端与测试 mock 有各自的图集记账入口，保持原样。
+    fn begin_frame(&mut self) {}
+
     /// 某个动画 key 的当前进度（0..=1）。
     ///
     /// 默认返回 `1.0`："没有动画 → 就是终态"。这是现有控件不改一行也不受影响的原因。

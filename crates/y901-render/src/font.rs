@@ -226,6 +226,23 @@ pub trait FontEngine {
     fn take_dirty(&mut self) -> (bool, Vec<DirtyRect>);
     /// 开始一帧。
     fn begin_frame(&mut self);
+
+    /// 当前图集帧号（**诊断用**）。
+    ///
+    /// 默认 `0` = 该实现不维护帧号（如 DirectWrite 路径）。存在的意义是让
+    /// "软渲染路径到底有没有推进帧号"可被测试断言，而不是靠读代码推断
+    /// （RENDER-BUG-02 / issue #8）。
+    fn frame(&self) -> u64 {
+        0
+    }
+
+    /// 尚未被 [`Self::take_dirty`] 取走的脏区数量（**诊断用**）。
+    ///
+    /// 默认 `0` = 该实现不上报脏区。软渲染路径不上传图集，但**必须每帧消费**
+    /// 脏区，否则这个数会随光栅化过的字形数单调增长。
+    fn pending_dirty_len(&self) -> usize {
+        0
+    }
     /// 按缩放比选一级字形；默认实现**永远返回 L0**。
     ///
     /// 默认实现的语义是"这个引擎不支持缩放"——它不是错误，

@@ -2,11 +2,43 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-22 复测 `passed=1259` / `ignored=69` / `targets=182`；`--include-ignored` 全量 `passed=1259` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 X11 收口后复测 `passed=1219` / `ignored=34` / `targets=182`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1263` / `ignored=69` / `targets=183`；`--include-ignored` 全量 `passed=1332` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1223` / `ignored=34` / `targets=183`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-atlas.log](evidence/cross-platform/linux-verify-2026-11-26-atlas.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-26：X11 连接层收尾 + SoftBackend 图集帧边界（RENDER-BUG-02 / issue #8）
+
+### A. SoftBackend 从未推进字体图集生命周期 —— 已修复
+
+`MyFontEngine` 的 `begin_frame` / `take_dirty` **只有 D3D11 后端调用**，软渲染三条路径
+（X11、Win32 `--force-soft`、Web）都没有入口，于是同一份引擎在两种后端行为分叉：
+
+1. `frame` 恒为 0 → `evict_one` 的热集判定 `last_used < cutoff`（`cutoff = frame - 512`）
+   永远为假，只能走"全表最冷"回退；`evicted_last_frame` 也从不归零；
+2. `dirty` 只增不减（每个光栅化过的字形一条矩形，永不释放）。
+
+**修法**（不改任何后端调用点）：帧边界收到 `RenderCtx::begin_frame`——`UiTree::render`
+在每次渲染前调一次（默认空实现，GPU 后端与测试 mock 不受影响），`SoftBackend`
+在其中推进帧号并消费上一帧脏区。这样三条软路径自动都接上了。
+
+- 新增诊断：`MyFontEngine::frame()` / `pending_dirty_len()`、`SoftBackend::font_frame()` /
+  `font_pending_dirty()`（与既有 `occupancy` / `evicted_last_frame` 同风格）。
+- 回归用例 `crates/y901-render/tests/soft_atlas_lifecycle.rs`（4 条）：帧号每帧 +1、
+  脏区每帧被消费、30 帧不累积、**光栅化量超过图集容量后脏区仍 ≤1/帧**。
+- 反向验证：分别删掉 `begin_frame()` / `take_dirty()` 调用后，对应用例逐条变红。
+- 像素基线 `0xF7455CCE7781A864` **未变**；`soft_fill_rate_1280x800` 仍在原量级
+  （text 1.24 ms / fill_rect 0.09 ms）。
+- **为什么不测"淘汰优先级"**：图集满后 `insert_into_atlas` 会整表重打包，小图集用例
+  被重打包主导；而"不推进帧号"的对照实现里所有 `last_used` 并列，淘汰靠
+  `HashMap` 迭代顺序，断言必然 flaky。帧号是否推进已由用例直接钉住。
+
+### B. X11 连接层三轮收尾（详见提交 `1576cbf` / `0aae0e1` / `e399eb9`）
+
+半包重组与 `next_packet(0)`、`get_property` 的 `bytes_after` 分页、窗口 resize 落库、
+阻塞/非阻塞读取的总 deadline、GenericEvent 附加数据 drain、`AnyPropertyType`
+分页 type 一致性、`delete` 语义。Linux 计数从 1054 → 1223（同一台 Xvfb）。
 
 ## 2026-11-24：内核优化第四~六轮（全部有同机 A/B 与像素金标）
 
@@ -88,7 +120,7 @@
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1259** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1263** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -267,6 +299,10 @@ NSimSun→simsun.ttc），hhea ascent 差 3.5px，会得到整行偏移——那
 4. ~~`cargo update` 会顺带升级 3 个依赖且需联网，`Cargo.lock` 里 `serial` 残留未清~~
    —— **已清**：`portable-pty` 升 0.9 后 `serial*` / `termios` / `ioctl-rs` 全部移出。
 5. audit 依赖联网刷新指南库；离线时结论带 `STALE AUDIT` 标记，**不算发布门禁**。
+6. ~~`RENDER-BUG-02`（issue #8）SoftBackend 不调 `begin_frame`/`take_dirty`~~ —— **已修**
+   （2026-11-26，帧边界收到 `RenderCtx::begin_frame`，见本文顶部 A 节）。
+   `RENDER-BUG-01`（issue #7）D3D11 超 10k instances 静默截断**仍未修**，等 RenderStats
+   的实例计数器落地后一起做。
 
 ## #18 tree.rs 测量结果（本轮）
 
@@ -555,7 +591,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1259/0/69 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1263/0/69 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，

@@ -187,4 +187,7 @@
 # Measured at 2026-11-26 (X11 连接层收尾：总 deadline / AnyPropertyType / GenericEvent / delete 语义):
 #   default cargo test --workspace --no-fail-fast   passed 1259, failed 0, ignored 69 / 182 个测试目标
 #   (Windows 计数不变：新增 11 条 X11 用例都在 cfg(unix) 下。Linux 侧 passed=1219 / targets=182，见 linux-numbers.txt)
-1259
+# Measured at 2026-11-26 (SoftBackend 图集帧边界：begin_frame/take_dirty，RENDER-BUG-02 / issue #8):
+#   default cargo test --workspace --no-fail-fast   passed 1263, failed 0, ignored 69 / 183 个测试目标
+#   (新增 soft_atlas_lifecycle 4 条 + 1 个测试目标。Linux 侧 passed=1223 / targets=183，见 linux-numbers.txt)
+1263

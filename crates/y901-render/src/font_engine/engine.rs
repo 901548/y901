@@ -806,6 +806,21 @@ impl MyFontEngine {
         self.evicted_last_frame
     }
 
+    /// 当前图集帧号（诊断）。
+    ///
+    /// 每 `begin_frame` 递增；`evict_one` 用它算"最近 512 帧"的 `cutoff`。
+    /// 若某个后端从不调用 `begin_frame`，这里会恒为 0，LRU 热集保护随之失效。
+    pub fn frame(&self) -> u64 {
+        self.frame
+    }
+
+    /// 尚未被 [`Self::take_dirty`] 取走的脏区数量（诊断）。
+    ///
+    /// 软渲染路径不上传图集，但仍必须每帧消费；否则这个值随光栅化过的字形数增长。
+    pub fn pending_dirty_len(&self) -> usize {
+        self.dirty.len()
+    }
+
     /// 清空图集（验收用：清空后必须能全量恢复）。
     pub fn clear_atlas(&mut self) {
         self.cache.clear();
@@ -940,6 +955,12 @@ impl FontEngine for MyFontEngine {
     }
     fn begin_frame(&mut self) {
         MyFontEngine::begin_frame(self)
+    }
+    fn frame(&self) -> u64 {
+        MyFontEngine::frame(self)
+    }
+    fn pending_dirty_len(&self) -> usize {
+        MyFontEngine::pending_dirty_len(self)
     }
     fn ascent(&self) -> f32 {
         self.ascent
