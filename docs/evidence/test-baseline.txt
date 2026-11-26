@@ -198,4 +198,7 @@
 #   default cargo test --workspace --no-fail-fast   passed 1268, failed 0, ignored 69 / 185 个测试目标
 #   (新增 2 个 X11 测试目标 render_stats_x11 / render_stats_x11_disabled，共 3 条用例；
 #    Linux 侧 passed=1234 / targets=185，见 linux-numbers.txt)
-1268
+# Measured at 2026-11-26 (RenderStats A5：Web 上屏四段埋点 + 三个阶段映射用例):
+#   default cargo test --workspace --no-fail-fast   passed 1271, failed 0, ignored 69 / 185 个测试目标
+#   (Web crate 新增 3 条宿主机用例；测试目标数不变。Linux 侧 passed=1237 / targets=185)
+1271

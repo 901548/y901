@@ -257,7 +257,17 @@ impl WindowBackend for WasmWindow<'_> {
     }
 
     fn render(&mut self, tree: &mut UiTree) -> Result<RenderOutcome, String> {
+        // 帧边界先建立（统计关闭时这里只有一次 `Option` 赋值）。
+        self.present.stats_begin_frame();
+        // 脏区形状要在 `invalidate_all()` 之前取：之后只剩"全窗"。
+        // `is_full()` 时 `rects()` 是空的（full 是标志），按"隐式一个整窗矩形"计 1。
+        let dirty_rects = if tree.dirty().is_full() {
+            1
+        } else {
+            tree.dirty().rects().len() as u32
+        };
         if tree.dirty().is_empty() {
+            self.present.stats_mark_skipped();
             return Ok(RenderOutcome::Skipped);
         }
 
@@ -268,6 +278,8 @@ impl WindowBackend for WasmWindow<'_> {
         // 两条路径坐标一致性……整套只会出 bug 的代码。
         // release 下 800×600 全帧渲染+上屏约 15ms，完全能稳定 60fps。
         let (vw, vh) = self.viewport();
+        let on = self.present.stats_enabled();
+        let t_prepare = y901_runtime::render_stats::mark(on);
         self.soft.clear();
         // **必须整树重绘**：上一行已把整张缓冲洗成清屏色，
         // 而 `UiTree::render` 在脏区不是 `full` 时**只画脏区**。
@@ -276,13 +288,39 @@ impl WindowBackend for WasmWindow<'_> {
         // 因为那一帧的脏区恰好就是输入框的矩形。
         // 这不是 clip 泄漏（裁剪区已在渲染末尾恢复），而是"清了却没画"。
         tree.invalidate_all();
+        self.present.stats_record(
+            y901_runtime::render_stats::StageId::RenderPrepare,
+            y901_runtime::render_stats::since(t_prepare),
+        );
+
+        let t_raster = y901_runtime::render_stats::mark(on);
         tree.render(self.soft);
+        self.present.stats_record(
+            y901_runtime::render_stats::StageId::CpuRaster,
+            y901_runtime::render_stats::since(t_raster),
+        );
+
+        // Web 每帧整窗重绘：脏矩形是输入信息，真正重绘的像素是整块画布。
+        self.present.stats_dirty(dirty_rects, vw as u64 * vh as u64);
+
+        // `present()` 内部记 pixel_convert / image_alloc / pixel_copy / canvas_blit。
         self.present.present(self.soft.pixels(), vw, vh);
+        self.present.stats_finish();
         Ok(RenderOutcome::Presented)
     }
 
     fn set_theme(&mut self, theme: y901_ui::theme::Theme) -> Result<(), String> {
         self.soft.set_theme(theme)
+    }
+
+    /// 本后端的分阶段统计种类（Web = 纯 CPU + canvas 上屏四段）。
+    fn render_stats_backend(&self) -> Option<y901_runtime::render_stats::BackendKind> {
+        Some(y901_runtime::render_stats::BackendKind::Web)
+    }
+
+    /// 取走本帧统计（**取走语义**：第二次调用必为 `None`）。
+    fn take_render_stats(&mut self) -> Option<y901_runtime::render_stats::RenderStats> {
+        self.present.take_render_stats()
     }
 }
 
