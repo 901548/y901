@@ -8,6 +8,7 @@
 # 用法：
 #   powershell -NoProfile -File scripts/perf-gate.ps1              # 全部 4 项
 #   powershell -NoProfile -File scripts/perf-gate.ps1 -Only grid   # 只跑一项
+#   powershell -NoProfile -File scripts/perf-gate.ps1 -Only stats  # 打印分阶段统计 JSON
 #   powershell -NoProfile -File scripts/perf-gate.ps1 -NoEnforce   # 只测不断言（看数字）
 #
 # 退出码：0 = 全部通过（或只测不断言）；1 = 有基准失败。
@@ -20,7 +21,7 @@
 # 所以一律用 `--include-ignored` 而不是 `--ignored`：后者会把非 ignore 的用例过滤掉，
 # 结果是"跑了 0 个用例却 PASS"——那正是本仓库最忌讳的假绿。
 param(
-    [ValidateSet('all', 'grid', 'layout', 'dirty', 'soft')]
+    [ValidateSet('all', 'grid', 'layout', 'dirty', 'soft', 'stats')]
     [string]$Only = 'all',
     [switch]$NoEnforce,
     # 强制只用本地缓存（不联网）。
@@ -89,6 +90,40 @@ function Invoke-Bench([string]$name, [string]$package, [string]$test, [string]$f
     }
     $script:results += [pscustomobject]@{ Name = $name; Code = $code; Dependency = ($code -ne 0 -and $out -match $networkPattern) }
     Write-Host ""
+}
+
+# 分阶段统计（RenderStats）：**不是阈值基准**，而是把"一帧的各阶段耗时"打成 JSON 行，
+# 便于贴进 docs/PERFORMANCE.md 或跨机器比较。因此：
+# - 用 `--nocapture` 抓 eprintln 出的 JSON 行；
+# - **不做通过/失败判定**（阈值会随机器漂移，硬编码只会制造假红）；
+# - 仍然记录退出码：连测试都跑不起来（无 D3D11 设备时用例会留痕跳过）要能看出来。
+function Invoke-Stats([string]$name, [string]$package, [string]$test, [string]$envName, [string]$envValue) {
+    Write-Host "=== $name ==="
+    $prev = [Environment]::GetEnvironmentVariable($envName)
+    [Environment]::SetEnvironmentVariable($envName, $envValue)
+    try {
+        $out = & cargo test -p $package --test $test --release --offline -- --nocapture --test-threads=1 2>&1 | Out-String
+        $code = $LASTEXITCODE
+    } finally {
+        [Environment]::SetEnvironmentVariable($envName, $prev)
+    }
+    # JSON 行以 `{` 开头、`"frame"` 打头（render_stats::write_json 的固定形状）。
+    $json = ($out -split "`n") | Where-Object { $_ -match '^\s*\{\s*"frame"' }
+    if ($json.Count -eq 0) {
+        Write-Host "  （没有 JSON 行：本机可能没有可用设备，或用例按约定留痕跳过）"
+        $skip = ($out -split "`n") | Where-Object { $_ -match 'SKIP:' }
+        foreach ($l in $skip) { Write-Host "  $($l.Trim())" }
+    } else {
+        foreach ($l in $json) { Write-Host "  $($l.Trim())" }
+    }
+    $script:results += [pscustomobject]@{ Name = $name; Code = $code; Dependency = ($code -ne 0 -and $out -match $networkPattern) }
+    Write-Host ""
+}
+
+if ($Only -in @('all', 'stats')) {
+    # D3D11 与 `--force-soft` 各跑一次：两条路径的可测阶段不同（能力表不同）。
+    Invoke-Stats 'render_stats（D3D11 分阶段统计 JSON）' 'y901-backend-win32' 'render_stats_enabled' 'Y901_RENDER_STATS' '1'
+    Invoke-Stats 'render_stats（--force-soft 分阶段统计 JSON）' 'y901-backend-win32' 'render_stats_soft' 'Y901_RENDER_STATS' '1'
 }
 
 if ($Only -in @('all', 'grid'))   { Invoke-Bench 'grid_perf（10k 网格布局；release 预算 6ms）' 'y901-ui' 'grid_perf' }

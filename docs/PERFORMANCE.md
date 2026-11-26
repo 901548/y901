@@ -254,6 +254,45 @@ cargo test -p y901-backend-win32 --release --test soft_backend -- --include-igno
 cargo test -p y901-backend-win32 --release --test perf_bench -- --ignored --nocapture
 ```
 
+### 6.0 分阶段统计（`RenderStats`）——"这一帧的时间花在哪"
+
+阈值基准回答"有没有变慢"，`RenderStats` 回答"慢在哪个阶段"。两者互补，不要混用。
+
+```powershell
+powershell -NoProfile -File scripts/perf-gate.ps1 -Only stats   # 打印两条 JSON 行
+```
+
+开它的唯一方式是环境变量 `Y901_RENDER_STATS=1`（**进程级 `OnceLock`，启动时决定**）。
+关闭时后端只做一次 `Option` 赋值，**不读时钟**（`render_stats::mark(false)` 直接返回 `None`）。
+
+**每个后端能测什么，由能力表决定，而不是"有没有调 `Instant::now()`"**：
+
+| 阶段 | D3D11 | Win32 soft | X11 | Web |
+|---|---|---|---|---|
+| `render_prepare` | ✅ | ✅ | ✅ | ✅ |
+| `command_gen` | ✅ | ⛔ 合并 | ⛔ 合并 | ⛔ 合并 |
+| `cpu_raster` | ➖ 无 | ✅ | ✅ | ✅ |
+| `pixel_convert` / `image_alloc` / `canvas_blit` | ➖ | ➖ | ➖ | ✅ |
+| `pixel_copy` | ➖ | ➖ | ✅ | ✅ |
+| `upload` | ✅ | ➖ | ✅（含 Present） | ➖（拆成上面四段） |
+| `backend_submit` | ✅ | ➖ | ➖ | ➖ |
+| `present_blocking` | ✅ | ✅ | ➖（并入 upload） | ➖（= canvas_blit） |
+| `gpu_execute` | ⚠️ 永远 Unavailable | ➖ | ➖ | ➖ |
+| `compositor` | ⚠️ Unavailable | ⚠️ Unavailable | ⚠️ Unavailable | ⚠️ Unavailable |
+
+图例：✅ 可测；➖ `NotApplicable`（这个后端没有这个阶段）；⛔ `Unavailable`（存在但无法分离测量）。
+
+**三条诚实规则**（由 `RenderStats::validate()` 与 `Stage` 三态强制）：
+
+1. **测不到的阶段绝不填 0**：`gpu_execute` 在本阶段没有 timestamp query，只能是
+   `Unavailable(原因)`；填 `Measured(0)` 会被 `validate()` 拒绝；
+2. **没有这个阶段写 `NotApplicable`**，与"本帧没走到"（`Unavailable("本帧未经过该阶段")`）区分开；
+   跳过帧里所有后端阶段都必须是 `None`；
+3. **计数器同理**：`atlas_upload_bytes` 在 X11/Web/soft 上写 0 表示"确实没有这个量"，
+   而不是"测得 0 字节"。
+
+**已知缺口（诚实记录）**：Web 侧只在 `wasm32-unknown-unknown` 上验证了编译与
+四段映射逻辑，**浏览器内的真实数字尚未采集**（本环境无浏览器）。
 ### 6.1 2026-11-22 复测（本机，用于校准"现在还是这个数吗"）
 
 环境：Intel i7-13650HX / Windows 11 (10.0.26200) / rustc 1.92.0 / `--release`。

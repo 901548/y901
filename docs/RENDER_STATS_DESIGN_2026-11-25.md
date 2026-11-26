@@ -355,8 +355,23 @@ pub struct RenderStats {
 
 ---
 
-## 10. 本轮未做（诚实标注）
+## 10. 落地状态与仍未做（诚实标注）
 
-- 未运行任何 benchmark（A 是设计阶段，且本机只能跑 Windows 侧）；
-- 未验证 `FrameStats` 的全部构造点（只看到 `runtime.rs:155` 与 wasm 读取处，B 阶段需全量 grep）；
-- 未验证 `web_time::Instant` 在 wasm 上的实际精度（B 阶段需在浏览器里取 `performance.now()` 对照）。
+**A 阶段已落地**（每一步一个提交，均有测试）：
+
+| 步骤 | 内容 | 提交 |
+|---|---|---|
+| A1 | 数据模型 + 三态 `Stage` + 能力表 + `validate()` | `c7c73d1` |
+| A2 | runtime 帧循环接线（`frame_step` 打点 + `take_render_stats`） | `b8aa7b4` |
+| A3 | D3D11 埋点 | `d507821` |
+| A4 | X11 埋点（`render_prepare`/`cpu_raster`/`pixel_copy`/`upload`） | `2de323d` |
+| A5 | Web 上屏四段 | `2275524` |
+| A6 | Win32 `--force-soft` 埋点 | `01600af` |
+| A7 | 口径文档 + `perf-gate.ps1 -Only stats` | 本提交 |
+
+**仍未做**：
+
+- **Web 浏览器内的真实数字未采集**（本环境无浏览器）：wasm 只验证了编译与四段映射，
+  真实耗时与 `web_time::Instant` 精度需要一次带浏览器的运行；
+- B 阶段的 `bench`（场景化 JSON 行：10k_rects 等）尚未实现，目前只有单帧 JSON 快照；
+- `FrameStats` 的全部构造点未逐一核查（A2 只改了 `runtime.rs` 那一处，wasm 读取处未动）。

@@ -173,6 +173,18 @@ fn d3d11_reports_stage_timings() {
     );
 
     // 8) 自检：数据不得自相矛盾。
+    // **把统计打成一行 JSON**（`perf-gate.ps1 -Only stats` 抓的就是这一行）。
+    // 为什么放在测试里而不是只走 `run_loop`：基准要能在无人值守的 CI/本机命令里
+    // 直接拿到数字，不依赖启动一个真窗口应用。
+    let mut json = String::new();
+    stats.write_json(&mut json);
+    eprintln!("{json}");
+    assert!(json.starts_with('{'), "JSON 行必须以 {{ 开头：{json}");
+    assert!(
+        json.contains("\"backend\"") && json.contains("\"stages\":"),
+        "JSON 行必须含 backend 与 stages：{json}"
+    );
+
     assert_eq!(stats.validate(), Ok(()));
 
     // 9) 取走语义：第二次必为 None（每帧最多消费一次）。
