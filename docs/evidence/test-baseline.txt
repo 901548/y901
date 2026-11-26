@@ -210,4 +210,7 @@
 # Measured at 2026-11-26 (PLAN 批次 4：浮层命中/光标/快照；+1 测试目标 / 4 条用例):
 #   default cargo test --workspace --no-fail-fast   passed 1280, failed 0, ignored 69 / 188 个测试目标
 #   (新增 y901-ui popup_hit（4 条）。Linux 侧 passed=1241 / targets=188)
-1280
+# Measured at 2026-11-27 (PLAN 批次 6 前半：图集像素数用 u64 计算 + blend 限制文档化):
+#   default cargo test --workspace --no-fail-fast   passed 1281, failed 0, ignored 69 / 188 个测试目标
+#   (新增 1 条 pixels_of 溢出用例。Linux 侧 passed=1242 / targets=188)
+1281

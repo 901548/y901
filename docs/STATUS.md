@@ -2,12 +2,43 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1280` / `ignored=69` / `targets=188`；`--include-ignored` 全量 `passed=1280` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1241` / `ignored=34` / `targets=188`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-popup-hit.log](evidence/cross-platform/linux-verify-2026-11-26-popup-hit.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1281` / `ignored=69` / `targets=188`；`--include-ignored` 全量 `passed=1281` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1242` / `ignored=34` / `targets=188`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-atlas-overflow.log](evidence/cross-platform/linux-verify-2026-11-27-atlas-overflow.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
 
+## 2026-11-27：PLAN 批次 6 前半 —— 图集面积溢出加固 + blend 限制显式记录
+
+两项都属"审计已点名、但当时没修"的项（`docs/AUDIT_2026-11-25.md` #11 #12）。
+
+### A. 图集像素数用 `u64` 计算（审计 #12 前半）
+
+`Atlas` 里三处 `size * size`（初始化缓冲、`occupancy()`、`compact()` 的新缓冲）都是
+**`u32` 乘法**：`size > 65535` 时溢出（`65536² == 0`）→ 分配出一个几乎为空的缓冲，
+随后字形写入越界/错位，画面整片花屏**且没有任何错误日志**。
+统一改用 `pixels_of(size)`：`u64` 计算 + `usize` 转换 + 越界 `debug_assert`。
+新增用例 `pixels_of_does_not_overflow_u32` 直接钉住 65536 / 100000 两个边界。
+
+### B. `blend()` 的适用条件写清楚（审计 #11）
+
+该函数是"目标不透明时正确"的 source-over：省掉了 `dst_c * da` 与 `/ out_a` 两步。
+软后端每帧 `clear()` 成不透明清屏色，所以**正常渲染路径上恒等且正确**；只有把半透明
+像素画到**已经半透明**的缓冲上（离屏合成）才会偏亮。
+修它要按像素做除法、影响整屏填充率（当前整屏文字 1.24 ms），因此在没有离屏合成
+需求前**保持现状并显式记录**，而不是偷偷改公式让像素基线漂移。
+
+### C. 修正一处与实现不符的注释（审计 #12 后半）
+
+`atlas.rs` 原注释称"像素区域由 packer 复用" —— `SkylinePacker` 只增不减、没有 free，
+被丢弃的区域是**永久空洞**，只能靠 `compact()` 回收。已按实现改写。
+
+### 未做（明确）
+
+- `cluster_boundaries` 的分配优化：全仓 grep 确认它**没有热路径调用方**
+  （`x_for_offset` 之类并不存在），属于"审计时的推测性条目"，本轮不做无收益重构；
+- `Theme.slots` 死数据、`fasthash` 文档、`ImageFit::None` 越界、`Query ~=` 布尔键、
+  若干过期文档 —— 归入批次 7（卫生），尚未处理。
 ## 2026-11-26（续）：PLAN 批次 4 —— 浮层命中 / 光标 / 快照可见性
 
 浮层（`UiTree::popups`：菜单、下拉、Tooltip、Dialog）**不在普通节点索引里**
@@ -291,7 +322,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1280** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1281** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -762,7 +793,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1280/0/69 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1281/0/69 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，

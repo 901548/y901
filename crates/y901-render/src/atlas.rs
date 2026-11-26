@@ -252,13 +252,29 @@ pub struct Placement {
     pub h: u32,
 }
 
+/// 图集的**像素数**（`size²`）。
+///
+/// 为什么不用 `size * size`：那是 `u32` 乘法，`size > 65535` 时会溢出成很小的值
+///（`65536² == 0`）。后果不是崩溃，而是**分配出一个几乎为空的缓冲**，随后所有
+/// 字形写入都越界或落在错误位置 —— 画面整片花屏，且没有任何错误日志。
+/// 用 `u64` 计算再转 `usize`（64 位平台天然安全），越界时立刻断言。
+#[inline]
+fn pixels_of(size: u32) -> usize {
+    let n = u64::from(size) * u64::from(size);
+    debug_assert!(
+        n <= usize::MAX as u64,
+        "图集边长 {size} 的像素数超出 usize 可表示范围"
+    );
+    n as usize
+}
+
 impl Atlas {
     /// 建一个边长为 `size` 的空图集打包器（初始只有一个整宽平台）。
     pub fn new(size: u32) -> Self {
         let size = size.max(64);
         Self {
             size,
-            data: vec![0u8; (size * size) as usize],
+            data: vec![0u8; pixels_of(size)],
             packer: SkylinePacker::new(size),
             slots: HashMap::new(),
             frame: 0,
@@ -314,7 +330,7 @@ impl Atlas {
     /// 已占用比例（按像素面积）。
     pub fn occupancy(&self) -> f32 {
         let used: u32 = self.slots.values().map(|s| s.area()).sum();
-        used as f32 / (self.size * self.size) as f32
+        used as f32 / pixels_of(self.size) as f32
     }
 
     /// 标记使用，用于 LRU。
@@ -343,8 +359,12 @@ impl Atlas {
                 // 旧槽的原尺寸与新请求一致，直接用
                 return Some(Placement { x, y, w, h });
             }
-            // 尺寸变了：旧槽无法容纳新内容，丢弃它（像素区域由 packer 复用，
-            // 不清零也不影响正确性 —— 新内容会整块覆盖）。
+            // 尺寸变了：旧槽无法容纳新内容，丢弃记录即可 —— **但别指望 packer 会
+            // 把那块空间还回来**：`SkylinePacker` 只增不减（没有 free/合并），
+            // 被丢弃的像素区域就此成为**永久空洞**，只能靠 `compact()` 全表重排回收。
+            // 旧注释写"像素区域由 packer 复用"，与实现不符（审计 #12）。
+            //
+            // 正确性上不清零是安全的：同一 key 的后续写入会整块覆盖新区域。
             self.slots.remove(&key);
         }
 
@@ -438,7 +458,7 @@ impl Atlas {
         let mut entries: Vec<(GlyphKey, Slot)> = self.slots.iter().map(|(k, v)| (*k, *v)).collect();
         entries.sort_by_key(|(_, s)| (s.y, s.x));
 
-        let mut fresh = vec![0u8; (self.size * self.size) as usize];
+        let mut fresh = vec![0u8; pixels_of(self.size)];
         self.packer.reset();
 
         // **重建 `slots`，而不是就地 `insert` 覆盖**。
@@ -492,6 +512,18 @@ impl Atlas {
 
 #[cfg(test)]
 mod tests {
+    /// **`size²` 必须用 `u64` 算**：`u32` 乘法在 `size > 65535` 时溢出成 0，
+    /// 结果是分配出一个空缓冲、随后整片花屏（审计 #12）。
+    #[test]
+    fn pixels_of_does_not_overflow_u32() {
+        assert_eq!(super::pixels_of(64), 4096);
+        assert_eq!(super::pixels_of(2048), 2048 * 2048);
+        // 这两个是 u32 乘法会溢出的边界：
+        assert_eq!(super::pixels_of(65_536), 65_536u64 as usize * 65_536);
+        assert_ne!(super::pixels_of(65_536), 0, "u32 乘法会得到 0");
+        assert_eq!(super::pixels_of(100_000), 100_000usize * 100_000);
+    }
+
     use super::*;
 
     /// 货架打包参考实现：按行放，行高 = 该行最高字形。
