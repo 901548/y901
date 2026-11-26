@@ -353,8 +353,11 @@ const X11_NOT_APPLICABLE: &[(StageId, &str)] = &[
     (StageId::GpuExecute, "CPU 光栅化后端没有 GPU 执行阶段"),
     (StageId::PixelConvert, "该阶段只在 Web 后端存在"),
     (StageId::ImageAlloc, "该阶段只在 Web 后端存在"),
-    (StageId::PixelCopy, "该阶段只在 Web 后端存在"),
     (StageId::CanvasBlit, "该阶段只在 Web 后端存在"),
+    // 注意：`PixelCopy` **在 X11 上存在**（软光栅把像素放在 `soft.buf`，
+    // 而上屏需要 `&mut self`，所以每帧要先拷到暂存 `window.frame`）。
+    // A1 初稿把它归为"只在 Web 存在"，这与设计表 §2 的 `window.rs:791-792` 矛盾，
+    // 这里按设计表修正：X11 测量 `pixel_copy`。
 ];
 
 /// Web 的能力表。
@@ -1078,10 +1081,15 @@ mod tests {
 
     #[test]
     fn web_only_pixel_stages_do_not_exist_on_other_backends() {
+        // **只有这三个是 Web 独有**：像素格式转换、离屏位图分配、`putImageData` 上屏。
+        //
+        // `pixel_copy` 不在此列：X11 的软光栅把像素留在 `soft.buf` 里，而上屏需要
+        // `&mut self`，所以每帧必须先把像素拷到暂存（`window.frame`）再 present。
+        // 这是一次真实的内存拷贝（1080p 约 8.3 MB/帧），属可测阶段 ——
+        // A1 初稿误把它归为"只在 Web 存在"，A 阶段第 4 步接 X11 时按实现修正。
         for id in [
             StageId::PixelConvert,
             StageId::ImageAlloc,
-            StageId::PixelCopy,
             StageId::CanvasBlit,
         ] {
             assert!(
@@ -1106,6 +1114,27 @@ mod tests {
                     ),
                 }
             }
+        }
+
+        // `pixel_copy`：X11 可测（见上）；Web 也可测（canvas 前的像素复制）。
+        assert!(
+            BackendKind::X11
+                .capability(StageId::PixelCopy)
+                .is_measurable(),
+            "X11 每帧要把像素拷到暂存再上屏，pixel_copy 必须可测"
+        );
+        assert!(
+            BackendKind::Web
+                .capability(StageId::PixelCopy)
+                .is_measurable(),
+            "Web 的 pixel_copy 必须可测"
+        );
+        // GPU 后端没有这一步（实例化绘制直接进 GPU）。
+        for other in [BackendKind::D3d11, BackendKind::Soft] {
+            assert!(
+                !other.capability(StageId::PixelCopy).is_measurable(),
+                "{other:?} 不该声称 pixel_copy 可测"
+            );
         }
     }
 }

@@ -2,12 +2,43 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1268` / `ignored=69` / `targets=183`；`--include-ignored` 全量 `passed=1268` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1231` / `ignored=34` / `targets=183`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-atlas.log](evidence/cross-platform/linux-verify-2026-11-26-atlas.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1268` / `ignored=69` / `targets=185`；`--include-ignored` 全量 `passed=1268` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1234` / `ignored=34` / `targets=185`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-x11-stats.log](evidence/cross-platform/linux-verify-2026-11-26-x11-stats.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
 
+## 2026-11-26（续）：RenderStats A 阶段第 4 步 —— X11 分阶段埋点
+
+`X11Window` 现在实现 `WindowBackend::render_stats_backend()`（自报 `BackendKind::X11`）
+与 `take_render_stats()`（取走语义），并按设计表 §2 的 X11 列打四个点：
+
+| 阶段 | 起止 |
+|---|---|
+| `render_prepare` | `invalidate_all()` + `soft.clear()` |
+| `cpu_raster` | `tree.render(&mut soft)` |
+| `pixel_copy` | `frame.extend_from_slice(soft.pixels())`（上屏前的暂存拷贝） |
+| `upload` | `present()` 内部：SHM 写入 / 分块 PutImage + flush（X11 的上传与 Present 是同一个动作） |
+
+计数器：`dirty_rect_count`（`DirtyRegion::is_full()` 记 1，否则取矩形数）、
+`damaged_pixels`（整窗重绘 = 客户区面积）、`atlas_upload_bytes`/`instance_*`/`batch_count`
+一律写 0（CPU 后端没有这些量，**写 0 是"确实没有"，不是"测得 0"）。
+
+**顺带修正一处能力表错误**：A1 初稿把 `PixelCopy` 归为"只在 Web 后端存在"（NotApplicable），
+但 X11 每帧确实要把 `soft.buf` 拷到 `window.frame` 才能上屏（1080p 约 8.3 MB/帧）。
+`BackendKind::X11` 改为可测，并同步修正 `render_stats::tests` 里那条按旧表写的断言。
+
+- 新增 2 个测试目标 / 3 条用例：
+  - `render_stats_x11.rs`：四段都被测量；`compositor`/`command_gen` 必须 `Unavailable`
+    （带原因）；`gpu_execute`/`backend_submit`/`present_blocking` 必须 `NotApplicable`；
+    计数器自洽；四段之和 ≤ `window.render` 墙钟；`presented` 恒 false；`validate()` 通过；
+    一次性消费；以及"跳过帧不得有阶段测量值、且不跨帧污染"。
+  - `render_stats_x11_disabled.rs`：关闭统计时 `take_render_stats()` **恒为 `None`**
+    （不是"有值但全 0"），且渲染行为不变（Presented / Skipped 判定照旧）。
+- 反向验证：删掉 `pixel_copy` 打点 → 对应用例变红（文件以 SHA256 校验恢复）。
+- 失败帧不交付统计（`present` 出错时 `stats = None`），与 D3D11 一致。
+- Linux 全量（Xvfb）：X11 crate 全绿（计数以 `docs/evidence/linux-numbers.txt` 为准）；
+  `linux-verify.sh` 每一步都 `EXIT_0`。
 ## 2026-11-26（续）：X11 传输层最后两项收口
 
 ### C. `poll_events` 错误路径丢弃已解码事件 —— 已修

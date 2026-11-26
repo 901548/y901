@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use y901_render::soft::SoftBackend;
+use y901_runtime::render_stats::{BackendKind, RenderStats, StageId};
 use y901_runtime::window::{RenderOutcome, WindowBackend};
 use y901_runtime::{EventSource, FontConfig, Presenter, RawEvent, Waker};
 use y901_ui::theme::Theme;
@@ -45,6 +46,13 @@ pub struct X11Window {
     soft: SoftBackend,
     /// 上屏用的像素暂存（`Present` 要 `&mut self`，不能同时借用 `soft`）。
     frame: Vec<u8>,
+    /// **分阶段统计**（`Y901_RENDER_STATS` 开启且本帧有渲染时才有值）。
+    ///
+    /// `None` = 统计关闭 / 本帧未产生统计。每帧由 `stats_begin_frame` 重置，
+    /// 由 `WindowBackend::take_render_stats` 取走（取走语义 ⇒ 每帧最多消费一次）。
+    stats: Option<RenderStats>,
+    /// 后端统计的帧号（仅用于 JSON 可读性；Runtime 侧另有自己的帧号）。
+    stats_frame: u64,
     /// 当前是否处于 fullscreen（状态机，避免重复发 EWMH）。
     fullscreen: bool,
     /// **输入法客户端**（IBus 或降级的 `NoIme`）。
@@ -613,6 +621,8 @@ impl X11Window {
             cursor_now: CursorShape::Default,
             soft,
             frame: Vec::new(),
+            stats: None,
+            stats_frame: 0,
             fullscreen,
             want_exit_fs: std::cell::Cell::new(false),
             rescale: None,
@@ -773,28 +783,122 @@ impl X11Window {
         &mut self.soft
     }
 
+    // ---- 分阶段统计（A 阶段：X11；方法私有，不是公开面）----
+
+    /// 每帧开始：统计开启时复用/新建统计对象，关闭时**清空且不分配**。
+    ///
+    /// 关闭时只做一次 `Option` 赋值（不读时钟、不分配）；`enabled()` 内部是
+    /// `OnceLock`，所以每帧代价是一次原子读 + 一次分支。
+    fn stats_begin_frame(&mut self) {
+        if y901_runtime::render_stats::enabled() {
+            self.stats_frame = self.stats_frame.wrapping_add(1);
+            match self.stats.as_mut() {
+                Some(s) => s.reset_for_next_frame(self.stats_frame),
+                None => self.stats = Some(RenderStats::new(self.stats_frame, BackendKind::X11)),
+            }
+        } else {
+            self.stats = None;
+        }
+    }
+
+    /// 打点起点；**统计关闭时返回 `None` 且不读时钟**。
+    #[inline]
+    fn stats_mark(&self) -> Option<std::time::Instant> {
+        self.stats.as_ref().map(|_| std::time::Instant::now())
+    }
+
+    /// 记录单区间阶段（X11 的四段都是单区间：无重试、无多段）。
+    #[inline]
+    fn stats_record(&mut self, id: StageId, start: Option<std::time::Instant>) {
+        if let (Some(s), Some(t)) = (self.stats.as_mut(), start) {
+            s.stages.set(id, t.elapsed());
+        }
+    }
+
+    /// 记录脏区计数（块数 + 覆盖像素数）。
+    #[inline]
+    fn stats_dirty(&mut self, rects: u32, pixels: u64) {
+        if let Some(s) = self.stats.as_mut() {
+            s.counters.dirty_rect_count = rects;
+            s.counters.damaged_pixels = pixels;
+        }
+    }
+
+    /// 跳过帧（`tree.dirty()` 为空）：后端没有渲染，但统计对象照常交付。
+    fn stats_mark_skipped(&mut self) {
+        if let Some(s) = self.stats.as_mut() {
+            s.counters.frame_skipped = true;
+        }
+    }
+
+    /// 帧末：写计数器并**保留在 `self.stats`**，等待 `take_render_stats` 取走。
+    ///
+    /// 只在成功出口调用；失败帧不交付统计（与 D3D11 一致）。
+    fn stats_finish(&mut self) {
+        if let Some(s) = self.stats.as_mut() {
+            // X11 是纯 CPU 后端：没有 GPU 图集上传，也没有实例化绘制。
+            s.counters.atlas_upload_bytes = 0;
+            s.counters.instance_pushed = 0;
+            s.counters.instance_drawn = 0;
+            s.counters.batch_count = 0;
+            s.counters.occluded = false;
+            s.counters.frame_skipped = false;
+        }
+    }
+
     /// 渲染一帧并提交 —— 先清屏，再画树，最后推送。
     ///
     /// 为何还要自己查**脏区**：`run_loop` 不再查 `tree.dirty()`，
     /// 它只看返回的 `RenderOutcome`；而"该不该跳过"的判定留在这个函数里。
     /// 两条渲染路径都必须有这个守卫，否则空帧也会推一帧 PutImage。
     pub fn render_tree(&mut self, tree: &mut UiTree) -> Result<(), String> {
+        // 帧边界**先**建立：先统计（本帧是否有渲染由后面的 early-return 决定）。
+        self.stats_begin_frame();
+        // 本帧的脏区形状要在 `invalidate_all()` 之前取 —— 之后就只剩"全窗"了。
+        //
+        // `is_full()` 时 `rects()` 是空的（full 是一个**标志**，不是覆盖全窗的矩形），
+        // 所以这里按"隐式一个整窗矩形"计 1，否则计数器会在每帧都报 0 虚报"没脏"。
+        let dirty_rects = if tree.dirty().is_full() {
+            1
+        } else {
+            tree.dirty().rects().len() as u32
+        };
         if tree.dirty().is_empty() {
             // 画面没变，但读屏器可能刚连上来或发了动作：无障碍这一侧照常推进。
+            self.stats_mark_skipped();
             #[cfg(feature = "a11y")]
             self.pump_a11y(tree);
             return Ok(());
         }
         // 纯 CPU 路径：整窗重绘（与 Windows 的 --force-soft 一致）
+        let t_prepare = self.stats_mark();
         tree.invalidate_all();
         self.soft.clear();
+        self.stats_record(StageId::RenderPrepare, t_prepare);
+        let t_raster = self.stats_mark();
         tree.render(&mut self.soft);
+        self.stats_record(StageId::CpuRaster, t_raster);
         // Present 需要 `&mut self`，而像素在 `self.soft` 里：先拷到暂存再上屏。
         let (w, h) = (self.soft.width(), self.soft.height());
+        let t_copy = self.stats_mark();
         self.frame.clear();
         self.frame.extend_from_slice(self.soft.pixels());
+        self.stats_record(StageId::PixelCopy, t_copy);
+        // X11 是"整窗重绘"：脏矩形只是输入信息，真正重绘的像素是整块客户区。
+        self.stats_dirty(dirty_rects, w as u64 * h as u64);
         let frame = std::mem::take(&mut self.frame);
+        // `upload` = SHM 写入 + ShmPutImage/PutImage 请求 + flush。
+        // 按设计表（§2）X11 的上传与 Present 是同一个动作，因此没有再单列 present。
+        let t_upload = self.stats_mark();
         let result = self.present(&frame, w, h);
+        self.stats_record(StageId::Upload, t_upload);
+        if result.is_ok() {
+            self.stats_finish();
+        } else {
+            // 失败帧**不交付**统计（与 D3D11 的 `present` 一致）：否则上层会把一次
+            // 没上屏的帧当成"有数据的一帧"去统计，均值随即失真。
+            self.stats = None;
+        }
         self.frame = frame;
         #[cfg(feature = "a11y")]
         self.pump_a11y(tree);
@@ -1264,6 +1368,16 @@ impl WindowBackend for X11Window {
 
     fn set_theme(&mut self, theme: Theme) -> Result<(), String> {
         self.soft.set_theme(theme)
+    }
+
+    /// 本后端的分阶段统计种类（X11 = 纯 CPU + MIT-SHM 上传）。
+    fn render_stats_backend(&self) -> Option<BackendKind> {
+        Some(BackendKind::X11)
+    }
+
+    /// 取走本帧统计（**取走语义**：第二次调用必为 `None`）。
+    fn take_render_stats(&mut self) -> Option<RenderStats> {
+        self.stats.take()
     }
 
     /// X11 后端启动时固定字体（与 Win32 的软后端一致：重建引擎需换字体路径，

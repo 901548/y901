@@ -1,0 +1,36 @@
+# Linux 验收日志（2026-11-26 第六轮）：RenderStats A 阶段第 4 步（X11 分阶段埋点）
+# 环境：Ubuntu 22.04 (WSL2) + Xvfb；CARGO_TARGET_DIR=$HOME/y901-target（与 Windows target 隔离）
+# 命令：CARGO_FLAGS=--offline SKIP_SLOW=1 bash scripts/linux-verify.sh
+
+=== CHECK_X11 ===
+$ cargo check -p y901-backend-x11 --all-targets --offline
+EXIT_CHECK_X11=0
+=== GOLDEN ===
+$ cargo test -p y901-backend-x11 --test golden --offline
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+EXIT_GOLDEN=0
+=== REAL_WINDOW ===
+$ xvfb-run -a -s -screen 0 1280x800x24 cargo test -p y901-backend-x11 --test real_window --offline
+test result: ok. 17 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.49s
+EXIT_REAL_WINDOW=0
+=== CLIPPY_X11 ===
+$ cargo clippy -p y901-backend-x11 --all-targets --offline -- -D warnings
+EXIT_CLIPPY_X11=0
+=== STROKE ===
+$ cargo test -p y901-render --test stroke_round_aa --offline
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+EXIT_STROKE=0
+=== SGR_REVERSE ===
+$ cargo test -p y901-extras --test sgr_reverse --offline
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+EXIT_SGR_REVERSE=0
+=== FULL_WORKSPACE ===
+$ xvfb-run -a cargo test --workspace --no-fail-fast --offline
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+EXIT_FULL_WORKSPACE=0
+=== 汇总 ===
+LINUX VERIFY: OK
+
+LINUX VERIFY: OK (7/7 EXIT_0)

@@ -194,4 +194,8 @@
 #   default cargo test --workspace --no-fail-fast   passed 1268, failed 0, ignored 69 / 183 个测试目标
 #   (新增 8 条：encode::length_guard_tests 5 条 + poll_events 归还 2 条 + put_image 宽行拒绝 1 条。
 #    Linux 侧 passed=1231 / targets=183，见 linux-numbers.txt)
+# Measured at 2026-11-26 (RenderStats A4：X11 分阶段埋点 + pixel_copy 能力表修正):
+#   default cargo test --workspace --no-fail-fast   passed 1268, failed 0, ignored 69 / 185 个测试目标
+#   (新增 2 个 X11 测试目标 render_stats_x11 / render_stats_x11_disabled，共 3 条用例；
+#    Linux 侧 passed=1234 / targets=185，见 linux-numbers.txt)
 1268
