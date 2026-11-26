@@ -96,9 +96,16 @@ impl Widget for Flood {
 /// 这不是超限修复的缺陷（扩容前后都会丢设备），属环境抖动 —— 但**不能**因此
 /// 把断言放宽或静默跳过：这里最多重试 3 次，全部失败才按"环境不可用"留痕跳过。
 fn render_tolerant(win: &mut Window, tree: &mut UiTree) -> Result<RenderOutcome, String> {
-    let mut last = String::new();
-    for _ in 0..3 {
+    let mut last_err = String::new();
+    for attempt in 0..3 {
+        // **重试前必须重新标脏**：上一轮 `render` 已经消费掉脏区（`UiTree::render`
+        // 会清空它），不补标的话重试只会得到 `Skipped`，看起来像"没渲染"。
+        if attempt > 0 {
+            tree.invalidate_all();
+        }
         match WindowBackend::render(win, tree) {
+            // 重试时脏区又被清空（理论上不会）：再走一轮，而不是把 Skipped 当成功。
+            Ok(RenderOutcome::Skipped) if attempt > 0 => continue,
             Ok(o) => return Ok(o),
             Err(e) => {
                 let device_lost = e.contains("0x887A0005")
@@ -107,12 +114,12 @@ fn render_tolerant(win: &mut Window, tree: &mut UiTree) -> Result<RenderOutcome,
                 if !device_lost {
                     return Err(e);
                 }
-                last = e;
+                last_err = e;
                 std::thread::sleep(std::time::Duration::from_millis(80));
             }
         }
     }
-    Err(last)
+    Err(last_err)
 }
 
 /// 容量规则：不小于默认值、按 2 的幂增长、越界不 panic。
