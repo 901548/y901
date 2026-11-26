@@ -298,8 +298,10 @@ pub fn read_xft_dpi(conn: &mut crate::conn::Connection, root: u32) -> Option<f32
         .ok()?;
     conn.flush().ok()?;
     let property = conn.read_reply_u32().ok()?;
+    // 用 **get_property_all**：`RESOURCE_MANAGER` 的大小由桌面环境决定，
+    // 4096 单位（16 KiB）在某些机器上会截断，旧实现会**静默**返回半截给解析器。
     let (format, data) = conn
-        .get_property(root, property, STRING, 0, 4096, false)
+        .get_property_all(root, property, STRING, false, 1 << 20)
         .ok()?;
     (format == 8)
         .then(|| xft_dpi_from_resource_manager(&data))
@@ -433,8 +435,9 @@ pub fn read_xsettings(conn: &mut crate::conn::Connection, screen: u32) -> Option
         return None;
     }
     let prop = intern(conn, b"_XSETTINGS_SETTINGS").ok()?;
+    // XSettings 块通常只有几百字节，但**没有协议上界**：用 all 版本避免截断。
     let (format, data) = conn
-        .get_property(owner, prop, prop, 0, 1 << 20, false)
+        .get_property_all(owner, prop, prop, false, 1 << 20)
         .ok()?;
     if format != 8 {
         return None;
@@ -837,7 +840,32 @@ impl X11Window {
     }
 
     /// 把 X11 事件翻译成平台无关事件；不关心的返回 `None`。
-    fn map_event(&self, ev: &X11Event) -> Option<RawEvent> {
+    /// `ConfigureNotify` 的决策（纯函数，便于无显示环境单测）。
+    ///
+    /// 返回：`(是否消费掉 stale 标记, 要发给上层的新尺寸)`。
+    ///
+    /// 三种"不产生事件"的情况：
+    /// 1. 尺寸 == `stale`（缩放刚变时队列里的旧尺寸）→ 消费标记、丢弃；
+    /// 2. 尺寸 == 当前缓存（WM 拖动时的重复事件）→ 丢弃，避免反复全量重排；
+    /// 3. 宽或高为 0（极小化）→ 丢弃，避免把缓冲缩成 0。
+    #[allow(clippy::type_complexity)]
+    fn configure_decision(
+        current: (u16, u16),
+        stale: Option<(u16, u16)>,
+        incoming: (u16, u16),
+    ) -> (bool, Option<(u16, u16)>) {
+        if stale == Some(incoming) {
+            return (true, None);
+        }
+        if incoming.0 == 0 || incoming.1 == 0 {
+            return (false, None);
+        }
+        if incoming == current {
+            return (false, None);
+        }
+        (false, Some(incoming))
+    }
+    fn map_event(&mut self, ev: &X11Event) -> Option<RawEvent> {
         Some(match ev {
             // Expose 只告诉你"哪块需要重绘"，不是尺寸变化。
             // 对外没有"局部重绘"事件，所以这里发一个当前窗口尺寸的 Resize 作为"该画一帧"的信号。
@@ -849,13 +877,25 @@ impl X11Window {
                 // 缩放刚变时，事件队列里可能还排着**旧尺寸**的 ConfigureNotify：
                 // 若照它重排，会把刚按新缩放建好的缓冲 resize 回去（字号新、缓冲旧 → 错位）。
                 // 代价：用户恰好把窗口拖回这个尺寸的那一次事件被吞掉（下一次 Expose 会补）。
-                if self.stale_configure.get() == Some((*width, *height)) {
+                let (consume_stale, decided) = Self::configure_decision(
+                    (self.width, self.height),
+                    self.stale_configure.get(),
+                    (*width, *height),
+                );
+                if consume_stale {
                     self.stale_configure.set(None);
-                    return None;
                 }
+                let (w, h) = decided?;
+                // **尺寸必须在这里落库**：`map_event` 原来是 `&self`，于是
+                // `ConfigureNotify` 只对外发了个 `Resize` 事件，窗口自己的
+                // `width/height` 永远停在旧值 —— `relayout` 按旧尺寸重排、
+                // `present` 按旧尺寸截断（新区域永远画不出来）。改成 `&mut self`
+                // 就是为了这一行。
+                self.width = w;
+                self.height = h;
                 RawEvent::Resize {
-                    w: *width as u32,
-                    h: *height as u32,
+                    w: w as u32,
+                    h: h as u32,
                 }
             }
             X11Event::Key {
@@ -1181,7 +1221,18 @@ impl WindowBackend for X11Window {
     /// 语义：先把光栅器尺寸对齐窗口，再按新视口整树重排并全量失效。
     fn relayout(&mut self, tree: &mut UiTree) {
         let (w, h) = self.size();
+        // 软缓冲（帧缓冲）必须与窗口同尺寸：`present` 按 `soft.pixels()` 的
+        // 长度上传，缓冲小于窗口就只会画出左上角。
         self.soft.resize(w as u32, h as u32);
+        // MIT-SHM 段是**按尺寸**建的：尺寸一变，旧段就不能再用（`present` 会因
+        // `state.w != w` 掉到分块 PutImage 的慢路径）。这里重建一次，保住快路径。
+        // 为什么不在 `present` 里就地重建：`present` 拿不到"这是新尺寸第一次上屏"
+        // 的信息，逐帧重建段会反复 mmap/attach。`relayout` 每次真正 resize 只调一次。
+        if let Some(state) = self.shm.as_ref() {
+            if state.w != w || state.h != h {
+                self.rebuild_shm(w, h);
+            }
+        }
         tree.layout(Size::new(w as f32, h as f32), &self.soft);
         tree.invalidate_all();
     }
@@ -1677,6 +1728,72 @@ mod dpi_scale_tests {
         assert_eq!(
             dpi_scale_with_xsettings_and_outputs(&screen(325), None, None, Some(&[broken])),
             1.0
+        );
+    }
+}
+
+/// `ConfigureNotify` 决策的纯函数测试（**不需要 X server**）。
+///
+/// 这些用例覆盖了 resize 语义里最容易出错、又最难在真机上稳定复现的三种情况：
+/// 过期尺寸、重复尺寸、0 尺寸。
+#[cfg(test)]
+mod configure_decision_tests {
+    use super::X11Window;
+
+    #[test]
+    fn new_size_produces_resize_event() {
+        assert_eq!(
+            X11Window::configure_decision((320, 200), None, (400, 300)),
+            (false, Some((400, 300)))
+        );
+    }
+
+    #[test]
+    fn duplicate_size_is_deduped() {
+        // WM 拖动时会连发多个同尺寸 ConfigureNotify：必须吞掉，否则每帧全量重排。
+        assert_eq!(
+            X11Window::configure_decision((400, 300), None, (400, 300)),
+            (false, None)
+        );
+    }
+
+    #[test]
+    fn stale_size_is_consumed_and_ignored() {
+        // 缩放刚变时队列里残留的"旧尺寸"事件：消费标记 + 不发事件。
+        assert_eq!(
+            X11Window::configure_decision((400, 300), Some((320, 200)), (320, 200)),
+            (true, None)
+        );
+    }
+
+    #[test]
+    fn stale_marker_only_matches_once() {
+        // 第一次匹配被消费；第二次同尺寸就属于"真的被拖回这个尺寸"→ 必须发事件。
+        let (consumed, ev) =
+            X11Window::configure_decision((400, 300), Some((320, 200)), (320, 200));
+        assert!(consumed);
+        assert!(ev.is_none());
+        // 消费后 stale=None，当前尺寸仍是 400x300 → 320x200 是真实变化。
+        assert_eq!(
+            X11Window::configure_decision((400, 300), None, (320, 200)),
+            (false, Some((320, 200)))
+        );
+    }
+
+    #[test]
+    fn zero_size_is_ignored() {
+        // 极小化时 X 报 0×0：不能把帧缓冲缩成 0（否则后续 present 会除零/空上传）。
+        assert_eq!(
+            X11Window::configure_decision((320, 200), None, (0, 0)),
+            (false, None)
+        );
+        assert_eq!(
+            X11Window::configure_decision((320, 200), None, (0, 200)),
+            (false, None)
+        );
+        assert_eq!(
+            X11Window::configure_decision((320, 200), None, (320, 0)),
+            (false, None)
         );
     }
 }

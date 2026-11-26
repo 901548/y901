@@ -113,6 +113,17 @@ pub struct Connection {
     info: ServerInfo,
     /// 读到但尚未交付的事件（键盘之前可能混着 Expose）
     pending: Vec<X11Event>,
+    /// **尚未凑满 32 字节的半个包**。
+    ///
+    /// 为什么必须有它：X11 事件包固定 32 字节，但 `read(2)` 只保证"至少读到 1 字节"。
+    /// 旧实现在读到 `n < 32` 时直接报错并**丢弃这 n 字节** —— 之后每个包都从错位处
+    /// 解析（表现为"界面卡死/乱事件"），而且因为读的是同一个流，错误会永久保留。
+    ///
+    /// 现在的约定：**任何读取路径都先往 `rx` 里补字节，凑满 32 才消费**；
+    /// 非阻塞/超时只表示"暂时没有更多字节"，`rx` 里的部分数据必须留着等下次。
+    rx: [u8; 32],
+    /// `rx` 里已经填了多少字节（`0..=32`；等于 32 表示"有一个完整包待取"）。
+    rx_filled: usize,
 }
 
 impl Connection {
@@ -142,6 +153,8 @@ impl Connection {
                 max_keycode: 0,
             },
             pending: Vec::new(),
+            rx: [0u8; 32],
+            rx_filled: 0,
         }
     }
     /// 连接到本地 X server 并完成握手。
@@ -174,6 +187,8 @@ impl Connection {
             seq: 0,
             info: ServerInfo::default(),
             pending: Vec::new(),
+            rx: [0u8; 32],
+            rx_filled: 0,
         };
         c.handshake(number)?;
         Ok(c)
@@ -408,19 +423,94 @@ impl Connection {
     /// 为什么需要它：剪贴板要处理 `SelectionRequest`/`SelectionNotify`
     /// 这类上层不关心的事件，而 `poll_events` 会把未知事件丢掉。
     pub fn next_packet(&mut self, timeout_ms: u32) -> Result<[u8; 32], String> {
-        self.stream
-            .set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
-            .map_err(|e| format!("set_read_timeout: {e}"))?;
-        let mut buf = [0u8; 32];
-        self.stream
-            .read_exact(&mut buf)
-            .map_err(|e| format!("读包失败: {e}"))?;
-        Ok(buf)
+        match self.try_next_packet(timeout_ms)? {
+            Some(pkt) => Ok(pkt),
+            None => Err(format!(
+                "读包超时（{timeout_ms}ms 内未收到完整的 32 字节包；已读部分会保留，下次接着读）"
+            )),
+        }
+    }
+
+    /// 尝试读一个 32 字节包；**没有完整包时返回 `Ok(None)`**，不报错。
+    ///
+    /// 语义：
+    /// - `wait_ms == 0`：**立即返回**（用 `set_nonblocking`，不是 `set_read_timeout(0)` ——
+    ///   后者在 Linux 上是 `EINVAL`，旧实现因此让"0 超时轮询"永远失败）；
+    /// - `wait_ms > 0`：最多等 `wait_ms`，超时返回 `Ok(None)`；
+    /// - 无论哪种情况，**已读到的半包都留在 `rx` 里**，下次调用接着补 —— 不会丢字节，
+    ///   也不会把半包当完整包交给解析器。
+    ///
+    /// 为什么保留 `next_packet`：它已有调用点（剪贴板），改签名是公开 API 破坏；
+    /// 需要"无数据"语义的新代码请用本函数。
+    pub fn try_next_packet(&mut self, wait_ms: u32) -> Result<Option<[u8; 32]>, String> {
+        if wait_ms == 0 {
+            self.stream
+                .set_nonblocking(true)
+                .map_err(|e| format!("set_nonblocking(true): {e}"))?;
+        } else {
+            self.stream
+                .set_nonblocking(false)
+                .map_err(|e| format!("set_nonblocking(false): {e}"))?;
+            self.stream
+                .set_read_timeout(Some(Duration::from_millis(wait_ms as u64)))
+                .map_err(|e| format!("set_read_timeout: {e}"))?;
+        }
+        let result = self.fill_one_packet(wait_ms);
+        if wait_ms == 0 {
+            // 恢复阻塞模式（忽略错误：即使失败也不该盖掉真正的读取结果，
+            // 但要留日志 —— 否则后续阻塞读会异常）。
+            if let Err(e) = self.stream.set_nonblocking(false) {
+                eprintln!("[y901] 恢复阻塞模式失败：{e}（后续读可能异常）");
+            }
+        }
+        result
+    }
+
+    /// 把 `rx` 补满 32 字节并返回该包；超时/无数据时返回 `Ok(None)`（**保留已读字节**）。
+    fn fill_one_packet(&mut self, wait_ms: u32) -> Result<Option<[u8; 32]>, String> {
+        let deadline = Instant::now() + Duration::from_millis(wait_ms as u64);
+        loop {
+            if self.rx_filled == 32 {
+                let pkt = self.rx;
+                self.rx_filled = 0;
+                return Ok(Some(pkt));
+            }
+            match self.stream.read(&mut self.rx[self.rx_filled..]) {
+                Ok(0) => return Err("服务端断开连接".to_string()),
+                Ok(n) => self.rx_filled += n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    if wait_ms == 0 {
+                        return Ok(None);
+                    }
+                    let now = Instant::now();
+                    if now >= deadline {
+                        return Ok(None);
+                    }
+                    // 短睡避免忙等；上界取"剩余时间"与 2ms 的较小者。
+                    let left = deadline.saturating_duration_since(now);
+                    std::thread::sleep(left.min(Duration::from_millis(2)));
+                }
+                Err(e) => return Err(format!("读包失败: {e}")),
+            }
+        }
+    }
+
+    /// 诊断/测试用：`rx` 里尚未成包的字节数。
+    pub fn partial_packet_bytes(&self) -> usize {
+        self.rx_filled
     }
 
     /// 读属性（`GetProperty`）。
     ///
     /// 返回：`(format, data)`。属性不存在或为空时 `data` 为空。
+    /// 读**一页**属性。
+    ///
+    /// **注意**：如果属性比 `long_length*4` 大，本函数返回 `Err`（而不是旧实现的
+    /// "静默返回半截"）。要读全部请用 [`Connection::get_property_all`]。
     pub fn get_property(
         &mut self,
         window: u32,
@@ -430,6 +520,45 @@ impl Connection {
         long_length: u32,
         delete_after: bool,
     ) -> Result<(u8, Vec<u8>), String> {
+        let (format, data, bytes_after, _type) = self.get_property_page(
+            window,
+            property,
+            type_atom,
+            long_offset,
+            long_length,
+            delete_after,
+        )?;
+        if bytes_after > 0 {
+            // **不许静默截断**：调用方要么用 `get_property_all`，要么显式接受这份
+            // 不完整数据（那就该自己分页）。返回半截数据会让上层解析出垃圾。
+            return Err(format!(
+                "GetProperty 只读到 {} 字节，属性还有 {bytes_after} 字节未读\
+                 （long_length={long_length} 太小；请用 get_property_all）",
+                data.len()
+            ));
+        }
+        Ok((format, data))
+    }
+
+    /// GetProperty 的**单页**读取。
+    ///
+    /// 返回：`(format, data, bytes_after, type_atom)`。
+    ///
+    /// `bytes_after` 是 X11 在响应里给的"属性里还剩多少字节没返回"——
+    /// 旧实现**完全忽略**它，于是超过 `long_length*4` 的属主数据被静默截断
+    ///（典型：大段剪贴板、XSettings 被截一半，解析出垃圾或直接失败）。
+    ///
+    /// `long_offset` / `long_length` 的单位是**4 字节**（X11 协议规定），
+    /// 与 `format` 无关；返回的 `data` 已按 `n_items × format/8` 截掉尾部填充。
+    fn get_property_page(
+        &mut self,
+        window: u32,
+        property: u32,
+        type_atom: u32,
+        long_offset: u32,
+        long_length: u32,
+        delete_after: bool,
+    ) -> Result<(u8, Vec<u8>, u32, u32), String> {
         self.send(&crate::encode::encode_get_property(
             window,
             property,
@@ -441,15 +570,131 @@ impl Connection {
         self.flush()?;
         let (head, mut data) = self.read_reply_packet()?;
         let format = head[1];
+        let type_atom = u32::from_le_bytes([head[8], head[9], head[10], head[11]]);
+        let bytes_after = u32::from_le_bytes([head[12], head[13], head[14], head[15]]);
+        // `n_items`（值长度，单位是**项**，不是字节）在字节 16..20。
         let n_items = u32::from_le_bytes([head[16], head[17], head[18], head[19]]) as usize;
-        // format=8 时每项 1 字节；32 时每项 4 字节
         let bytes = match format {
             8 => n_items,
-            16 => n_items * 2,
-            32 => n_items * 4,
-            _ => 0,
+            16 => n_items.saturating_mul(2),
+            32 => n_items.saturating_mul(4),
+            // format=0 是**协议里的"属性不存在"**（type=None、长度为 0）。
+            // 旧实现会算出 0 字节并返回空；新实现也要保持这个语义，不能报错，
+            // 否则"读一个可能不存在的属性"会从"返回空"变成"启动失败"。
+            0 => 0,
+            _ => {
+                return Err(format!(
+                    "GetProperty 返回了非法 format={format}（只允许 0/8/16/32）"
+                ))
+            }
         };
         data.truncate(bytes.min(data.len()));
+        Ok((format, data, bytes_after, type_atom))
+    }
+
+    /// 读**完整**属性（自动处理 `bytes_after`），超限时**显式失败**。
+    ///
+    /// 为什么需要新函数而不是改 `get_property` 的语义：`get_property` 的
+    /// `long_length` 由调用方决定，它无法知道"我要的是全部还是前 N 字节"。
+    /// 本函数明确表达"我要全部"，因此可以安全地分页与限流。
+    ///
+    /// 实现（两阶段，避免"边读边删"把没读到的一半删掉）：
+    /// 1. **探长度**：`GetProperty(offset=0, length=0, delete=false)` → `bytes_after` 即总字节数；
+    /// 2. **一次读满**：`length = ceil(total/4)`（单位是 4 字节），最后一页才带 `delete`；
+    ///    若服务器仍少给（`bytes_after > 0`），按页续读（**续读页一律不删**）。
+    ///
+    /// `max_bytes`：硬上限。超限返回 `Err` 且**不删除**属性（调用方还可以换策略重读）。
+    pub fn get_property_all(
+        &mut self,
+        window: u32,
+        property: u32,
+        type_atom: u32,
+        delete_after: bool,
+        max_bytes: usize,
+    ) -> Result<(u8, Vec<u8>), String> {
+        // 1) 探长度（不删除）
+        let (format, _empty, total_bytes, ty) =
+            self.get_property_page(window, property, type_atom, 0, 0, false)?;
+        // 属性不存在或为空：`bytes_after == 0` → 直接返回空。
+        if total_bytes == 0 {
+            if delete_after {
+                // 空属性也要按调用方要求删除（读 0 项 + delete=true）。
+                let _ = self.get_property_page(window, property, type_atom, 0, 0, true)?;
+            }
+            return Ok((format, Vec::new()));
+        }
+        let total = total_bytes as usize;
+        if total > max_bytes {
+            return Err(format!(
+                "属性 {total} 字节超过上限 {max_bytes}：已停止读取（属性未被删除）"
+            ));
+        }
+        // 2) 一次读满：请求 ceil(total/4) 个 4 字节单位，正好覆盖剩余全部数据。
+        let want_units = total.div_ceil(4) as u32;
+        let (fmt, mut data, mut bytes_after, _ty) =
+            self.get_property_page(window, property, type_atom, 0, want_units, delete_after)?;
+        if fmt != format {
+            return Err(format!(
+                "GetProperty 分页 format 不一致：首读 {format}、续读 {fmt}"
+            ));
+        }
+        // `delete_after` 只允许在"这一页已经覆盖全部数据"时使用；否则后面的数据
+        // 会被服务器删掉 —— 那是数据丢失，必须显式报错而不是静默返回半截。
+        if delete_after && bytes_after > 0 {
+            return Err(format!(
+                "GetProperty(delete=true) 只返回了 {} 字节，但属性还有 {bytes_after} 字节未被读取\
+                 （数据已被服务器删除；请改用较小的 delete 策略或更大的 max_bytes）",
+                data.len()
+            ));
+        }
+        // 3) 服务器少给时继续分页（**不带 delete**）。
+        let mut guard_pages = 0usize;
+        while bytes_after > 0 {
+            guard_pages += 1;
+            if guard_pages > MAX_PROPERTY_PAGES {
+                return Err(format!(
+                    "GetProperty 分页超过 {MAX_PROPERTY_PAGES} 页仍未读完（{bytes_after} 字节剩余）"
+                ));
+            }
+            if data.len() >= total {
+                return Err(format!(
+                    "GetProperty 已读 {} 字节但服务器仍报告 {bytes_after} 字节剩余（协议异常）",
+                    data.len()
+                ));
+            }
+            // 下一页的 offset 单位是 4 字节：已读字节必须 4 字节对齐，
+            // 否则说明服务器在非页边界截断（format 8/16 时才可能发生）——显式报错。
+            if data.len() % 4 != 0 {
+                return Err(format!(
+                    "GetProperty 分页边界不是 4 字节对齐（已读 {} 字节）",
+                    data.len()
+                ));
+            }
+            let offset_units = (data.len() / 4) as u32;
+            let remaining = total - data.len();
+            let want = remaining.div_ceil(4) as u32;
+            let (f2, chunk, after2, _t2) =
+                self.get_property_page(window, property, type_atom, offset_units, want, false)?;
+            if f2 != format {
+                return Err(format!(
+                    "GetProperty 分页 format 不一致：首读 {format}、续读 {f2}"
+                ));
+            }
+            if chunk.is_empty() {
+                return Err(format!(
+                    "GetProperty 分页返回 0 字节但仍有 {after2} 字节剩余（协议异常）"
+                ));
+            }
+            data.extend_from_slice(&chunk);
+            bytes_after = after2;
+            if data.len() > max_bytes {
+                return Err(format!(
+                    "GetProperty 读取超过上限 {max_bytes} 字节：已停止（属性未被删除）"
+                ));
+            }
+        }
+        data.truncate(total.min(data.len()));
+        let _ = ty;
         Ok((format, data))
     }
 
@@ -584,9 +829,26 @@ impl Connection {
     ///
     /// 超时：由 `read_exact` 提供（200ms 轮询 + 5s 总限）；本函数**不另设 deadline**，
     /// 否则会与调用方（如 `sync`）的 deadline 重叠。
-    fn read_packet(&mut self) -> Result<([u8; 32], Vec<u8>), String> {
+    /// 读满一个 32 字节包头（**先把 `rx` 里已有的半个包接上**）。
+    ///
+    /// 这样"先被 `poll_events`/`try_next_packet` 读了 20 字节"之后，阻塞式
+    /// `read_packet` 也能正确接着读剩下的 12 字节，而不是把这 20 字节当成新包头。
+    fn read_head(&mut self) -> Result<[u8; 32], String> {
         let mut head = [0u8; 32];
-        self.read_exact(&mut head)?;
+        let mut filled = 0usize;
+        if self.rx_filled > 0 {
+            filled = self.rx_filled;
+            head[..filled].copy_from_slice(&self.rx[..filled]);
+            self.rx_filled = 0;
+        }
+        if filled < 32 {
+            self.read_exact(&mut head[filled..])?;
+        }
+        Ok(head)
+    }
+
+    fn read_packet(&mut self) -> Result<([u8; 32], Vec<u8>), String> {
+        let head = self.read_head()?;
         // **reply length 是 CARD32**（Reply 头：1 type | 1 data | 2 seq | 4 length）。
         // 旧实现只读低 16 位：任何附加数据超过 65 535 单位（262 140 字节）的回复
         // （典型：`GetImage` 读回 1080p、大段剪贴板 `GetProperty`）只会被读掉一部分，
@@ -739,56 +1001,58 @@ impl Connection {
     fn poll_events_inner(&mut self) -> Result<(Vec<X11Event>, Vec<X11Error>), String> {
         let mut events = std::mem::take(&mut self.pending);
         let mut errors = Vec::new();
-        let mut buf = [0u8; 32];
         loop {
-            match self.stream.read(&mut buf) {
-                Ok(0) => return Err("服务端断开连接".to_string()),
-                Ok(32) => {
-                    match buf[0] {
-                        0 => errors.push(parse_error(&buf)),
-                        // 字节 0 == 1 是**响应**（reply），不是事件。
-                        // 不区分的话，InternAtom/GetInputFocus 的响应会被当成 Unknown 事件丢给上层。
-                        1 => {
-                            // **防御性 drain**：正常情况下主连接的 reply 都在
-                            // `read_reply_packet` / `sync` 里已读完，不会到这里；
-                            // 但若将来加运行期请求（如实时查 `_NET_WM_STATE`），
-                            // 它的 reply 可能先被 `poll_events` 摸到。
-                            // 若不 drain，剩下的 `units*4` 字节会把后续每一包都错位
-                            // （与 64c6088 修的是同一类灾难）。
-                            //
-                            // 选**drain 而不是报错**：poll_events 的调用方只想要事件，
-                            // reply 对它没用；报错会让一个"无害的并发"升级成启动失败。
-                            let units =
-                                u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
-                            if units > MAX_REPLY_UNITS {
-                                return Err(format!(
-                                    "poll_events: reply length {units} units exceeds sanity limit"
-                                ));
-                            }
-                            let mut extra = vec![0u8; units * 4];
-                            if !extra.is_empty() {
-                                self.stream.read_exact(&mut extra).map_err(|e| {
-                                    format!("poll_events 收到 reply，drain 附加数据失败: {e}")
-                                })?;
-                            }
-                        }
-                        _ => {
-                            if let Ok(ev) = decode_event(&buf) {
-                                events.push(ev);
-                            }
-                        }
+            // **先凑满一个 32 字节包**：`rx` 里可能已有上次读到的半个包。
+            // 读不满就带着已读字节返回（非阻塞语义），下次接着读 —— 绝不丢字节。
+            while self.rx_filled < 32 {
+                match self.stream.read(&mut self.rx[self.rx_filled..]) {
+                    Ok(0) => return Err("服务端断开连接".to_string()),
+                    Ok(n) => self.rx_filled += n,
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            || e.kind() == std::io::ErrorKind::TimedOut =>
+                    {
+                        return Ok((events, errors))
+                    }
+                    // 信号中断不是错误：重试即可（否则会被当成“读错”升级成断线）。
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(format!("读事件失败: {e}")),
+                }
+            }
+            let buf = self.rx;
+            self.rx_filled = 0;
+            match buf[0] {
+                0 => errors.push(parse_error(&buf)),
+                // 字节 0 == 1 是**响应**（reply），不是事件。
+                // 不区分的话，InternAtom/GetInputFocus 的响应会被当成 Unknown 事件丢给上层。
+                1 => {
+                    // **防御性 drain**：正常情况下主连接的 reply 都在
+                    // `read_reply_packet` / `sync` 里已读完，不会到这里；
+                    // 但若将来加运行期请求（如实时查 `_NET_WM_STATE`），
+                    // 它的 reply 可能先被 `poll_events` 摸到。
+                    // 若不 drain，剩下的 `units*4` 字节会把后续每一包都错位
+                    // （与 64c6088 修的是同一类灾难）。
+                    //
+                    // 选**drain 而不是报错**：poll_events 的调用方只想要事件，
+                    // reply 对它没用；报错会让一个"无害的并发"升级成启动失败。
+                    let units = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
+                    if units > MAX_REPLY_UNITS {
+                        return Err(format!(
+                            "poll_events: reply length {units} units exceeds sanity limit"
+                        ));
+                    }
+                    let mut extra = vec![0u8; units * 4];
+                    if !extra.is_empty() {
+                        self.stream.read_exact(&mut extra).map_err(|e| {
+                            format!("poll_events 收到 reply，drain 附加数据失败: {e}")
+                        })?;
                     }
                 }
-                Ok(n) => return Err(format!("收到 {n} 字节的不完整包（X11 事件固定 32 字节）")),
-                Err(e)
-                    if e.kind() == std::io::ErrorKind::WouldBlock
-                        || e.kind() == std::io::ErrorKind::TimedOut =>
-                {
-                    return Ok((events, errors))
+                _ => {
+                    if let Ok(ev) = decode_event(&buf) {
+                        events.push(ev);
+                    }
                 }
-                // 信号中断不是错误：重试即可（否则会被当成“读错”升级成断线）。
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(format!("读事件失败: {e}")),
             }
         }
     }
@@ -903,6 +1167,10 @@ fn parse_error(buf: &[u8]) -> X11Error {
 /// 回复附加数据的**合理性上限**（单位：4 字节）。16 MiB 足够覆盖 4K 截图；
 /// 超出说明长度字段损坏，不能拿它去 `vec![0u8; n]`。
 const MAX_REPLY_UNITS: usize = 4 * 1024 * 1024;
+
+/// `get_property_all` 单次读取的最大页数（防御服务器异常：永远报 `bytes_after > 0`
+/// 却只给极少量数据 —— 没有这个上界就是**无界循环**）。
+const MAX_PROPERTY_PAGES: usize = 64;
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -965,5 +1233,237 @@ mod tests {
         let mut conn = Connection::from_stream(ours);
         let first = conn.poll_events(100);
         assert!(first.is_ok(), "units=0 的 reply 不应导致错误：{first:?}");
+    }
+}
+
+/// **包重组状态机**的测试（`UnixStream::pair()` 灌字节，不需要 X server）。
+///
+/// 覆盖的正是旧实现会丢字节的路径：`read(2)` 只给半个包。
+#[cfg(test)]
+mod read_path_tests {
+    use super::*;
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+
+    /// 一个"可识别"的 32 字节包：首字节 = 事件码，其余按序号填充。
+    fn packet(tag: u8) -> [u8; 32] {
+        let mut p = [0u8; 32];
+        p[0] = tag;
+        for (i, b) in p.iter_mut().enumerate() {
+            *b ^= (i as u8).wrapping_mul(7).wrapping_add(tag);
+        }
+        p[0] = tag;
+        p
+    }
+
+    // ---- next_packet / try_next_packet ----
+
+    #[test]
+    fn try_next_packet_returns_none_without_error_when_no_data() {
+        let (ours, _theirs) = UnixStream::pair().expect("pair");
+        let mut c = Connection::from_stream(ours);
+        // 0 超时 + 没数据 = **正常**的"暂无数据"，不是错误。
+        let r = c.try_next_packet(0).expect("无数据不应报错");
+        assert!(r.is_none(), "无数据时必须返回 None");
+        assert_eq!(c.partial_packet_bytes(), 0);
+    }
+
+    #[test]
+    fn next_packet_zero_timeout_is_not_an_einval() {
+        let (ours, _theirs) = UnixStream::pair().expect("pair");
+        let mut c = Connection::from_stream(ours);
+        // 旧实现在这里必定 Err("set_read_timeout: ...")（Linux 的 EINVAL）。
+        let err = c.next_packet(0).expect_err("无数据时 next_packet 应报超时");
+        assert!(
+            !err.contains("set_read_timeout") && !err.contains("InvalidInput"),
+            "0 超时不得走 set_read_timeout(0)（Linux EINVAL）：{err}"
+        );
+        assert!(err.contains("超时"), "错误应说明是超时：{err}");
+    }
+
+    #[test]
+    fn partial_packet_is_preserved_and_completed_later() {
+        let (ours, mut theirs) = UnixStream::pair().expect("pair");
+        let mut c = Connection::from_stream(ours);
+        let want = packet(2); // KeyPress 之类的事件码
+
+        // 只发前 10 字节
+        theirs.write_all(&want[..10]).expect("write head");
+        theirs.flush().ok();
+        assert!(
+            c.try_next_packet(0).expect("部分包不应报错").is_none(),
+            "10/32 字节不能算一个完整包"
+        );
+        assert_eq!(
+            c.partial_packet_bytes(),
+            10,
+            "已读的 10 字节必须留着，不能丢"
+        );
+
+        // 补上剩下的 22 字节
+        theirs.write_all(&want[10..]).expect("write tail");
+        theirs.flush().ok();
+        let got = c
+            .try_next_packet(0)
+            .expect("合并后应成功")
+            .expect("应有完整包");
+        assert_eq!(got, want, "拼出来的包必须与写入的逐字节相同");
+        assert_eq!(c.partial_packet_bytes(), 0, "交付后缓冲区必须清空");
+    }
+
+    #[test]
+    fn next_packet_timeout_keeps_partial_bytes() {
+        let (ours, mut theirs) = UnixStream::pair().expect("pair");
+        let mut c = Connection::from_stream(ours);
+        let want = packet(3);
+        theirs.write_all(&want[..5]).expect("write");
+        theirs.flush().ok();
+
+        let err = c.next_packet(20).expect_err("只有 5 字节，应超时");
+        assert!(err.contains("超时"), "{err}");
+        assert_eq!(
+            c.partial_packet_bytes(),
+            5,
+            "超时也不能丢掉已读的 5 字节（否则流永久错位）"
+        );
+
+        theirs.write_all(&want[5..]).expect("write rest");
+        theirs.flush().ok();
+        let got = c.next_packet(100).expect("补满后应成功");
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn back_to_back_packets_are_delivered_in_order_without_duplicates() {
+        let (ours, mut theirs) = UnixStream::pair().expect("pair");
+        let mut c = Connection::from_stream(ours);
+        let a = packet(2);
+        let b = packet(3);
+        let d = packet(4);
+        let mut all = Vec::new();
+        all.extend_from_slice(&a);
+        all.extend_from_slice(&b);
+        all.extend_from_slice(&d);
+        theirs.write_all(&all).expect("write 3 packets");
+        theirs.flush().ok();
+
+        assert_eq!(c.try_next_packet(0).unwrap(), Some(a));
+        assert_eq!(c.try_next_packet(0).unwrap(), Some(b));
+        assert_eq!(c.try_next_packet(0).unwrap(), Some(d));
+        assert_eq!(
+            c.try_next_packet(0).unwrap(),
+            None,
+            "三个包消费完后不得再产出（不重复消费）"
+        );
+    }
+
+    #[test]
+    fn half_packet_then_rest_plus_next_full_packet() {
+        // 场景：a 的前 13 字节先到；随后"a 的剩余 19 字节 + 完整的 b"一起到达。
+        // 这是最容易错位的形态：补完 a 之后必须**从正确偏移**继续解析 b。
+        let (ours, mut theirs) = UnixStream::pair().expect("pair");
+        let mut c = Connection::from_stream(ours);
+        let a = packet(2);
+        let b = packet(3);
+
+        theirs.write_all(&a[..13]).expect("write head of a");
+        theirs.flush().ok();
+        assert!(
+            c.try_next_packet(0).unwrap().is_none(),
+            "13/32 字节不能算完整包"
+        );
+        assert_eq!(c.partial_packet_bytes(), 13);
+
+        let mut rest = Vec::new();
+        rest.extend_from_slice(&a[13..]);
+        rest.extend_from_slice(&b);
+        theirs.write_all(&rest).expect("write rest of a + b");
+        theirs.flush().ok();
+
+        assert_eq!(c.try_next_packet(0).unwrap(), Some(a), "a 必须完整拼出");
+        assert_eq!(c.try_next_packet(0).unwrap(), Some(b), "b 不得错位");
+        assert_eq!(c.try_next_packet(0).unwrap(), None);
+        assert_eq!(c.partial_packet_bytes(), 0);
+    }
+
+    #[test]
+    fn packet_split_across_three_writes() {
+        // 分三次到达（每次都不足 32 字节）：必须累积到第三个才交付。
+        let (ours, mut theirs) = UnixStream::pair().expect("pair");
+        let mut c = Connection::from_stream(ours);
+        let a = packet(5);
+
+        for (i, chunk) in [&a[..5], &a[5..17], &a[17..]].into_iter().enumerate() {
+            theirs.write_all(chunk).expect("write chunk");
+            theirs.flush().ok();
+            let got = c.try_next_packet(0).expect("分片读取不应报错");
+            if i < 2 {
+                assert!(got.is_none(), "第 {i} 次分片不应交付完整包");
+                assert_eq!(c.partial_packet_bytes(), [5, 17][i]);
+            } else {
+                assert_eq!(got, Some(a), "第三次分片后必须拼出完整包");
+            }
+        }
+        assert_eq!(c.partial_packet_bytes(), 0);
+    }
+
+    // ---- 与阻塞式读取共享缓冲 ----
+
+    #[test]
+    fn blocking_reply_read_consumes_buffered_partial_head() {
+        let (ours, mut theirs) = UnixStream::pair().expect("pair");
+        // 一个 units=0 的 reply：byte0=1，字节 8..12 是返回值
+        let mut reply = [0u8; 32];
+        reply[0] = 1;
+        reply[8..12].copy_from_slice(&0xDEAD_BEEFu32.to_le_bytes());
+
+        // 先只给 7 字节，让 `rx` 里留下 7 字节
+        theirs.write_all(&reply[..7]).expect("write head");
+        theirs.flush().ok();
+        let mut c = Connection::from_stream(ours);
+        assert!(c.try_next_packet(0).expect("不应报错").is_none());
+        assert_eq!(c.partial_packet_bytes(), 7);
+
+        // 再给剩下的 25 字节；阻塞式 `read_reply_u32` 必须**接上**这 7 字节
+        theirs.write_all(&reply[7..]).expect("write tail");
+        theirs.flush().ok();
+        let v = c.read_reply_u32().expect("应能读到 reply");
+        assert_eq!(v, 0xDEAD_BEEF, "缓冲里的 7 字节必须被当作包头的一部分");
+        assert_eq!(c.partial_packet_bytes(), 0);
+    }
+
+    #[test]
+    fn poll_events_tolerates_partial_packet_without_desync() {
+        let (ours, mut theirs) = UnixStream::pair().expect("pair");
+        let mut c = Connection::from_stream(ours);
+        let ev = packet(2); // 字节 0 = 2（KeyPress 类事件码）
+
+        // 半个包 → poll_events 必须**正常返回**（不是 Err），并保留已读字节
+        theirs.write_all(&ev[..12]).expect("write head");
+        theirs.flush().ok();
+        let first = c.poll_events(0);
+        assert!(
+            first.is_ok(),
+            "半个包不该让 poll_events 报错（旧实现会 Err 并丢字节）：{first:?}"
+        );
+        assert_eq!(c.partial_packet_bytes(), 12);
+
+        // 补齐剩余 20 字节 → 下一次 poll 必须把它当成**一个**包消费掉
+        theirs.write_all(&ev[12..]).expect("write tail");
+        theirs.flush().ok();
+        let second = c.poll_events(0).expect("补齐后应成功");
+        assert!(
+            second.0.len() <= 1,
+            "补满后最多解出一个事件，实测 {:?}",
+            second.0
+        );
+        assert_eq!(
+            c.partial_packet_bytes(),
+            0,
+            "消费完必须清空缓冲（不能重复消费）"
+        );
+        // 再 poll 一次不应有残留
+        let third = c.poll_events(0).expect("第三次 poll");
+        assert!(third.0.is_empty(), "不应残留事件：{:?}", third.0);
     }
 }

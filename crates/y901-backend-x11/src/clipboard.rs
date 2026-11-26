@@ -363,7 +363,9 @@ fn fetch_text(
         if property == 0 {
             return Err("剪贴板为空或 owner 拒绝提供 UTF8 文本".to_string());
         }
-        let (_, data) = conn.get_property(wid, property, 0, 0, 1 << 20, true)?;
+        // 剪贴板内容由**别的进程**决定，没有协议上界：必须读全（`get_property_all`
+        // 会自动处理 `bytes_after`），并且达到上限时**显式报错**而不是返回半截文本。
+        let (_, data) = conn.get_property_all(wid, property, 0, true, 4 << 20)?;
         return String::from_utf8(data).map_err(|e| format!("剪贴板内容不是合法 UTF-8：{e}"));
     }
     Err("等待 SelectionNotify 超时".to_string())

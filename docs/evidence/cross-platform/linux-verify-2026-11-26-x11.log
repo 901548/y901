@@ -1,0 +1,38 @@
+# Linux 验收日志（2026-11-26）：X11 resize / 半包重组 / get_property bytes_after 收口
+# 环境：Ubuntu 22.04 (WSL2) + Xvfb；CARGO_TARGET_DIR 独立（避免与 Windows 共享 target 互相污染）
+# 命令：CARGO_FLAGS=--offline SKIP_SLOW=1 CARGO_TARGET_DIR=$HOME/y901-target bash scripts/linux-verify.sh
+
+=== CHECK_X11 ===
+$ cargo check -p y901-backend-x11 --all-targets --offline
+EXIT_CHECK_X11=0
+=== GOLDEN ===
+$ cargo test -p y901-backend-x11 --test golden --offline
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+EXIT_GOLDEN=0
+=== REAL_WINDOW ===
+$ xvfb-run -a -s -screen 0 1280x800x24 cargo test -p y901-backend-x11 --test real_window --offline
+test result: ok. 17 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.62s
+EXIT_REAL_WINDOW=0
+=== CLIPPY_X11 ===
+$ cargo clippy -p y901-backend-x11 --all-targets --offline -- -D warnings
+EXIT_CLIPPY_X11=0
+=== STROKE ===
+$ cargo test -p y901-render --test stroke_round_aa --offline
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+EXIT_STROKE=0
+=== SGR_REVERSE ===
+$ cargo test -p y901-extras --test sgr_reverse --offline
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+EXIT_SGR_REVERSE=0
+=== FULL_WORKSPACE ===
+$ xvfb-run -a cargo test --workspace --no-fail-fast --offline
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.61s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.58s
+EXIT_FULL_WORKSPACE=0
+[linux-verify] wrote docs/evidence/linux-numbers.txt (passed=1184 ignored=34 targets=182)
+[linux-verify] REMINDER: copy this file back to the Windows checkout and commit it.
+=== 汇总 ===
+LINUX VERIFY: OK
+
+LINUX VERIFY: OK (7/7 EXIT_0)

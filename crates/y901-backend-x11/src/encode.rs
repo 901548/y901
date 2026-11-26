@@ -264,6 +264,11 @@ pub fn encode_put_image(a: &PutImageArgs) -> Vec<u8> {
 ///
 /// **陷阱**：第 20-23 字节是"项目个数"而非"字节数"。
 /// `format = 8` 时两者相等；`format = 32` 时项目数 = 字节数 / 4。弄错会导致标题变乱码。
+///
+/// **长度上限**：请求的 `length` 字段是 u16（单位为 4 字节），因此**单次**请求最多
+/// `65535 * 4 = 262 140` 字节（含 24 字节头）→ 数据部分上限 [`MAX_PROPERTY_BYTES`]。
+/// 超过时本函数**无法**用一次请求表达（协议限制）；debug 构建会断言，
+/// release 下 `length` 字段会被截断成错误值 —— 所以调用方**必须自己分块**。
 pub fn encode_change_property(
     window: u32,
     property: u32,
@@ -277,6 +282,12 @@ pub fn encode_change_property(
         16 => data.len() / 2,
         _ => data.len(),
     };
+    debug_assert!(
+        data.len() <= MAX_PROPERTY_BYTES,
+        "ChangeProperty 数据 {} 字节超过单请求上限 {MAX_PROPERTY_BYTES}\
+         （协议 length 是 u16 个 4 字节单位）；调用方必须分块",
+        data.len()
+    );
     let mut out = Vec::with_capacity(24 + pad4(data.len()));
     out.push(opcode::CHANGE_PROPERTY);
     out.push(mode as u8);
@@ -291,6 +302,11 @@ pub fn encode_change_property(
     out
 }
 
+/// **单次 `ChangeProperty` 的数据上限**（字节）。
+///
+/// 协议：请求 `length` 是 u16，单位 4 字节 → 单请求 ≤ 65535×4 = 262 140 字节，
+/// 其中头部占 24 字节，所以数据部分上限是 262 116 字节（向下取整到 4 的倍数）。
+pub const MAX_PROPERTY_BYTES: usize = (u16::MAX as usize) * 4 - 24;
 /// 编码 `GetInputFocus`（opcode 43）。
 ///
 /// 用途：X11 **没有** `poll` 请求——事件是服务端主动推过来的。

@@ -2,7 +2,7 @@
 passed=1259
 ignored=69
 # targets = number of test binaries ('test result:' lines in the default run)
-targets=181
+targets=182
 # include_ignored = observed passed count from a full --include-ignored run
 include_ignored=1328
 baseline=1259

@@ -177,4 +177,8 @@
 #   default cargo test --workspace --no-fail-fast   passed 1259, failed 0, ignored 69 / 181 个测试目标
 #   (新增 acc/dirty_stats 单测 12 条 + merge presented 1 条 +
 #    render_stats_enabled 2 / render_stats_disabled 1 / render_stats_headless 1；passed 1242 → 1259)
+# Measured at 2026-11-26 (X11 正确性收口：resize / 半包重组 / bytes_after):
+#   default cargo test --workspace --no-fail-fast   passed 1259, failed 0, ignored 69 / 182 个测试目标
+#   (Windows 侧计数不变：新增的 25 条 X11 用例都在 #[cfg(target_os="linux")] / cfg(unix) 下；
+#    新增 1 个测试目标 protocol_and_resize。Linux 侧见 linux-numbers.txt：passed=1184 / targets=182)
 1259

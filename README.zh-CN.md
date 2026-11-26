@@ -133,7 +133,7 @@ y901-shell           应用壳：create_runtime() + 剪贴板 + 密钥 + 截图
 
 ```bash
 cargo check --workspace --all-targets      # 0 warning
-cargo test --workspace                     # 1259 passed / 0 failed / 69 ignored（181 个测试目标）
+cargo test --workspace                     # 1259 passed / 0 failed / 69 ignored（182 个测试目标）
 powershell -File scripts/hash-gate.ps1     # 像素门禁（基线 0xF7455CCE7781A864，400x220）
 powershell -File scripts/gate.ps1          # 完整门禁（发布前必跑）
 ```
