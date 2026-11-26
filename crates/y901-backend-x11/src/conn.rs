@@ -496,9 +496,10 @@ impl Connection {
     fn fill_one_packet(&mut self, wait_ms: u32) -> Result<Option<[u8; 32]>, String> {
         let deadline = Instant::now() + Duration::from_millis(wait_ms as u64);
         loop {
-            // ① 先把未读完的 reply 附加数据消费掉（保持字节顺序）。
+            // ① 先把未读完的 reply / GenericEvent 附加数据消费掉（保持字节顺序）。
+            //    **与包头共享同一个 deadline**。
             if self.tail_needed > 0 {
-                if !self.pump_tail_poll()? {
+                if !self.pump_tail_until(Some(deadline))? {
                     // 没读完：进度保留在 `tail`，本次返回"暂无完整包"。
                     return Ok(None);
                 }
@@ -508,6 +509,24 @@ impl Connection {
             if self.rx_filled == 32 {
                 let pkt = self.rx;
                 self.rx_filled = 0;
+                // Reply / GenericEvent 可能带附加数据：登记给**下一次调用**消费，
+                // 这样调用方拿到的是完整包头，而流不会因为附加数据而错位。
+                match packet_extra_units(&pkt) {
+                    Some(units) if units > 0 => {
+                        if units > MAX_REPLY_UNITS {
+                            return Err(format!(
+                                "包声明 {units} 单位附加数据，超过 sanity 上限（流已不可信）"
+                            ));
+                        }
+                        self.pending_head = Some(pkt);
+                        self.tail.clear();
+                        self.tail_needed = units * 4;
+                    }
+                    _ => {
+                        self.pending_head = None;
+                        self.tail_needed = 0;
+                    }
+                }
                 return Ok(Some(pkt));
             }
             // ② **总时限在每次尝试读取之前都检查**。
@@ -891,37 +910,66 @@ impl Connection {
             .min(self.reply_timeout)
             .max(Duration::from_millis(1));
         let _ = self.stream.set_read_timeout(Some(slice));
-        let out = self.pump_tail_blocking_inner();
+        let deadline = Instant::now() + self.reply_timeout;
+        let out = self.pump_tail_blocking_inner(deadline);
         let _ = self.stream.set_read_timeout(None);
         out
     }
 
     /// `pump_tail_blocking` 的实体（调用方已设好轮询切片）。
-    fn pump_tail_blocking_inner(&mut self) -> Result<(), String> {
-        let deadline = Instant::now() + self.reply_timeout;
+    /// `pump_tail_blocking` 的实体：**总 deadline 覆盖持续成功的小片段读取**。
+    ///
+    /// 与 `read_head_blocking_inner` 同一套规则（旧实现只在 `WouldBlock` 时比较
+    /// deadline，慢速分片会让循环无限延长）：每轮读取前检查 deadline；每次 `read`
+    /// 的等待不超过剩余预算；超时保留已读数据。
+    fn pump_tail_blocking_inner(&mut self, deadline: Instant) -> Result<(), String> {
         while self.tail.len() < self.tail_needed {
-            if self.pump_tail_once()? {
-                continue;
-            }
-            if Instant::now() >= deadline {
+            let now = Instant::now();
+            if now >= deadline {
                 return Err(format!(
                     "读超时：reply 附加数据还差 {} 字节（已读部分保留，可重试）",
                     self.tail_needed - self.tail.len()
                 ));
             }
-            std::thread::sleep(Duration::from_millis(2));
+            let left = deadline.saturating_duration_since(now);
+            let _ = self
+                .stream
+                .set_read_timeout(Some(POLL_SLICE.min(left).max(Duration::from_millis(1))));
+            // `pump_tail_once` 内部已处理 `Interrupted`（原地重试，不重置 deadline）。
+            if !self.pump_tail_once()? {
+                continue;
+            }
         }
         Ok(())
     }
 
-    /// 非阻塞地把 `tail` 补满：`Ok(false)` = 暂时没读完（进度保留）。
-    fn pump_tail_poll(&mut self) -> Result<bool, String> {
+    /// 把 `tail` 补满；`deadline == None` 表示**纯非阻塞**（读不到就返回）。
+    ///
+    /// `Some(deadline)` 用于 `try_next_packet(wait_ms)`：**Reply / GenericEvent 的
+    /// 附加数据与包头共享同一个总 deadline**。旧实现在这里调用无 deadline 的
+    /// `pump_tail_poll`，附加数据缓慢到达时会被无限读取，`wait_ms` 形同虚设。
+    fn pump_tail_until(&mut self, deadline: Option<Instant>) -> Result<bool, String> {
         while self.tail.len() < self.tail_needed {
+            if let Some(dl) = deadline {
+                let now = Instant::now();
+                if now >= dl {
+                    return Ok(false);
+                }
+                let left = dl.saturating_duration_since(now);
+                let _ = self
+                    .stream
+                    .set_read_timeout(Some(POLL_SLICE.min(left).max(Duration::from_millis(1))));
+            }
             if !self.pump_tail_once()? {
                 return Ok(false);
             }
         }
         Ok(true)
+    }
+
+    /// 纯非阻塞地把 `tail` 补满：`Ok(false)` = 暂时没读完（进度保留）。
+    fn pump_tail_poll(&mut self) -> Result<bool, String> {
+        self.pump_tail_until(None)
     }
 
     /// 取走已读满的附加数据并复位状态。
@@ -941,20 +989,39 @@ impl Connection {
             .min(self.reply_timeout)
             .max(Duration::from_millis(1));
         let _ = self.stream.set_read_timeout(Some(slice));
-        let out = self.read_head_blocking_inner();
+        let deadline = Instant::now() + self.reply_timeout;
+        let out = self.read_head_blocking_inner(deadline);
         let _ = self.stream.set_read_timeout(None);
         out
     }
 
-    /// `read_head_blocking` 的实体（调用方已设好轮询切片）。
-    fn read_head_blocking_inner(&mut self) -> Result<[u8; 32], String> {
-        let deadline = Instant::now() + self.reply_timeout;
+    /// `read_head_blocking` 的实体（调用方已设好初始轮询切片）。
+    ///
+    /// **总 deadline 覆盖"持续成功的小片段读取"**：旧实现只在 `WouldBlock` 分支
+    /// 比较 deadline，对端只要每次都送几个字节、每次 `read` 都成功，循环就永远
+    /// 不会命中那个分支 —— 于是 `reply_timeout=5s` 可以被拖成任意长。现在：
+    /// 1. **每轮读取前**都检查 deadline；
+    /// 2. 每次 `read` 之前把 socket 超时收紧到 `min(POLL_SLICE, 剩余预算)`，
+    ///    保证单次 `read` 不会越过 deadline（`Interrupted` 重试也不重置预算）；
+    /// 3. 超时返回 `Err`，但 `rx`/`rx_filled` **原样保留**，下一次调用接着读。
+    fn read_head_blocking_inner(&mut self, deadline: Instant) -> Result<[u8; 32], String> {
         loop {
             if self.rx_filled == 32 {
                 let head = self.rx;
                 self.rx_filled = 0;
                 return Ok(head);
             }
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(format!(
+                    "读超时：包头还差 {} 字节（已读部分保留，可重试）",
+                    32 - self.rx_filled
+                ));
+            }
+            let left = deadline.saturating_duration_since(now);
+            let _ = self
+                .stream
+                .set_read_timeout(Some(POLL_SLICE.min(left).max(Duration::from_millis(1))));
             match self.stream.read(&mut self.rx[self.rx_filled..]) {
                 Ok(0) => return Err("对端关闭连接".to_string()),
                 Ok(n) => self.rx_filled += n,
@@ -963,13 +1030,8 @@ impl Connection {
                     if e.kind() == std::io::ErrorKind::WouldBlock
                         || e.kind() == std::io::ErrorKind::TimedOut =>
                 {
-                    if Instant::now() >= deadline {
-                        return Err(format!(
-                            "读超时：包头还差 {} 字节（已读部分保留，可重试）",
-                            32 - self.rx_filled
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(2));
+                    // 回到循环顶部重新判定 deadline（不在这里自行 sleep）。
+                    continue;
                 }
                 Err(e) => return Err(format!("读取失败：{e}")),
             }
@@ -1012,11 +1074,9 @@ impl Connection {
                 // 旧实现只读低 16 位：任何附加数据超过 65 535 单位（262 140 字节）的回复
                 // （典型：`GetImage` 读回 1080p、大段剪贴板 `GetProperty`）只会被读掉一部分，
                 // 剩下的字节留在流里 → 之后每个包都从错位处解析，界面卡死/花屏。
-                let units = if h[0] == 1 || h[0] == 35 {
-                    u32::from_le_bytes([h[4], h[5], h[6], h[7]]) as usize
-                } else {
-                    0
-                };
+                // Reply 与 GenericEvent 都带 `length`（都在字节 4..8）；
+                // 把它们当事件体解析会让后续每一包错位。
+                let units = packet_extra_units(&h).unwrap_or(0);
                 // 防御：损坏的长度不应让我们尝试分配几个 GB
                 if units > MAX_REPLY_UNITS {
                     return Err(format!("reply length {units} units exceeds sanity limit"));
@@ -1188,7 +1248,12 @@ impl Connection {
                 0 => errors.push(parse_error(&buf)),
                 // 字节 0 == 1 是**响应**（reply），不是事件。
                 // 不区分的话，InternAtom/GetInputFocus 的响应会被当成 Unknown 事件丢给上层。
-                1 => {
+                //
+                // 字节 0 == 35 是 **GenericEvent**：本轮后端**不支持**它（`decode.rs`
+                // 明确写了"超过 32 字节的事件本轮不支持"），但它的头里**带 `length`**。
+                // 旧实现把它当普通事件：附加数据留在流里 → 之后每一包都从错位处解析。
+                // 现在的策略：与 reply 一样**先把附加数据 drain 干净再丢弃事件**。
+                1 | 35 => {
                     // **防御性 drain**：正常情况下主连接的 reply 都在
                     // `read_reply_packet` / `sync` 里已读完，不会到这里；
                     // 但若将来加运行期请求（如实时查 `_NET_WM_STATE`），
@@ -1198,10 +1263,10 @@ impl Connection {
                     //
                     // 选**drain 而不是报错**：poll_events 的调用方只想要事件，
                     // reply 对它没用；报错会让一个"无害的并发"升级成启动失败。
-                    let units = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
+                    let units = packet_extra_units(&buf).unwrap_or(0);
                     if units > MAX_REPLY_UNITS {
                         return Err(format!(
-                            "poll_events: reply length {units} units exceeds sanity limit"
+                            "poll_events: 包声明附加数据 {units} 单位，超过 sanity 上限（流已不可信）"
                         ));
                     }
                     // 不在**这里**读附加数据：改为登记到 `tail_needed`，由循环顶部
@@ -1352,6 +1417,21 @@ const POLL_SLICE: Duration = Duration::from_millis(50);
 /// 却只给极少量数据 —— 没有这个上界就是**无界循环**）。
 const MAX_PROPERTY_PAGES: usize = 64;
 
+/// 该包头声明的**附加数据单位数**（4 字节为单位）；`None` = 这个包不带附加数据。
+///
+/// X11 里只有 **Reply**（byte0 = 1）和 **GenericEvent**（byte0 = 35）的字节 4..8
+/// 是 `length`。Error（byte0 = 0）的字节 4..8 是 `bad_value`，普通事件的字节 4 起
+/// 是事件体 —— 把它们当长度去 drain 会多读字节、整条流从此错位（本项目踩过两次）。
+///
+/// 所有读取路径（`read_packet` / `fill_one_packet` / `poll_events_inner`）都必须
+/// 用它来判断，**不允许各自硬编码 `head[0] == 1`**。
+fn packet_extra_units(head: &[u8; 32]) -> Option<usize> {
+    if head[0] == 1 || head[0] == 35 {
+        Some(u32::from_le_bytes([head[4], head[5], head[6], head[7]]) as usize)
+    } else {
+        None
+    }
+}
 /// 一页 `GetProperty` 的结果（`format` + 实际类型 + 剩余字节 + 本页数据）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PropertyPage {
@@ -1425,7 +1505,7 @@ impl PropertySource for ConnPropertySource<'_> {
 fn check_page(
     page: &PropertyPage,
     format: u8,
-    type_atom: u32,
+    expect_type: u32,
     total: usize,
     consumed_before: usize,
 ) -> Result<(), String> {
@@ -1435,9 +1515,12 @@ fn check_page(
             page.format
         ));
     }
-    if type_atom != 0 && page.type_atom != type_atom {
+    // `expect_type` 是**第一页实际返回的 type**（`AnyPropertyType` 时由首片确定），
+    // 或调用方显式请求的 type。任何一页与之不同都必须失败：
+    // 否则会把"两种不同类型的数据"拼成一个"成功"结果。
+    if page.type_atom != expect_type {
         return Err(format!(
-            "GetProperty 分页 type 不一致：请求 atom {type_atom}、实际 {}（属性可能在读取期间被修改）",
+            "GetProperty 分页 type 不一致：基准 atom {expect_type}、当前 {}（属性可能在读取期间被修改）",
             page.type_atom
         ));
     }
@@ -1470,47 +1553,40 @@ fn collect_property_all(
     delete_after: bool,
     max_bytes: usize,
 ) -> Result<(u8, Vec<u8>), String> {
-    // 1) 探长度（**不删除**）
+    // 1) 探长度（**不删除**：探测请求一律 delete=false）
     let probe = src.page(0, 0, false)?;
     let format = probe.format;
     // 类型校验：`probe.type_atom == 0` 是 X11 的 **None**，表示**属性不存在** ——
     // 那不是"类型不匹配"，调用方读一个可能不存在的属性应当得到"空"。
-    // 只有"属性存在但类型不同"（type != 0 且 != 请求值）才是真的不匹配。
     if type_atom != 0 && probe.type_atom != 0 && probe.type_atom != type_atom {
         return Err(format!(
             "GetProperty 类型不匹配：请求 atom {type_atom}、实际 {}",
             probe.type_atom
         ));
     }
+    // **分页的类型基准**：调用方指定了类型就用它；`AnyPropertyType`（0）时用
+    // **第一页实际返回的 type** 作为基准，后续每一页必须与之相同。
+    let expect_type = if type_atom != 0 {
+        type_atom
+    } else {
+        probe.type_atom
+    };
+
     let total = probe.bytes_after as usize;
-    if total == 0 {
-        if delete_after {
-            // 空属性也要按调用方要求删除（读 0 项 + delete=true）。
-            let _ = src.page(0, 0, true)?;
-        }
-        return Ok((format, Vec::new()));
-    }
     if total > max_bytes {
         return Err(format!(
             "属性 {total} 字节超过上限 {max_bytes}：已停止读取（属性未被删除）"
         ));
     }
 
-    // 2) 一次读满：请求 ceil(total/4) 个 4 字节单位，正好覆盖全部数据。
-    let want_units = total.div_ceil(4) as u32;
-    let page = src.page(0, want_units, delete_after)?;
-    check_page(&page, format, type_atom, total, 0)?;
-    let mut data = page.data;
-    let mut bytes_after = page.bytes_after;
-    if delete_after && bytes_after > 0 {
-        return Err(format!(
-            "GetProperty(delete=true) 只返回了 {} 字节，但属性还有 {bytes_after} 字节未被读取\
-             （数据已被服务器删除；请改用较小的 delete 策略或更大的 max_bytes）",
-            data.len()
-        ));
-    }
-
-    // 3) 服务器少给时继续分页（**续页一律不带 delete**）。
+    // 2) 读全部数据（**带 delete 的请求只在最后单独发一次**，见第 4 步）。
+    //
+    // 为什么不把 delete 放在数据页上：按协议，只有 `bytes_after == 0` 的读取才会
+    // 真正删除属性；若服务器只返回一部分却带着 delete，我们既拿不到剩余数据、
+    // 也无法确定属性是否还在。把删除推迟到"数据已完整拿到"之后单独发一次，
+    // 既不会丢数据，也能明确报告删除是否生效。
+    let mut data = Vec::with_capacity(total.min(max_bytes));
+    let mut bytes_after = total as u32;
     let mut pages = 0usize;
     while bytes_after > 0 {
         pages += 1;
@@ -1529,16 +1605,16 @@ fn collect_property_all(
         let offset_units = (data.len() / 4) as u32;
         let remaining = total - data.len();
         let want = remaining.div_ceil(4) as u32;
-        let chunk = src.page(offset_units, want, false)?;
-        check_page(&chunk, format, type_atom, total, data.len())?;
-        if chunk.data.is_empty() {
+        let page = src.page(offset_units, want, false)?;
+        check_page(&page, format, expect_type, total, data.len())?;
+        if page.data.is_empty() && page.bytes_after > 0 {
             return Err(format!(
                 "GetProperty 分页返回 0 字节但仍有 {} 字节剩余（协议异常）",
-                chunk.bytes_after
+                page.bytes_after
             ));
         }
-        data.extend_from_slice(&chunk.data);
-        bytes_after = chunk.bytes_after;
+        data.extend_from_slice(&page.data);
+        bytes_after = page.bytes_after;
         if data.len() > max_bytes {
             return Err(format!(
                 "GetProperty 读取超过上限 {max_bytes} 字节：已停止（属性未被删除）"
@@ -1546,13 +1622,63 @@ fn collect_property_all(
         }
     }
 
-    // 4) 终检：读到的长度必须与探测一致。
+    // 3) 终检：读到的长度必须与探测一致（防止"属性在读取期间被修改"混入）。
     if data.len() != total {
         return Err(format!(
-            "GetProperty 读到的长度 {} 与探测的 {total} 不一致（属性可能在读取期间被修改）",
+            "GetProperty 读到的长度 {} 与探测的 {total} 不一致（属性可能在读取期间被修改；\
+             属性未被删除）",
             data.len()
         ));
     }
+
+    // 4) 删除（仅当调用方要求，且**数据已经完整拿到**）。
+    //
+    // 为什么要**再读一遍**而不是"在某一页上带 delete"：
+    // - 协议规定只有 `bytes_after == 0` 的读取才会删除属性。若把 delete 挂在可能
+    //   只返回一部分的数据页上，服务器若按"读完才删"的语义会让我们拿不到剩余数据；
+    //   若按"请求即删"的语义则会直接丢数据（两种实现都存在）。
+    // - 把一个 `delete=true` 的请求放在**覆盖全部数据**的那一次读取上，才是无歧义的。
+    //   因为分页时我们不知道哪一页会是最后一页（服务器可能少给），所以先不带 delete
+    //   读全，再单独发一次"整段 + delete"的请求：这次请求一定 `bytes_after == 0`。
+    //
+    // 代价是调用方要求删除时会多读一遍（剪贴板读取属于这种情况）。换来的是：
+    // 既不会丢数据，也能**明确区分**"服务器确实删了"与"只是我们收到了错误"。
+    // 同时把这次重读的内容与第一次读到的做比对：不一致说明属性在读期间被改过，
+    // 此时删除结果未知，必须报错而不是宣称成功。
+    if delete_after {
+        let units = total.div_ceil(4) as u32;
+        let del = src.page(0, units, true)?;
+        if del.type_atom != expect_type {
+            return Err(format!(
+                "GetProperty 删除请求返回的 type（{}）与预期（{expect_type}）不一致：\
+                 属性可能在读取期间被替换；删除结果未知",
+                del.type_atom
+            ));
+        }
+        if del.format != format {
+            return Err(format!(
+                "GetProperty 删除请求返回的 format（{}）与预期（{format}）不一致：\
+                 属性可能在读取期间被替换；删除结果未知",
+                del.format
+            ));
+        }
+        if del.bytes_after != 0 {
+            return Err(format!(
+                "GetProperty 删除未生效：属性仍剩 {} 字节（协议上只有 bytes_after==0 的读取\
+                 才会删除）；数据已完整读出，但**属性仍然存在**",
+                del.bytes_after
+            ));
+        }
+        if del.data != data {
+            return Err(format!(
+                "GetProperty 删除请求读到的内容（{} 字节）与首次读取（{} 字节）不一致：\
+                 属性在读取期间被修改，删除结果未知",
+                del.data.len(),
+                data.len()
+            ));
+        }
+    }
+
     Ok((format, data))
 }
 
@@ -2234,12 +2360,87 @@ mod property_paging_tests {
         assert_eq!(src.calls[1], (0, 0, true), "空属性也要按要求删除");
     }
 
+    /// **delete 语义**：数据页一律 `delete=false`，读完后再单独发一次删除请求
+    ///（`offset = ceil(total/4)`、`length = 0`、`delete = true`）。
     #[test]
-    fn single_full_page_carries_delete() {
-        let mut src = Scripted::new(vec![page(8, 7, 4, Vec::new()), page(8, 7, 0, bytes(4))]);
+    fn delete_is_issued_once_after_all_data_is_read() {
+        let mut src = Scripted::new(vec![
+            page(8, 7, 4, Vec::new()), // 探测
+            page(8, 7, 0, bytes(4)),   // 数据页（不带 delete）
+            page(8, 7, 0, bytes(4)),   // 删除请求：整段 + delete，内容与首次一致
+        ]);
         let (_, data) = collect_property_all(&mut src, 7, true, 1 << 20).expect("读满 + delete");
         assert_eq!(data, bytes(4));
-        assert_eq!(src.calls[1], (0, 1, true), "覆盖全部数据的页才带 delete");
+        assert_eq!(
+            src.calls[1],
+            (0, 1, false),
+            "数据页不得带 delete（服务器可能只返回一部分）"
+        );
+        assert_eq!(
+            src.calls[2],
+            (0, 1, true),
+            "删除请求必须在数据读完后单独发：offset=0、length=ceil(4/4)=1、delete=true"
+        );
+    }
+
+    /// 部分页 + `delete=true`：属性此时不会被删，数据仍要读完，随后删除成功。
+    #[test]
+    fn partial_pages_with_delete_still_read_everything_then_delete() {
+        let all = bytes(100);
+        let mut src = Scripted::new(vec![
+            page(8, 7, 100, Vec::new()),
+            page(8, 7, 60, all[..40].to_vec()),
+            page(8, 7, 0, all[40..].to_vec()),
+            page(8, 7, 0, all.clone()), // 删除请求：整段重读 + delete
+        ]);
+        let (_, data) = collect_property_all(&mut src, 7, true, 1 << 20).expect("应成功");
+        assert_eq!(data, all, "部分页不得阻止读全");
+        assert!(
+            src.calls[1..3].iter().all(|(_, _, del)| !*del),
+            "所有数据页都不得带 delete：{:?}",
+            &src.calls[1..3]
+        );
+        assert_eq!(src.calls[3], (0, 25, true), "最后单独删除（整段重读）");
+    }
+
+    /// 删除请求读到的内容与首次不一致：属性在读期间被改过，删除结果未知 → 必须报错。
+    #[test]
+    fn delete_readback_mismatch_is_reported() {
+        let mut src = Scripted::new(vec![
+            page(8, 7, 4, Vec::new()),
+            page(8, 7, 0, bytes(4)),
+            page(8, 7, 0, vec![9u8, 9, 9, 9]), // 内容变了
+        ]);
+        let err = collect_property_all(&mut src, 7, true, 1 << 20).expect_err("必须报错");
+        assert!(
+            err.contains("不一致") && err.contains("删除结果未知"),
+            "{err}"
+        );
+    }
+
+    /// 删除请求返回 `bytes_after != 0`：按协议**没有删除**，必须如实报告。
+    #[test]
+    fn delete_not_effective_is_reported_honestly() {
+        let mut src = Scripted::new(vec![
+            page(8, 7, 4, Vec::new()),
+            page(8, 7, 0, bytes(4)),
+            page(8, 7, 4, Vec::new()), // 服务器说还剩 4 字节 → 没删
+        ]);
+        let err = collect_property_all(&mut src, 7, true, 1 << 20).expect_err("必须报告未删除");
+        assert!(err.contains("删除未生效"), "{err}");
+        assert!(err.contains("属性仍然存在"), "必须说明属性是否还在：{err}");
+    }
+
+    /// 删除页 type 变了（属性在读取期间被替换）：删除结果未知，必须报错。
+    #[test]
+    fn delete_page_type_change_is_reported() {
+        let mut src = Scripted::new(vec![
+            page(8, 7, 4, Vec::new()),
+            page(8, 7, 0, bytes(4)),
+            page(8, 8, 0, bytes(4)), // 删除请求返回的 type 变了
+        ]);
+        let err = collect_property_all(&mut src, 7, true, 1 << 20).expect_err("必须报错");
+        assert!(err.contains("删除") && err.contains("type"), "{err}");
     }
 
     // ---- 类型 / 格式一致性 ----
@@ -2252,11 +2453,34 @@ mod property_paging_tests {
         assert_eq!(src.calls.len(), 1, "类型不符时不应继续读数据");
     }
 
+    /// `AnyPropertyType`：第一页实际 type 成为基准，后续页必须同 type（一致 → 成功）。
     #[test]
-    fn any_property_type_skips_type_check() {
-        let mut src = Scripted::new(vec![page(8, 99, 4, Vec::new()), page(8, 99, 0, bytes(4))]);
-        let (_, data) = collect_property_all(&mut src, 0, false, 1 << 20).expect("Any 类型不校验");
-        assert_eq!(data.len(), 4);
+    fn any_property_type_accepts_consistent_pages() {
+        let all = bytes(100);
+        let mut src = Scripted::new(vec![
+            page(8, 99, 100, Vec::new()),
+            page(8, 99, 60, all[..40].to_vec()),
+            page(8, 99, 0, all[40..].to_vec()),
+        ]);
+        let (_, data) = collect_property_all(&mut src, 0, false, 1 << 20).expect("Any 跨页一致");
+        assert_eq!(data, all);
+    }
+
+    /// `AnyPropertyType` 下第二页 type 变了：**必须失败**（不能把两类数据拼起来）。
+    #[test]
+    fn any_property_type_rejects_type_change_on_later_page() {
+        let mut src = Scripted::new(vec![
+            page(8, 99, 100, Vec::new()),
+            page(8, 99, 60, bytes(40)),
+            page(8, 100, 0, bytes(60)), // 第二页类型变了
+        ]);
+        let err = collect_property_all(&mut src, 0, false, 1 << 20)
+            .expect_err("Any 模式下 type 变化也必须失败");
+        assert!(err.contains("type 不一致"), "{err}");
+        assert!(
+            err.contains("99") && err.contains("100"),
+            "应指出两边的 type：{err}"
+        );
     }
 
     #[test]
@@ -2365,36 +2589,281 @@ mod property_paging_tests {
     }
 
     // ---- delete 语义 ----
+}
+
+/// **慢速分片下的总 deadline**（任务 A / B）与 **GenericEvent 附加数据**（任务 D）。
+#[cfg(test)]
+mod deadline_and_generic_event_tests {
+    use super::*;
+    use std::io::Write;
+    use std::net::Shutdown;
+    use std::os::unix::net::UnixStream;
+
+    fn packet(tag: u8) -> [u8; 32] {
+        let mut p = [0u8; 32];
+        for (i, b) in p.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(13).wrapping_add(tag);
+        }
+        p[0] = tag;
+        p
+    }
+
+    /// `kind` 字节 + `units` 个 4 字节附加数据（Reply=1 / GenericEvent=35）。
+    fn head_with_units(kind: u8, units: u32) -> [u8; 32] {
+        let mut h = [0u8; 32];
+        h[0] = kind;
+        h[4..8].copy_from_slice(&units.to_le_bytes());
+        h
+    }
+
+    fn conn_from(pair: (UnixStream, UnixStream)) -> (Connection, UnixStream) {
+        let (ours, theirs) = pair;
+        (Connection::from_stream(ours), theirs)
+    }
+
+    // ---- A1：阻塞读取包头的慢速分片 ----
 
     #[test]
-    fn delete_with_partial_first_page_is_an_explicit_error() {
-        let mut src = Scripted::new(vec![
-            page(8, 7, 100, Vec::new()),
-            page(8, 7, 60, bytes(40)), // delete=true 却只给 40/100
-        ]);
-        let err = collect_property_all(&mut src, 7, true, 1 << 20).expect_err("必须失败");
+    fn blocking_head_read_respects_total_deadline_under_slow_drip() {
+        let (mut c, mut peer) = conn_from(UnixStream::pair().expect("pair"));
+        // 预算 120ms；对端每 60ms 送 8 字节 → 送完 32 字节需 180ms，必然超时。
+        c.set_reply_timeout_for_test(Duration::from_millis(120));
+        let want = packet(2);
+        let writer = std::thread::spawn(move || {
+            for chunk in want.chunks(8) {
+                if peer.write_all(chunk).is_err() {
+                    return;
+                }
+                peer.flush().ok();
+                std::thread::sleep(Duration::from_millis(60));
+            }
+        });
+
+        let t0 = Instant::now();
+        let err = c.read_packet().expect_err("慢速分片必须按总预算超时");
+        let elapsed = t0.elapsed();
+        assert!(err.contains("读超时"), "错误应说明超时：{err}");
         assert!(
-            err.contains("delete=true") || err.contains("未被读取"),
-            "必须说明 delete 与分页冲突：{err}"
+            elapsed >= Duration::from_millis(100),
+            "应当接近预算才返回（证明真的在等），实际 {elapsed:?}"
         );
+        assert!(
+            elapsed < Duration::from_millis(600),
+            "**总 deadline 必须覆盖持续成功的分片读取**：实际 {elapsed:?}"
+        );
+        let kept = c.partial_packet_bytes();
+        assert!(
+            kept > 0 && kept < 32,
+            "超时前读到的字节必须保留（实际 {kept}）"
+        );
+
+        writer.join().ok();
+        let (head, extra) = c.read_packet().expect("补齐后应成功");
+        assert_eq!(head, want, "续读必须得到原始包");
+        assert!(extra.is_empty());
+        assert_eq!(c.partial_packet_bytes(), 0);
+    }
+
+    // ---- A2：阻塞读取 Reply 附加数据的慢速分片 ----
+
+    #[test]
+    fn blocking_tail_read_respects_total_deadline_under_slow_drip() {
+        let (mut c, mut peer) = conn_from(UnixStream::pair().expect("pair"));
+        c.set_reply_timeout_for_test(Duration::from_millis(120));
+        let head = head_with_units(1, 4); // 16 字节附加数据
+        let extra: Vec<u8> = (0..16).map(|i| 0xA0u8.wrapping_add(i)).collect();
+
+        peer.write_all(&head).expect("head");
+        peer.flush().ok();
+        let for_writer = extra.clone();
+        let writer = std::thread::spawn(move || {
+            for chunk in for_writer.chunks(4) {
+                if peer.write_all(chunk).is_err() {
+                    return;
+                }
+                peer.flush().ok();
+                std::thread::sleep(Duration::from_millis(60));
+            }
+        });
+
+        let t0 = Instant::now();
+        let err = c.read_packet().expect_err("附加数据慢速到达必须超时");
+        let elapsed = t0.elapsed();
+        assert!(err.contains("读超时"), "{err}");
+        assert!(err.contains("附加数据"), "错误应指明是附加数据：{err}");
+        assert!(
+            elapsed < Duration::from_millis(600),
+            "总 deadline 必须覆盖附加数据的分片读取：实际 {elapsed:?}"
+        );
+        let missing = c.pending_reply_extra_bytes();
+        assert!(
+            missing > 0 && missing < 16,
+            "已读附加数据必须保留（还差 {missing}）"
+        );
+
+        writer.join().ok();
+        let (h2, got) = c.read_packet().expect("补齐后应恢复完整 Reply");
+        assert_eq!(h2, head, "包头不得重复消费");
+        assert_eq!(got, extra, "附加数据必须逐字节恢复");
+        assert_eq!(c.pending_reply_extra_bytes(), 0);
+    }
+
+    // ---- B1 / B2：try_next_packet 的总时限覆盖附加数据 ----
+
+    #[test]
+    fn try_next_packet_deadline_covers_reply_extra_and_keeps_event_once() {
+        let (mut c, mut peer) = conn_from(UnixStream::pair().expect("pair"));
+        let head = head_with_units(1, 5); // 20 字节附加数据
+        let extra: Vec<u8> = (0..20).map(|i| i as u8).collect();
+        let ev = packet(2);
+
+        peer.write_all(&head).expect("head");
+        peer.write_all(&extra[..4]).expect("first extra chunk");
+        peer.flush().ok();
+
+        // ① 第一次：拿到完整包头（附加数据登记为"待读"）
+        let got = c.try_next_packet(0).expect("第一次").expect("应拿到包头");
+        assert_eq!(got, head);
         assert_eq!(
-            src.calls[1],
-            (0, 25, true),
-            "首页确实带了 delete（这正是数据已被删除的原因，必须如实报告）"
+            c.pending_reply_extra_bytes(),
+            20,
+            "包头返回时附加数据尚未读取（20 字节待读）"
         );
+
+        // ② 持续但很慢地送到（每 40ms 4 字节）：
+        //    - 分片间隔 **小于** 单次 socket 超时（60ms）→ 每次 read 都会成功；
+        //    - 若有共享 deadline，则 ~60ms 就返回；
+        //    - 若无 deadline（旧实现），会一路读到 160ms 才返回。
+        //    断言 `<120ms` 才能真正区分这两种实现。
+        let mut peer_writer = peer.try_clone().expect("clone stream");
+        let writer = std::thread::spawn(move || {
+            for chunk in extra[4..].chunks(4) {
+                std::thread::sleep(Duration::from_millis(40));
+                if peer_writer.write_all(chunk).is_err() {
+                    return;
+                }
+                peer_writer.flush().ok();
+            }
+        });
+
+        let t0 = Instant::now();
+        let got = c.try_next_packet(60).expect("第二次不应报错");
+        let elapsed = t0.elapsed();
+        assert!(
+            got.is_none(),
+            "附加数据未读完时不能返回下一个包（更不能把附加数据当包头）：{got:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(120),
+            "**附加数据读取必须共享 wait_ms 预算**（旧实现会被持续成功的小读拖到 160ms+）：实际 {elapsed:?}"
+        );
+        let pending = c.pending_reply_extra_bytes();
+        assert!(
+            pending > 0 && pending < 20,
+            "必须在预算内读到一部分并保留（还差 {pending}）"
+        );
+
+        // ③ 写完剩余附加数据 + 一个普通事件；再读必须恰好得到那个事件
+        writer.join().expect("writer");
+        peer.write_all(&ev).expect("event");
+        peer.flush().ok();
+        let got = c
+            .try_next_packet(1000)
+            .expect("第三次")
+            .expect("应拿到事件");
+        assert_eq!(got, ev, "事件必须恰好出现一次，且未被附加数据污染");
+        assert_eq!(c.pending_reply_extra_bytes(), 0);
+        assert!(c.try_next_packet(0).expect("第四次").is_none());
+    }
+
+    // ---- D：GenericEvent ----
+
+    #[test]
+    fn generic_event_without_extra_is_readable() {
+        let (mut c, mut peer) = conn_from(UnixStream::pair().expect("pair"));
+        let ge = head_with_units(35, 0);
+        peer.write_all(&ge).expect("write");
+        peer.flush().ok();
+        assert_eq!(c.try_next_packet(50).expect("try").expect("应有包"), ge);
+        assert!(c.try_next_packet(0).expect("再读").is_none());
     }
 
     #[test]
-    fn paging_after_delete_is_impossible_and_error_is_explicit() {
-        // 探测 total=100、首页带 delete 只给 40 → 后面的数据已被删除，
-        // 不能继续分页假装还能读，也不能静默返回 40 字节。
-        let mut src = Scripted::new(vec![
-            page(8, 7, 100, Vec::new()),
-            page(8, 7, 60, bytes(40)),
-            // 即便脚本里还有数据，也不应被请求（断言靠 calls 长度）
-        ]);
-        let err = collect_property_all(&mut src, 7, true, 1 << 20).expect_err("必须失败");
-        assert!(err.contains("delete=true"), "{err}");
-        assert_eq!(src.calls.len(), 2, "delete 失败后不得继续分页");
+    fn generic_event_extra_is_drained_before_next_event() {
+        let (mut c, mut peer) = conn_from(UnixStream::pair().expect("pair"));
+        let ge = head_with_units(35, 2); // 8 字节附加数据
+        let extra = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        let ev = packet(2);
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&ge);
+        buf.extend_from_slice(&extra);
+        buf.extend_from_slice(&ev);
+        peer.write_all(&buf).expect("write");
+        peer.flush().ok();
+
+        // `poll_events`：GenericEvent 本轮不支持（会被丢弃），但**必须先 drain 附加数据**，
+        // 否则后面的普通事件会从错位处解析。
+        let (events, errors) = c.poll_events(0).expect("poll");
+        assert!(errors.is_empty());
+        assert_eq!(
+            events.len(),
+            1,
+            "GenericEvent 之后的事件必须被正确解析（附加数据不得当成事件头）：{events:?}"
+        );
+        let (again, _) = c.poll_events(0).expect("poll2");
+        assert!(again.is_empty(), "不得重复解析：{again:?}");
+    }
+
+    #[test]
+    fn generic_event_extra_split_does_not_leak_into_event() {
+        let (mut c, mut peer) = conn_from(UnixStream::pair().expect("pair"));
+        let ge = head_with_units(35, 2);
+        let extra = [9u8, 8, 7, 6, 5, 4, 3, 2];
+        let ev = packet(3);
+        peer.write_all(&ge).expect("head");
+        peer.write_all(&extra[..3]).expect("partial extra");
+        peer.flush().ok();
+
+        let (events, errors) = c.poll_events(0).expect("poll 1");
+        assert!(errors.is_empty());
+        assert!(
+            events.is_empty(),
+            "附加数据未完整时不得产生事件：{events:?}"
+        );
+        assert!(c.pending_reply_extra_bytes() > 0, "进度必须保留");
+
+        peer.write_all(&extra[3..]).expect("rest extra");
+        peer.write_all(&ev).expect("event");
+        peer.flush().ok();
+        let (events, _) = c.poll_events(0).expect("poll 2");
+        assert_eq!(events.len(), 1, "收齐后事件必须恰好出现一次：{events:?}");
+    }
+
+    #[test]
+    fn generic_event_eof_during_extra_is_an_error() {
+        let (mut c, mut peer) = conn_from(UnixStream::pair().expect("pair"));
+        let ge = head_with_units(35, 2);
+        peer.write_all(&ge).expect("head");
+        peer.write_all(&[1u8, 2]).expect("partial extra");
+        peer.flush().ok();
+        peer.shutdown(Shutdown::Both).ok();
+        drop(peer);
+        let r = c.poll_events(100);
+        assert!(r.is_err(), "EOF 时必须报错，不能伪造完整事件：{r:?}");
+    }
+
+    #[test]
+    fn read_packet_returns_generic_event_payload_for_future_support() {
+        // 阻塞路径把 GenericEvent 的附加数据**完整读出并交给调用方**，
+        // 将来支持 GenericEvent 时不需要改读取层。
+        let (mut c, mut peer) = conn_from(UnixStream::pair().expect("pair"));
+        let ge = head_with_units(35, 1);
+        let extra = [0xABu8, 0xCD, 0xEF, 0x01];
+        peer.write_all(&ge).expect("head");
+        peer.write_all(&extra).expect("extra");
+        peer.flush().ok();
+        let (head, payload) = c.read_packet().expect("read");
+        assert_eq!(head, ge);
+        assert_eq!(payload, extra, "GenericEvent 附加数据必须完整返回");
     }
 }

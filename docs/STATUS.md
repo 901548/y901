@@ -2,7 +2,7 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-22 复测 `passed=1259` / `ignored=69` / `targets=182`；`--include-ignored` 全量 `passed=1259` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 X11 收口后复测 `passed=1208` / `ignored=34` / `targets=182`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-22 复测 `passed=1259` / `ignored=69` / `targets=182`；`--include-ignored` 全量 `passed=1259` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 X11 收口后复测 `passed=1219` / `ignored=34` / `targets=182`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
