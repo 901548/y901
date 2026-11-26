@@ -2,12 +2,38 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1276` / `ignored=69` / `targets=187`；`--include-ignored` 全量 `passed=1276` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1237` / `ignored=34` / `targets=187`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-instance-capacity.log](evidence/cross-platform/linux-verify-2026-11-26-instance-capacity.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1280` / `ignored=69` / `targets=188`；`--include-ignored` 全量 `passed=1280` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1241` / `ignored=34` / `targets=188`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-popup-hit.log](evidence/cross-platform/linux-verify-2026-11-26-popup-hit.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
 
+## 2026-11-26（续）：PLAN 批次 4 —— 浮层命中 / 光标 / 快照可见性
+
+浮层（`UiTree::popups`：菜单、下拉、Tooltip、Dialog）**不在普通节点索引里**
+（不参与树布局，`paint_order` 看不到它们），而 `hit_test` / `cursor_at` /
+`snapshot_json` 都只查树。三条用户可见缺陷随之而来：
+
+1. 浮层盖住背景时命中返回**被遮挡的背景节点** → RPC/自动化点"菜单项"点到下面；
+2. 菜单项声明的光标不生效（看到的是背景的 `Default`）；
+3. RPC `get_tree` 里**看不到菜单项** → 外部工具无法驱动菜单。
+
+修法：
+- `popup_hit(pos)`：按开启顺序**逆序**找第一个包含该点的浮层（后开的在上），
+  再在它子树里用 `deepest_at()` 取最深命中（后序优先 = 后画在上）。
+  浮层的 `arrange` 用的就是 `place_popup` 返回的**屏幕矩形**，所以不需要坐标平移。
+- `hit_test`：浮层优先；**存在模态浮层时，浮层外的点返回 `None`**（事件被吞，
+  不透传到底层）—— 与 `dispatch` 的模态语义保持一致。
+- `cursor_at`：与 `hit_test` 同一套优先级（否则光标会指向"点不到"的元素）；
+  模态浮层外部保持 `Default`（不暗示可点）。
+- `snapshot_json()`：新增**独立的 `popups` 数组**，不混进 `children` ——
+  已有消费者按 `children` 遍历树节点，混进去会让菜单被当成普通子控件。
+
+- 新增 4 条用例（`crates/y901-ui/tests/popup_hit.rs`）：浮层命中不透背景、
+  光标跟随浮层、模态浮层吞掉外部点击、快照含浮层子树。
+- 反向验证：`hit_test` 不看浮层 → 前两条红；`snapshot_json` 不带 `popups` → 第四条红。
+- **未做**：`snapshot()`（AccessKit 用的 `NodeInfo`）仍不含浮层 —— 那属无障碍批次，
+  与本文的 RPC/命中路径分开处理，避免一次改两类消费者。
 ## 2026-11-26（续）：RENDER-BUG-01 / issue #7 —— 实例超限不再静默截断
 
 旧行为：`let count = instances.len().min(INSTANCE_CAPACITY)`，第 10 001 个实例往后
@@ -265,7 +291,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1276** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1280** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -736,7 +762,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1276/0/69 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1280/0/69 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，

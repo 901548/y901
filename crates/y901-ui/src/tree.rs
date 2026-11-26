@@ -183,6 +183,31 @@ impl DirtyRegion {
     }
 }
 
+/// 在**任意子树**里取包含该点的最深节点（后序优先：后画的在上）。
+///
+/// 与 `hit_index` 的区别：这里只做"子树内最深"，不依赖 `paint_order`，
+/// 因为浮层不在普通节点索引里。坐标是**绝对屏幕坐标**（浮层的 `arrange`
+/// 用的就是 `place_popup` 返回的屏幕矩形）。
+fn deepest_at(node: &dyn Widget, pos: Pos) -> Option<&dyn Widget> {
+    if !node.is_open() {
+        return None;
+    }
+    let visible = match node.clip() {
+        Some(c) => node.rect().intersect(c),
+        None => node.rect(),
+    };
+    if !visible.contains(pos) {
+        return None;
+    }
+    // 后访问者（树序靠后 = 后画）优先。
+    for child in node.children().iter().rev() {
+        if let Some(hit) = deepest_at(child.as_ref(), pos) {
+            return Some(hit);
+        }
+    }
+    Some(node)
+}
+
 /// 挂在 Overlay 层的浮层（菜单/Tooltip/弹窗都用它）。
 ///
 /// 为什么不直接当普通子节点：普通子节点会继承父链的 `push_clip`
@@ -2314,12 +2339,56 @@ impl UiTree {
             }
         }
 
+        // **浮层优先**：它与 `hit_test` 必须同一套优先级，否则光标会指向
+        // 一个"点不到"的元素（浮层里是 Hand，鼠标却还是箭头）。
+        if let Some(node) = self.popup_hit(pos) {
+            let mut best: Option<(usize, Cursor)> = None;
+            walk(node, pos, None, 0, &mut best);
+            return best.map(|(_, c)| c).unwrap_or(Cursor::Default);
+        }
+        if self.has_modal_popup() {
+            // 模态浮层外部：事件被吞，光标保持默认（不暗示可点）。
+            return Cursor::Default;
+        }
         let mut best: Option<(usize, Cursor)> = None;
         walk(self.root.as_ref(), pos, None, 0, &mut best);
         best.map(|(_, c)| c).unwrap_or(Cursor::Default)
     }
+    /// **浮层范围内的最深命中**（视觉最上层优先）。
+    ///
+    /// 浮层按开启顺序绘制（后开的在**上**），所以从后往前找：第一个包含该点的
+    /// 浮层就是视觉上最上层的那个；再在它的子树里取最深命中。
+    ///
+    /// 为什么不能只查 `paint_order`：浮层**不在普通节点索引里**（它们不参与树的
+    /// 布局/裁剪，见 `Popup` 的注释），所以索引里根本看不到它们 —— 那正是
+    /// "点菜单项点到背景"的根因。
+    fn popup_hit(&self, pos: Pos) -> Option<&dyn Widget> {
+        for popup in self.popups.iter().rev() {
+            let r = popup.rect;
+            if r.is_empty() || !r.contains(pos) {
+                continue;
+            }
+            return Some(deepest_at(popup.widget.as_ref(), pos).unwrap_or(popup.widget.as_ref()));
+        }
+        None
+    }
+
+    /// 是否有**模态**浮层（有则浮层外的点一律被吞掉）。
+    fn has_modal_popup(&self) -> bool {
+        self.popups.iter().any(|p| p.modal)
+    }
+
     /// 命中测试：返回最深的、包含该点的节点 id。
+    ///
+    /// **浮层优先**：浮层画在树之上，命中必须与视觉一致（PLAN 批次 4）。
+    /// 模态浮层存在时，浮层外的点返回 `None`（事件被吞掉，不透传到底层）。
     pub fn hit_test(&self, pos: Pos) -> Option<String> {
+        if let Some(node) = self.popup_hit(pos) {
+            return Some(node.id().to_string());
+        }
+        if self.has_modal_popup() {
+            return None;
+        }
         self.hit_index(pos)
             .and_then(|i| {
                 let p = self.path_of(i);
@@ -2987,7 +3056,20 @@ impl UiTree {
                     ),
                 )
         }
-        node_json(self.root.as_ref(), self.focus.as_deref())
+        // **浮层单独一列 `popups`**，不混进 `children`：
+        // 已有消费者按 `children` 遍历树节点，混进去会让它们以为菜单是普通子控件
+        //（缩进、命中、无障碍层级全乱）。RPC 侧按 `popups` 取值即可看到菜单项。
+        let popups = crate::json::Json::Arr(
+            self.popups
+                .iter()
+                .map(|p| {
+                    let mut j = node_json(p.widget.as_ref(), self.focus.as_deref());
+                    j = j.set("modal", p.modal);
+                    j
+                })
+                .collect(),
+        );
+        node_json(self.root.as_ref(), self.focus.as_deref()).set("popups", popups)
     }
     /// 导出语义树快照。
     pub fn snapshot(&self) -> NodeInfo {
