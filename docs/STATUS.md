@@ -2,12 +2,41 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1271` / `ignored=69` / `targets=185`；`--include-ignored` 全量 `passed=1271` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1237` / `ignored=34` / `targets=185`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-web-stats.log](evidence/cross-platform/linux-verify-2026-11-26-web-stats.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1273` / `ignored=69` / `targets=186`；`--include-ignored` 全量 `passed=1273` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1237` / `ignored=34` / `targets=186`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-soft-stats.log](evidence/cross-platform/linux-verify-2026-11-26-soft-stats.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
 
+## 2026-11-26（续）：RenderStats A 阶段第 6 步 —— Win32 `--force-soft` 软路径埋点
+
+软渲染路径以前**完全不交付统计**：`render_inner` 在软分支里直接 `gdi_present` 后 return，
+`render_stats_backend()` 又只在 `backend.is_some()` 时返回 `D3d11`。于是
+`--force-soft` 下 `take_render_stats()` 恒为 `None`，与"统计关闭"无法区分。
+
+现在：
+
+| 阶段 | 起止 |
+|---|---|
+| `render_prepare` | `tree.invalidate_all()` + `soft.clear()` |
+| `cpu_raster` | `tree.render(soft)` |
+| `present_blocking` | `gdi_present()`（`StretchDIBits` 是阻塞调用） |
+
+- 统计对象由 **`Window` 自己持有**（`soft_stats`）——软路径根本没有 `D3dBackend`，
+  两条路径在同一 `Window` 里二选一；`render_stats_backend()` 现在二选一自报
+  `D3d11` / `Soft`，`take_render_stats()` 也从对应持有者取。
+- 跳过帧也 `stats_begin_frame` + `frame_skipped=true`（与 D3D 路径一致），
+  这样基准能区分"跳过"与"未接入"。
+- 计数器：`damaged_pixels` = **实际**客户区面积（不是请求尺寸 —— 本机 150% DPI 下
+  360×200 的请求得到 450×250 的客户区，统计报的是后者，这是正确的）。
+
+- 新增 1 个 Windows-only 测试目标 / 2 条用例（`render_stats_soft.rs`，自己设
+  `Y901_FORCE_SOFT=1` + `Y901_RENDER_STATS=1`）：三个可测阶段都被测量；
+  六个不存在阶段必须 `NotApplicable`；`command_gen`/`compositor` 必须
+  `Unavailable` 且原因非空；计数器自洽；三段之和 ≤ 墙钟；`presented` 恒 false；
+  `validate()` 通过；一次性消费。第二例钉住"跳过帧不得有阶段测量值、且不污染下一帧"。
+- 反向验证：删掉 `present_blocking` 打点 → 用例变红（文件以 SHA256 校验恢复）。
+- Linux 侧：`linux-verify.sh` 全量确认无回归（软路径代码是 Windows-only）。
 ## 2026-11-26（续）：RenderStats A 阶段第 5 步 —— Web 上屏四段埋点
 
 `Present`（Web 的 canvas 呈现器）现在持有统计对象并实现上屏四段，`WasmWindow`
@@ -213,7 +242,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1271** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1273** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -684,7 +713,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1271/0/69 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1273/0/69 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，

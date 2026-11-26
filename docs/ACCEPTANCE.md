@@ -1,15 +1,15 @@
 # Y901 框架验收凭证
 
-本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1135 passed / 0 failed / 63 ignored**；包含 ignored 的完整运行 **1198 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-26 X11 正确性收口后复测为 **1237 passed / 0 failed / 34 ignored / 185 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
+本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1135 passed / 0 failed / 63 ignored**；包含 ignored 的完整运行 **1198 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-26 X11 正确性收口后复测为 **1237 passed / 0 failed / 34 ignored / 186 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1271 passed / 0 failed / 69 ignored** |
-| `cargo test --workspace --offline -- --include-ignored` | **1340 passed / 0 failed** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1273 passed / 0 failed / 69 ignored** |
+| `cargo test --workspace --offline -- --include-ignored` | **1342 passed / 0 failed** |
 
-`include_ignored=1340`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
+`include_ignored=1342`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -57,8 +57,8 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **1271 passed / 0 failed / 69 ignored**（185 个测试目标） |
-| `--include-ignored` | **1340 passed / 0 failed** |
+| 默认测试 | **1273 passed / 0 failed / 69 ignored**（186 个测试目标） |
+| `--include-ignored` | **1342 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
 | `cargo audit` | 0 漏洞 |
@@ -67,7 +67,7 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| Linux 默认测试（`xvfb-run cargo test --workspace`） | **1237 passed / 0 failed / 34 ignored**（185 个测试目标） |
+| Linux 默认测试（`xvfb-run cargo test --workspace`） | **1237 passed / 0 failed / 34 ignored**（186 个测试目标） |
 | Linux x11 `check --all-targets` | exit 0 |
 | Linux x11 `golden` | 36 passed / 0 failed |
 | Linux `xvfb-run real_window` | 17 passed / 0 failed / 2 ignored |
@@ -78,9 +78,8 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 > （18 条 TextArea 用例 + 1 条 doctest），因此 Linux 计数从 1035 变为 1054。
 > 更早的首次 1031（Web ARIA 接线前）见 git 历史与本文件旧版本。
 
-Linux 本轮证据：[`linux-verify-2026-11-26-web-stats.log`](evidence/cross-platform/linux-verify-2026-11-26-web-stats.log)（RenderStats A5：Web 上屏四段埋点）。上一轮 [`linux-verify-2026-11-26-x11-stats.log`](evidence/cross-platform/linux-verify-2026-11-26-x11-stats.log)（RenderStats A4：X11 分阶段埋点）。上一轮 [`linux-verify-2026-11-26-x11-encode.log`](evidence/cross-platform/linux-verify-2026-11-26-x11-encode.log)（X11 传输层收尾：`poll_events` 错误路径归还事件、编码器长度守卫）。上一轮 [`linux-verify-2026-11-26-atlas.log`](evidence/cross-platform/linux-verify-2026-11-26-atlas.log)（SoftBackend 图集帧边界收口后，1237 passed / 185 targets）。上一轮 [`linux-verify-2026-11-26-x11-deadline.log`](evidence/cross-platform/linux-verify-2026-11-26-x11-deadline.log)（X11 连接层收尾：阻塞/非阻塞总 deadline、`AnyPropertyType` 分页、GenericEvent 附加数据、`delete` 语义）。上一轮 [`linux-verify-2026-11-26-x11-read.log`](evidence/cross-platform/linux-verify-2026-11-26-x11-read.log)（X11 resize / 半包重组 / `bytes_after` 收口） / 185 targets，脚本汇总 7/7 EXIT_0）。上一轮 [`linux-verify-2026-11-22-s6.log`](evidence/cross-platform/linux-verify-2026-11-22-s6.log) 是 TextArea 加入后的记录（数字以该日志为准）。
-更早的 [`linux-verify-2026-11-22.log`](evidence/cross-platform/linux-verify-2026-11-22.log) 是同日 Web ARIA 接线后的 1031 记录，
-保留为历史，不可当作本轮证据。
+Linux 本轮证据：[`linux-verify-2026-11-26-soft-stats.log`](evidence/cross-platform/linux-verify-2026-11-26-soft-stats.log)（RenderStats A6：Win32 `--force-soft` 软路径埋点；Linux 侧用于确认无回归）。
+同日的更早记录（按时间倒序，均在同目录）：`linux-verify-2026-11-26-web-stats.log`（A5 Web）、`linux-verify-2026-11-26-x11-stats.log`（A4 X11）、`linux-verify-2026-11-26-x11-encode.log`（X11 编码器长度）、`linux-verify-2026-11-26-atlas.log`（图集帧边界）、`linux-verify-2026-11-26-x11-deadline.log`（读取层 deadline）、`linux-verify-2026-11-26-x11-read.log`（半包重组 / `bytes_after`）、`linux-verify-2026-11-26-x11.log`（resize）、`linux-verify-2026-11-23.log`、`linux-verify-2026-11-22-s6.log`、`linux-verify-2026-11-22.log`。
 命令：`CARGO_FLAGS=--offline bash scripts/linux-verify.sh`（Ubuntu 22.04 / WSL2 + Xvfb）。
 2026-11-20 的历史记录保留为 [`linux-full-2026-11-20.log`](evidence/cross-platform/linux-full-2026-11-20.log)、
 [`linux-verify-2026-11-20.log`](evidence/cross-platform/linux-verify-2026-11-20.log)，不可视为本轮证据。更早的 CentOS 7.9 记录见 [`linux-verify-2026-11-19.log`](evidence/cross-platform/linux-verify-2026-11-19.log)。

@@ -856,6 +856,13 @@ pub struct Window {
     backend: Option<D3dBackend>,
     /// 纯 CPU 后端（`Y901_FORCE_SOFT=1` 时启用；与 `backend` 互斥）。
     soft: Option<y901_render::soft::SoftBackend>,
+    /// **软渲染路径的分阶段统计**（`Y901_RENDER_STATS` 开启时才有值）。
+    ///
+    /// 为什么不放在 `D3dBackend` 里：软路径根本没有 `D3dBackend`
+    /// （两条路径在同一个 `Window` 里二选一），所以只能由 `Window` 自己持有。
+    soft_stats: Option<y901_runtime::render_stats::RenderStats>,
+    /// 软路径统计帧号（仅用于 JSON 可读性）。
+    soft_stats_frame: u64,
     viewport: (u32, u32),
     /// 最近一次 `SetCursor` 事件里的鼠标位置；
     /// 事件消费发生在 `wait_events` 内部，所以在这里记一下，
@@ -1132,6 +1139,8 @@ impl Window {
                 hwnd,
                 backend,
                 soft,
+                soft_stats: None,
+                soft_stats_frame: 0,
                 viewport,
                 pending_cursor: None,
                 saved_style: 0,
@@ -1506,6 +1515,24 @@ impl Window {
             .unwrap_or_default()
     }
 
+    /// 软渲染路径的帧边界：统计开启时复用/新建统计对象，关闭时**清空且不分配**。
+    fn soft_stats_begin_frame(&mut self) {
+        if y901_runtime::render_stats::enabled() {
+            self.soft_stats_frame = self.soft_stats_frame.wrapping_add(1);
+            match self.soft_stats.as_mut() {
+                Some(s) => s.reset_for_next_frame(self.soft_stats_frame),
+                None => {
+                    self.soft_stats = Some(y901_runtime::render_stats::RenderStats::new(
+                        self.soft_stats_frame,
+                        y901_runtime::render_stats::BackendKind::Soft,
+                    ))
+                }
+            }
+        } else {
+            self.soft_stats = None;
+        }
+    }
+
     /// `render` 与 `render_with_sync` 的共同实现。
     fn render_inner(&mut self, tree: &mut UiTree, sync_interval: u32) -> Result<(), String> {
         // **没有脏区就不清屏、不 Present**：保留上一帧。
@@ -1520,19 +1547,61 @@ impl Window {
             if let Some(backend) = self.backend.as_mut() {
                 backend.stats_begin_frame();
                 backend.stats_mark_skipped();
+            } else if self.soft.is_some() {
+                self.soft_stats_begin_frame();
+                if let Some(s) = self.soft_stats.as_mut() {
+                    s.counters.frame_skipped = true;
+                }
             }
             return Ok(());
         }
-        if let Some(soft) = self.soft.as_mut() {
+        if self.soft.is_some() {
+            use y901_runtime::render_stats as rs;
+            // 帧边界 + 脏区计数器（`is_full()` 时 `rects()` 为空，按一个整窗矩形计）。
+            self.soft_stats_begin_frame();
+            let dirty_rects = if tree.dirty().is_full() {
+                1
+            } else {
+                tree.dirty().rects().len() as u32
+            };
+            let (vw, vh) = self.viewport;
+            if let Some(s) = self.soft_stats.as_mut() {
+                // 软路径每帧清屏 + 整树重绘 → 受损像素就是整个客户区。
+                s.counters.dirty_rect_count = dirty_rects;
+                s.counters.damaged_pixels = vw as u64 * vh as u64;
+            }
+            let on = self.soft_stats.is_some();
+
             // 纯 CPU：先清整张缓冲，再强制整树重绘。
             // 为什么不能只重绘脏区：软缓冲每帧都被清掉，
             // 没被标脏的节点不重画就会出现空洞（这一点与 D3D 的自持 RT 相反）。
+            let t_prepare = rs::mark(on);
+            let soft = self.soft.as_mut().expect("上面已判断 soft.is_some()");
             tree.invalidate_all();
             soft.clear();
+            if let Some(s) = self.soft_stats.as_mut() {
+                rs::record(&mut s.stages, rs::StageId::RenderPrepare, t_prepare);
+            }
+
+            let t_raster = rs::mark(on);
             tree.render(soft);
-            let (w, h) = self.viewport;
-            let _ = (w, h);
+            if let Some(s) = self.soft_stats.as_mut() {
+                rs::record(&mut s.stages, rs::StageId::CpuRaster, t_raster);
+            }
+
+            // GDI 的 `StretchDIBits` 就是软路径的"上屏"，它本身是阻塞调用。
+            let t_present = rs::mark(on);
             gdi_present(self.hwnd, soft.pixels(), soft.width(), soft.height());
+            if let Some(s) = self.soft_stats.as_mut() {
+                rs::record(&mut s.stages, rs::StageId::PresentBlocking, t_present);
+                // 软路径没有 GPU 图集上传、没有实例化绘制。
+                s.counters.atlas_upload_bytes = 0;
+                s.counters.instance_pushed = 0;
+                s.counters.instance_drawn = 0;
+                s.counters.batch_count = 0;
+                s.counters.occluded = false;
+                s.counters.frame_skipped = false;
+            }
             return Ok(());
         }
         let Some(backend) = self.backend.as_mut() else {
@@ -2393,7 +2462,7 @@ impl y901_runtime::window::WindowBackend for Window {
         }
     }
 
-    /// 只有 **D3D11 路径**接入统计；软渲染（`--force-soft`）本阶段返回 `None`。
+    /// D3D11 与 `--force-soft` 两条路径都接入统计，但**种类不同**（能力表不同）。
     ///
     /// 为什么必须由窗口自报而不能让 runtime 猜：两条路径在同一个 `Window` 类型里
     ///（`soft` / `backend` 二选一，见结构体字段），runtime 无法区分；而种类决定
@@ -2402,6 +2471,9 @@ impl y901_runtime::window::WindowBackend for Window {
     fn render_stats_backend(&self) -> Option<y901_runtime::render_stats::BackendKind> {
         if self.backend.is_some() {
             Some(y901_runtime::render_stats::BackendKind::D3d11)
+        } else if self.soft.is_some() {
+            // `--force-soft`：纯 CPU 路径（能力表与 D3D11 不同，必须分开自报）。
+            Some(y901_runtime::render_stats::BackendKind::Soft)
         } else {
             None
         }
@@ -2409,7 +2481,10 @@ impl y901_runtime::window::WindowBackend for Window {
 
     /// 取走后端本帧统计（取走语义；未接入/关闭统计时 `None`）。
     fn take_render_stats(&mut self) -> Option<y901_runtime::render_stats::RenderStats> {
-        self.backend.as_mut()?.take_render_stats()
+        match self.backend.as_mut() {
+            Some(b) => b.take_render_stats(),
+            None => self.soft_stats.take(),
+        }
     }
 }
 

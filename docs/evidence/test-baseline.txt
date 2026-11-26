@@ -201,4 +201,7 @@
 # Measured at 2026-11-26 (RenderStats A5：Web 上屏四段埋点 + 三个阶段映射用例):
 #   default cargo test --workspace --no-fail-fast   passed 1271, failed 0, ignored 69 / 185 个测试目标
 #   (Web crate 新增 3 条宿主机用例；测试目标数不变。Linux 侧 passed=1237 / targets=185)
-1271
+# Measured at 2026-11-26 (RenderStats A6：Win32 --force-soft 软路径埋点 + 2 条 Windows 用例):
+#   default cargo test --workspace --no-fail-fast   passed 1273, failed 0, ignored 69 / 186 个测试目标
+#   (新增 1 个测试目标 render_stats_soft（Windows-only，2 条）。Linux 侧 passed=1237 / targets=186)
+1273
