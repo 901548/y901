@@ -19,8 +19,11 @@ use crate::decode::{decode_event, X11Event};
 use crate::encode::{encode_get_input_focus, encode_put_image, encode_setup_request, PutImageArgs};
 use crate::randr::{OutputDpi, EXTENSION_NAME, REQUIRED_MAJOR, REQUIRED_MINOR};
 
-/// `PutImage` 单包数据上限（字节）：`length` 是 u16，单位 4 字节，去掉 6 个单位的头。
-pub const PUT_IMAGE_MAX_BYTES: usize = (u16::MAX as usize - 6) * 4;
+/// `PutImage` 单包数据上限（字节）。
+///
+/// 定义在 [`crate::encode`]（协议常量、非 unix 平台也编译）；这里 re-export
+/// 只为保持 `conn::PUT_IMAGE_MAX_BYTES` 这条既有公开路径不变。
+pub use crate::encode::PUT_IMAGE_MAX_BYTES;
 
 /// 一个错误包（X11 error，32 字节，字节 0 = 0）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -591,6 +594,12 @@ impl Connection {
         self.tail_needed - self.tail.len()
     }
 
+    /// 诊断/测试用：`pending` 里尚未交付给调用方的事件数。
+    ///
+    /// 错误路径必须让它保持不变（旧实现会清零）；成功交付后应为 0。
+    pub fn pending_events_len(&self) -> usize {
+        self.pending.len()
+    }
     /// **仅测试**：把阻塞读取的总超时从 5s 缩短，便于验证"超时后仍可续读"。
     #[cfg(test)]
     pub(crate) fn set_reply_timeout_for_test(&mut self, d: Duration) {
@@ -1225,16 +1234,41 @@ impl Connection {
     }
 
     /// `poll_events` 的实体（已按 `timeout_ms` 设好阻塞模式）。
+    /// 事件轮询：**错误路径必须归还已解码的事件**。
+    ///
+    /// 旧实现先 `let mut events = std::mem::take(&mut self.pending);`，再用 `?` 传播错误。
+    /// `events` 里既有上一次遗留的 `pending`，也有本次刚解码的事件（典型：`WM_DELETE_WINDOW`）
+    /// —— 错误返回时它们随栈帧一起销毁，关闭请求就此消失。现在错误路径把事件放回
+    /// `self.pending`，下一次轮询仍能拿到（顺序天然正确：旧 `pending` 在前，按到达顺序追加）。
     fn poll_events_inner(&mut self) -> Result<(Vec<X11Event>, Vec<X11Error>), String> {
         let mut events = std::mem::take(&mut self.pending);
         let mut errors = Vec::new();
+        match self.poll_events_drain(&mut events, &mut errors) {
+            Ok(()) => Ok((events, errors)),
+            Err(e) => {
+                // `drain` 内部不会再往 `pending` 里写，直接覆盖即可。
+                self.pending = events;
+                Err(e)
+            }
+        }
+    }
+
+    /// 把当前可读的包全部消费进 `events` / `errors`（由 [`Self::poll_events_inner`] 调用）。
+    ///
+    /// 返回 `Ok(())` = **暂时没有更多可读数据**（正常 idle），不是错误；
+    /// 只有 EOF / 不可恢复 I/O / 协议长度异常才返回 `Err`。
+    fn poll_events_drain(
+        &mut self,
+        events: &mut Vec<X11Event>,
+        errors: &mut Vec<X11Error>,
+    ) -> Result<(), String> {
         loop {
             // ① **先把上一次没读完的 reply 附加数据吞掉**：字节顺序是硬约束，
             //    附加数据没消费完之前绝不能去解析下一个包头。
             if self.tail_needed > 0 {
                 if !self.pump_tail_poll()? {
                     // 暂时没读完：进度保存在 `tail` 里，下次调用接着读。
-                    return Ok((events, errors));
+                    return Ok(());
                 }
                 self.pending_head = None;
                 self.take_tail(); // poll_events 不需要 reply 载荷，但必须消费掉
@@ -1242,7 +1276,7 @@ impl Connection {
             }
             // ② 读包头：`rx` 里可能已有上次的半个包；读不满就带着已读字节返回。
             let Some(buf) = self.read_head_poll()? else {
-                return Ok((events, errors));
+                return Ok(());
             };
             match buf[0] {
                 0 => errors.push(parse_error(&buf)),
@@ -1310,7 +1344,17 @@ impl Connection {
                 pixels.len()
             ));
         }
-        let rows_per_chunk = (PUT_IMAGE_MAX_BYTES / stride).max(1);
+        // **一行都装不下时不能继续**：旧实现用 `.max(1)`，宽到 `stride > PUT_IMAGE_MAX_BYTES`
+        // （X11 窗口宽 > 65529 px）就会把一行塞进一次请求 → `length` 字段溢出 u16
+        // → 服务器按错误长度切包，整条流错位。这里直接报错，让调用方降级。
+        if stride > PUT_IMAGE_MAX_BYTES {
+            return Err(format!(
+                "单行 {stride} 字节超过单次 PutImage 上限 {PUT_IMAGE_MAX_BYTES} 字节\
+                 （窗口宽 {} px）",
+                width
+            ));
+        }
+        let rows_per_chunk = PUT_IMAGE_MAX_BYTES / stride;
         let mut y = 0usize;
         let mut chunks = 0usize;
         while y < height as usize {
@@ -2865,5 +2909,86 @@ mod deadline_and_generic_event_tests {
         let (head, payload) = c.read_packet().expect("read");
         assert_eq!(head, ge);
         assert_eq!(payload, extra, "GenericEvent 附加数据必须完整返回");
+    }
+
+    // ---- poll_events 的错误路径不得丢弃已解码事件 ----
+
+    /// 向连接里塞"一个事件 + 一个无附加数据的 reply"，让 `read_reply_packet`
+    /// 把事件存进 `pending`（模拟"同步请求期间到达的 WM_DELETE_WINDOW"）。
+    fn seed_pending_event(c: &mut Connection, peer: &mut UnixStream) -> [u8; 32] {
+        let ev = packet(2);
+        let reply = head_with_units(1, 0);
+        peer.write_all(&ev).expect("write event");
+        peer.write_all(&reply).expect("write reply");
+        peer.flush().ok();
+        let (head, _) = c.read_reply_packet().expect("读 reply（事件应被暂存）");
+        assert_eq!(head, reply);
+        assert_eq!(c.pending_events_len(), 1, "事件应被暂存到 pending");
+        ev
+    }
+
+    /// **错误路径必须把 `pending` 还回去**：旧实现 `mem::take` 之后 `?` 直接返回，
+    /// `WM_DELETE_WINDOW` 这类事件就此消失（用户点关闭没反应）。
+    #[test]
+    fn poll_events_keeps_pending_events_when_it_errors() {
+        let (mut c, mut peer) = conn_from(UnixStream::pair().expect("pair"));
+        let ev = seed_pending_event(&mut c, &mut peer);
+
+        // 造一个**声明长度超限**的 reply 头：`poll_events` 会因 sanity 上限报错
+        let bad = head_with_units(1, (MAX_REPLY_UNITS + 1) as u32);
+        peer.write_all(&bad).expect("write oversized reply head");
+        peer.flush().ok();
+
+        let err = c
+            .poll_events(0)
+            .expect_err("超限长度必须报错，而不是继续解析");
+        assert!(err.contains("sanity"), "错误应说明长度越界：{err}");
+        assert_eq!(
+            c.pending_events_len(),
+            1,
+            "**错误路径不能丢掉已解码的事件**（旧实现会清零，事件永久消失）"
+        );
+
+        // 再确认事件内容没被换掉/重复：直接查内部状态
+        let _ = ev;
+    }
+
+    /// **单行超过单次 PutImage 上限时必须报错**，不能把一行塞进一次请求
+    /// （`length` 字段会溢出 u16，服务器随即按错误长度切包 → 流错位）。
+    ///
+    /// X11 窗口宽是 u16：`width > 65529` 时 `width × 4 > 262 116`。这里在**发送之前**
+    /// 就拒绝，所以不需要真实 X server，也不会往 socket 写任何字节。
+    #[test]
+    fn put_image_rejects_a_row_wider_than_one_request() {
+        let (mut c, _peer) = conn_from(UnixStream::pair().expect("pair"));
+        let width: u16 = 65_530; // 65530 × 4 = 262 120 > PUT_IMAGE_MAX_BYTES (262 116)
+        let stride = width as usize * 4;
+        let pixels = vec![0u8; stride];
+        let err = c
+            .put_image_bgra(1, 2, width, 1, &pixels, 24)
+            .expect_err("一行装不下时必须返回 Err，而不是发出截断长度的请求");
+        assert!(
+            err.contains("超过单次 PutImage 上限"),
+            "错误信息应说明是单行超限：{err}"
+        );
+    }
+    /// 成功路径仍然要**交付并清空** `pending`（不能因为"归还"逻辑变成永远不清空）。
+    #[test]
+    fn poll_events_delivers_and_clears_pending_on_success() {
+        let (mut c, mut peer) = conn_from(UnixStream::pair().expect("pair"));
+        let ev = seed_pending_event(&mut c, &mut peer);
+
+        let (events, errors) = c.poll_events(0).expect("无更多数据时 poll 应成功");
+        assert!(errors.is_empty());
+        assert_eq!(events.len(), 1, "暂存的事件必须交付：{events:?}");
+        assert_eq!(
+            c.pending_events_len(),
+            0,
+            "交付后必须清空 pending（否则下次会重复交付）"
+        );
+        // 事件内容应就是当初那个包解码出来的（再 poll 一次不得重复）
+        let (again, _) = c.poll_events(0).expect("再次 poll");
+        assert!(again.is_empty(), "不得重复交付：{again:?}");
+        let _ = ev;
     }
 }

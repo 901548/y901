@@ -190,4 +190,8 @@
 # Measured at 2026-11-26 (SoftBackend 图集帧边界：begin_frame/take_dirty，RENDER-BUG-02 / issue #8):
 #   default cargo test --workspace --no-fail-fast   passed 1263, failed 0, ignored 69 / 183 个测试目标
 #   (新增 soft_atlas_lifecycle 4 条 + 1 个测试目标。Linux 侧 passed=1223 / targets=183，见 linux-numbers.txt)
-1263
+# Measured at 2026-11-26 (X11 传输层收尾：poll_events 错误路径归还事件 + 编码器长度守卫):
+#   default cargo test --workspace --no-fail-fast   passed 1268, failed 0, ignored 69 / 183 个测试目标
+#   (新增 8 条：encode::length_guard_tests 5 条 + poll_events 归还 2 条 + put_image 宽行拒绝 1 条。
+#    Linux 侧 passed=1231 / targets=183，见 linux-numbers.txt)
+1268

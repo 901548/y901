@@ -2,12 +2,42 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1263` / `ignored=69` / `targets=183`；`--include-ignored` 全量 `passed=1332` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1223` / `ignored=34` / `targets=183`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-atlas.log](evidence/cross-platform/linux-verify-2026-11-26-atlas.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1268` / `ignored=69` / `targets=183`；`--include-ignored` 全量 `passed=1268` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1231` / `ignored=34` / `targets=183`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-26-atlas.log](evidence/cross-platform/linux-verify-2026-11-26-atlas.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
 
+## 2026-11-26（续）：X11 传输层最后两项收口
+
+### C. `poll_events` 错误路径丢弃已解码事件 —— 已修
+
+`poll_events_inner` 先 `let mut events = mem::take(&mut self.pending)`，再用 `?` 传播错误。
+`events` 里既有上一次遗留的 `pending`，也有本次刚解出的 `WM_DELETE_WINDOW`
+—— 错误返回时随栈帧销毁，用户点关闭无反应。现在拆成
+`poll_events_inner`（负责"出错就把事件放回 `pending`"）+ `poll_events_drain`
+（只负责解析），并加 `Connection::pending_events_len()` 让"归还"可被断言。
+
+### D. 编码器 `length as u16` 静默截断 —— 已修
+
+以前每个编码器各写一行 `(X + pad4(n) / 4) as u16`，超限时 `as` 静默回绕，
+服务器按错误长度切包 → 整条流错位。现在统一走 `length_units()`：
+debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(u16::MAX)`
+（**不再回绕成小值**）。覆盖 8 处：`intern_atom` / `query_extension` /
+`put_image` / `change_property` / `create_window` / `create_gc` / `change_gc` /
+`configure_window`；另外补了 `SetupRequest` 两个 u16 认证字段的长度断言。
+
+顺带修掉一个**真实溢出缺口**：`put_image_bgra` 用
+`(PUT_IMAGE_MAX_BYTES / stride).max(1)` 分块，窗口宽 > 65529 px 时一行就超过单请求上限，
+`.max(1)` 会把整行塞进一次请求。现在直接 `Err`（调用方可降级）。
+
+`PUT_IMAGE_MAX_BYTES` 从 `conn`（`#[cfg(unix)]` 才编译）移到 `encode`（各平台都编译），
+`conn` 保留 `pub use` 维持既有公开路径；因此这 5 条长度用例在 Windows 上也真跑。
+
+- 回归用例 8 条：`encode::length_guard_tests`（5）、`poll_events_keeps_pending_events_when_it_errors`、
+  `poll_events_delivers_and_clears_pending_on_success`、`put_image_rejects_a_row_wider_than_one_request`。
+- 反向验证：分别回退"归还 pending"、`request_fits` 上限、`.max(1)` 分块，
+  各导致对应用例变红（随后按 SHA256 校验恢复）。
 ## 2026-11-26：X11 连接层收尾 + SoftBackend 图集帧边界（RENDER-BUG-02 / issue #8）
 
 ### A. SoftBackend 从未推进字体图集生命周期 —— 已修复
@@ -120,7 +150,7 @@
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1263** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1268** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -591,7 +621,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1263/0/69 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1268/0/69 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，

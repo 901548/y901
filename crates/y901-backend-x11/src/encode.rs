@@ -77,6 +77,15 @@ pub fn encode_setup_request(auth_name: &[u8], auth_data: &[u8]) -> Vec<u8> {
     out.push(0); // unused
     put_u16(&mut out, PROTOCOL_MAJOR);
     put_u16(&mut out, PROTOCOL_MINOR);
+    // 这两个是 **u16 字段**（不是 `length` 单位）：超长会截断成错误值，
+    // 服务器随后按错误偏移解析 auth-data，握手直接失败且原因不明。
+    debug_assert!(
+        auth_name.len() <= u16::MAX as usize && auth_data.len() <= u16::MAX as usize,
+        "Setup 认证字段过长（name={} / data={} 字节，上限 {}）",
+        auth_name.len(),
+        auth_data.len(),
+        u16::MAX
+    );
     put_u16(&mut out, auth_name.len() as u16);
     put_u16(&mut out, auth_data.len() as u16);
     put_u16(&mut out, 0); // unused
@@ -99,7 +108,12 @@ pub fn encode_intern_atom(name: &[u8], only_if_exists: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(8 + pad4(name.len()));
     out.push(opcode::INTERN_ATOM);
     out.push(u8::from(only_if_exists));
-    put_u16(&mut out, (2 + pad4(name.len()) / 4) as u16);
+    debug_assert!(
+        name.len() <= u16::MAX as usize,
+        "InternAtom 名称 {} 字节，超过 u16 名称长度字段",
+        name.len()
+    );
+    put_u16(&mut out, length_units(8 + pad4(name.len())));
     put_u16(&mut out, name.len() as u16);
     put_u16(&mut out, 0); // unused
     push_padded(&mut out, name);
@@ -158,7 +172,7 @@ pub fn encode_create_window(a: &CreateWindowArgs) -> Vec<u8> {
     let mut out = Vec::with_capacity(32 + sorted.len() * 4);
     out.push(opcode::CREATE_WINDOW);
     out.push(0); // depth = CopyFromParent
-    put_u16(&mut out, (8 + sorted.len()) as u16);
+    put_u16(&mut out, length_units(32 + sorted.len() * 4));
     put_u32(&mut out, a.wid);
     put_u32(&mut out, a.parent);
     put_u16(&mut out, a.x as u16);
@@ -237,7 +251,7 @@ pub fn encode_put_image(a: &PutImageArgs) -> Vec<u8> {
     let mut out = Vec::with_capacity(24 + pad4(a.data.len()));
     out.push(opcode::PUT_IMAGE);
     out.push(ImageFormat::ZPixmap as u8);
-    put_u16(&mut out, (6 + pad4(a.data.len()) / 4) as u16);
+    put_u16(&mut out, length_units(24 + pad4(a.data.len())));
     put_u32(&mut out, a.drawable);
     put_u32(&mut out, a.gc);
     put_u16(&mut out, a.width);
@@ -291,7 +305,7 @@ pub fn encode_change_property(
     let mut out = Vec::with_capacity(24 + pad4(data.len()));
     out.push(opcode::CHANGE_PROPERTY);
     out.push(mode as u8);
-    put_u16(&mut out, (6 + pad4(data.len()) / 4) as u16);
+    put_u16(&mut out, length_units(24 + pad4(data.len())));
     put_u32(&mut out, window);
     put_u32(&mut out, property);
     put_u32(&mut out, type_atom);
@@ -300,6 +314,39 @@ pub fn encode_change_property(
     put_u32(&mut out, items as u32);
     push_padded(&mut out, data);
     out
+}
+
+/// **单次请求的总字节上限**：协议 `length` 字段是 u16，单位是 4 字节。
+///
+/// `length` 计的是**含 4 字节头**的整个请求，所以 `total_bytes = length * 4`。
+/// 超过这个值的请求无法用一次发送表达；调用方必须分块（见 `put_image_bgra`）。
+pub const MAX_REQUEST_BYTES: usize = (u16::MAX as usize) * 4;
+
+/// `PutImage` 单次请求的**数据段上限**（字节）：`length` 是 u16 个 4 字节单位，
+/// 减去 PutImage 的 6 个单位（24 字节）头。
+///
+/// 放在 `encode` 而不是 `conn`：它由协议决定、与"怎么连服务器"无关，而且
+/// `conn` 模块在非 unix 平台不编译（`encode` 会编译），测试要在两边都能跑。
+pub const PUT_IMAGE_MAX_BYTES: usize = (u16::MAX as usize - 6) * 4;
+
+/// 这个总字节数能否用**一次**请求表达。
+pub fn request_fits(total_bytes: usize) -> bool {
+    total_bytes.is_multiple_of(4) && total_bytes <= MAX_REQUEST_BYTES
+}
+
+/// 把"整个请求的字节数"换算成协议里的 `length` 字段（单位 4 字节）。
+///
+/// **为什么统一到一个函数**：以前每个编码器各写一行 `(X + pad4(n)/4) as u16`，
+/// 数据段一大就静默截断（`as` 不检查），服务器随即按错误的长度切包，整条流错位。
+/// 现在全部走这里：debug 构建立刻断言，release 下 `try_into` 失败也会**饱和到
+/// `u16::MAX`** 而不是回绕成任意小值 —— 但正确做法仍是调用方分块，
+/// 所以 `put_image_bgra` / `get_property_all` 都在入口检查 `request_fits`。
+fn length_units(total_bytes: usize) -> u16 {
+    debug_assert!(
+        request_fits(total_bytes),
+        "请求总长 {total_bytes} 字节无法用单次请求表达（上限 {MAX_REQUEST_BYTES}）；调用方必须分块"
+    );
+    (total_bytes / 4).try_into().unwrap_or(u16::MAX)
 }
 
 /// **单次 `ChangeProperty` 的数据上限**（字节）。
@@ -355,7 +402,7 @@ pub fn encode_create_gc(gc: u32, drawable: u32, values: &[(GcMask, u32)]) -> Vec
     let mut out = Vec::with_capacity(16 + list.len() * 4);
     out.push(opcode::CREATE_GC);
     out.push(0);
-    put_u16(&mut out, (4 + list.len()) as u16);
+    put_u16(&mut out, length_units(16 + list.len() * 4));
     put_u32(&mut out, gc);
     put_u32(&mut out, drawable);
     put_u32(&mut out, mask);
@@ -371,7 +418,7 @@ pub fn encode_change_gc(gc: u32, values: &[(GcMask, u32)]) -> Vec<u8> {
     let mut out = Vec::with_capacity(12 + list.len() * 4);
     out.push(opcode::CHANGE_GC);
     out.push(0);
-    put_u16(&mut out, (3 + list.len()) as u16);
+    put_u16(&mut out, length_units(12 + list.len() * 4));
     put_u32(&mut out, gc);
     put_u32(&mut out, mask);
     for v in list {
@@ -426,7 +473,7 @@ pub fn encode_configure_window(wid: u32, values: &[(ConfigureMask, u32)]) -> Vec
     let mut out = Vec::with_capacity(12 + sorted.len() * 4);
     out.push(opcode::CONFIGURE_WINDOW);
     out.push(0);
-    put_u16(&mut out, (3 + sorted.len()) as u16);
+    put_u16(&mut out, length_units(12 + sorted.len() * 4));
     put_u32(&mut out, wid);
     put_u32(&mut out, mask);
     for (_, v) in &sorted {
@@ -611,7 +658,12 @@ pub fn encode_query_extension(name: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(8 + pad4(name.len()));
     out.push(opcode::QUERY_EXTENSION);
     out.push(0);
-    put_u16(&mut out, (2 + pad4(name.len()) / 4) as u16);
+    debug_assert!(
+        name.len() <= u16::MAX as usize,
+        "QueryExtension 名称 {} 字节，超过 u16 名称长度字段",
+        name.len()
+    );
+    put_u16(&mut out, length_units(8 + pad4(name.len())));
     put_u16(&mut out, name.len() as u16);
     put_u16(&mut out, 0);
     push_padded(&mut out, name);
@@ -901,4 +953,89 @@ pub fn encode_get_selection_owner(selection: u32) -> Vec<u8> {
     put_u16(&mut out, 2);
     put_u32(&mut out, selection);
     out
+}
+
+/// **请求长度字段的边界测试**（`length` 是 u16，单位 4 字节）。
+///
+/// 背景：以前每个编码器各写一行 `(X + pad4(n) / 4) as u16`，数据段一大就**静默截断**，
+/// 服务器按错误长度切包 → 整条协议流错位（本项目踩过两次）。现在统一走
+/// `length_units()`，这里钉住换算与上限。
+#[cfg(test)]
+mod length_guard_tests {
+    use super::PUT_IMAGE_MAX_BYTES;
+    use super::*;
+
+    /// `length` 计的是**含 4 字节头**的整个请求。
+    #[test]
+    fn max_request_bytes_matches_protocol_limit() {
+        assert_eq!(MAX_REQUEST_BYTES, 262_140);
+        assert!(request_fits(MAX_REQUEST_BYTES));
+        assert!(
+            !request_fits(MAX_REQUEST_BYTES + 4),
+            "超过 u16×4 的请求无法用一次表达"
+        );
+        assert!(
+            !request_fits(MAX_REQUEST_BYTES - 2),
+            "非 4 字节对齐的总长也不行（length 以 4 字节为单位）"
+        );
+    }
+
+    /// PutImage 带上限大小的数据时，`length` 必须正好是 `u16::MAX`（而不是回绕）。
+    #[test]
+    fn put_image_length_field_saturates_exactly_at_limit() {
+        // 前置：PutImage 的数据上限 = 总上限 − 24 字节头
+        assert_eq!(PUT_IMAGE_MAX_BYTES, MAX_REQUEST_BYTES - 24);
+        let data = vec![0u8; PUT_IMAGE_MAX_BYTES];
+        let pkt = encode_put_image(&PutImageArgs {
+            drawable: 1,
+            gc: 2,
+            width: 256,
+            height: (PUT_IMAGE_MAX_BYTES / (256 * 4)) as u16,
+            dst_x: 0,
+            dst_y: 0,
+            depth: 24,
+            data: &data,
+        });
+        assert_eq!(pkt.len(), MAX_REQUEST_BYTES);
+        let length = u16::from_le_bytes([pkt[2], pkt[3]]);
+        assert_eq!(length, u16::MAX, "上限处的 length 必须是 65535");
+    }
+
+    /// ChangeProperty 同理：数据上限 = 总上限 − 24 字节头。
+    #[test]
+    fn change_property_length_field_saturates_exactly_at_limit() {
+        assert_eq!(MAX_PROPERTY_BYTES, MAX_REQUEST_BYTES - 24);
+        let data = vec![7u8; MAX_PROPERTY_BYTES];
+        let pkt = encode_change_property(1, 2, 3, 8, PropMode::Replace, &data);
+        assert_eq!(pkt.len(), MAX_REQUEST_BYTES);
+        let length = u16::from_le_bytes([pkt[2], pkt[3]]);
+        assert_eq!(length, u16::MAX);
+    }
+
+    /// 变量长名称的编码器：`length` 字段与名称长度字段都要对得上。
+    #[test]
+    fn intern_atom_field_layout_is_consistent() {
+        let name = b"_NET_WM_STATE"; // 13 字节 → pad4 = 16
+        let pkt = encode_intern_atom(name, false);
+        assert_eq!(pkt.len(), 8 + 16);
+        assert_eq!(u16::from_le_bytes([pkt[2], pkt[3]]), 2 + 4);
+        assert_eq!(u16::from_le_bytes([pkt[4], pkt[5]]), name.len() as u16);
+    }
+
+    /// debug 构建立刻断言（release 下这条断言被编译掉，`try_into` 也不会回绕成小值）。
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "无法用单次请求表达")]
+    fn over_limit_request_panics_in_debug() {
+        let _ = encode_put_image(&PutImageArgs {
+            drawable: 1,
+            gc: 2,
+            width: 1,
+            height: 1,
+            dst_x: 0,
+            dst_y: 0,
+            depth: 24,
+            data: &vec![0u8; PUT_IMAGE_MAX_BYTES + 4],
+        });
+    }
 }
