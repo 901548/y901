@@ -66,6 +66,12 @@ pub struct X11Window {
     /// 没有"必须在显示之前"的时序约束。
     #[cfg(feature = "a11y")]
     a11y: Option<y901_a11y::platform::unix_atspi::UnixAtspi>,
+    /// **最近一次推给 AT-SPI 的 id 映射**（feature `a11y`）。
+    ///
+    /// `NodeId` 是 Y901 节点 id 的稳定哈希（跨帧不变），但"这个 id 还在不在树里"
+    /// 只能靠最近一次推送的映射判断；按遍历序号反查会在删行后点到邻居。
+    #[cfg(feature = "a11y")]
+    a11y_node_ids: y901_a11y::platform::NodeIdMap,
     /// 全屏下按 Esc：`translate`（`&self`）置位，`wait_events`（`&mut self`）消费。
     ///
     /// **为何不用进程级 `static`**：`static` 它会让两个窗口共享同一个标志 ——
@@ -632,6 +638,8 @@ impl X11Window {
             ime_focused: false,
             #[cfg(feature = "a11y")]
             a11y: Some(y901_a11y::platform::unix_atspi::UnixAtspi::new()),
+            #[cfg(feature = "a11y")]
+            a11y_node_ids: y901_a11y::platform::NodeIdMap::default(),
         })
     }
 
@@ -855,11 +863,18 @@ impl X11Window {
             return;
         };
         bridge.set_window_focused(self.ime_focused);
-        bridge.push(y901_a11y::to_tree_update(tree.snapshot()));
+        let (update, node_ids) = y901_a11y::to_tree_update_with_map(tree.snapshot());
+        bridge.push(update);
+        // 动作是**异步**到达的（AT-SPI 走 D-Bus），那一刻树可能已经变了：
+        // 用"最近一次推送"的映射反查，才是用户实际看到的那棵树。
+        self.a11y_node_ids = node_ids;
         while let Some(req) = bridge.poll_action() {
-            if matches!(req.action, y901_a11y::accesskit::Action::Click) {
-                // 前序遍历序号 → Y901 节点 id（与 `to_tree_update` 的分配规则一致）。
-                if let Some(id) = nth_node_id(tree, req.target_node.0 as usize) {
+            if !matches!(req.action, y901_a11y::accesskit::Action::Click) {
+                continue;
+            }
+            match self.a11y_node_ids.y901_of(req.target_node) {
+                Some(id) => {
+                    let id = id.to_string();
                     tree.dispatch_to(
                         &id,
                         &y901_ui::UiEvent::Action {
@@ -867,6 +882,17 @@ impl X11Window {
                             args: y901_ui::json::Json::obj(),
                         },
                     );
+                }
+                None => {
+                    // 节点已经不在树里：丢弃，并且**每个进程只告警一次**。
+                    static WARNED: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
+                    if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!(
+                            "[y901] 无障碍动作指向已不存在的节点（AccessKit id {:?}），已丢弃",
+                            req.target_node
+                        );
+                    }
                 }
             }
         }
@@ -1477,24 +1503,6 @@ fn fullscreen_atoms(conn: &mut Connection, wid: u32, root: u32, add: bool) -> Re
     Ok(())
 }
 
-/// 按**前序遍历序号**取节点 id（与 `to_tree_update` 的分配顺序一致）。
-///
-/// `to_tree_update` 会跳过未暴露的子树，前序遍历 + 同一跳过规则即可对上序号，
-/// 比让后端长期持有一份会过期的 `NodeIdMap` 简单。
-#[cfg(feature = "a11y")]
-fn nth_node_id(tree: &UiTree, wanted: usize) -> Option<String> {
-    fn walk(node: &y901_ui::NodeInfo, seen: &mut usize, wanted: usize) -> Option<String> {
-        if !node.semantics.exposed_to_ai {
-            return None;
-        }
-        if *seen == wanted {
-            return Some(node.id.clone());
-        }
-        *seen += 1;
-        node.children.iter().find_map(|c| walk(c, seen, wanted))
-    }
-    walk(&tree.snapshot(), &mut 0, wanted)
-}
 #[cfg(test)]
 mod dpi_scale_tests {
     use super::{dpi_scale, snap_scale, xft_dpi_from_resource_manager};

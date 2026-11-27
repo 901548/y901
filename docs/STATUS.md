@@ -2,11 +2,43 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1283` / `ignored=70` / `targets=188`；`--include-ignored` 全量 `passed=1283` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1246` / `ignored=34` / `targets=188`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-lf.log](evidence/cross-platform/linux-verify-2026-11-27-lf.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1295` / `ignored=70` / `targets=188`；`--include-ignored` 全量 `passed=1295` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1258` / `ignored=34` / `targets=188`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-a11y.log](evidence/cross-platform/linux-verify-2026-11-27-a11y.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-27（续二）：无障碍动作路由 —— `NodeId` 改稳定哈希（PLAN 批次 3）
+
+**症状（真实可复现的误操作）**：读屏器/自动化点"删除第 2 行"，删掉的却是第 3 行。
+
+根因有两层，缺一不可：
+
+1. `y901-a11y::to_tree_update` 按**前序遍历序号**分配 `NodeId`（`NodeId(next_id)`）。
+   列表删掉一行，它后面所有控件的 id **整体前移一位**；
+2. 两个后端的 `pump_a11y` 收到动作后，用 `nth_node_id(tree, target.0 as usize)`
+   按**当下这棵树**的序号反查。而 UIA / AT-SPI 的动作都要过一层 IPC，
+   到达时树**已经不是**当初推出去的那棵了 —— 序号 + 异步 = 张冠李戴。
+
+修法（三处一起改才有意义）：
+
+| 层 | 改法 |
+|---|---|
+| id 分配 | `NodeId = FNV-1a 64(NodeInfo.id)`；同树内碰撞**线性探测**。同一控件**跨帧 id 不变**，UIA 的自动化节点缓存与读屏器的焦点记忆才靠得住 |
+| 映射 | `to_tree_update_with_map()` 返回 `(TreeUpdate, NodeIdMap)`（旧入口 `to_tree_update()` 保留）；`NodeIdMap` 此前是**从未被填充的死代码** |
+| 派发 | 窗口持 `a11y_node_ids`（最近一次推送的映射）；动作进来直接反查。**查不到 = 节点已删除 → 丢弃 + 每进程告警一次**（不静默误派，也不刷屏）。两个后端的 `nth_node_id` 已删除 |
+
+顺带补上浮层的语义树断言：`snapshot()` 把浮层作为根的最后几个孩子追加，而
+AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩形 == 命中测试矩形"
+（锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
+
+**验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；workspace **1295 passed / 0 failed**
+（ignored 70 / 188 目标，`--include-ignored` 1365）；Linux Xvfb **1258 passed / 34 ignored**，
+且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
+**变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
+（文件 SHA256 比对确认字节一致）。
+**诚实边界**：自动化只覆盖到"映射表把 id 查对了"；"讲述人真的点中那一行"仍需按
+[A11Y_ACCEPTANCE.md](A11Y_ACCEPTANCE.md) 人工验收。
 
 ## 2026-11-27（续）：整理 —— RenderStats 三个软后端统一到 `Collector`
 
@@ -375,7 +407,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1283** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1295** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -846,7 +878,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1283/0/70 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1295/0/70 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，

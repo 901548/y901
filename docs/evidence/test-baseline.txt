@@ -227,4 +227,11 @@
 #   default cargo test --workspace --no-fail-fast   passed 1283, failed 0, ignored 70 / 188 个测试目标
 #   (新增 4 条 Collector 用例：关闭 inert / 复用+计数器归零 / 跳过帧无阶段值 / discard 不交付。
 #    Linux 侧 passed=1246 / targets=188)
-1283
+# Measured at 2026-11-27 (PLAN 批次 3：无障碍 NodeId 改稳定哈希 + NodeIdMap 接进两个后端):
+#   default cargo test --workspace --no-fail-fast   passed 1295, failed 0, ignored 70 / 188 个测试目标
+#   (新增 12 条：y901-a11y 10 条 —— 跨帧 id 不变 / 已删除节点的动作查不到 / 唯一性与反查 /
+#    未暴露节点无 id / 与顺序无关 / 碰撞线性探测 / 重复 id 复用 / FNV 固定向量 /
+#    浮层子树可达且可点 / 菜单重建后 id 稳定；y901-ui popup_hit 2 条 ——
+#    语义树浮层矩形与命中几何一致 / 浮层排在基础树之后。
+#    include_ignored 1353 → 1365。)
+1295

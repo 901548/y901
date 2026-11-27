@@ -44,6 +44,23 @@ pub struct NodeIdMap {
     to_y901: std::collections::HashMap<accesskit::NodeId, String>,
 }
 
+impl From<std::collections::HashMap<String, accesskit::NodeId>> for NodeIdMap {
+    /// 由"Y901 id → AccessKit id"单向表构造双向表。
+    ///
+    /// 为什么需要：`to_tree_update_with_map` 在遍历时只维护单向表（反向表每帧重建
+    /// 一次太浪费），转成 `NodeIdMap` 时一次补齐 —— 一个 O(n) 的冷操作，每帧一次。
+    fn from(to_accesskit: std::collections::HashMap<String, accesskit::NodeId>) -> Self {
+        let mut to_y901 = std::collections::HashMap::with_capacity(to_accesskit.len());
+        for (y901_id, ak) in &to_accesskit {
+            to_y901.insert(*ak, y901_id.clone());
+        }
+        Self {
+            to_accesskit,
+            to_y901,
+        }
+    }
+}
+
 impl NodeIdMap {
     /// 记录一条映射。
     pub fn insert(&mut self, y901_id: impl Into<String>, ak: accesskit::NodeId) {

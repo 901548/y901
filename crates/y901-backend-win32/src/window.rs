@@ -893,6 +893,16 @@ pub struct Window {
     /// 所以它在 `create_inner` 里紧跟建窗之后创建。
     #[cfg(feature = "a11y")]
     a11y: Option<y901_a11y::platform::windows_uia::WindowsUia>,
+    /// **最近一次推给 UIA 的 id 映射**（feature `a11y`）。
+    ///
+    /// 动作是**异步**到达的：那一刻的树可能已经变了，而用户操作的永远是
+    /// "他看到的那个节点" —— 所以要用最近一次推送时的映射，而不是重新推一遍
+    /// 再按遍历序号猜（旧实现的做法，删行后会点到邻居）。
+    ///
+    /// `NodeId` 本身是 Y901 节点 id 的稳定哈希，跨帧不变；映射表额外负责
+    /// "这个 id 现在还在不在树里"，查不到就说明动作指向已删除的节点。
+    #[cfg(feature = "a11y")]
+    a11y_node_ids: y901_a11y::platform::NodeIdMap,
 }
 
 impl Window {
@@ -1152,6 +1162,8 @@ impl Window {
                 dpi_scale,
                 #[cfg(feature = "a11y")]
                 a11y,
+                #[cfg(feature = "a11y")]
+                a11y_node_ids: y901_a11y::platform::NodeIdMap::default(),
             };
             // 此时窗口已以普通样式存在，`set_fullscreen` 能保存到真实原状态。
             if fullscreen {
@@ -2462,47 +2474,52 @@ impl y901_runtime::window::WindowBackend for Window {
 impl Window {
     /// 推无障碍树 + 回派读屏器动作。
     ///
-    /// 动作回派只处理 `Click`：AccessKit 的 u64 id 用**前序遍历序号**反查成
-    /// Y901 的节点 id（与 `to_tree_update` 的分配规则一致），再投一条 `Action{name:"click"}`。
+    /// 动作回派只处理 `Click`：用**本帧的** [`y901_a11y::NodeIdMap`] 把 AccessKit
+    /// 的 `NodeId` 反查成 Y901 节点 id，再投一条 `Action{name:"click"}`。
+    ///
+    /// 为什么必须用映射表而不是"前序遍历序号"：`NodeId` 现在是 Y901 节点 id 的
+    /// **稳定哈希**（跨帧不变），而序号会随"删掉一行"整体前移 —— 读屏器的动作是
+    /// **异步**到达的，按序号反查就会点到邻居身上（审计 #6 的原始症状）。
+    /// 用表还有一个好处：**已删除节点**的动作查不到 → 显式丢弃，不会误路由。
     fn pump_a11y(&mut self, tree: &mut UiTree) {
         let Some(bridge) = self.a11y.as_mut() else {
             return;
         };
-        bridge.push(y901_a11y::to_tree_update(tree.snapshot()));
+        let (update, node_ids) = y901_a11y::to_tree_update_with_map(tree.snapshot());
+        bridge.push(update);
+        // 记住本帧映射：动作可能下一帧才到，但那时树已经变了，
+        // 用**最近一次推送**的映射才是"用户看到的那棵树"。
+        self.a11y_node_ids = node_ids;
         while let Some(req) = bridge.poll_action() {
             if !matches!(req.action, y901_a11y::accesskit::Action::Click) {
                 continue;
             }
-            if let Some(id) = nth_node_id(tree, req.target_node.0 as usize) {
-                tree.dispatch_to(
-                    &id,
-                    &y901_ui::UiEvent::Action {
-                        name: "click".to_string(),
-                        args: y901_ui::json::Json::obj(),
-                    },
-                );
+            match self.a11y_node_ids.y901_of(req.target_node) {
+                Some(id) => {
+                    let id = id.to_string();
+                    tree.dispatch_to(
+                        &id,
+                        &y901_ui::UiEvent::Action {
+                            name: "click".to_string(),
+                            args: y901_ui::json::Json::obj(),
+                        },
+                    );
+                }
+                None => {
+                    // 节点已不在树里：**丢弃并按进程只告警一次**。
+                    // 静默丢弃会让人以为"读屏器不工作"；每次都打会刷屏。
+                    static WARNED: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
+                    if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!(
+                            "[y901] 无障碍动作指向已不存在的节点（AccessKit id {:?}），已丢弃",
+                            req.target_node
+                        );
+                    }
+                }
             }
         }
     }
-}
-
-/// 按**前序遍历序号**取节点 id（与 `to_tree_update` 的分配顺序一致）。
-///
-/// `to_tree_update` 会跳过未暴露的子树，前序遍历 + 同一跳过规则即可对上序号，
-/// 比让后端长期持有一份会过期的 `NodeIdMap` 简单。
-#[cfg(feature = "a11y")]
-fn nth_node_id(tree: &UiTree, wanted: usize) -> Option<String> {
-    fn walk(node: &y901_ui::NodeInfo, seen: &mut usize, wanted: usize) -> Option<String> {
-        if !node.semantics.exposed_to_ai {
-            return None;
-        }
-        if *seen == wanted {
-            return Some(node.id.clone());
-        }
-        *seen += 1;
-        node.children.iter().find_map(|c| walk(c, seen, wanted))
-    }
-    walk(&tree.snapshot(), &mut 0, wanted)
 }
 
 #[cfg(test)]

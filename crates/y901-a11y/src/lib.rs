@@ -21,11 +21,13 @@
 //! ## 用法
 //!
 //! ```no_run
-//! # use y901_a11y::to_tree_update;
+//! # use y901_a11y::to_tree_update_with_map;
 //! # fn demo(tree: &y901_ui::UiTree) {
-//! let update = to_tree_update(tree.snapshot());
-//! // 把 update 交给 accesskit_windows / accesskit_unix 的适配器
-//! # let _ = update;
+//! let (update, node_ids) = to_tree_update_with_map(tree.snapshot());
+//! // 把 update 交给 accesskit_windows / accesskit_unix 的适配器；
+//! // node_ids 留着，收到系统动作时用它把 AccessKit id 反查回 Y901 节点 id：
+//! // if let Some(id) = node_ids.y901_of(action_node) { tree.dispatch_to(id, ..); }
+//! # let _ = (update, node_ids);
 //! # }
 //! ```
 //!
@@ -151,6 +153,61 @@ fn apply_state(sem: &Semantics, node: &mut Node) {
     }
 }
 
+/// Y901 节点 id → AccessKit `NodeId` 的**稳定**映射。
+///
+/// # 为什么不能用前序遍历序号
+///
+/// 旧实现是 `NodeId(next_id)`，`next_id` 按遍历顺序自增。于是**列表删掉一行**，
+/// 它后面所有控件的 `NodeId` 全部前移一位；读屏器的动作在**下一帧**才到达
+///（AccessKit/UIA 是异步的），反查就落到了邻居身上 —— 用户点"删除"，删掉的是
+/// 下一行。审计 #6 记的就是这条。
+///
+/// # 现在的规则
+///
+/// `NodeId = FNV-1a 64(Y901 节点 id)`；同一棵树里若两个不同 id 撞到同一个哈希，
+/// 就**线性探测**往后找一个没被占用的值。这样：
+/// - 同一个控件**跨帧 id 不变**（UIA 的自动化节点缓存、读屏器的焦点记忆都依赖它）；
+/// - 碰撞只影响"谁多占一个值"，不影响正确性，且**结果确定**（同一棵树每次分配一致）；
+/// - 已删除节点的旧 id 不会命中任何现有节点，调用方据此**显式丢弃**动作。
+#[inline]
+fn fnv1a64(text: &str) -> u64 {
+    // FNV-1a：参数取标准值，便于跨语言复现（Python/JS 侧算同一个值）。
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in text.as_bytes() {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// 分配器：记录"这个哈希值已经被谁占了"，碰撞时线性探测。
+#[derive(Default)]
+struct IdAllocator {
+    /// `NodeId` → 占用它的 Y901 id（用于区分"同一个 id 重复出现"与"真碰撞"）。
+    taken: HashMap<accesskit::NodeId, String>,
+}
+
+impl IdAllocator {
+    /// 给 `y901_id` 分配一个**稳定**的 `NodeId`。
+    fn allocate(&mut self, y901_id: &str) -> NodeId {
+        let mut value = fnv1a64(y901_id);
+        loop {
+            let candidate = NodeId(value);
+            match self.taken.get(&candidate) {
+                // 同一个 Y901 id 再次出现（同一棵树里理论上不会，防御性处理）：
+                // 复用同一个 `NodeId`，不另占一个值。
+                Some(owner) if owner == y901_id => return candidate,
+                // 真碰撞：线性探测下一个值。
+                Some(_) => value = value.wrapping_add(1),
+                None => {
+                    self.taken.insert(candidate, y901_id.to_string());
+                    return candidate;
+                }
+            }
+        }
+    }
+}
+
 /// 递归把一个节点（含子树）转成 AccessKit 的 `(NodeId, Node)` 列表。
 ///
 /// 返回：本节点的 id 与"已展开的扁平列表"。
@@ -159,15 +216,14 @@ fn apply_state(sem: &Semantics, node: &mut Node) {
 fn convert(
     info: &NodeInfo,
     parent: Option<NodeId>,
-    next_id: &mut u64,
+    alloc: &mut IdAllocator,
     out: &mut Vec<(NodeId, Node)>,
     id_map: &mut HashMap<String, NodeId>,
 ) -> Option<NodeId> {
     if !info.semantics.exposed_to_ai {
         return None;
     }
-    let self_id = NodeId(*next_id);
-    *next_id += 1;
+    let self_id = alloc.allocate(&info.id);
     id_map.insert(info.id.clone(), self_id);
 
     let mut node = Node::new(map_role(info.role));
@@ -195,7 +251,7 @@ fn convert(
     // 子节点：先递归收集（`out` 的写入顺序不影响 TreeUpdate 的正确性）。
     let mut child_ids = Vec::new();
     for child in &info.children {
-        if let Some(child_id) = convert(child, Some(self_id), next_id, out, id_map) {
+        if let Some(child_id) = convert(child, Some(self_id), alloc, out, id_map) {
             child_ids.push(child_id);
         }
     }
@@ -215,10 +271,22 @@ fn convert(
 /// - `focus` 取第一个 `focused == true` 的已暴露节点，没有就用根；
 /// - `tree` 只在首次推送时给（本函数总是给，平台层可自行去重）。
 pub fn to_tree_update(root: NodeInfo) -> TreeUpdate {
+    // 兼容入口：大多数调用方（含文档示例与既有测试）只关心 `TreeUpdate`。
+    // 需要把系统动作映射回 Y901 节点时用 [`to_tree_update_with_map`]。
+    to_tree_update_with_map(root).0
+}
+
+/// 同上，但**同时返回 AccessKit id ↔ Y901 节点 id 的映射**。
+///
+/// 为什么后端必须用这一个：`NodeId` 现在是**由 Y901 节点 id 派生的稳定哈希**
+/// （FNV-1a 哈希，见下方 `IdAllocator` 的说明），跨帧不变；但"某个 id 曾经存在、现在已经不在树里"
+/// 仍然只能靠**当帧的映射表**判断 —— 没有表就只能猜，而那正是旧实现
+/// （按前序遍历序号反查）会在删行后把"删除"点到邻居身上的原因。
+pub fn to_tree_update_with_map(root: NodeInfo) -> (TreeUpdate, NodeIdMap) {
     let mut out = Vec::new();
     let mut id_map = HashMap::new();
-    let mut next_id = 0u64;
-    let root_id = convert(&root, None, &mut next_id, &mut out, &mut id_map);
+    let mut alloc = IdAllocator::default();
+    let root_id = convert(&root, None, &mut alloc, &mut out, &mut id_map);
 
     // 找焦点：优先语义树里 focused 的节点。
     let focused = find_focused(&root, &id_map);
@@ -247,12 +315,13 @@ pub fn to_tree_update(root: NodeInfo) -> TreeUpdate {
         }
     };
 
-    TreeUpdate {
+    let update = TreeUpdate {
         nodes: out,
         tree,
         tree_id: accesskit::TreeId::ROOT,
         focus: focused.unwrap_or(root_node),
-    }
+    };
+    (update, id_map.into())
 }
 
 /// 找第一个持有焦点的已暴露节点。
@@ -526,5 +595,157 @@ mod tests {
             .expect("button");
         assert_eq!(button.label(), None, "没有 label 就不该有名字");
         let _ = Pos::new(0.0, 0.0);
+    }
+
+    // ---- 稳定 NodeId（审计 #6 的回归） ----
+
+    /// 三行列表。`rows` 决定哪些行还在树里，用来模拟"删掉一行"。
+    fn list_with_rows(rows: &[&str]) -> NodeInfo {
+        let mut root = node("list", "list");
+        for id in rows {
+            root.children.push(node(id, "list_item"));
+        }
+        root
+    }
+
+    #[test]
+    fn node_id_does_not_shift_when_a_sibling_is_deleted() {
+        let (_, before) = to_tree_update_with_map(list_with_rows(&["row-a", "row-b", "row-c"]));
+        let (_, after) = to_tree_update_with_map(list_with_rows(&["row-a", "row-c"]));
+        assert_eq!(
+            after.accesskit_of("row-c"),
+            before.accesskit_of("row-c"),
+            "删掉 row-b 后 row-c 的 NodeId 必须不变，否则读屏器下一帧会点到邻居上"
+        );
+        assert_eq!(
+            after.accesskit_of("row-a"),
+            before.accesskit_of("row-a"),
+            "未受影响的节点更不能变"
+        );
+    }
+
+    #[test]
+    fn action_for_a_deleted_node_finds_nothing_and_is_dropped() {
+        let (_, before) = to_tree_update_with_map(list_with_rows(&["row-a", "row-b"]));
+        let deleted = before.accesskit_of("row-b").expect("row-b 曾有 id");
+        let (_, after) = to_tree_update_with_map(list_with_rows(&["row-a"]));
+        // 后端就是靠这个 `None` 把"指向已删除节点"的动作丢掉，而不是误派给相邻行。
+        assert_eq!(after.y901_of(deleted), None);
+    }
+
+    #[test]
+    fn every_exposed_node_gets_a_distinct_id_and_maps_back() {
+        let root = list_with_rows(&["row-a", "row-b", "row-c"]);
+        let (update, map) = to_tree_update_with_map(root);
+        assert_eq!(map.len(), 4, "根 + 3 行");
+        assert_eq!(update.nodes.len(), 4);
+        let mut seen = std::collections::HashSet::new();
+        for (id, _) in &update.nodes {
+            assert!(seen.insert(*id), "NodeId 必须唯一：{:?} 重复", id);
+        }
+        for expect in ["list", "row-a", "row-b", "row-c"] {
+            let id = map.accesskit_of(expect).expect("应有映射");
+            assert_eq!(map.y901_of(id), Some(expect), "反查必须回到同一个 id");
+        }
+    }
+
+    #[test]
+    fn unexposed_nodes_neither_get_an_id_nor_appear_in_the_map() {
+        let mut root = node("root", "window");
+        let mut hidden = node("hidden", "panel");
+        hidden.semantics = Semantics::default(); // 未暴露
+        root.children.push(hidden);
+        let (_, map) = to_tree_update_with_map(root);
+        assert_eq!(map.accesskit_of("hidden"), None);
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn id_depends_only_on_the_y901_id_not_on_position_or_order() {
+        // 同一批 id、不同顺序 → 每个节点拿到的 NodeId 相同。
+        let (_, a) = to_tree_update_with_map(list_with_rows(&["x", "y"]));
+        let (_, b) = to_tree_update_with_map(list_with_rows(&["y", "x"]));
+        assert_eq!(a.accesskit_of("x"), b.accesskit_of("x"));
+        assert_eq!(a.accesskit_of("y"), b.accesskit_of("y"));
+    }
+
+    #[test]
+    fn hash_collision_probes_to_the_next_free_value() {
+        // 人为占住 "beta" 的哈希值（模拟真碰撞），分配器必须往后线性探测，
+        // 而不是把两个不同节点映射成同一个 NodeId。
+        let mut alloc = IdAllocator::default();
+        let stolen = NodeId(fnv1a64("beta"));
+        alloc.taken.insert(stolen, "someone-else".to_string());
+        let got = alloc.allocate("beta");
+        assert_ne!(got, stolen, "碰撞时必须换一个值");
+        assert_eq!(got, NodeId(fnv1a64("beta").wrapping_add(1)));
+    }
+
+    #[test]
+    fn allocating_the_same_id_twice_reuses_the_same_node_id() {
+        // 防御性：同一棵树里同一个 Y901 id 出现两次时，不该白占两个 NodeId。
+        let mut alloc = IdAllocator::default();
+        let first = alloc.allocate("dup");
+        let second = alloc.allocate("dup");
+        assert_eq!(first, second);
+        assert_eq!(alloc.taken.len(), 1);
+    }
+
+    #[test]
+    fn popup_subtree_is_reachable_and_actionable() {
+        // `UiTree::snapshot()` 把浮层（菜单/下拉/对话框）作为**根节点的最后几个孩子**
+        // 追加进来（绘制顺序）。读屏器必须能走到菜单项 —— 否则"键盘能开菜单，
+        // 读屏器却念不到里面有什么"。
+        let mut root = node("window", "window");
+        root.children.push(node("save-btn", "button"));
+        let mut menu = node("menu", "list");
+        menu.children.push(node("item-a", "list_item"));
+        menu.children.push(node("item-b", "list_item"));
+        root.children.push(menu);
+
+        let (update, map) = to_tree_update_with_map(root);
+        assert_eq!(update.nodes.len(), 5, "窗口 + 按钮 + 菜单 + 两个菜单项");
+        for expect in ["window", "save-btn", "menu", "item-a", "item-b"] {
+            let id = map.accesskit_of(expect).expect("每个节点都要有 id");
+            assert_eq!(map.y901_of(id), Some(expect));
+        }
+        // 菜单项必须是 AccessKit 树里的真实节点（能接收 Click），不是只有 id。
+        let item_a = map.accesskit_of("item-a").unwrap();
+        let node_a = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == item_a)
+            .map(|(_, n)| n)
+            .expect("菜单项节点");
+        assert_eq!(node_a.role(), Role::ListItem);
+    }
+
+    #[test]
+    fn popup_item_ids_are_stable_when_the_menu_is_rebuilt() {
+        // 每帧重建整棵树（平台层就是这么做的）时，同一个菜单项的 `NodeId` 不能变；
+        // 否则读屏器缓存的"当前菜单项"会在每一帧失效。
+        fn menu_with(items: &[&str]) -> NodeInfo {
+            let mut root = node("window", "window");
+            let mut menu = node("menu", "list");
+            for id in items {
+                menu.children.push(node(id, "list_item"));
+            }
+            root.children.push(menu);
+            root
+        }
+        let (_, before) = to_tree_update_with_map(menu_with(&["a", "b", "c"]));
+        let (_, after) = to_tree_update_with_map(menu_with(&["a", "b", "c"]));
+        for id in ["a", "b", "c"] {
+            assert_eq!(before.accesskit_of(id), after.accesskit_of(id));
+        }
+    }
+
+    #[test]
+    fn fnv1a_matches_known_values() {
+        // 固定向量：换了算法就会在这里红，提醒"NodeId 不是随便能改的"——
+        // 改了等于把所有平台侧的节点缓存一次性作废。
+        assert_eq!(fnv1a64(""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a64("a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a64("foobar"), 0x8594_4171_f739_67e8);
     }
 }

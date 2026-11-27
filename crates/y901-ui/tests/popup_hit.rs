@@ -126,6 +126,14 @@ impl Widget for Leaf {
     fn children(&self) -> &[Box<dyn Widget>] {
         &self.children
     }
+    /// 必须有：`add_node` 只对返回 `Some` 的容器生效，否则"挂子节点"直接失败
+    ///（本文件的 `snapshot_appends_popups_after_the_base_tree` 依赖它）。
+    fn children_mut(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        Some(&mut self.children)
+    }
+    fn children_mut_for_traversal(&mut self) -> Option<&mut Vec<Box<dyn Widget>>> {
+        Some(&mut self.children)
+    }
     fn cursor_at(&self, _pos: Pos) -> Cursor {
         self.cursor
     }
@@ -250,5 +258,88 @@ fn snapshot_json_includes_popup_subtrees() {
     assert!(
         json.contains("menu") && json.contains("item"),
         "浮层与菜单项必须出现在快照里（旧实现只有树节点）：{json}"
+    );
+}
+/// `snapshot()`（无障碍/外部工具用的 `NodeInfo` 树）里的浮层矩形，
+/// 必须与**命中测试**用的是同一个矩形。
+///
+/// 为什么单独钉：AccessKit 的 `bounds` 由这个 `rect` 生成，读屏器的
+/// "触摸探索 / 鼠标定位朗读"直接打在 bounds 上。若语义树报 `node.rect()`
+/// 而命中用 `place_popup` 的结果，两者一旦不一致，读屏器指到的地方就点不中。
+#[test]
+fn snapshot_popup_rect_matches_the_hit_test_geometry() {
+    let mut t = tree();
+    layout_once(&mut t);
+    let menu = Leaf::new("menu", Cursor::Default, Size::new(120.0, 40.0)).with_children(vec![
+        Box::new(Leaf::new("item-a", Cursor::Pointer, Size::new(120.0, 20.0))),
+        Box::new(Leaf::new("item-b", Cursor::Pointer, Size::new(120.0, 20.0))),
+    ]);
+    // 锚点贴着视口右下角：`place_popup` 会把它往左上翻，因此"放置后矩形"
+    // 一定不同于锚点矩形 —— 正是旧实现容易报错的那种情形。
+    assert!(t.open_popup(Box::new(menu), Rect::new(VW - 20.0, VH - 20.0, 40.0, 24.0)));
+    layout_once(&mut t);
+
+    let placed = t.popup_rect("menu").expect("浮层应有 rect");
+    let snap = t.snapshot();
+    let popup_info = snap
+        .children
+        .iter()
+        .find(|c| c.id == "menu")
+        .expect("浮层必须出现在语义树里");
+    assert_eq!(
+        popup_info.rect, placed,
+        "语义树必须报 place_popup 之后的矩形（旧实现报的是控件自己的 rect）"
+    );
+
+    // 语义树里的矩形中心，命中必须落进浮层内部。
+    let center = Pos::new(placed.x + placed.w * 0.5, placed.y + placed.h * 0.5);
+    let hit = t.hit_test(center).expect("浮层中心应有命中");
+    assert!(
+        hit == "item-a" || hit == "item-b" || hit == "menu",
+        "语义树矩形与命中几何不一致：center={center:?} 命中 {hit}"
+    );
+}
+
+/// 浮层必须排在根节点的 `children` **末尾**（与绘制顺序一致：浮层最后画）。
+///
+/// AccessKit 的树内顺序等于读屏器的朗读顺序；把浮层混进基础内容中间，
+/// 会造成"菜单项夹在正文里"的朗读顺序错误。
+#[test]
+fn snapshot_appends_popups_after_the_base_tree() {
+    let mut t = tree();
+    // 根节点本身没有孩子时，"浮层排最后"是无意义的断言 —— 先加一个真正的
+    // 基础内容节点，才能区分"浮层混进基础树"与"浮层追加在后面"。
+    assert!(
+        t.add_node(
+            "bg",
+            Box::new(Leaf::new("btn", Cursor::Pointer, Size::new(80.0, 24.0)))
+        ),
+        "基础按钮应挂得上"
+    );
+    layout_once(&mut t);
+    let menu =
+        Leaf::new("menu", Cursor::Default, Size::new(120.0, 20.0)).with_children(vec![Box::new(
+            Leaf::new("item", Cursor::Pointer, Size::new(120.0, 20.0)),
+        )]);
+    t.open_popup(Box::new(menu), Rect::new(10.0, 10.0, 40.0, 24.0));
+    layout_once(&mut t);
+
+    let snap = t.snapshot();
+    let ids: Vec<&str> = snap.children.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(
+        ids.last().copied(),
+        Some("menu"),
+        "浮层应是根节点的最后一个孩子（绘制顺序），实得 {ids:?}"
+    );
+    assert_eq!(
+        ids,
+        vec!["btn", "menu"],
+        "基础内容在前、浮层在后（绘制/朗读顺序），实得 {ids:?}"
+    );
+    let menu_info = snap.children.last().expect("浮层");
+    assert!(
+        menu_info.children.iter().any(|c| c.id == "item"),
+        "浮层子树也要进语义树，实得 {:?}",
+        menu_info.children.iter().map(|c| &c.id).collect::<Vec<_>>()
     );
 }
