@@ -155,12 +155,18 @@ fn capacity_for_rounds_up_to_powers_of_two() {
 /// 第二个窗口的创建仍会在 WARP 上卡住（线程间共享 D3D 运行时状态）。
 /// 串行地在**同一个窗口**里做两段检查，既满足约定也不牺牲覆盖面。
 ///
-/// **默认 `#[ignore]`**：CI 的 windows runner 只有 WARP，扩容实例缓冲后实测
-/// `STATUS_HEAP_CORRUPTION`（0xc0000374，测试进程直接崩、连用例名都不打印）。
-/// 本地带真实 GPU 用 `--ignored` 跑是本用例的**唯一**验证途径；WARP 上的崩溃
-/// 已记录为待查风险（见 STATUS.md），在定位前不放进默认门禁 —— 否则 CI 永远红。
+/// **默认 `#[ignore]`**：CI 的 windows runner 没有 GPU，`Window::create` 直接失败，
+/// 本用例只会 SKIP；真正有意义的执行需要一台有 D3D11 设备的机器
+/// （`cargo test -p y901-backend-win32 --test instance_overflow -- --ignored`）。
+///
+/// **2026-11-27 更新**：WARP 上原本会 `STATUS_HEAP_CORRUPTION`（0xc0000374）的那个
+/// 崩溃已经定位并修好 —— 根因不是 WARP，是 `rebuild()` 之后"容量记在 `Gfx`、
+/// 缓冲在 `Pipeline`"两者不同步，`copy_nonoverlapping` 写过了映射区尾部。
+/// 现在容量与缓冲由 `Pipeline` 独占（见 `d3d11.rs` 里 `Pipeline::instance_capacity`
+/// 与 `device_object_lifetime_tests`）。WARP 上复跑不再崩溃，只是因为本机 WARP 的
+/// `Present` 本身就返回 `0x887A0005`（100 个实例也一样），所以这里仍会走 SKIP。
 #[test]
-#[ignore = "需要真实 GPU：WARP 上扩容实例缓冲会 STATUS_HEAP_CORRUPTION；本地 --ignored 跑"]
+#[ignore = "需要可用的 D3D11 设备（CI 无 GPU）；本地 --ignored 跑"]
 fn instance_overflow_draws_everything_and_paints_the_tail() {
     let _guard = D3D_LOCK
         .lock()

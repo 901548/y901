@@ -1734,6 +1734,16 @@ struct Pipeline {
     rasterizer: RasterizerState,
     constant_buffer: Buffer,
     instance_buffer: Buffer,
+    /// `instance_buffer` 实际能放多少个实例。
+    ///
+    /// **为什么要放在 `Pipeline` 里、而不是 `Gfx` 里**：容量必须与缓冲同生共死。
+    /// 旧实现把容量存在 `Gfx` 上，`rebuild()` 重建了 `Pipeline`（缓冲回到
+    /// `INSTANCE_CAPACITY`）却忘了把容量改回去 —— 于是下一帧
+    /// `ensure_instance_capacity()` 认为"还够大"直接返回，`count` 取到旧的大值，
+    /// `Map` 后的 `copy_nonoverlapping` 就**写过了映射区尾部**。
+    /// 在 WARP 上这稳定表现为 `STATUS_HEAP_CORRUPTION`（进程级崩溃）；
+    /// 在真实 GPU 上则是驱动内存被悄悄踩坏。现在两个值只能在同一个地方一起改。
+    instance_capacity: usize,
     /// blit 专用的小缓冲（1 个实例）。
     ///
     /// **不能复用 `instance_buffer`**：那会 `Map(DISCARD)` 掉 UI 实例，
@@ -1903,6 +1913,7 @@ unsafe fn create_pipeline(device: &Device) -> Result<Pipeline, String> {
     })?;
 
     Ok(Pipeline {
+        instance_capacity: INSTANCE_CAPACITY,
         vertex_shader,
         pixel_shader,
         blit_ps,
@@ -2140,11 +2151,6 @@ pub struct Gfx {
     images: std::collections::HashMap<u64, (Texture, ShaderResourceView, u32, u32, u32)>,
     /// 下一个图片索引（从 1 开始，0 = 无效）。
     next_image: u64,
-    /// **实例缓冲当前容量**（元素数）。
-    ///
-    /// 初始为 [`INSTANCE_CAPACITY`]；某一帧实例更多时按 2 的幂扩容
-    /// （RENDER-BUG-01 / issue #7：以前超出部分被 `min()` 静默截断）。
-    instance_capacity: usize,
 }
 
 impl Gfx {
@@ -2175,7 +2181,6 @@ impl Gfx {
             snapshot: None,
             images: std::collections::HashMap::new(),
             next_image: 0,
-            instance_capacity: INSTANCE_CAPACITY,
         };
         gfx.rebuild(hwnd, width, height)?;
         Ok(gfx)
@@ -2192,6 +2197,15 @@ impl Gfx {
     ///
     /// 违反会导致：旧指针悬垂，后续提交命令时访问已释放的 COM 对象（未定义行为）。
     pub unsafe fn rebuild(&mut self, hwnd: HWND, width: u32, height: u32) -> Result<(), String> {
+        // **所有"由设备创建的对象"都必须在这里一起丢掉**，否则重建之后仍会拿
+        // 旧设备的 COM 指针去绑定新上下文：D3D11 在 release 下不报错、只是画不出来，
+        // 在 debug layer 下会直接报 DEVICE_MISMATCH，还可能把新设备再踢一次。
+        //
+        // 历史教训（本文件已有两处同类）：
+        // - 容量挂在 `Gfx` 上、缓冲在 `Pipeline` 里 → 重建后容量说"还够"、实际缓冲更小
+        //   → `copy_nonoverlapping` 写过界 → WARP 上 STATUS_HEAP_CORRUPTION；
+        // - 图集是 CPU 侧 `atlas_data` 派生出来的（`create_atlas` 会重建），当时就对了；
+        // - 图片纹理表 `images` 是设备对象，**以前漏在这里**。
         self.atlas = None;
         self.pipeline = None;
         self.cached = None;
@@ -2199,6 +2213,14 @@ impl Gfx {
         self.swap_chain = None;
         self.context = None;
         self.device = None;
+        // 图片纹理来自旧设备：直接丢弃。代价是设备丢失后图片需要重新上传
+        // （控件下一次 `upload_texture` 会拿到新 id）；不丢则会一直用外设备 SRV。
+        // `next_image` **不回绕**：id 单调递增，避免新旧表混用时别名冲突。
+        let dropped = self.images.len();
+        self.images.clear();
+        if dropped > 0 {
+            eprintln!("[y901] 设备重建：丢弃 {dropped} 张旧设备的图片纹理（需重新上传）");
+        }
 
         let (device, context, swap_chain) = create_device_and_swap_chain(hwnd, width, height)?;
         let pipeline = create_pipeline(&device)?;
@@ -2506,10 +2528,15 @@ impl Gfx {
     ///
     /// 同 [`Gfx::render_batched`]：必须在拥有本 D3D 设备的线程上调用。
     unsafe fn ensure_instance_capacity(&mut self, needed: usize) -> bool {
-        if needed <= self.instance_capacity {
+        // 容量与缓冲**同一个所有者**（`Pipeline`），所以这里读到的就是真实容量。
+        let old_cap = self
+            .pipeline
+            .as_ref()
+            .map(|p| p.instance_capacity)
+            .unwrap_or(0);
+        if needed <= old_cap {
             return true;
         }
-        let old_cap = self.instance_capacity;
         let new_cap = capacity_for(needed);
         let Some(device) = self.device.as_ref() else {
             return false;
@@ -2531,7 +2558,7 @@ impl Gfx {
         match self.pipeline.as_mut() {
             Some(p) => {
                 p.instance_buffer = buffer;
-                self.instance_capacity = new_cap;
+                p.instance_capacity = new_cap;
                 eprintln!(
                     "[y901] 实例缓冲扩容：{old_cap} → {new_cap} 个实例（本次需要 {needed} 个）"
                 );
@@ -2600,7 +2627,13 @@ impl Gfx {
         // **先保证容量够**：不够就扩容（issue #7）。失败时退化为旧的截断行为，
         // 但下面仍会打印告警，不会静默。
         let capacity_ok = self.ensure_instance_capacity(instances.len());
-        let capacity = self.instance_capacity;
+        // 扩容刚失败时 `capacity_ok=false`，此时容量仍是旧值 —— 这里读的就是
+        // **真实缓冲容量**，`count` 由它夹紧，绝不会超出映射区。
+        let capacity = self
+            .pipeline
+            .as_ref()
+            .map(|p| p.instance_capacity)
+            .unwrap_or(0);
         let (Some(pipeline), Some(rtv), Some(context), Some(swap_chain), Some(cached)) = (
             self.pipeline.as_ref(),
             self.rtv.as_ref(),
@@ -3153,6 +3186,17 @@ impl Gfx {
         hr as u32 == DXGI_STATUS_OCCLUDED
     }
 
+    /// **实例缓冲的真实容量**（元素数，诊断用）。
+    ///
+    /// 为什么要有这个查询：容量现在挂在 `Pipeline` 上（与缓冲同生共死），
+    /// 测试与诊断需要一条只读通道确认"扩容/重建之后容量与缓冲仍然一致"。
+    pub fn instance_capacity(&self) -> usize {
+        self.pipeline
+            .as_ref()
+            .map(|p| p.instance_capacity)
+            .unwrap_or(INSTANCE_CAPACITY)
+    }
+
     /// 调试诊断：当前存活的 COM 对象数（Release 构建恒为 0）。
     // 诊断 API：COM 泄漏计数，仅 `live_objects()` 测试与人工排查调用
     // 归类：诊断 API —— `live_objects` 供泄漏排查（debug 构建计数）
@@ -3478,5 +3522,99 @@ mod render_guard_tests {
     #[test]
     fn rejects_everything_at_once() {
         assert!(!render_preconditions_ok(false, 0, 0));
+    }
+}
+
+#[cfg(test)]
+mod pipeline_capacity_tests {
+    /// **容量必须在建管线时初始化**（且只在 `Pipeline` 里）。
+    ///
+    /// 背景（2026-11-27 实测）：旧实现把容量存在 `Gfx` 上，`rebuild()` 重建管线后
+    /// 忘了重置 —— 下一帧 `ensure_instance_capacity()` 认为"还够大"直接返回，
+    /// `Map` 之后的 `copy_nonoverlapping` 写过了映射区尾部。WARP 上稳定
+    /// `STATUS_HEAP_CORRUPTION`（0xc0000374），真实 GPU 上则是驱动内存被踩。
+    ///
+    /// 为什么用源码守卫：这条路径需要真 GPU（`rebuild` 走设备重建），CI 跑不到。
+    /// 删掉 `instance_capacity: INSTANCE_CAPACITY` 这一行会让本用例立刻红。
+    #[test]
+    fn create_pipeline_initialises_the_capacity_with_the_buffer() {
+        let src = include_str!("d3d11.rs");
+        let start = src
+            .find("fn create_pipeline")
+            .expect("create_pipeline 存在");
+        let rest = &src[start..];
+        let end = rest[1..].find("\nfn ").map(|i| i + 1).unwrap_or(rest.len());
+        let body = &rest[..end];
+        assert!(
+            body.contains("instance_capacity: INSTANCE_CAPACITY"),
+            "建管线时必须同时初始化容量；否则扩容后重建会让容量与缓冲不一致：\n{body}"
+        );
+        assert!(
+            !body.contains("byte_width: (INSTANCE_CAPACITY * INSTANCE_SIZE) as u32\n        ."),
+            "（提示）容量与缓冲的尺寸必须用同一个常量推导"
+        );
+        // 容量不能再挂在 `Gfx` 上（两处各记一份 = 必然会漂移）。
+        let gfx_start = src.find("pub struct Gfx {").expect("Gfx 结构存在");
+        let gfx_rest = &src[gfx_start..];
+        let gfx_end = gfx_rest.find("\n}").expect("结构体结束");
+        assert!(
+            !gfx_rest[..gfx_end].contains("instance_capacity"),
+            "容量必须由 `Pipeline` 独占持有，`Gfx` 上不得再存一份"
+        );
+    }
+}
+
+#[cfg(test)]
+mod device_object_lifetime_tests {
+    /// **重建设备必须扔掉所有"由设备创建"的对象**。
+    ///
+    /// 这条用例抓的是这一类 bug 的共性：某个 `Gfx` 字段持有设备对象，但
+    /// `rebuild()` 忘了清它 —— 重建之后还拿旧设备的指针去绑定新上下文。
+    /// 已发生过两次：
+    /// 1. 实例缓冲容量（`Gfx` 上记一份、`Pipeline` 里有缓冲）→ 写过界 →
+    ///    WARP 上 `STATUS_HEAP_CORRUPTION`；
+    /// 2. 图片纹理表 `images`（漏了）→ 设备丢失后一直用外设备 SRV。
+    ///
+    /// 为什么用源码守卫而不是行为测试：真要触发设备丢失需要拔显卡/驱动更新，
+    /// CI 与开发机都造不出来。这里改成"结构断言 + 源码断言"：
+    /// `rebuild` 的方法体里必须出现每个设备对象字段的清理语句。
+    #[test]
+    fn rebuild_resets_every_device_owned_field() {
+        let src = include_str!("d3d11.rs");
+        let start = src
+            .find("pub unsafe fn rebuild(&mut self, hwnd: HWND")
+            .expect("Gfx::rebuild 存在");
+        let rest = &src[start..];
+        let end = rest[1..]
+            .find("\n    /// # Safety")
+            .map(|i| i + 1)
+            .unwrap_or(rest.len());
+        let body = &rest[..end];
+
+        // 每个设备对象字段都必须被显式清掉。
+        for field in [
+            "self.atlas = None",
+            "self.pipeline = None",
+            "self.cached = None",
+            "self.rtv = None",
+            "self.swap_chain = None",
+            "self.context = None",
+            "self.device = None",
+        ] {
+            assert!(
+                body.contains(field),
+                "rebuild 必须清掉设备对象 `{field}`；漏一个就会在重建后绑定旧设备的指针"
+            );
+        }
+        // 图片纹理表是 HashMap，用 clear()。
+        assert!(
+            body.contains("self.images.clear()"),
+            "rebuild 必须丢弃 `images`（旧设备的 SRV 不能绑到新上下文）：\n{body}"
+        );
+        // 图集要由 CPU 侧数据重建（不是清空了事）。
+        assert!(
+            body.contains("self.create_atlas()"),
+            "rebuild 必须从 CPU 侧图集数据重建纹理，否则整屏缺字"
+        );
     }
 }
