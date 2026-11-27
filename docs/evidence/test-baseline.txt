@@ -263,4 +263,9 @@
 #   (新增 tests/wm_close.rs 2 条（WM_CLOSE 不再立刻销毁 / 否决后窗口仍在）+ ime::ime_form_tests 1 条
 #    （组合窗客户区坐标 + CFS_POINT，候选窗屏幕坐标 + CFS_CANDIDATEPOS）。两处都做了变异验证。
 #    targets 190 → 191。像素哈希不变。)
-1331
+# Measured at 2026-11-27 (y901-core 属性测试抓到并修掉两个真 bug：宽字被擦成半格 / reflow 偏移下溢):
+#   default cargo test --workspace --no-fail-fast   passed 1338, failed 0, ignored 71 / 194 个测试目标
+#   (新增 crates/y901-core/tests/grid_invariants.rs 1 条属性测试（300 网格 × 120 步 × 14 种 VT 操作）
+#    + wide_erase_tests 3 条具名回归；加 wrap_invariants 2 条 + text_caret_invariants 1 条 → targets +3。
+#    两处修复都做了变异验证（改回旧写法立即红）。像素哈希不变。)
+1338

@@ -2,11 +2,61 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1331` / `ignored=71` / `targets=191`；`--include-ignored` 全量 `passed=1331` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1289` / `ignored=35` / `targets=191`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-win32-close.log](evidence/cross-platform/linux-verify-2026-11-27-win32-close.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1338` / `ignored=71` / `targets=194`；`--include-ignored` 全量 `passed=1338` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1296` / `ignored=35` / `targets=194`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-core-props.log](evidence/cross-platform/linux-verify-2026-11-27-core-props.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-27（续十）：用属性测试扫出 `y901-core` 两个真 bug
+
+前几轮都是"读代码找问题"。这轮换成**随机操作 + 不变量断言**（确定性伪随机，不引依赖），
+先在 `y901-core` 的终端网格上跑 300 个网格 × 120 步 × 14 种 VT 操作，抓到两个：
+
+### A. 擦除会把宽字符擦成半个
+
+`blank_from` / `blank_upto` 逐格填空白。宽字占两格（`WideHead` + `WideTail`），
+只要擦除边界落在中间，就会留下"有尾无头"或"有头无尾"的半格：
+
+```text
+擦前:  a 中[尾]        列 1 是宽字头、列 2 是宽字尾
+ESC[1K 到列 2:  a [空] 尾   ← 列 0/1 被填空白，列 2 的 WideTail 成了孤儿
+```
+
+后果：渲染时 `WideTail` 被当作半格标记跳过 → 画面上**少半个字**；
+`line_text()` / `text()` 多出一个无头字符位；下次往这行写字时 `clear_wide_pair`
+又按"列 2 是尾"去清列 1/2，**把相邻内容一起吃掉**。
+触发方式很普通：`ESC[1K` / `ESC[K` / `ESC[J` 时光标恰好停在中文/emoji 上。
+
+修法：所有擦除走同一条 `blank_span()`，边界落在宽字中间时**整字向外扩**
+（VT 语义就是"擦到一部分 = 整个字被擦掉"）。
+
+### B. `reflow` 改列宽时可能 `u32` 下溢 panic
+
+裁剪到视口高度时，旧实现给"同一逻辑行的每一行"都减去 `base_off`：
+
+```rust
+for r in new_rows.iter_mut() { if r.line == base_line { r.line_start -= base_off; } }
+```
+
+它隐含假设"同一 `line` id 的行在序列里连续且偏移单调"。这条假设**不成立**：
+`soft_wrap()` 会把写到的下一个物理行改写成当前逻辑行的续行（终端的正常行为），
+于是同一个 id 可能在屏幕上**非连续地出现两段**，其中一段的 `line_start` 是 0 ——
+减去 `base_off` 就下溢（debug 直接 panic，release 静默错位到错误的行首，
+点击/光标定位全偏）。
+
+修法：只修正**从行 0 开始的连续前缀**（那才是被切开的同一块），并且用**累加**重算
+偏移而不是减法 —— 与 `line_start` 的定义逐字一致，不再依赖 id 唯一性。
+
+### 顺带补的两个属性测试（未发现新 bug，但有护栏价值）
+
+- `wrap_invariants`（4000 + 1500 组随机文本）：`wrap()` 的 `start` 必须是 char 边界且
+  指向该行内容、多字符行宽度放得下、**不丢字符**（按字符而非按词比 —— CJK 允许断字）。
+- `text_caret_invariants`（8 组种子 × 300 轮 × 25 步随机编辑）：光标/锚点永远落在
+  **字素簇边界**上（`e` + 组合重音不能被劈开），包括"把光标设到任意字节位置"和撤销/重做。
+
+**验证**：workspace **1338 passed / 0 failed / 71 ignored / 194 目标**；像素哈希不变；
+两处修复都做了**变异验证**（把实现改回旧写法 → 属性测试立即红，还原后全绿）。
 
 ## 2026-11-27（续九）：发布就绪检查结果 —— 下一版必须是 **0.5.0**，不能是 0.4.1
 
@@ -64,7 +114,7 @@
 **诚实边界**：IME 只验到"表单参数正确"。**真实输入法把候选框画在光标旁边**仍需人工看
 （仓库里没有可自动化的 IMM 环境）。
 
-workspace **1331 passed / 0 failed / 71 ignored / 191 目标**；Linux Xvfb 1289 / 35 / 191。
+当轮 workspace **1331 passed / 0 failed / 71 ignored / 191 目标**；当轮 Linux Xvfb **1289 / 35 / 191**。
 
 ## 2026-11-27（续七）：后台线程一次标脏不再等于整窗重绘（审计 #7）
 
@@ -89,7 +139,7 @@ workspace **1331 passed / 0 failed / 71 ignored / 191 目标**；Linux Xvfb 1289
 **验证**：+4 条（`One` 不整窗 / `One` 请求重排 / 同帧 `All` 压过 `One` / 未知 id 不产生脏区）；
 变异验证：把 `drain` 改回"一律整窗" → 2 条立刻红，还原后全绿。像素哈希不变。
 当轮 workspace **1328 passed / 0 failed / 71 ignored / 190 目标**（`--include-ignored` 1399）；
-Linux Xvfb 1289 passed / 35 ignored。
+当轮 Linux Xvfb **1289 passed / 35 ignored**。
 
 ## 2026-11-27（续六）：WARP 上的 `STATUS_HEAP_CORRUPTION` 已定位并修复
 
@@ -235,7 +285,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1289 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1296 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -608,7 +658,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1328** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1338** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。

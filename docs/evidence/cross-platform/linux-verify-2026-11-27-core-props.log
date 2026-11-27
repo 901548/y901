@@ -1,0 +1,15 @@
+# Linux 验收日志（2026-11-27 第二十一轮）：y901-core 宽字擦除 / reflow 偏移（属性测试抓到的两个 bug）
+# 环境：Ubuntu 22.04 (WSL2) + Xvfb；CARGO_TARGET_DIR=$HOME/y901-target
+# 第一遍 CLIPPY_X11=101（新增测试里 3 条 clippy：or-pattern 可用范围、未用方法、%2 手写倍数判断），
+# 修完重跑为 OK —— 又一次证明 Windows 绿不等于 Linux clippy 绿。
+
+EXIT_CHECK_X11=0
+EXIT_GOLDEN=0
+EXIT_REAL_WINDOW=0
+EXIT_CLIPPY_X11=0
+EXIT_STROKE=0
+EXIT_SGR_REVERSE=0
+EXIT_FULL_WORKSPACE=0
+LINUX VERIFY: OK
+
+LINUX VERIFY: OK (7/7 EXIT_0)

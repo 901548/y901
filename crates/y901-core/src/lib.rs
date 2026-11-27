@@ -654,15 +654,29 @@ impl Grid {
                     self.history.push_back(row);
                 }
             }
-            if base_off > 0 {
-                for r in new_rows.iter_mut() {
-                    if r.line == base_line {
-                        r.line_start -= base_off;
-                    }
+            // **重新累积偏移**，而不是"每行减去 base_off"。
+            //
+            // 旧写法假设"同一 `line` id 的行在本行序列里是连续且偏移单调"，
+            // 一旦不成立就是 `u32` 下溢 panic（debug）/ 静默错位（release）：
+            // 属性测试 2026-11-27 抓到 `line_start=0` 却要减 `base_off=7` 的实例。
+            //
+            // 触发路径：`soft_wrap()` 会把"下一个物理行"直接改写成当前逻辑行的
+            // 续行（终端的正常行为——写到下一行就覆盖它）。于是一个逻辑行的 id 可能
+            // 在屏幕上**非连续地出现两段**，`line == base_line` 就不再等于"这一块"。
+            //
+            // 现在只修正**从行 0 开始的连续前缀**（那才是被切开的同一块），
+            // 并且用累加而不是减法 —— 与 `line_start` 的定义（本行内容在该逻辑行内的
+            // 字节偏移）逐字一致，不会再依赖 id 的唯一性。
+            let mut acc = base_off;
+            for r in new_rows.iter_mut() {
+                if r.line != base_line {
+                    break;
                 }
-                if self.anchor.line == base_line {
-                    self.anchor.offset = self.anchor.offset.saturating_sub(base_off);
-                }
+                r.line_start = acc;
+                acc += r.len as u32;
+            }
+            if self.anchor.line == base_line {
+                self.anchor.offset = self.anchor.offset.saturating_sub(base_off);
             }
         }
         while new_rows.len() < rows {
@@ -917,14 +931,50 @@ impl Grid {
 
 /// 清空 `row.cells[start..]`。
 fn blank_from(row: &mut Row, start: usize) {
-    for cell in &mut row.cells[start..] {
-        *cell = Cell::blank(STYLE_DEFAULT);
-    }
+    blank_span(row, start, row.cells.len().saturating_sub(1));
 }
 
 /// 清空 `row.cells[..=end]`。
 fn blank_upto(row: &mut Row, end: usize) {
-    for cell in &mut row.cells[..=end] {
+    blank_span(row, 0, end);
+}
+
+/// 清空 `row.cells[from..=to]`，**宽字符整字清**。
+///
+/// # 为什么必须整字清（真 bug，2026-11-27 用属性测试抓到的）
+///
+/// 宽字占两格（`WideHead` + `WideTail`）。旧实现逐格填空白，于是当擦除范围的
+/// 边界正好落在宽字中间时，会把这一对**劈成两半**：
+///
+/// ```text
+/// 擦除前:  a 中 中̲(尾)      ← 列 1 是宽字头、列 2 是宽字尾
+/// ESC[1K 到列 1:   a [空] 尾   ← 列 0/1 被填空白，列 2 的 WideTail 成了孤魂
+/// ```
+///
+/// 后果：渲染时 `WideTail` 会被跳过（那是"半格"标记），于是画面上少半个字、
+/// 而 `line_text()` / `text()` 里多出一个无头的字符位置；再往这行写东西时
+/// `clear_wide_pair` 又会按"列 2 是尾"去清列 1/2，把相邻内容一起吃掉。
+///
+/// VT 的语义就是"擦到宽字一部分 = 整个字被擦掉"，所以这里把边界向外扩到整对。
+fn blank_span(row: &mut Row, from: usize, to: usize) {
+    let n = row.cells.len();
+    if n == 0 {
+        return;
+    }
+    let mut start = from.min(n - 1);
+    let mut end = to.min(n - 1);
+    if start > end {
+        std::mem::swap(&mut start, &mut end);
+    }
+    // 起点落在宽字尾 → 连头一起清。
+    if row.cells[start].kind == CellKind::WideTail && start > 0 {
+        start -= 1;
+    }
+    // 终点落在宽字头 → 连尾一起清。
+    if row.cells[end].kind == CellKind::WideHead && end + 1 < n {
+        end += 1;
+    }
+    for cell in &mut row.cells[start..=end] {
         *cell = Cell::blank(STYLE_DEFAULT);
     }
 }
@@ -954,6 +1004,79 @@ fn clear_wide_pair(row: &mut Row, col: usize) {
     let style = row.cells[lo].style;
     for cell in &mut row.cells[lo..=hi] {
         *cell = Cell::blank(style);
+    }
+}
+
+#[cfg(test)]
+mod wide_erase_tests {
+    use super::*;
+
+    /// 光标停在宽字的**尾格**上执行 `ESC[1K`（擦到行首）：两格必须一起没。
+    ///
+    /// 旧实现逐格填空白，结果留下"有尾无头"的孤立 `WideTail` ——
+    /// 渲染时它被当成半格跳过，画面上少半个字；再往这行写字时
+    /// `clear_wide_pair` 又会按它去清相邻格，把别的内容一起吃掉。
+    #[test]
+    fn erase_to_line_start_inside_a_wide_char_removes_both_halves() {
+        let mut g = Grid::new(6, 1);
+        g.set_cursor(0, 0);
+        g.place_cell('a', STYLE_DEFAULT);
+        g.place_cell('中', STYLE_DEFAULT); // 占列 1、2
+        g.place_cell('b', STYLE_DEFAULT); // 列 3
+                                          // 光标放到宽字尾（列 2），擦到行首
+        g.set_cursor(0, 2);
+        g.erase_in_line(1);
+        let row = &g.screen[0];
+        for (i, cell) in row.cells.iter().enumerate() {
+            assert_ne!(
+                cell.kind,
+                CellKind::WideTail,
+                "第 {i} 列出现孤立宽字尾（宽字被劈开了）：{:?}",
+                row.cells.iter().map(|c| c.kind).collect::<Vec<_>>()
+            );
+            assert_ne!(cell.kind, CellKind::WideHead, "宽字应整字被擦掉");
+        }
+        // 宽字之后的 'b' 不能被误伤。
+        assert_eq!(row.cells[3].ch, 'b', "擦除范围之外的字符不该被清掉");
+    }
+
+    /// 光标停在宽字**头格**上执行 `ESC[K`（擦到行尾）：同样整字清。
+    #[test]
+    fn erase_to_line_end_inside_a_wide_char_removes_both_halves() {
+        let mut g = Grid::new(6, 1);
+        g.set_cursor(0, 0);
+        g.place_cell('a', STYLE_DEFAULT);
+        g.place_cell('中', STYLE_DEFAULT); // 列 1、2
+        g.set_cursor(0, 1); // 宽字头
+        g.erase_in_line(0);
+        let row = &g.screen[0];
+        assert_eq!(row.cells[0].ch, 'a', "宽字之前的字符保留");
+        for i in 1..6 {
+            assert_eq!(
+                row.cells[i].kind,
+                CellKind::Narrow,
+                "第 {i} 列不该留下宽字半格：{:?}",
+                row.cells.iter().map(|c| c.kind).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// 整屏擦除也走同一条宽字感知路径。
+    #[test]
+    fn erase_display_is_wide_aware() {
+        let mut g = Grid::new(5, 2);
+        g.set_cursor(0, 2);
+        g.place_cell('中', STYLE_DEFAULT); // 列 2、3
+        g.set_cursor(0, 3); // 尾格
+        g.erase_in_display(1);
+        for row in &g.screen {
+            for cell in &row.cells {
+                assert!(
+                    matches!(cell.kind, CellKind::Narrow),
+                    "擦屏后不该有宽字半格残留"
+                );
+            }
+        }
     }
 }
 
