@@ -8,6 +8,27 @@
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
 
+## 2026-11-27（续九）：发布就绪检查结果 —— 下一版必须是 **0.5.0**，不能是 0.4.1
+
+批次 1–7 全部落地后跑 `scripts/check-release-readiness.ps1`（只读脚本，不发布）：
+
+| 项 | 结果 |
+|---|---|
+| fmt / 版本一致性 / semver 纪律 / `gate.ps1` / `check-packaging`（12 crate）/ `cargo deny` | **PASS** |
+| `cargo semver-checks`（对 `v0.4.0` 基线） | **FAIL**：`constructible_struct_adds_private_field` — `Present.collector` |
+| crates.io 凭据 | **BLOCKED**（本机无 `~/.cargo/credentials.toml`） |
+| 工作区干净 | **BLOCKED**（发布时要求） |
+| 真机读屏器验收 | **BLOCKED**（只能人工） |
+
+**为什么不能发 0.4.1**：`Present`（`y901-backend-web`，crate 根 `pub use present::Present`）
+在 0.4.0 可以用结构体字面量构造（`pub canvas` + `pub ctx`）；本轮 A5 给它加了一个私有字段
+`collector` 存分阶段统计，于是外部 `Present { canvas, ctx }` 不再编译 —— 这是**破坏性变更**。
+本仓库的规矩是"破坏性变更走 minor"（0.4.0 正是这么来的：`WasmState` 增 `pub` 字段），
+所以下一版按 **0.5.0** 规划，见 [PLAN_2026-11-25.md](PLAN_2026-11-25.md) 批次 8。
+
+**没有为了 patch 号好看去绕 API**：把 `collector` 挪进 `WasmState`、或给 `WasmWindow` 加字段，
+都会破坏另一个公开结构体 —— 那只是把 break 换个位置。诚实升 minor 比扭曲设计便宜。
+
 ## 2026-11-27（续八）：Win32 关窗可否决 + IME 候选窗真的会跟随光标（审计 #4 #5）
 
 审计里最后两条"未修"的 Win32 项。
