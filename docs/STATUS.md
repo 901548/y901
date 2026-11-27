@@ -2,11 +2,48 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1328` / `ignored=71` / `targets=190`；`--include-ignored` 全量 `passed=1328` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1289` / `ignored=35` / `targets=190`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-invalidation.log](evidence/cross-platform/linux-verify-2026-11-27-invalidation.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1331` / `ignored=71` / `targets=191`；`--include-ignored` 全量 `passed=1331` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1289` / `ignored=35` / `targets=191`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-win32-close.log](evidence/cross-platform/linux-verify-2026-11-27-win32-close.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-27（续八）：Win32 关窗可否决 + IME 候选窗真的会跟随光标（审计 #4 #5）
+
+审计里最后两条"未修"的 Win32 项。
+
+### A. `WM_CLOSE` 不再偷偷销毁窗口
+
+旧行为：点标题栏 X → `DefWindowProcW` → **同步 `DestroyWindow`**。宿主拿到
+`RawEvent::Close` 时 HWND 已经没了 —— "还有未保存的改动，确定退出？"这种提示根本做不到，
+`Window::close()` 也没有参与的机会。
+
+现在 `WM_CLOSE` **只投递事件**（窗口继续存在）：否决 = 什么都不做，同意 = 调
+`Window::close()`（改为幂等，`IsWindow` 短路）。`run_loop` 语义没变（收到 Close 就返回，
+`Window` 随后 drop 时兜底销毁），所以"点 X 关窗"的用户体验与以前一致。
+
+`tests/wm_close.rs` 2 条钉住：`WM_CLOSE` 之后窗口**仍在**且事件队列里有 `Close`；
+否决之后窗口不会被偷偷销毁。变异：改回 `DefWindowProcW` → 2 条立刻红。
+
+### B. IME 候选窗用错了 style 位 + 坐标系
+
+`CandidateForm` 里传的是 `CFS_POINT`(0x0002) 和客户区坐标 —— 两个都错：
+
+| API | 正确的 style | 正确的坐标 |
+|---|---|---|
+| `ImmSetCompositionWindow` | `CFS_POINT` | 客户区 |
+| `ImmSetCandidateWindow` | `CFS_CANDIDATEPOS`(0x0008) | **屏幕** |
+
+`CFS_POINT` 不是 `CandidateForm` 的合法位，于是**候选窗根本不动**（永远停在默认位置）。
+拆出纯函数 `ime_forms()` 让两套口径各自正确，并用 `ClientToScreen` 换算出候选窗那份。
+
+**验证**：`ime::ime_form_tests` 断言两个表单的 style 与坐标各自正确（且断言
+`candidate.style != CFS_POINT`）；变异回 `CFS_POINT` → 立即红。
+
+**诚实边界**：IME 只验到"表单参数正确"。**真实输入法把候选框画在光标旁边**仍需人工看
+（仓库里没有可自动化的 IMM 环境）。
+
+workspace **1331 passed / 0 failed / 71 ignored / 191 目标**；Linux Xvfb 1289 / 35 / 191。
 
 ## 2026-11-27（续七）：后台线程一次标脏不再等于整窗重绘（审计 #7）
 
@@ -30,7 +67,7 @@
 
 **验证**：+4 条（`One` 不整窗 / `One` 请求重排 / 同帧 `All` 压过 `One` / 未知 id 不产生脏区）；
 变异验证：把 `drain` 改回"一律整窗" → 2 条立刻红，还原后全绿。像素哈希不变。
-workspace **1328 passed / 0 failed / 71 ignored / 190 目标**（`--include-ignored` 1399）；
+当轮 workspace **1328 passed / 0 failed / 71 ignored / 190 目标**（`--include-ignored` 1399）；
 Linux Xvfb 1289 passed / 35 ignored。
 
 ## 2026-11-27（续六）：WARP 上的 `STATUS_HEAP_CORRUPTION` 已定位并修复
@@ -90,7 +127,7 @@ debug layer 下是 `DEVICE_MISMATCH`，还可能把新设备再踢一次。现�
 `color/geometry/command` 的"过期文档"复核后**没有**需要改的表述，因此没动 —— 记录在此，
 避免下一轮重复怀疑。
 
-**验证**：+6 条新用例、加强 3 条；workspace **1328 passed / 0 failed / 71 ignored / 190 目标**
+**验证**：+6 条新用例、加强 3 条；当轮 workspace **1322 passed / 0 failed / 71 ignored / 190 目标**
 （`--include-ignored` 1393）；像素哈希 `0xF7455CCE7781A864` 不变；Linux Xvfb 1285 passed（当轮数）。
 
 ## 2026-11-27（续四）：文本编辑的产品缺口 —— 撤销/重做、按词移动、双击选词（PLAN 批次 5）
@@ -143,7 +180,7 @@ workspace **1316 passed / 0 failed / 71 ignored / 190 目标**（`--include-igno
 ZWJ emoji 序列 / 空格混合）× **每个字节位置**上逐一比对 snap/prev/next 三个函数。
 另加一条超长簇用例（"基字 + 500 组合记号"，验证一次跨簇而不是按字符走）。
 
-**验证**：workspace **1328 passed / 0 failed / 71 ignored / 190 目标**；像素哈希
+**验证**：当轮 workspace **1324 passed / 0 failed / 71 ignored / 190 目标**；像素哈希
 `0xF7455CCE7781A864` 未变（纯实现优化）；Linux Xvfb 全量见 evidence 日志。
 
 顺带修掉一个**门禁脚本自身的坑**：`gate.ps1` 与 `sync-doc-numbers.ps1` 都用
@@ -1021,7 +1058,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1328/0/71 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的当轮 1328/0/71 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，

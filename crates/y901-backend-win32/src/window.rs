@@ -87,8 +87,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     MsgWaitForMultipleObjectsEx, PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassExW,
     SetCursor, SetWindowLongPtrW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW,
     CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HTCLIENT, IDC_ARROW, IDC_HAND, IDC_IBEAM,
-    IDC_SIZEALL, IDC_SIZENS, IDC_SIZEWE, MSG, PM_REMOVE, QS_ALLINPUT, SW_SHOW, WM_CHAR, WM_DESTROY,
-    WM_DPICHANGED, WM_DROPFILES, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
+    IDC_SIZEALL, IDC_SIZENS, IDC_SIZEWE, MSG, PM_REMOVE, QS_ALLINPUT, SW_SHOW, WM_CHAR, WM_CLOSE,
+    WM_DESTROY, WM_DPICHANGED, WM_DROPFILES, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
     WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
     WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_NULL, WM_PAINT,
     WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN,
@@ -814,6 +814,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             // 否则窗口是黑的/花的。这里只置标记，真正的 invalidate_all 由 runtime 做
             // （wndproc 拿不到 UiTree）。
             request_full_redraw(hwnd);
+            0
+        }
+        // **拦截 `WM_CLOSE`，不立刻销毁窗口**（审计 #4）。
+        //
+        // 默认行为（`DefWindowProcW`）是同步 `DestroyWindow`：于是宿主收到
+        // `RawEvent::Close` 时 HWND **已经没了** —— 想"问你确定要退出吗？"再否决
+        // 都做不到，`Window::close()` 也没机会参与。
+        //
+        // 现在只投递事件并返回 0：窗口活着，宿主可以
+        //   - 否决：什么都不做（窗口继续存在）；
+        //   - 同意：调 [`Window::close`]，它会 `DestroyWindow`。
+        // `run_loop` 保持原语义（收到 `Close` 就返回 `Ok(())`，随后 `Window` 被
+        // drop 时由 `Drop` 兜底销毁），所以"点 X 关窗"这个默认行为没有变。
+        WM_CLOSE => {
+            push(hwnd, RawEvent::Close);
             0
         }
         WM_DESTROY => {
@@ -1751,12 +1766,25 @@ impl Window {
         }
     }
 
-    /// 请求关闭窗口（投递退出消息）。为什么不是析构：关闭要经过消息循环，直接销毁会让正在处理的这条消息访问悬垂句柄。
+    /// 真正关闭窗口并销毁 HWND。
+    ///
+    /// 与"用户点了标题栏 X"的区别（审计 #4）：
+    /// - 点 X → `WM_CLOSE` → 只投递 [`y901_runtime::RawEvent::Close`]，**窗口仍然存在**。
+    ///   宿主可以否决（什么都不做），或调用本方法表示同意。
+    /// - 本方法 → `DestroyWindow`：立即销毁，随后 `WM_DESTROY` / `WM_NCDESTROY`
+    ///   照常走清理（子类化撤销、表项移除、`PostQuitMessage`）。
+    ///
+    /// 幂等：HWND 已销毁时 `IsWindow` 返回 0，直接返回（不会二次销毁）。
+    ///
+    /// 为什么不能也在 `WM_CLOSE` 里同步销毁：那样宿主"问你确定要退出吗"的对话框会
+    /// 在窗口已经消失之后才弹出来 —— 也没法取消。
     pub fn close(&self) {
-        // SAFETY：`DestroyWindow` 只接受本线程创建的窗口句柄；本 `Window` 独占该句柄，
-        // 不会再被第二次销毁（`close` 之后调用方不应继续 `present`/`pump`）。
-        // 违反后果：重复销毁会破坏窗口类状态（静默失败）；跨线程销毁会失败并让窗口残留。
+        // SAFETY：`IsWindow` 只读；`DestroyWindow` 只接受本线程创建的句柄。
+        // 本 `Window` 独占该句柄，`close` 之后调用方不应继续 `present`/`pump`。
         unsafe {
+            if windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(self.hwnd) == 0 {
+                return;
+            }
             DestroyWindow(self.hwnd);
         }
     }

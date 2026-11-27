@@ -1,0 +1,14 @@
+# Linux 验收日志（2026-11-27 第二十轮）：Win32 关窗可否决 + IME 候选窗坐标（审计 #4 #5）
+# 环境：Ubuntu 22.04 (WSL2) + Xvfb；CARGO_TARGET_DIR=$HOME/y901-target
+# 说明：本轮的代码改动全在 #![cfg(windows)] 内，Linux 侧主要验证"没被带坏"。
+
+EXIT_CHECK_X11=0
+EXIT_GOLDEN=0
+EXIT_REAL_WINDOW=0
+EXIT_CLIPPY_X11=0
+EXIT_STROKE=0
+EXIT_SGR_REVERSE=0
+EXIT_FULL_WORKSPACE=0
+LINUX VERIFY: OK
+
+LINUX VERIFY: OK (7/7 EXIT_0)

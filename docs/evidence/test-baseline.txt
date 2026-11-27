@@ -258,4 +258,9 @@
 #   default cargo test --workspace --no-fail-fast   passed 1328, failed 0, ignored 71 / 190 个测试目标
 #   (新增 invalidation_handle 4 条：One 不整窗 / One 请求重排 / All 压过 One / 未知 id 不标脏。
 #    变异验证：把 drain 改回"一律整窗" → 2 条立刻红。像素哈希不变。)
-1328
+# Measured at 2026-11-27 (审计 #4 #5：Win32 WM_CLOSE 可否决；IME 候选窗坐标口径修正):
+#   default cargo test --workspace --no-fail-fast   passed 1331, failed 0, ignored 71 / 191 个测试目标
+#   (新增 tests/wm_close.rs 2 条（WM_CLOSE 不再立刻销毁 / 否决后窗口仍在）+ ime::ime_form_tests 1 条
+#    （组合窗客户区坐标 + CFS_POINT，候选窗屏幕坐标 + CFS_CANDIDATEPOS）。两处都做了变异验证。
+#    targets 190 → 191。像素哈希不变。)
+1331

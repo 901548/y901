@@ -20,7 +20,15 @@ pub const GCS_COMPSTR: u32 = 0x0008;
 /// 本次携带的是"已确定的最终串"，应当作为 `UiEvent::Text` 提交。
 pub const GCS_RESULTSTR: u32 = 0x0800;
 
+/// `CompositionForm.style`：`current_position` 是**客户区坐标**。
+///
+/// `ImmSetCompositionWindow` 要求客户区坐标 —— 这是唯一一个不要求屏幕坐标的 API。
 const CFS_POINT: u32 = 0x0002;
+/// `CandidateForm.style`：`current_position` 是**屏幕坐标**（MSDN: CFS_CANDIDATEPOS）。
+///
+/// **不要用 `CFS_POINT`（0x0002）**：它在 `CandidateForm` 里不是合法位，
+/// 结果是候选窗根本不动（输入法候选框永远停在屏幕左上角/默认位置）。
+const CFS_CANDIDATEPOS: u32 = 0x0008;
 
 #[link(name = "imm32")]
 unsafe extern "system" {
@@ -114,46 +122,102 @@ pub unsafe fn get_composition_string(hwnd: HWND, flag: u32) -> Option<Vec<u16>> 
     Some(buf)
 }
 
-/// 把候选窗/组合窗钉在客户区 (x, y)。
+/// 由"客户端坐标"构造两个 IME 表单（纯函数，便于单测）。
 ///
-/// 留作后续接线：TextInput 需要它把 IME 候选框贴到光标处，
-/// 当前应用还没调用（终端组件自己画预编辑串）。
+/// 两个 API 的坐标口径**不同**，这是审计 #5 记的坑：
+/// - `ImmSetCompositionWindow` + `CFS_POINT` → **客户区**坐标；
+/// - `ImmSetCandidateWindow` + `CFS_CANDIDATEPOS` → **屏幕**坐标。
+///
+/// 旧实现两处都用 `CFS_POINT` 且都传客户区坐标，于是：组合窗位置大致对，
+/// 候选窗则完全不动（`CFS_POINT` 不是 `CandidateForm` 的合法位）。
+fn ime_forms(client: POINT, screen: POINT) -> (CompositionForm, CandidateForm) {
+    let composition = CompositionForm {
+        style: CFS_POINT,
+        current_position: client,
+        area: [0; 4],
+    };
+    let candidate = CandidateForm {
+        index: 0,
+        style: CFS_CANDIDATEPOS,
+        current_position: screen,
+        area: [0; 4],
+    };
+    (composition, candidate)
+}
+
+/// 把候选窗/组合窗钉到光标处。
+///
+/// 输入 `x`/`y` 是**客户区**像素坐标（与 `UiTree` 的坐标系一致）；
+/// 内部负责把候选窗那一份换算成屏幕坐标。
 ///
 /// # Safety
 ///
 /// 调用者必须保证：
 /// - `hwnd` 有效且未销毁，且调用发生在该窗口的创建线程上（IMM 上下文按线程绑定）；
-/// - `x`、`y` 是**客户区**像素坐标（非屏幕坐标），并且落在合理范围内
-///   （超出 `i32` 表示范围会被截断）。
+/// - `x`、`y` 落在合理范围内（超出 `i32` 表示范围会被截断）。
 ///
 /// 违反会导致：`ImmGetContext` 返回空指针（本函数已判空返回，安全），
 /// 或把候选窗钉到错误位置；不会造成内存不安全。
-// 诊断 API：`set_composition_position()`：输入法候选窗跟随，当前未接线
-// 归类：诊断 API —— `set_composition_position` 由 window.rs 的 IME 路径调用，测试不覆盖
-#[allow(dead_code)]
 pub unsafe fn set_composition_position(hwnd: HWND, x: f32, y: f32) {
     let himc = ImmGetContext(hwnd);
     if himc.is_null() {
         return;
     }
-    let pos = POINT {
+    let client = POINT {
         x: x as i32,
         y: y as i32,
     };
-    let composition = CompositionForm {
-        style: CFS_POINT,
-        current_position: pos,
-        area: [0; 4],
-    };
+    let mut screen = client;
+    // 候选窗要屏幕坐标：ClientToScreen 原地转换，失败时退回客户区坐标
+    //（位置略偏，但总比不动强）。
+    let ok = windows_sys::Win32::Graphics::Gdi::ClientToScreen(hwnd, &mut screen);
+    if ok == 0 {
+        screen = client;
+    }
+    let (composition, candidate) = ime_forms(client, screen);
     ImmSetCompositionWindow(himc, &composition);
-    let candidate = CandidateForm {
-        index: 0,
-        style: CFS_POINT,
-        current_position: pos,
-        area: [0; 4],
-    };
     ImmSetCandidateWindow(himc, &candidate);
     ImmReleaseContext(hwnd, himc);
+}
+
+#[cfg(test)]
+mod ime_form_tests {
+    use super::*;
+
+    /// 两个表单的坐标口径与 style 位必须**各自正确**（审计 #5 的回归）。
+    #[test]
+    fn composition_uses_client_coords_candidate_uses_screen_coords() {
+        let client = POINT { x: 10, y: 20 };
+        let screen = POINT { x: 510, y: 320 };
+        let (composition, candidate) = ime_forms(client, screen);
+
+        assert_eq!(
+            composition.style, CFS_POINT,
+            "ImmSetCompositionWindow 要 CFS_POINT"
+        );
+        assert_eq!(
+            (
+                composition.current_position.x,
+                composition.current_position.y
+            ),
+            (10, 20),
+            "组合窗要**客户区**坐标"
+        );
+
+        assert_eq!(
+            candidate.style, CFS_CANDIDATEPOS,
+            "ImmSetCandidateWindow 要 CFS_CANDIDATEPOS；用 CFS_POINT 候选窗根本不动"
+        );
+        assert_ne!(
+            candidate.style, CFS_POINT,
+            "两条路径的 style 不能相同 —— 相同就意味着把 0x0002 传给了候选窗（旧 bug）"
+        );
+        assert_eq!(
+            (candidate.current_position.x, candidate.current_position.y),
+            (510, 320),
+            "候选窗要**屏幕**坐标"
+        );
+    }
 }
 
 /// 消息处理结果：由主循环决定副作用（写 PTY / 重绘）。
