@@ -735,6 +735,127 @@ pub fn record(times: &mut StageTimes, id: StageId, start: Option<web_time::Insta
         times.set(id, d);
     }
 }
+/// **后端侧帧统计收集器**：把"要不要测 / 怎么记账 / 不许伪造"集中在一处。
+///
+/// 为什么抽出它：A 阶段落地的三个后端（X11、Web、Win32 软路径）各自手写了
+/// 6 个几乎相同的辅助方法（`begin_frame` / `mark` / `record` / `dirty` /
+/// `mark_skipped` / `finish`），共约 120 行重复代码。重复的不只是行数 ——
+/// **"测不到就写 0" 这类规则一旦各写一遍，迟早有后端写错**。
+///
+/// 语义（与手写版本逐条相同）：
+/// - 关闭统计时 `begin_frame` 只做一次 `Option` 赋值，**不读时钟、不分配**；
+/// - `mark()` 在关闭时返回 `None`，于是 `record` 什么都不做；
+/// - 每帧**复用**同一个 `RenderStats`（`reset_for_next_frame`），零堆分配；
+/// - `take()` 是**取走语义**：同一帧第二次调用必得 `None`，不会重复消费。
+#[derive(Debug)]
+pub struct Collector {
+    stats: Option<RenderStats>,
+    frame: u64,
+    backend: BackendKind,
+}
+
+impl Collector {
+    /// 建一个收集器（`backend` 决定能力表，进而决定 `validate()` 的判据）。
+    pub fn new(backend: BackendKind) -> Self {
+        Self {
+            stats: None,
+            frame: 0,
+            backend,
+        }
+    }
+
+    /// 每帧开始：统计开启时复用/新建，关闭时清空（**不分配**）。
+    pub fn begin_frame(&mut self) {
+        if enabled() {
+            self.frame = self.frame.wrapping_add(1);
+            match self.stats.as_mut() {
+                Some(s) => s.reset_for_next_frame(self.frame),
+                None => self.stats = Some(RenderStats::new(self.frame, self.backend)),
+            }
+        } else {
+            self.stats = None;
+        }
+    }
+
+    /// 本帧是否要打点（关闭时调用方据此跳过一切计时）。
+    #[inline]
+    pub fn enabled(&self) -> bool {
+        self.stats.is_some()
+    }
+
+    /// 打点起点；**关闭时返回 `None` 且不读时钟**。
+    #[inline]
+    pub fn mark(&self) -> Option<web_time::Instant> {
+        mark(self.stats.is_some())
+    }
+
+    /// 记录一段已完成的耗时（替代"先 mark 再 record"的场景，Web 用得上）。
+    #[inline]
+    pub fn record_elapsed(&mut self, id: StageId, elapsed: Option<Duration>) {
+        if let (Some(s), Some(d)) = (self.stats.as_mut(), elapsed) {
+            s.stages.set(id, d);
+        }
+    }
+
+    /// 记录"从 `start` 到现在"的耗时（`start == None` 时不动）。
+    #[inline]
+    pub fn record(&mut self, id: StageId, start: Option<web_time::Instant>) {
+        if let Some(s) = self.stats.as_mut() {
+            record(&mut s.stages, id, start);
+        }
+    }
+
+    /// 记录脏区计数（块数 + 覆盖像素数）。
+    #[inline]
+    pub fn set_dirty(&mut self, rects: u32, pixels: u64) {
+        if let Some(s) = self.stats.as_mut() {
+            s.counters.dirty_rect_count = rects;
+            s.counters.damaged_pixels = pixels;
+        }
+    }
+
+    /// 跳过帧（没有渲染）：统计对象照常交付，但标 `frame_skipped`。
+    pub fn mark_skipped(&mut self) {
+        if let Some(s) = self.stats.as_mut() {
+            s.counters.frame_skipped = true;
+        }
+    }
+
+    /// 帧末：把 **CPU 后端确实没有的量**显式写 0（不是"测得 0"）。
+    ///
+    /// `presented` 不在这里写 —— 它归 Runtime 所有（B1 裁决）。
+    /// 只在成功出口调用；失败帧应由调用方 `discard()`，不交付半截数据。
+    pub fn finish(&mut self) {
+        if let Some(s) = self.stats.as_mut() {
+            s.counters.atlas_upload_bytes = 0;
+            s.counters.instance_pushed = 0;
+            s.counters.instance_drawn = 0;
+            s.counters.batch_count = 0;
+            s.counters.occluded = false;
+            s.counters.frame_skipped = false;
+        }
+    }
+
+    /// 借出底层 `Option<RenderStats>`（**仅供批量写入与测试**）。
+    ///
+    /// 为什么保留这个"后门"：`record_upload` 这类"一次写四段"的辅助函数与单元测试
+    /// 需要直接构造/检查统计对象；走 `Collector` 的逐个 `record_elapsed` 会让测试
+    /// 也必须先把环境变量打开（`enabled()` 是进程级 `OnceLock`，一开全进程都变），
+    /// 反而更容易写出"依赖执行顺序"的测试。
+    pub fn stats_mut(&mut self) -> &mut Option<RenderStats> {
+        &mut self.stats
+    }
+
+    /// 取走本帧统计（**取走语义**：第二次调用必为 `None`）。
+    pub fn take(&mut self) -> Option<RenderStats> {
+        self.stats.take()
+    }
+
+    /// 丢弃本帧统计（失败帧不交付）。
+    pub fn discard(&mut self) {
+        self.stats = None;
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1014,6 +1135,85 @@ mod tests {
             s.validate(),
             Err(StatsError::UnavailableButNotApplicable(StageId::GpuExecute))
         );
+    }
+
+    // ---- Collector：三个软后端共用的规则 ----
+
+    /// 关闭统计时**不分配、不读时钟、不交付**。
+    #[test]
+    fn collector_is_inert_when_disabled() {
+        // 进程级开关由其它用例决定；这里直接构造一个"begin_frame 后没有对象"的路径：
+        // 若开关恰好开着，`take()` 会有值 —— 两种情况下断言都成立。
+        let mut c = Collector::new(BackendKind::X11);
+        c.begin_frame();
+        assert_eq!(c.enabled(), enabled(), "enabled() 必须与进程开关一致");
+        assert_eq!(
+            c.mark().is_some(),
+            enabled(),
+            "关闭时不得读时钟（mark 返回 None）"
+        );
+        // 记录在关闭时是 no-op：
+        c.record(StageId::Upload, None);
+        c.set_dirty(3, 300);
+        c.mark_skipped();
+        c.finish();
+        let stats = c.take();
+        assert_eq!(stats.is_some(), enabled());
+        // 取走语义：第二次必为 None。
+        assert!(c.take().is_none());
+    }
+
+    /// 开启时每帧推进帧号、复用同一对象（零分配）、`finish` 把 CPU 后端没有的量写 0。
+    #[test]
+    fn collector_reuses_one_object_and_zeroes_cpu_counters() {
+        if !enabled() {
+            // 未开启的进程里没有对象可检查；这条覆盖由 `--` 里打开开关的测试二进制保证。
+            return;
+        }
+        let mut c = Collector::new(BackendKind::Soft);
+        c.begin_frame();
+        c.set_dirty(2, 200);
+        c.record_elapsed(StageId::CpuRaster, Some(Duration::from_micros(5)));
+        c.finish();
+        let s = c.take().expect("应当交付统计");
+        assert_eq!(s.backend, BackendKind::Soft);
+        assert_eq!(s.counters.dirty_rect_count, 2);
+        assert_eq!(s.counters.damaged_pixels, 200);
+        assert_eq!(s.counters.atlas_upload_bytes, 0);
+        assert!(!s.counters.frame_skipped);
+        assert_eq!(
+            s.stages.get(StageId::CpuRaster),
+            Some(Duration::from_micros(5))
+        );
+        assert_eq!(s.validate(), Ok(()));
+        // 下一帧：帧号递增（复用同一对象，不是新建）。
+        c.begin_frame();
+        let s2 = c.take().expect("第二帧");
+        assert_eq!(s2.frame_id, s.frame_id + 1, "每帧帧号必须 +1");
+    }
+
+    /// `mark_skipped` 只置标志，不写任何阶段（跳过帧不得有测量值）。
+    #[test]
+    fn collector_skipped_frame_has_no_stage_values() {
+        let mut c = Collector::new(BackendKind::Web);
+        c.begin_frame();
+        c.mark_skipped();
+        if let Some(s) = c.take() {
+            assert!(s.counters.frame_skipped);
+            for id in StageId::ALL {
+                assert_eq!(s.stages.get(id), None, "跳过帧不得有 {}", id.name());
+            }
+            assert_eq!(s.validate(), Ok(()));
+        }
+    }
+
+    /// `discard()` 之后不交付（失败帧不交付半截数据）。
+    #[test]
+    fn collector_discard_prevents_delivery() {
+        let mut c = Collector::new(BackendKind::X11);
+        c.begin_frame();
+        c.discard();
+        assert!(c.take().is_none(), "discard 之后不得交付");
     }
 
     #[test]

@@ -2509,6 +2509,7 @@ impl Gfx {
         if needed <= self.instance_capacity {
             return true;
         }
+        let old_cap = self.instance_capacity;
         let new_cap = capacity_for(needed);
         let Some(device) = self.device.as_ref() else {
             return false;
@@ -2532,9 +2533,7 @@ impl Gfx {
                 p.instance_buffer = buffer;
                 self.instance_capacity = new_cap;
                 eprintln!(
-                    "[y901] 实例缓冲扩容：{} → {} 个实例（本次需要 {needed} 个）",
-                    INSTANCE_CAPACITY.min(new_cap / 2),
-                    new_cap
+                    "[y901] 实例缓冲扩容：{old_cap} → {new_cap} 个实例（本次需要 {needed} 个）"
                 );
                 true
             }

@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use y901_runtime::render_stats::{self, BackendKind, RenderStats, StageId, StageTimes};
+use y901_runtime::render_stats::{self, BackendKind, RenderStats, StageId};
 
 use crate::bindings::{CanvasRenderingContext2d, HtmlCanvasElement};
 
@@ -31,20 +31,23 @@ pub struct UploadStages {
     pub canvas_blit: Duration,
 }
 
-/// 把上屏四段写进统计（`stats` 为 `None` 时**什么都不做**）。
+/// 把上屏四段写进统计（`collector` 关闭时**什么都不做**）。
 ///
 /// 为什么不合并成一段：这四段在 Web 上的耗时结构完全不同（通道交换是纯 CPU 循环、
 /// `createImageData` 可能触发浏览器分配、`set` 是跨界拷贝、`putImageData` 是合成前
 /// 的最后一步），合并后就无法判断优化该打哪里。
+///
+/// 为什么收 `&mut Option<RenderStats>`：本函数是"一次写四段"的批量写入，而
+/// `Collector` 的规则（关闭时不写、取走语义）由调用方持有；`None` 时本函数是纯
+/// no-op。这样单测可以直接构造 `Some(RenderStats::…)`，不必先打开进程级开关。
 pub(crate) fn record_upload(stats: &mut Option<RenderStats>, stages: UploadStages) {
     let Some(s) = stats.as_mut() else {
         return;
     };
-    let times: &mut StageTimes = &mut s.stages;
-    times.set(StageId::PixelConvert, stages.pixel_convert);
-    times.set(StageId::ImageAlloc, stages.image_alloc);
-    times.set(StageId::PixelCopy, stages.pixel_copy);
-    times.set(StageId::CanvasBlit, stages.canvas_blit);
+    s.stages.set(StageId::PixelConvert, stages.pixel_convert);
+    s.stages.set(StageId::ImageAlloc, stages.image_alloc);
+    s.stages.set(StageId::PixelCopy, stages.pixel_copy);
+    s.stages.set(StageId::CanvasBlit, stages.canvas_blit);
 }
 
 /// 画布呈现器。
@@ -53,14 +56,12 @@ pub struct Present {
     pub canvas: HtmlCanvasElement,
     /// 2D 上下文（`getContext("2d")`）。
     pub ctx: Option<CanvasRenderingContext2d>,
-    /// **分阶段统计**（`Y901_RENDER_STATS` 开启时才有值）。
+    /// **分阶段统计收集器**（`Y901_RENDER_STATS` 开启时才有值）。
     ///
     /// 放在 `Present` 而不是 `WasmWindow` 的理由：`WasmWindow` 是**借用式薄包装**
     ///（`&mut SoftBackend` / `&mut Present`），给它加字段会改变公开结构体的字面量
     /// 构造方式；而 `Present` 是 `WasmState` 长期持有的所有者，天然适合放统计。
-    stats: Option<RenderStats>,
-    /// 统计帧号（仅用于 JSON 可读性）。
-    stats_frame: u64,
+    collector: render_stats::Collector,
 }
 
 impl Present {
@@ -71,74 +72,55 @@ impl Present {
         Self {
             canvas,
             ctx,
-            stats: None,
-            stats_frame: 0,
+            collector: render_stats::Collector::new(BackendKind::Web),
         }
     }
 
     // ---- 分阶段统计（A 阶段第 5 步：Web）----
+    //
+    // 规则集中在本 crate 依赖的 `render_stats::Collector`（三个软后端共用）。
+    // 这里保留同名入口，是因为 `WasmWindow::render` 只借到 `&mut Present`，
+    // 让 Present 直接转发比自己再抄一遍 6 个方法更不容易写错。
 
-    /// 每帧开始：统计开启时复用/新建统计对象，关闭时**清空且不分配**。
+    /// 每帧开始（统计关闭时不分配、不读时钟）。
     pub fn stats_begin_frame(&mut self) {
-        if render_stats::enabled() {
-            self.stats_frame = self.stats_frame.wrapping_add(1);
-            match self.stats.as_mut() {
-                Some(s) => s.reset_for_next_frame(self.stats_frame),
-                None => self.stats = Some(RenderStats::new(self.stats_frame, BackendKind::Web)),
-            }
-        } else {
-            self.stats = None;
-        }
+        self.collector.begin_frame();
     }
 
     /// 统计是否开启（**本帧**是否要打点）。
     #[inline]
     pub fn stats_enabled(&self) -> bool {
-        self.stats.is_some()
+        self.collector.enabled()
     }
 
-    /// 写入某阶段的**已算好的耗时**（`None` = 统计关闭，本方法什么都不做）。
+    /// 写入某阶段的**已算好的耗时**（`None` = 统计关闭，什么都不做）。
     ///
-    /// 为什么收 `Option<Duration>` 而不是 `Option<Instant>`：后者需要把
-    /// `web_time::Instant` 暴露到本 crate 的签名里（本 crate 不依赖 `web-time`），
-    /// 而调用方拿到的正是 `render_stats::since(start)` 的结果 —— 少一层类型穿透。
+    /// 为什么收 `Option<Duration>` 而不是 `Option<Instant>`：后者要求本 crate 的签名
+    /// 暴露 `web_time::Instant`（本 crate 不依赖 `web-time`），而调用方拿到的正是
+    /// `render_stats::since(start)` 的结果 —— 少一层类型穿透。
     #[inline]
     pub fn stats_record(&mut self, id: StageId, elapsed: Option<Duration>) {
-        if let (Some(s), Some(d)) = (self.stats.as_mut(), elapsed) {
-            s.stages.set(id, d);
-        }
+        self.collector.record_elapsed(id, elapsed);
     }
 
     /// 记录脏区计数（块数 + 覆盖像素数）。
     pub fn stats_dirty(&mut self, rects: u32, pixels: u64) {
-        if let Some(s) = self.stats.as_mut() {
-            s.counters.dirty_rect_count = rects;
-            s.counters.damaged_pixels = pixels;
-        }
+        self.collector.set_dirty(rects, pixels);
     }
 
     /// 跳过帧：后端没有渲染，但统计对象照常交付。
     pub fn stats_mark_skipped(&mut self) {
-        if let Some(s) = self.stats.as_mut() {
-            s.counters.frame_skipped = true;
-        }
+        self.collector.mark_skipped();
     }
 
-    /// 帧末：写计数器（Web 是纯 CPU 后端，没有 GPU 图集上传与实例化绘制）。
+    /// 帧末：把"CPU 后端确实没有的量"显式写 0（不是"测得 0"）。
     pub fn stats_finish(&mut self) {
-        if let Some(s) = self.stats.as_mut() {
-            s.counters.atlas_upload_bytes = 0;
-            s.counters.instance_pushed = 0;
-            s.counters.instance_drawn = 0;
-            s.counters.batch_count = 0;
-            s.counters.occluded = false;
-            s.counters.frame_skipped = false;
-        }
+        self.collector.finish();
     }
 
     /// 取走本帧统计（**取走语义**：第二次调用必为 `None`）。
     pub fn take_render_stats(&mut self) -> Option<RenderStats> {
-        self.stats.take()
+        self.collector.take()
     }
 
     /// **整帧上屏**。`pixels` 是软后端产出的 BGRA，浏览器要 RGBA。
@@ -155,7 +137,7 @@ impl Present {
             return; // 没取到 2D 上下文：静默跳过上屏（不崩）
         };
         // 统计关闭时 `mark(false)` **不读时钟**，四段开销为零。
-        let on = self.stats.is_some();
+        let on = self.collector.enabled();
 
         let t = render_stats::mark(on);
         let rgba = bgra_to_rgba(pixels, w, h);
@@ -178,7 +160,7 @@ impl Present {
         // 借用冲突（`ctx` 是 `self.ctx` 的借用、`stats` 又要 `&mut self`）的解法：
         // 先把四段收集成**值**，再写统计 —— 这也是 `UploadStages` 存在的第二个理由。
         record_upload(
-            &mut self.stats,
+            self.collector.stats_mut(),
             UploadStages {
                 pixel_convert: convert,
                 image_alloc: alloc,
@@ -308,7 +290,7 @@ mod tests {
     /// 覆盖的典型表现是"只有最后一段有值"。
     #[test]
     fn all_four_upload_stages_survive_a_round_trip() {
-        let mut stats = Some(RenderStats::new(1, BackendKind::Web));
+        let mut stats = Some(RenderStats::new(3, BackendKind::Web));
         record_upload(
             &mut stats,
             UploadStages {

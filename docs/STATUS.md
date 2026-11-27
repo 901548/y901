@@ -2,12 +2,43 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1279` / `ignored=70` / `targets=188`；`--include-ignored` 全量 `passed=1279` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1242` / `ignored=34` / `targets=188`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-ci-fix.log](evidence/cross-platform/linux-verify-2026-11-27-ci-fix.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1283` / `ignored=70` / `targets=188`；`--include-ignored` 全量 `passed=1283` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-26 复测 `passed=1246` / `ignored=34` / `targets=188`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-collector.log](evidence/cross-platform/linux-verify-2026-11-27-collector.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
 
+## 2026-11-27（续）：整理 —— RenderStats 三个软后端统一到 `Collector`
+
+A4–A6 落地时，X11 / Web / Win32 软路径**各自手写了 6 个几乎相同的辅助方法**
+（`begin_frame` / `mark` / `record` / `dirty` / `mark_skipped` / `finish`），
+合计约 120 行重复代码。重复的不只是行数：**"关闭时不读时钟""取走语义"
+"CPU 后端没有的量写 0" 这类规则各写一遍，迟早有后端写错。**
+
+现在把规则收进 `render_stats::Collector`（`y901-runtime`，+121 行）：
+
+| 后端 | 整理前 | 整理后 |
+|---|---|---|
+| X11 | 6 个私有方法（≈65 行） | 字段 + 直接调 `self.stats.*` |
+| Web（`Present`） | 6 个 pub 方法（≈60 行） | 6 个一行转发（保留 pub 面不变） |
+| Win32 软路径 | 1 个私有方法 + 3 段内联块 | 字段 + `self.soft_stats.*` |
+
+净变化：**+197 / −185**（净 +12 行，其中 121 行是带完整语义注释的共享实现 +
+4 条新单测；重复代码减少约 120 行）。
+
+新增 4 条规则单测（`render_stats::tests`，进程开关两种模式都跑过）：
+关闭时 `mark()` 不读时钟且 `take()` 不交付；开启时**复用同一对象**、帧号每帧 +1、
+`finish()` 把 `atlas_upload_bytes`/`instance_*`/`batch_count` 写 0；
+`mark_skipped()` 只置标志、**任何阶段都不得有测量值**；`discard()` 后不交付（失败帧）。
+
+**零行为变化**：四个统计测试二进制（`render_stats_enabled` / `_soft` / `_headless` /
+`render_stats_x11`(+`_disabled`)）逐条仍绿，像素哈希不变。
+顺带修掉一处会打印错误信息的细节：扩容日志现在报的是**真实旧容量**
+（此前 `10000 → 40000` 会把旧的 20000 报成 10000）。
+
+保留的"后门"：`Collector::stats_mut()` 供 `record_upload` 这类批量写入与单测使用 ——
+否则单测也得先打开进程级开关（`OnceLock`，一开全进程都变），反而更容易写出依赖
+执行顺序的测试。已在方法注释里写明用途。
 ## 2026-11-27（续）：issue #7 的 CI 收口 —— 用例合并 + 记录 WARP 崩溃风险
 
 `instance_overflow` 首次进 CI 时连续三次红，每次原因不同，逐一查清：
@@ -344,7 +375,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1279** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1283** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -815,7 +846,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1279/0/70 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1283/0/70 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，

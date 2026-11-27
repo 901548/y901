@@ -856,13 +856,13 @@ pub struct Window {
     backend: Option<D3dBackend>,
     /// 纯 CPU 后端（`Y901_FORCE_SOFT=1` 时启用；与 `backend` 互斥）。
     soft: Option<y901_render::soft::SoftBackend>,
-    /// **软渲染路径的分阶段统计**（`Y901_RENDER_STATS` 开启时才有值）。
+    /// **软渲染路径的分阶段统计收集器**（`Y901_RENDER_STATS` 开启时才有值）。
     ///
     /// 为什么不放在 `D3dBackend` 里：软路径根本没有 `D3dBackend`
     /// （两条路径在同一个 `Window` 里二选一），所以只能由 `Window` 自己持有。
-    soft_stats: Option<y901_runtime::render_stats::RenderStats>,
-    /// 软路径统计帧号（仅用于 JSON 可读性）。
-    soft_stats_frame: u64,
+    /// 规则（开关、复用、取走语义、CPU 后端没有的量写 0）都在
+    /// `render_stats::Collector`，三个软后端共用一份实现。
+    soft_stats: y901_runtime::render_stats::Collector,
     viewport: (u32, u32),
     /// 最近一次 `SetCursor` 事件里的鼠标位置；
     /// 事件消费发生在 `wait_events` 内部，所以在这里记一下，
@@ -1139,8 +1139,9 @@ impl Window {
                 hwnd,
                 backend,
                 soft,
-                soft_stats: None,
-                soft_stats_frame: 0,
+                soft_stats: y901_runtime::render_stats::Collector::new(
+                    y901_runtime::render_stats::BackendKind::Soft,
+                ),
                 viewport,
                 pending_cursor: None,
                 saved_style: 0,
@@ -1515,24 +1516,6 @@ impl Window {
             .unwrap_or_default()
     }
 
-    /// 软渲染路径的帧边界：统计开启时复用/新建统计对象，关闭时**清空且不分配**。
-    fn soft_stats_begin_frame(&mut self) {
-        if y901_runtime::render_stats::enabled() {
-            self.soft_stats_frame = self.soft_stats_frame.wrapping_add(1);
-            match self.soft_stats.as_mut() {
-                Some(s) => s.reset_for_next_frame(self.soft_stats_frame),
-                None => {
-                    self.soft_stats = Some(y901_runtime::render_stats::RenderStats::new(
-                        self.soft_stats_frame,
-                        y901_runtime::render_stats::BackendKind::Soft,
-                    ))
-                }
-            }
-        } else {
-            self.soft_stats = None;
-        }
-    }
-
     /// `render` 与 `render_with_sync` 的共同实现。
     fn render_inner(&mut self, tree: &mut UiTree, sync_interval: u32) -> Result<(), String> {
         // **没有脏区就不清屏、不 Present**：保留上一帧。
@@ -1548,29 +1531,25 @@ impl Window {
                 backend.stats_begin_frame();
                 backend.stats_mark_skipped();
             } else if self.soft.is_some() {
-                self.soft_stats_begin_frame();
-                if let Some(s) = self.soft_stats.as_mut() {
-                    s.counters.frame_skipped = true;
-                }
+                self.soft_stats.begin_frame();
+                self.soft_stats.mark_skipped();
             }
             return Ok(());
         }
         if self.soft.is_some() {
             use y901_runtime::render_stats as rs;
             // 帧边界 + 脏区计数器（`is_full()` 时 `rects()` 为空，按一个整窗矩形计）。
-            self.soft_stats_begin_frame();
+            self.soft_stats.begin_frame();
             let dirty_rects = if tree.dirty().is_full() {
                 1
             } else {
                 tree.dirty().rects().len() as u32
             };
             let (vw, vh) = self.viewport;
-            if let Some(s) = self.soft_stats.as_mut() {
-                // 软路径每帧清屏 + 整树重绘 → 受损像素就是整个客户区。
-                s.counters.dirty_rect_count = dirty_rects;
-                s.counters.damaged_pixels = vw as u64 * vh as u64;
-            }
-            let on = self.soft_stats.is_some();
+            // 软路径每帧清屏 + 整树重绘 → 受损像素就是整个客户区。
+            self.soft_stats
+                .set_dirty(dirty_rects, vw as u64 * vh as u64);
+            let on = self.soft_stats.enabled();
 
             // 纯 CPU：先清整张缓冲，再强制整树重绘。
             // 为什么不能只重绘脏区：软缓冲每帧都被清掉，
@@ -1579,29 +1558,20 @@ impl Window {
             let soft = self.soft.as_mut().expect("上面已判断 soft.is_some()");
             tree.invalidate_all();
             soft.clear();
-            if let Some(s) = self.soft_stats.as_mut() {
-                rs::record(&mut s.stages, rs::StageId::RenderPrepare, t_prepare);
-            }
+            self.soft_stats
+                .record(rs::StageId::RenderPrepare, t_prepare);
 
             let t_raster = rs::mark(on);
             tree.render(soft);
-            if let Some(s) = self.soft_stats.as_mut() {
-                rs::record(&mut s.stages, rs::StageId::CpuRaster, t_raster);
-            }
+            self.soft_stats.record(rs::StageId::CpuRaster, t_raster);
 
             // GDI 的 `StretchDIBits` 就是软路径的"上屏"，它本身是阻塞调用。
             let t_present = rs::mark(on);
             gdi_present(self.hwnd, soft.pixels(), soft.width(), soft.height());
-            if let Some(s) = self.soft_stats.as_mut() {
-                rs::record(&mut s.stages, rs::StageId::PresentBlocking, t_present);
-                // 软路径没有 GPU 图集上传、没有实例化绘制。
-                s.counters.atlas_upload_bytes = 0;
-                s.counters.instance_pushed = 0;
-                s.counters.instance_drawn = 0;
-                s.counters.batch_count = 0;
-                s.counters.occluded = false;
-                s.counters.frame_skipped = false;
-            }
+            self.soft_stats
+                .record(rs::StageId::PresentBlocking, t_present);
+            // 软路径没有 GPU 图集上传、没有实例化绘制（`finish` 统一写 0）。
+            self.soft_stats.finish();
             return Ok(());
         }
         let Some(backend) = self.backend.as_mut() else {

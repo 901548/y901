@@ -223,4 +223,8 @@
 #   (该文件默认跑 1 条 capacity_for；GPU 用例 --ignored 在真实 GPU 上为绿：
 #    "实例缓冲扩容 10000 → 20000" + drawn==pushed + 像素尾部标记。
 #    WARP 上扩容后 STATUS_HEAP_CORRUPTION 属待查风险，已记入 STATUS.md。)
-1279
+# Measured at 2026-11-27 (整理：RenderStats 三软后端统一 Collector，+4 条规则单测):
+#   default cargo test --workspace --no-fail-fast   passed 1283, failed 0, ignored 70 / 188 个测试目标
+#   (新增 4 条 Collector 用例：关闭 inert / 复用+计数器归零 / 跳过帧无阶段值 / discard 不交付。
+#    Linux 侧 passed=1246 / targets=188)
+1283
