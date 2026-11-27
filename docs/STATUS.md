@@ -2,11 +2,47 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1338` / `ignored=71` / `targets=194`；`--include-ignored` 全量 `passed=1338` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1296` / `ignored=35` / `targets=194`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-core-props.log](evidence/cross-platform/linux-verify-2026-11-27-core-props.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1342` / `ignored=71` / `targets=196`；`--include-ignored` 全量 `passed=1342` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1300` / `ignored=35` / `targets=196`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-dirty-bounds.log](evidence/cross-platform/linux-verify-2026-11-27-dirty-bounds.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-27（续十一）：属性测试继续推进 —— `DirtyRegion::bounds` 的 f32 舍入
+
+同一套"随机操作 + 不变量"打到脏区层，抓到第三个 bug。
+
+### 症状（API 契约被违反一个 ULP）
+
+`bounds()` 的契约是"覆盖全部脏块"。实现是 `Rect::new(x0, y0, x1 - x0, y1 - y0)`，
+而 `Rect` 的右边界是**由 `x + w` 重算**的 —— f32 下 `x0 + (x1 - x0)` 不保证回到 `x1`：
+
+```text
+x0 = 54.8, x1 = 424.72  →  w = 369.91998  →  x0 + w = 424.71997  <  424.72
+```
+
+于是脏块右边缘恰好等于包围盒右边缘时，`bounds().contains_rect(块) == false`。
+拿来当 scissor 就是**最右一列像素不重绘**（残影）；拿来做断言就是随机红。
+属性测试里几百个随机脏区序列，第 2 个就命中。
+
+修法：算完 `w`/`h` 后检查 `x0 + w < x1`，是则把 `w` 抬到**下一个可表示的 f32**
+（`next_up`）。契约是"覆盖"，宁可宽一个 ULP，也不能窄一个。
+
+### 顺带确认没问题的两处
+
+同一轮还写了两套属性测试，**没有发现新 bug**（这类结论同样要记下来，否则下轮会重写一遍）：
+
+- `atlas_packing_invariants`（随机若干张图集 × 每次 80 次分配、尺寸 32~96）：`SkylinePacker`
+  的每次分配都完整落在图集内、任意两块不重叠、零尺寸/超尺寸请求被拒绝。
+- `dirty_region_invariants` 的其余不变量：空矩形不入表、块数不超 `MAX_RECTS`
+  （超了退化 `full`）、`clear()` 之后既非 `full` 也无残块。
+
+**一处测试自身的坑**（值得记）：覆盖性最初用"矩形角点"断言，被 f32 舍入判成失败 ——
+那不是 bug，是断言选错了对象。改成**按像素中心**采样（后端转 scissor 时是 `ceil` 向外取整，
+"最后一个像素覆盖没覆盖"才是真语义），随机红消失。
+
+**验证**：workspace **1342 passed / 0 failed / 71 ignored / 196 目标**（`--include-ignored` 1413）；
+像素哈希不变；Linux Xvfb 1300 / 35 / 196。变异验证：去掉 ULP 外扩 → 属性测试与具名回归**都立即红**。
 
 ## 2026-11-27（续十）：用属性测试扫出 `y901-core` 两个真 bug
 
@@ -55,7 +91,7 @@ for r in new_rows.iter_mut() { if r.line == base_line { r.line_start -= base_off
 - `text_caret_invariants`（8 组种子 × 300 轮 × 25 步随机编辑）：光标/锚点永远落在
   **字素簇边界**上（`e` + 组合重音不能被劈开），包括"把光标设到任意字节位置"和撤销/重做。
 
-**验证**：workspace **1338 passed / 0 failed / 71 ignored / 194 目标**；像素哈希不变；
+**验证**：当轮 workspace **1342 passed / 0 failed / 71 ignored / 194 目标**；像素哈希不变；
 两处修复都做了**变异验证**（把实现改回旧写法 → 属性测试立即红，还原后全绿）。
 
 ## 2026-11-27（续九）：发布就绪检查结果 —— 下一版必须是 **0.5.0**，不能是 0.4.1
@@ -285,7 +321,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1296 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1300 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -658,7 +694,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1338** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1342** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。

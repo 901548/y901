@@ -268,4 +268,9 @@
 #   (新增 crates/y901-core/tests/grid_invariants.rs 1 条属性测试（300 网格 × 120 步 × 14 种 VT 操作）
 #    + wide_erase_tests 3 条具名回归；加 wrap_invariants 2 条 + text_caret_invariants 1 条 → targets +3。
 #    两处修复都做了变异验证（改回旧写法立即红）。像素哈希不变。)
-1338
+# Measured at 2026-11-27 (DirtyRegion::bounds 被 f32 舍入吃掉一个 ULP；+ 图集打包/脏区覆盖属性测试):
+#   default cargo test --workspace --no-fail-fast   passed 1342, failed 0, ignored 71 / 196 个测试目标
+#   (新增 y901-ui/tests/dirty_region_invariants.rs 1 条属性测试 + tree.rs 内 dirty_bounds_tests 1 条具名回归；
+#    y901-render/tests/atlas_packing_invariants.rs 2 条（随机 200 张图集 × 80 次分配不重叠/不越界）。
+#    bounds 修复做了变异验证（去掉 ULP 外扩 → 立即红）。像素哈希不变。)
+1342

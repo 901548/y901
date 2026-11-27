@@ -48,6 +48,21 @@ impl NodeInfo {
     }
 }
 
+/// 下一个可表示的 `f32`（朝 +∞ 走一格）。
+///
+/// 只用于 [`DirtyRegion::bounds`] 的"宁可多覆盖一个 ULP"：`Rect` 用 `x + w` 重算
+/// 右边界，f32 下 `x + (x1 - x) != x1` 是常态。
+fn next_up(v: f32) -> f32 {
+    if !v.is_finite() || v == f32::MAX {
+        return v;
+    }
+    if v == 0.0 {
+        return f32::from_bits(1); // 最小的正次正规数
+    }
+    let bits = v.to_bits();
+    f32::from_bits(if v > 0.0 { bits + 1 } else { bits - 1 })
+}
+
 /// 脏区：本帧需要重绘的区域集合。
 ///
 /// 空集合 = 无事发生；`full` = 整窗重绘（首帧、主题变更、设备重建）。
@@ -170,16 +185,68 @@ impl DirtyRegion {
     ///
     /// 返回：`None` = 没有脏矩形（且不是 full）；否则是覆盖全部脏块的矩形。
     /// 用途：后端设置单一 scissor 时用它，避免逐矩形多次 draw。
+    ///
+    /// ## 为什么最后要"向外扩一个 ULP"
+    ///
+    /// `Rect` 存的是 `(x, y, w, h)`，右边界由 `x + w` **重新算出来**。而
+    /// `w = x1 - x0` 之后再算 `x0 + w`，在 f32 下**不保证**等于 `x1`：
+    ///
+    /// ```text
+    /// x0 = 54.8, x1 = 424.72 → w = 369.91998 → x0 + w = 424.71997 < 424.72
+    /// ```
+    ///
+    /// 于是"覆盖全部脏块"这个契约会被违反 3e-5 —— 属性测试 2026-11-27 抓到
+    /// 脏块右边缘恰好等于包围盒右边缘时 `bounds().contains_rect(块)` 为 `false`。
+    /// 用在 scissor 上就是**最右一列像素不重绘**（残影），用来做断言就是随机红。
+    /// 契约是"覆盖"，所以宁可宽一个 ULP 也不能窄一个。
     pub fn bounds(&self) -> Option<Rect> {
         let mut it = self.rects.iter().filter(|r| !r.is_empty());
         let first = *it.next()?;
-        Some(it.fold(first, |acc, r| {
-            let x0 = acc.x.min(r.x);
-            let y0 = acc.y.min(r.y);
-            let x1 = acc.right().max(r.right());
-            let y1 = acc.bottom().max(r.bottom());
-            Rect::new(x0, y0, x1 - x0, y1 - y0)
-        }))
+        let (x0, y0, x1, y1) = it.fold(
+            (first.x, first.y, first.right(), first.bottom()),
+            |(x0, y0, x1, y1), r| {
+                (
+                    x0.min(r.x),
+                    y0.min(r.y),
+                    x1.max(r.right()),
+                    y1.max(r.bottom()),
+                )
+            },
+        );
+        let mut w = x1 - x0;
+        let mut h = y1 - y0;
+        if x0 + w < x1 {
+            w = next_up(w);
+        }
+        if y0 + h < y1 {
+            h = next_up(h);
+        }
+        Some(Rect::new(x0, y0, w, h))
+    }
+}
+
+#[cfg(test)]
+mod dirty_bounds_tests {
+    use super::*;
+
+    /// **`bounds()` 必须严格罩住每个脏块**（含右/下边缘恰好相切的情况）。
+    ///
+    /// 回归：`Rect` 用 `x + w` 重算边界，而 `w = x1 - x0` 之后再相加在 f32 下
+    /// 常常回不到 `x1`（差 1 个 ULP）。曾导致 `bounds().contains_rect(块) == false`：
+    /// 拿它当 scissor 会漏掉最右一列像素，拿它做断言会随机红。
+    #[test]
+    fn bounds_covers_every_rect_even_when_edges_touch_exactly() {
+        let mut d = DirtyRegion::default();
+        // 两个矩形的右边界都落在 424.72 上：正是 f32 会掉精度的那种值。
+        d.add(Rect::new(54.8, 93.4, 369.92, 246.36));
+        d.add(Rect::new(370.0, 93.4, 54.72, 3.84));
+        let b = d.bounds().expect("有脏块就该有包围盒");
+        for r in d.rects() {
+            assert!(
+                b.contains_rect(*r),
+                "bounds {b:?} 没罩住脏块 {r:?}（右/下边缘被 f32 舍入吃掉了一个 ULP）"
+            );
+        }
     }
 }
 
