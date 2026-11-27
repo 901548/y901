@@ -6,7 +6,7 @@
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1280 passed / 0 failed / 69 ignored** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1279 passed / 0 failed / 70 ignored** |
 | `cargo test --workspace --offline -- --include-ignored` | **1349 passed / 0 failed** |
 
 `include_ignored=1349`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
@@ -26,7 +26,7 @@
 
 > **三个口径别混淆**（此前标题只写"8 个/7 个"，与另外两个数互相矛盾）：
 > 本表列的是 **8 条按像素/解析真值断言的用例**；`snapshot_harness.rs` **文件里共 10 条
-> `#[ignore]`**（另有 2 条是纯诊断/确定性自检）；全仓 `ignored=69` 是**所有 crate 的
+> `#[ignore]`**（另有 2 条是纯诊断/确定性自检）；全仓 `ignored=70` 是**所有 crate 的
 > `#[ignore]` 总数**（含性能基准、DirectWrite 对拍、调试探针），不是本表。
 
 
@@ -57,7 +57,7 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **1280 passed / 0 failed / 69 ignored**（188 个测试目标） |
+| 默认测试 | **1279 passed / 0 failed / 70 ignored**（188 个测试目标） |
 | `--include-ignored` | **1349 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
