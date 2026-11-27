@@ -1,8 +1,30 @@
-# Linux 侧脚本必须保持 LF：在 Windows 工作区（core.autocrlf=true）里
-# `git archive` 会把未声明的文本文件导出成 CRLF，到了 Linux 上 bash 直接
-# 报 `$'\r': 未找到命令`（实测：scripts/linux-verify.sh 第 13 行）。
+# **统一 LF**（本仓库所有文本文件在磁盘上都是 LF，见 `git ls-files --eol`）。
+#
+# 为什么显式声明：Windows 工作区的 `core.autocrlf=true` 会在**每次 `git add`** 时
+# 对每个 LF 文件刷一屏
+#   `warning: in the working copy of 'X', LF will be replaced by CRLF the next time
+#    Git touches it`
+# 并且下一次 `git checkout` 真的会把它改写成 CRLF —— 于是 `git diff` 整文件翻新、
+# Linux 侧脚本/源码混入 `\r`。仓库级 `eol=lf` 让"索引、工作区、checkout"三者一致，
+# 与 `core.autocrlf` 的取值无关（attributes 优先于 config）。
+* text=auto eol=lf
+
+# 二进制资产不受换行规则影响（`text=auto` 靠 NUL 字节启发式，这里再显式兜底）。
+*.png binary
+*.ico binary
+*.ttf binary
+*.ttc binary
+*.otf binary
+*.woff2 binary
+
+# Linux 侧脚本必须 LF：`git archive` 会把未声明的文本导出成 CRLF，到 Linux 上
+# bash 直接报 `$'\r': 未找到命令`（实测：scripts/linux-verify.sh 第 13 行）。
 *.sh text eol=lf
 
-# PowerShell 脚本必须带 BOM 且用 CRLF 以外的方式管理换行：BOM 由内容保证，
-# 这里只声明它们是文本，避免二进制误判。
-*.ps1 text
+# PowerShell 脚本：**BOM 由内容保证**（gate 有专门检查），换行按上面的统一规则走 LF
+# —— PowerShell 5.1 能读 LF，关键是 BOM 而不是 CRLF。
+*.ps1 text eol=lf
+
+# 标记文件用 LF，避免 `git diff` 把整行当变更加重噪声。
+*.log text eol=lf
+*.txt text eol=lf
