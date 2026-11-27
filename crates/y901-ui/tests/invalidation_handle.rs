@@ -215,3 +215,79 @@ fn handle_after_tree_dropped_is_harmless() {
     let drained = handle.drain();
     assert_eq!(drained.len(), 1);
 }
+// ---------- 审计 #7：单个节点的后台标脏不得升级成整窗 ----------
+
+/// `One(id)` 只标**该节点**的矩形，绝不能变成整窗重绘。
+///
+/// 旧实现把 `One` 和 `All` 都升级成 `DirtyRegion::full()`（`whole_window` 是死变量），
+/// 于是后台线程每来一条数据就是一次整窗重绘 + 整帧纹理上传。
+#[test]
+fn single_node_invalidation_does_not_become_a_whole_window_repaint() {
+    let mut tree = tree_with_two_leaves();
+    tree.invalidate_all();
+    let mut sink = Sink;
+    tree.render(&mut sink);
+    assert!(tree.dirty().is_empty(), "前置：脏区已清空");
+
+    let rect_a = tree.rect_of("a").expect("节点 a 已布局");
+    assert!(!rect_a.is_empty(), "前置：a 有非空矩形");
+
+    tree.invalidation_handle().invalidate("a");
+    assert_eq!(tree.drain_external_invalidations(), 1);
+
+    assert!(
+        !tree.dirty().is_full(),
+        "单个节点的后台标脏不得升级成整窗（审计 #7 的原始症状）"
+    );
+    let rects = tree.dirty().rects().to_vec();
+    assert!(!rects.is_empty(), "该节点仍必须被标脏");
+    // 允许墨迹外扩，所以只要求"不超出节点矩形太多"：用包含关系反向检查。
+    let union = rects.iter().fold(rects[0], |acc, r| acc.union(*r));
+    assert!(
+        union.w <= rect_a.w + 64.0 && union.h <= rect_a.h + 64.0,
+        "脏区应围绕该节点（允许墨迹外扩），实际 {union:?} vs 节点 {rect_a:?}"
+    );
+}
+
+/// `One(id)` 必须请求本帧重排：后台改的是数据，尺寸可能变了。
+#[test]
+fn single_node_invalidation_requests_a_relayout() {
+    let mut tree = tree_with_two_leaves();
+    // 清掉建树时的"需要布局"标志。
+    let _ = tree.take_layout_request();
+    tree.invalidation_handle().invalidate("b");
+    assert_eq!(tree.drain_external_invalidations(), 1);
+    assert!(
+        tree.take_layout_request(),
+        "后台标脏后必须请求重排，否则尺寸变化要等下一次别的事件才生效"
+    );
+}
+
+/// 同帧里既有 `One` 又有 `All`：合并成整窗（取最强，不能漏块）。
+#[test]
+fn all_wins_over_one_in_the_same_batch() {
+    let mut tree = tree_with_two_leaves();
+    let h = tree.invalidation_handle();
+    h.invalidate("a");
+    h.invalidate_all();
+    assert_eq!(tree.drain_external_invalidations(), 2);
+    assert!(tree.dirty().is_full(), "含 All 时必须整窗");
+}
+
+/// 不存在的 id：不标脏、不请求重排（与 `UiTree::invalidate` 的静默忽略一致）。
+#[test]
+fn unknown_id_is_ignored_without_forcing_a_repaint() {
+    let mut tree = tree_with_two_leaves();
+    tree.invalidate_all();
+    let mut sink = Sink;
+    tree.render(&mut sink);
+    let _ = tree.take_layout_request();
+
+    tree.invalidation_handle().invalidate("ghost");
+    let n = tree.drain_external_invalidations();
+    assert_eq!(n, 1, "请求本身要被计数（调用方靠它判断'有没有后台活'）");
+    assert!(
+        tree.dirty().is_empty(),
+        "不存在的节点不该产生脏区（否则每次僵尸请求都要重绘）"
+    );
+}

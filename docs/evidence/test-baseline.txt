@@ -254,4 +254,8 @@
 #   default cargo test --workspace --no-fail-fast   passed 1324, failed 0, ignored 71 / 190 个测试目标
 #   (新增 2 条源码守卫：create_pipeline 必须同时初始化容量 / rebuild 必须清掉每个设备对象字段
 #    并重建图集。WARP 上原本 100% 复现的 STATUS_HEAP_CORRUPTION 已消失；真实 GPU 用例全部通过。)
-1324
+# Measured at 2026-11-27 (审计 #7：后台单节点标脏不再升级成整窗重绘，+4 条回归):
+#   default cargo test --workspace --no-fail-fast   passed 1328, failed 0, ignored 71 / 190 个测试目标
+#   (新增 invalidation_handle 4 条：One 不整窗 / One 请求重排 / All 压过 One / 未知 id 不标脏。
+#    变异验证：把 drain 改回"一律整窗" → 2 条立刻红。像素哈希不变。)
+1328

@@ -6,6 +6,6 @@
 #
 # 生成：在 Linux 上 bash scripts/linux-verify.sh（默认会跑全量 workspace 测试）
 # 会把结果写回仓库里的这个文件，随后把文件带回 Windows 提交。
-passed=1285
+passed=1289
 ignored=35
 targets=190

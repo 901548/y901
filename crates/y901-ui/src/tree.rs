@@ -1106,12 +1106,28 @@ impl UiTree {
     /// 把后台线程的标脏请求合并进当前脏区（**框架内部接口**）。
     ///
     /// 返回：本次处理的请求数（0 = 没有后台请求）。
-    /// 规则：`One(id)` → 该节点布局失效 + 标脏 + 登记语义检查；
-    /// 只要出现一条 `All` → 整窗脏区（合并取最强，不会漏块）。
+    /// 规则：`One(id)` → 该节点布局失效 + **只标该节点矩形** + 登记语义检查
+    /// + 请求本帧重排；只要出现一条 `All` → 整窗脏区（合并取最强，不会漏块）。
     ///
     /// **必须在 `layout()` 之前调用**（主循环在 `window.resize` 之前 drain），
     /// 否则本帧按旧脏区布局、下一帧才重排。
     /// 注意：与 `UiTree::invalidate(id)` 一样，id 不存在时静默忽略。
+    ///
+    /// ## 为什么 `One` 不再升级成整窗
+    ///
+    /// 旧实现把 `One` 与 `All` 一视同仁（`whole_window` 是个死变量），理由是
+    /// "后台改的往往是看不见的内容，整窗最稳妥"。代价是：**后台线程每敲一下
+    /// 键盘/每来一条日志，就是一个 4K 整窗重绘 + 整帧上传**（`invalidate_all`
+    /// 的注释里自己写着"不要每帧调用——它会让脏区剪枝完全失效"）。
+    ///
+    /// 正确性由两件事保证，不需要整窗：
+    /// 1. `invalidate(&id)` 已经按**该节点自己的**矩形 + 墨迹外扩标脏；
+    /// 2. 后台改数据通常会让尺寸变化，所以这里同时 `layout_requested = true`；
+    ///    重排后 `mark_moved_map()` 会把"旧矩形 ∪ 新矩形"补进脏区 ——
+    ///    尺寸变化、甚至节点消失（旧位置要擦掉）都被它覆盖。
+    ///
+    /// 真正"说不清是哪块"的场景（主题切换、整表换数据）由调用方显式用
+    /// [`crate::InvalidationHandle::invalidate_all`] 表达，语义不再靠猜。
     #[doc(hidden)]
     pub fn drain_external_invalidations(&mut self) -> usize {
         let requests = self.external.drain();
@@ -1120,6 +1136,7 @@ impl UiTree {
         }
         let mut count = 0;
         let mut whole_window = false;
+        let mut moved = false;
         for request in requests {
             count += 1;
             match request {
@@ -1127,14 +1144,18 @@ impl UiTree {
                     self.cache.mark_dirty(&id);
                     self.invalidate(&id);
                     self.pending_semantic.insert(id);
+                    moved = true;
                 }
                 crate::invalidate::PendingInvalidation::All => whole_window = true,
             }
         }
-        // 有请求就一定重绘：`invalidate(id)` 只覆盖单个矩形，但后台任务改的
-        // 往往是"看不见的内容"（例如列表里的数据），整窗重绘最稳妥。
-        let _ = whole_window;
-        self.dirty = DirtyRegion::full();
+        if whole_window {
+            self.dirty = DirtyRegion::full();
+        } else if moved {
+            // 让本帧真的重排一次：后台改的是数据，组件只能在 render 阶段读到新值，
+            // 而尺寸变化必须经过 arrange 才能反映到矩形上。
+            self.layout_requested = true;
+        }
         count
     }
 

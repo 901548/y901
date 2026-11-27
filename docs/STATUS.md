@@ -2,11 +2,36 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1324` / `ignored=71` / `targets=190`；`--include-ignored` 全量 `passed=1324` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1285` / `ignored=35` / `targets=190`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-hygiene.log](evidence/cross-platform/linux-verify-2026-11-27-hygiene.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1328` / `ignored=71` / `targets=190`；`--include-ignored` 全量 `passed=1328` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1289` / `ignored=35` / `targets=190`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-invalidation.log](evidence/cross-platform/linux-verify-2026-11-27-invalidation.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-27（续七）：后台线程一次标脏不再等于整窗重绘（审计 #7）
+
+`InvalidationHandle` 是给后台线程用的"该重绘了"通知。旧实现里 `drain` 把 `One(id)` 和
+`All` **一视同仁**地升级成 `DirtyRegion::full()`（`whole_window` 变量赋值后就是
+`let _ = whole_window;`，纯粹的死代码）。后果很直接：
+
+- 后台每来一条数据（一行日志、一次下载进度、一个列表项）→ **整窗重绘 + 整帧纹理上传**；
+- 而这个项目自己的 `invalidate_all()` 注释里写着"不要每帧调用——它会让脏区剪枝完全失效"。
+
+**现在**：`All` → 整窗；`One(id)` → 只标该节点矩形（含 `Widget::ink_overflow` 外扩）
+并请求本帧重排。正确性不靠"整窗最稳妥"这句托词，而是三条已有机制：
+
+1. `invalidate(&id)` 按该节点自己的矩形标脏；
+2. 后台改的数据只有组件下次 `render` 才读得到，所以同时置 `layout_requested`；
+3. 重排后 `mark_moved_map()` 会补"旧矩形 ∪ 新矩形"——尺寸变化、甚至节点消失（旧位置要擦）
+   都被覆盖。
+
+真正说不清是哪块的场景（换主题、整表换数据）由调用方显式调 `invalidate_all()` 表达，
+不再让框架去猜。
+
+**验证**：+4 条（`One` 不整窗 / `One` 请求重排 / 同帧 `All` 压过 `One` / 未知 id 不产生脏区）；
+变异验证：把 `drain` 改回"一律整窗" → 2 条立刻红，还原后全绿。像素哈希不变。
+workspace **1328 passed / 0 failed / 71 ignored / 190 目标**（`--include-ignored` 1399）；
+Linux Xvfb 1289 passed / 35 ignored。
 
 ## 2026-11-27（续六）：WARP 上的 `STATUS_HEAP_CORRUPTION` 已定位并修复
 
@@ -65,8 +90,8 @@ debug layer 下是 `DEVICE_MISMATCH`，还可能把新设备再踢一次。现�
 `color/geometry/command` 的"过期文档"复核后**没有**需要改的表述，因此没动 —— 记录在此，
 避免下一轮重复怀疑。
 
-**验证**：+6 条新用例、加强 3 条；workspace **1324 passed / 0 failed / 71 ignored / 190 目标**
-（`--include-ignored` 1393）；像素哈希 `0xF7455CCE7781A864` 不变；Linux Xvfb 1285 passed。
+**验证**：+6 条新用例、加强 3 条；workspace **1328 passed / 0 failed / 71 ignored / 190 目标**
+（`--include-ignored` 1393）；像素哈希 `0xF7455CCE7781A864` 不变；Linux Xvfb 1285 passed（当轮数）。
 
 ## 2026-11-27（续四）：文本编辑的产品缺口 —— 撤销/重做、按词移动、双击选词（PLAN 批次 5）
 
@@ -118,7 +143,7 @@ workspace **1316 passed / 0 failed / 71 ignored / 190 目标**（`--include-igno
 ZWJ emoji 序列 / 空格混合）× **每个字节位置**上逐一比对 snap/prev/next 三个函数。
 另加一条超长簇用例（"基字 + 500 组合记号"，验证一次跨簇而不是按字符走）。
 
-**验证**：workspace **1324 passed / 0 failed / 71 ignored / 190 目标**；像素哈希
+**验证**：workspace **1328 passed / 0 failed / 71 ignored / 190 目标**；像素哈希
 `0xF7455CCE7781A864` 未变（纯实现优化）；Linux Xvfb 全量见 evidence 日志。
 
 顺带修掉一个**门禁脚本自身的坑**：`gate.ps1` 与 `sync-doc-numbers.ps1` 都用
@@ -152,7 +177,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1285 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1289 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -525,7 +550,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1324** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1328** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -996,7 +1021,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1324/0/71 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1328/0/71 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，
