@@ -2,11 +2,39 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1297` / `ignored=71` / `targets=189`；`--include-ignored` 全量 `passed=1297` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1260` / `ignored=35` / `targets=189`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-cluster.log](evidence/cross-platform/linux-verify-2026-11-27-cluster.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1316` / `ignored=71` / `targets=190`；`--include-ignored` 全量 `passed=1316` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1279` / `ignored=35` / `targets=190`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-text-edit.log](evidence/cross-platform/linux-verify-2026-11-27-text-edit.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-27（续四）：文本编辑的产品缺口 —— 撤销/重做、按词移动、双击选词（PLAN 批次 5）
+
+三个"用户一定会按"的操作此前都不存在：`Ctrl+Z` 没反应、`Ctrl+←/→` 不动、双击不选词。
+现在两个文本控件（`TextInput` / `TextArea`）都有，且**逻辑只写在 `TextBuffer` 里一份**。
+
+| 能力 | 语义（刻意选的约定） |
+|---|---|
+| `Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z` | 撤销 / 重做。**连续打字合并为一步**（间隔 < 700ms），停顿后另起一步 —— 撤一次退回一段话，而不是一个字 |
+| 历史容量 | 条数上限 200 **且** 总字节上限 4 MiB（只按条数限，4 MB 文档的 200 步就是 800 MB；只按字节限，短文本会攒几千步） |
+| `Ctrl+←` / `Ctrl+→` | 按词移动，**对称约定**：`←` 落到词首，`→` 落到下一个词首（最后一个词的下一站 = 文本末尾）。加 `Shift` 扩展选区 |
+| 双击 | 选中指针下的词；点在空白/标点上**优先选右边的词**，右边没有才选左边；全是标点时选这串标点 |
+
+两条容易做错、所以专门钉住的细节：
+
+1. **不能拆字素簇**：`cafe` + `U+0301` 的词移动/选词必须落在整个簇的外侧。
+   `word_range_never_splits_a_grapheme_cluster` 与控件层的 `word_moves_never_split_a_grapheme_cluster` 各钉一遍。
+2. **撤销要还原光标**：`undo_restores_the_cursor_where_the_edit_started` —— 否则撤销后光标跳到开头，
+   用户下一次输入就插错位置（比"不能撤销"更糟）。
+
+双击识别不用系统双击消息，而是"**时间 + 距离**"（400ms / 4 逻辑像素）：
+三个后端都要各自翻译一遍系统消息，而这两个量在任何后端都拿得到，判定逻辑只写一份。
+
+**验证**：`y901-ui` 新增 9 条、`y901-widgets/tests/text_editing.rs` 新增 10 条（端到端：事件进、文本出）；
+workspace **1316 passed / 0 failed / 71 ignored / 190 目标**（`--include-ignored` 1387）；Linux Xvfb 全量见 evidence 日志。
+
+**诚实的边界**：撤销历史是"整份文本快照"，不是基于操作的 diff —— 4 MiB 上限下最坏约 4 MiB 额外内存；
+换成 rope/CRDT 才能做到真正的 O(编辑量)，那属于 NEXT 阶段（见 [ROADMAP.md](ROADMAP.md)）。
 
 ## 2026-11-27（续三）：光标移动不再物化整份边界表（PLAN 批次 6 后半）
 
@@ -30,7 +58,7 @@
 ZWJ emoji 序列 / 空格混合）× **每个字节位置**上逐一比对 snap/prev/next 三个函数。
 另加一条超长簇用例（"基字 + 500 组合记号"，验证一次跨簇而不是按字符走）。
 
-**验证**：workspace **1297 passed / 0 failed / 71 ignored / 189 目标**；像素哈希
+**验证**：workspace **1316 passed / 0 failed / 71 ignored / 190 目标**；像素哈希
 `0xF7455CCE7781A864` 未变（纯实现优化）；Linux Xvfb 全量见 evidence 日志。
 
 顺带修掉一个**门禁脚本自身的坑**：`gate.ps1` 与 `sync-doc-numbers.ps1` 都用
@@ -63,8 +91,8 @@ ZWJ emoji 序列 / 空格混合）× **每个字节位置**上逐一比对 snap/
 AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩形 == 命中测试矩形"
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
-**验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；workspace **1297 passed / 0 failed**
-（ignored 71 / 189 目标，`--include-ignored` 1368）；Linux Xvfb **1260 passed / 35 ignored**，
+**验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；workspace **1316 passed / 0 failed**
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1279 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -438,7 +466,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1297** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1316** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -909,7 +937,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1297/0/71 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1316/0/71 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，

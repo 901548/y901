@@ -9,11 +9,53 @@
 //! 2. `anchor == cursor` 表示"没有选区"；
 //! 3. 所有编辑操作都先用选区替换，再落笔（与用户预期一致）。
 //!
-//! 已知限制（刻意的）：不做 grapheme cluster 合并（emoji 组合、变音符号会被
-//! 当成多个字符逐个删除），不做 bidi，不折行。这些等 `TextInputWidget` 需要时再补。
+//! 光标移动与删除**按字素簇**（`e` + 组合重音算一个整体，见 `crate::cluster`），
+//! 不按 UTF-8 字节、也不按 `char`。
+//!
+//! 已知限制（刻意的）：不做 bidi，不折行（折行在控件层按可视宽度做）。
 
 use crate::color::TextStyle;
 use crate::widget::TextMetrics;
+use std::collections::VecDeque;
+use std::time::Instant;
+
+/// 撤销历史里最多保留多少步。
+///
+/// 为什么是"条数 + 总字节"双上限：只按条数限，一份 4 MB 的文本按 200 步存
+/// 就是 800 MB；只按字节限，短文本会攒下几千步。两个都要。
+const HISTORY_MAX_STEPS: usize = 200;
+/// 撤销历史最多占多少字节（所有快照的文本副本之和）。
+const HISTORY_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// 连续打字合并为一步的时间窗。
+///
+/// 超过这个间隔再按键就另起一步：用户停顿一下再打字，通常希望 Ctrl+Z
+/// 撤到停顿处，而不是把整段话一次撤掉。
+const TYPING_COALESCE: std::time::Duration = std::time::Duration::from_millis(700);
+
+/// 撤销栈里的一份快照：文本 + 光标 + 锚点。
+#[derive(Clone, Debug)]
+struct Snapshot {
+    text: String,
+    cursor: usize,
+    anchor: usize,
+}
+
+/// 一次编辑的类别：决定能不能与上一步合并。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum EditKind {
+    /// 连续输入（可合并）。
+    Typing,
+    /// 删除、粘贴、剪切等（不与任何东西合并）。
+    Other,
+}
+
+/// 这个字符算不算"词"的一部分（Ctrl+←/→ 与双击选词的边界依据）。
+///
+/// 规则刻意简单、可预期：字母/数字/下划线成词，其余（空白、标点、emoji）成界。
+/// 不做语言相关分词 —— 那需要词典，且猜错时用户更难纠正。
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
 
 /// 文本长度上限（字节）：16 MiB。
 ///
@@ -29,6 +71,14 @@ pub struct TextBuffer {
     cursor: usize,
     /// 选区锚点：字节偏移。`anchor == cursor` 表示无选区。
     anchor: usize,
+    /// 撤销栈（每项是"这次编辑**之前**"的状态）。
+    undo: VecDeque<Snapshot>,
+    /// 重做栈（撤销时压入，任何新编辑清空）。
+    redo: Vec<Snapshot>,
+    /// 撤销栈当前占用的文本字节数（用于 `HISTORY_MAX_BYTES` 上限）。
+    undo_bytes: usize,
+    /// 上一次编辑的时间与类别，用于把连续打字合并成一步。
+    last_edit: Option<(Instant, EditKind)>,
 }
 
 impl TextBuffer {
@@ -45,6 +95,7 @@ impl TextBuffer {
             text,
             cursor: end,
             anchor: end,
+            ..Self::default()
         }
     }
 
@@ -220,10 +271,298 @@ impl TextBuffer {
         true
     }
 
+    // ---------- 撤销 / 重做 ----------
+
+    /// 把"当前状态"存进撤销栈（**在改文本之前**调用）。
+    ///
+    /// 合并规则：`Typing` 与上一步同类且间隔小于 [`TYPING_COALESCE`] 时不重复入栈 ——
+    /// 于是"连打 10 个字母"是**一步**，而"打字 → 停顿 → 打字"是两步。
+    fn record(&mut self, kind: EditKind) {
+        let now = Instant::now();
+        if kind == EditKind::Typing {
+            if let Some((last_at, EditKind::Typing)) = self.last_edit {
+                if now.duration_since(last_at) < TYPING_COALESCE {
+                    self.last_edit = Some((now, kind));
+                    // 仍在同一段输入里：不新增快照（旧快照已覆盖这段之前的状态）。
+                    return;
+                }
+            }
+        }
+        self.last_edit = Some((now, kind));
+        self.undo_bytes += self.text.len();
+        self.undo.push_back(Snapshot {
+            text: self.text.clone(),
+            cursor: self.cursor,
+            anchor: self.anchor,
+        });
+        // 新编辑让"未来的撤销"失效。
+        self.redo.clear();
+        // 两道上限：条数与总字节。超了从**最旧**的开始丢。
+        while self.undo.len() > HISTORY_MAX_STEPS
+            || (self.undo_bytes > HISTORY_MAX_BYTES && self.undo.len() > 1)
+        {
+            if let Some(dropped) = self.undo.pop_front() {
+                self.undo_bytes = self.undo_bytes.saturating_sub(dropped.text.len());
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// 撤销栈的步数（诊断/测试用）。
+    pub fn undo_depth(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// 撤销栈占用的文本字节数（诊断/测试用；用于验证上限真的生效）。
+    pub fn history_bytes(&self) -> usize {
+        self.undo_bytes
+    }
+
+    /// 是否还有可撤销的编辑。
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    /// 是否还有可重做的编辑。
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// 撤销一步。返回 `false` 表示已经在最早的状态。
+    pub fn undo(&mut self) -> bool {
+        let Some(prev) = self.undo.pop_back() else {
+            return false;
+        };
+        self.undo_bytes = self.undo_bytes.saturating_sub(prev.text.len());
+        self.redo.push(Snapshot {
+            text: std::mem::take(&mut self.text),
+            cursor: self.cursor,
+            anchor: self.anchor,
+        });
+        self.text = prev.text;
+        self.cursor = prev.cursor.min(self.text.len());
+        self.anchor = prev.anchor.min(self.text.len());
+        // 撤销之后又是一段新输入的起点。
+        self.last_edit = None;
+        true
+    }
+
+    /// 重做一步。返回 `false` 表示没有可重做的编辑。
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo_bytes += self.text.len();
+        self.undo.push_back(Snapshot {
+            text: std::mem::take(&mut self.text),
+            cursor: self.cursor,
+            anchor: self.anchor,
+        });
+        self.text = next.text;
+        self.cursor = next.cursor.min(self.text.len());
+        self.anchor = next.anchor.min(self.text.len());
+        self.last_edit = None;
+        true
+    }
+
+    /// 清空撤销/重做历史（例如 `set_text` 载入全新文档后）。
+    pub fn clear_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+        self.undo_bytes = 0;
+        self.last_edit = None;
+    }
+
+    // ---------- 词移动 / 选词（Ctrl+←/→、双击）----------
+
+    /// 词首（Ctrl+←）：先跳过紧邻的非单词字符，再跳过单词字符。
+    ///
+    /// 结果会吸附到字素簇边界，绝不把 `e` 与它的重音拆开。
+    pub fn move_word_left(&mut self, extend: bool) -> bool {
+        let target = self.word_left_target(self.cursor);
+        if target == self.cursor {
+            return false;
+        }
+        self.cursor = target;
+        if !extend {
+            self.anchor = target;
+        }
+        true
+    }
+
+    /// 词尾（Ctrl+→）：先跳过单词字符，再跳过紧邻的非单词字符（与上文对称）。
+    pub fn move_word_right(&mut self, extend: bool) -> bool {
+        let target = self.word_right_target(self.cursor);
+        if target == self.cursor {
+            return false;
+        }
+        self.cursor = target;
+        if !extend {
+            self.anchor = target;
+        }
+        true
+    }
+
+    fn word_left_target(&self, pos: usize) -> usize {
+        let mut idx = pos;
+        // 1) 跳过非单词字符
+        while idx > 0 {
+            let (i, ch) = self.text[..idx].char_indices().next_back().unwrap();
+            if is_word_char(ch) {
+                break;
+            }
+            idx = i;
+        }
+        // 2) 跳过单词字符
+        while idx > 0 {
+            let (i, ch) = self.text[..idx].char_indices().next_back().unwrap();
+            if !is_word_char(ch) {
+                break;
+            }
+            idx = i;
+        }
+        crate::cluster::snap(&self.text, idx)
+    }
+
+    fn word_right_target(&self, pos: usize) -> usize {
+        let mut idx = pos;
+        // 1) 跳过单词字符
+        while idx < self.text.len() {
+            let ch = self.text[idx..].chars().next().unwrap();
+            if !is_word_char(ch) {
+                break;
+            }
+            idx += ch.len_utf8();
+        }
+        // 2) 跳过非单词字符
+        while idx < self.text.len() {
+            let ch = self.text[idx..].chars().next().unwrap();
+            if is_word_char(ch) {
+                break;
+            }
+            idx += ch.len_utf8();
+        }
+        self.cluster_ceil(idx)
+    }
+
+    /// 把位置**向上**对齐到字素簇边界（不越过簇尾）。
+    fn cluster_ceil(&self, pos: usize) -> usize {
+        let pos = pos.min(self.text.len());
+        if pos == 0 || pos >= self.text.len() || crate::cluster::snap(&self.text, pos) == pos {
+            return pos;
+        }
+        crate::cluster::next_boundary(&self.text, pos).unwrap_or(self.text.len())
+    }
+
+    /// `byte` 所在"词"的区间（双击选中用）。
+    ///
+    /// 规则：落在单词字符上 → 选中该词；落在空白/标点上 → **优先选右边那个词**
+    /// （与主流编辑器一致：双击行尾空格选最后一个词，否则什么也选不中）；
+    /// 右边没有词就选左边那个。返回值一定落在字素簇边界上。
+    pub fn word_range_at(&self, byte: usize) -> Option<(usize, usize)> {
+        if self.text.is_empty() {
+            return None;
+        }
+        let pos = crate::cluster::snap(&self.text, byte.min(self.text.len()));
+        let at_word = self.text[pos..].chars().next().is_some_and(is_word_char);
+        if at_word {
+            return Some(self.word_bounds_around(pos, true));
+        }
+        // 非单词字符：找右边的词
+        let mut p = pos;
+        while p < self.text.len() {
+            let ch = self.text[p..].chars().next().unwrap();
+            if is_word_char(ch) {
+                return Some(self.word_bounds_around(p, true));
+            }
+            p += ch.len_utf8();
+        }
+        // 右边没有词：选左边的词
+        let mut p = pos;
+        while p > 0 {
+            let (i, ch) = self.text[..p].char_indices().next_back().unwrap();
+            if is_word_char(ch) {
+                return Some(self.word_bounds_around(i, false));
+            }
+            p = i;
+        }
+        // 整段没有任何单词字符（如全是标点）：选中这串标点
+        let start = {
+            let mut s = pos;
+            while s > 0 {
+                let (i, ch) = self.text[..s].char_indices().next_back().unwrap();
+                if is_word_char(ch) {
+                    break;
+                }
+                s = i;
+            }
+            crate::cluster::snap(&self.text, s)
+        };
+        let end = {
+            let mut e = pos;
+            while e < self.text.len() {
+                let ch = self.text[e..].chars().next().unwrap();
+                if is_word_char(ch) {
+                    break;
+                }
+                e += ch.len_utf8();
+            }
+            self.cluster_ceil(e)
+        };
+        Some((start, end))
+    }
+
+    /// 从 `pos`（必须是指向单词字符的位置）向两侧扩展成一整段词。
+    fn word_bounds_around(&self, pos: usize, _right_biased: bool) -> (usize, usize) {
+        let mut start = pos;
+        while start > 0 {
+            let (i, ch) = self.text[..start].char_indices().next_back().unwrap();
+            if !is_word_char(ch) {
+                break;
+            }
+            start = i;
+        }
+        let mut end = pos;
+        while end < self.text.len() {
+            let ch = self.text[end..].chars().next().unwrap();
+            if !is_word_char(ch) {
+                break;
+            }
+            end += ch.len_utf8();
+        }
+        (
+            crate::cluster::snap(&self.text, start),
+            self.cluster_ceil(end),
+        )
+    }
+
+    /// 选中 `byte` 所在的词（双击）。没有词时返回 `false`。
+    pub fn select_word_at(&mut self, byte: usize) -> bool {
+        let Some((start, end)) = self.word_range_at(byte) else {
+            return false;
+        };
+        if start == end {
+            return false;
+        }
+        self.set_selection(start, end);
+        true
+    }
+
     // ---------- 编辑 ----------
 
     /// 删除选区；没有选区返回 `false`。
     pub fn delete_selection(&mut self) -> bool {
+        if !self.has_selection() {
+            return false;
+        }
+        self.record(EditKind::Other);
+        self.delete_selection_raw();
+        true
+    }
+
+    /// 删除选区（**不记撤销历史**）：供 `insert_str` 等"整体是一次编辑"的路径复用。
+    fn delete_selection_raw(&mut self) -> bool {
         let Some((start, end)) = self.selection() else {
             return false;
         };
@@ -238,7 +577,8 @@ impl TextBuffer {
         if s.is_empty() {
             return;
         }
-        self.delete_selection();
+        self.record(EditKind::Typing);
+        self.delete_selection_raw();
         // 超限时截断到剩余容量（按字符边界切），**不 panic、不静默丢整段**。
         let room = MAX_TEXT_LEN.saturating_sub(self.text.len());
         let mut take = s.len().min(room);
@@ -267,6 +607,7 @@ impl TextBuffer {
         if self.cursor == 0 {
             return false;
         }
+        self.record(EditKind::Other);
         let start = self.prev_boundary(self.cursor);
         self.text.replace_range(start..self.cursor, "");
         self.cursor = start;
@@ -282,6 +623,7 @@ impl TextBuffer {
         if self.cursor >= self.text.len() {
             return false;
         }
+        self.record(EditKind::Other);
         let end = self.next_boundary(self.cursor);
         self.text.replace_range(self.cursor..end, "");
         // 光标不动
@@ -653,6 +995,166 @@ mod tests {
 
         // 反向：点 x=17 应落到第二行第 2 个字符之后
         assert_eq!(buf.offset_for_x(17.0, &Mono, &s), 6);
+    }
+
+    // ---------- 撤销 / 重做 ----------
+
+    #[test]
+    fn undo_is_a_stack_and_redo_mirrors_it() {
+        // 只用公开编辑接口，避免测试依赖 `record` 的内部调用时点：
+        // 输入("a") → 删除 → 输入("b")，共三步。
+        let mut buf = TextBuffer::new();
+        buf.insert_str("a");
+        assert!(buf.backspace());
+        buf.insert_str("b");
+        assert_eq!(buf.text(), "b");
+
+        assert!(buf.undo(), "应有可撤销步骤");
+        assert_eq!(buf.text(), "", "撤销插入 b → 空");
+        assert!(buf.undo());
+        assert_eq!(buf.text(), "a", "再撤销删除 → 回到 a");
+        assert!(buf.undo());
+        assert_eq!(buf.text(), "", "再撤销第一次插入 → 空");
+        assert!(!buf.undo(), "到底之后必须返回 false（不是 panic）");
+
+        assert!(buf.redo());
+        assert_eq!(buf.text(), "a", "重做第一次插入");
+        assert!(buf.redo());
+        assert_eq!(buf.text(), "", "重做删除");
+        assert!(buf.redo());
+        assert_eq!(buf.text(), "b", "重做第二次插入");
+        assert!(!buf.redo());
+    }
+
+    #[test]
+    fn consecutive_typing_coalesces_but_delete_breaks_the_run() {
+        let mut buf = TextBuffer::new();
+        buf.insert_str("x");
+        buf.insert_str("y");
+        buf.insert_str("z");
+        assert_eq!(buf.text(), "xyz");
+        assert_eq!(buf.undo_depth(), 1, "连续输入应合并为一步");
+        buf.undo();
+        assert_eq!(buf.text(), "");
+
+        let mut buf = TextBuffer::from_text("");
+        buf.insert_str("a");
+        buf.backspace();
+        assert_eq!(buf.text(), "");
+        assert_eq!(buf.undo_depth(), 2, "输入 + 删除是两步（删除不可合并）");
+    }
+
+    #[test]
+    fn history_respects_the_step_limit() {
+        let mut buf = TextBuffer::new();
+        // 每步之间用删除打断合并，制造大量独立步骤。
+        for _ in 0..(HISTORY_MAX_STEPS + 50) {
+            buf.insert_str("a");
+            buf.record(EditKind::Other);
+        }
+        assert!(
+            buf.undo_depth() <= HISTORY_MAX_STEPS,
+            "撤销步数必须有上限，实得 {}",
+            buf.undo_depth()
+        );
+        // 一直撤到底不应 panic，且文本长度单调不增。
+        let mut last = buf.text().len();
+        while buf.undo() {
+            let now = buf.text().len();
+            assert!(now <= last, "撤销后文本变长了：{last} → {now}");
+            last = now;
+        }
+    }
+
+    #[test]
+    fn history_respects_the_byte_budget() {
+        let mut buf = TextBuffer::new();
+        // 往同一个缓冲里灌 1 MiB，每次插入都记一步（用 Other 打断合并）。
+        let chunk = "x".repeat(64 * 1024);
+        for _ in 0..16 {
+            buf.insert_str(&chunk);
+            buf.record(EditKind::Other);
+        }
+        assert!(
+            buf.history_bytes() <= HISTORY_MAX_BYTES,
+            "快照总字节必须受 HISTORY_MAX_BYTES 约束，实得 {}",
+            buf.history_bytes()
+        );
+    }
+
+    // ---------- 按词移动 / 选词 ----------
+
+    #[test]
+    fn word_moves_land_on_word_edges() {
+        let mut buf = TextBuffer::from_text("hello brave world");
+        assert_eq!(buf.cursor(), 17);
+        buf.move_word_left(false);
+        assert_eq!(buf.cursor(), 12, "world 的词首");
+        buf.move_word_left(false);
+        assert_eq!(buf.cursor(), 6, "brave 的词首");
+        buf.move_word_left(false);
+        assert_eq!(buf.cursor(), 0, "hello 的词首");
+        assert!(!buf.move_word_left(false), "已在开头，不再移动");
+        // 约定（与 Ctrl+← 对称）：Ctrl+→ 永远落在**下一个词首**；
+        // 最后一个词的下一站就是文本末尾。
+        buf.move_word_right(false);
+        assert_eq!(buf.cursor(), 6, "hello 之后的下一个词首是 brave");
+        buf.move_word_right(false);
+        assert_eq!(buf.cursor(), 12, "再下一站是 world 的词首");
+        buf.move_word_right(false);
+        assert_eq!(buf.cursor(), 17, "最后一个词的下一站是末尾");
+        assert!(!buf.move_word_right(false), "已在末尾，不再移动");
+    }
+
+    #[test]
+    fn word_moves_skip_punctuation_and_whitespace_runs() {
+        // 连续标点/空白是一个"非词"区段，应一次跨过。
+        let mut buf = TextBuffer::from_text("foo --- bar");
+        buf.move_word_left(false);
+        assert_eq!(buf.cursor(), 8, "bar 的词首");
+        buf.move_word_left(false);
+        assert_eq!(buf.cursor(), 0, "一次跨过 ' --- ' 到 foo 的词首");
+    }
+
+    #[test]
+    fn word_range_at_selects_the_word_or_the_neighbouring_one() {
+        let text = "alpha beta gamma";
+        let buf = TextBuffer::from_text(text);
+        assert_eq!(buf.word_range_at(7), Some((6, 10)), "点在词内 → 该词");
+        // 点在空格上：优先选右边的词（主流编辑器行为）
+        assert_eq!(buf.word_range_at(5), Some((6, 10)));
+        // 末尾空白右边没有词 → 选左边的词
+        let buf = TextBuffer::from_text("alpha ");
+        assert_eq!(buf.word_range_at(5), Some((0, 5)));
+        // 全是标点：选这串标点本身
+        let buf = TextBuffer::from_text("***");
+        assert_eq!(buf.word_range_at(1), Some((0, 3)));
+        // 空文本没有词
+        assert_eq!(TextBuffer::new().word_range_at(0), None);
+    }
+
+    #[test]
+    fn word_range_never_splits_a_grapheme_cluster() {
+        // "e" + 组合重音 是一簇（3 字节），选词不能把它切开。
+        let text = "cafe\u{301} bar";
+        let buf = TextBuffer::from_text(text);
+        let (start, end) = buf.word_range_at(6).expect("空格右侧有词");
+        assert_eq!(&text[start..end], "bar");
+        let (s2, e2) = buf.word_range_at(0).expect("左侧有词");
+        assert_eq!(
+            &text[s2..e2],
+            "cafe\u{301}",
+            "整个 cafe\u{301} 必须一次选中（e 与重音不拆开）"
+        );
+    }
+
+    #[test]
+    fn select_word_at_reports_whether_it_selected_anything() {
+        let mut buf = TextBuffer::from_text("one two");
+        assert!(buf.select_word_at(6));
+        assert_eq!(buf.selection(), Some((4, 7)));
+        let mut empty = TextBuffer::new();
+        assert!(!empty.select_word_at(0), "空文本选不出词");
     }
 
     #[test]

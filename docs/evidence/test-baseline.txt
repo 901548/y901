@@ -238,4 +238,10 @@
 #   default cargo test --workspace --no-fail-fast   passed 1297, failed 0, ignored 71 / 189 个测试目标
 #   (新增 y901-ui cluster::tests 2 条（逐字节对拍旧实现 / 超长组合簇）+ tests/cluster_perf.rs 1 条 #[ignore] 剖析；
 #    ignored 70 → 71。剖析实测：20 万字符文本上 1000 次移动 327µs，旧实现 41.2s（12.6 万倍）。
-1297
+# Measured at 2026-11-27 (PLAN 批次 5：TextBuffer 撤销/重做 + 按词移动 + 双击选词，两个文本控件共用):
+#   default cargo test --workspace --no-fail-fast   passed 1316, failed 0, ignored 71 / 190 个测试目标
+#   (新增 y901-ui text::tests 9 条（撤销栈/重做镜像、合并窗口、步数与字节双上限、
+#    词移动、标点区段、选词边界、簇安全、空文本）+ y901-widgets text_editing 10 条
+#    （Ctrl+Z/Y/Shift+Z 端到端、Ctrl+←/→ 与 Shift 扩选、双击选词、簇不拆分、
+#    TextArea 同能力）。include_ignored 1387。
+1316

@@ -92,6 +92,8 @@ pub struct TextArea {
     dragging: bool,
     /// 上下移动时保持的**目标 x**（像素）：连续按 ↑↓ 不应左右漂移。
     goal_x: Option<f32>,
+    /// 上一次左键按下的时间与位置：用于识别**双击**（选词）。
+    last_click: Option<(Instant, Pos)>,
     placeholder: Option<String>,
     /// 期望可视行数（只影响 `measure` 的默认高度）。
     rows: usize,
@@ -136,6 +138,7 @@ impl TextArea {
             version: 0,
             dragging: false,
             goal_x: None,
+            last_click: None,
             placeholder: None,
             rows: DEFAULT_ROWS,
             needs_relayout: true,
@@ -425,6 +428,19 @@ impl TextArea {
     }
 
     /// 把屏幕坐标（客户端坐标）映射成字节偏移。
+    /// 这次按下是否算**双击**（与上一次按下同位置、间隔 < 400ms）。
+    ///
+    /// 位置容差 4 逻辑像素：真实双击时手会抖一两个像素，要求严格相等几乎永不成立。
+    fn is_double_click(&self, pos: Pos) -> bool {
+        const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
+        const TOLERANCE: f32 = 4.0;
+        match self.last_click {
+            Some((at, prev)) if at.elapsed() < DOUBLE_CLICK => {
+                (prev.x - pos.x).abs() <= TOLERANCE && (prev.y - pos.y).abs() <= TOLERANCE
+            }
+            _ => false,
+        }
+    }
     fn byte_at_screen(&self, pos: Pos) -> usize {
         let pad = self.padding_scaled(self.ui_scale);
         let local_x = pos.x - (self.rect.x + pad.left);
@@ -528,6 +544,41 @@ impl TextArea {
                     if let Some(text) = self.clipboard.get() {
                         self.buffer.insert_str(&text);
                         self.touch();
+                        return EventResult::Redraw;
+                    }
+                    return EventResult::Handled;
+                }
+                // Ctrl+Z 撤销；Ctrl+Shift+Z / Ctrl+Y 重做。
+                Key::Char('z') | Key::Char('Z') => {
+                    let changed = if mods.shift {
+                        self.buffer.redo()
+                    } else {
+                        self.buffer.undo()
+                    };
+                    if changed {
+                        self.touch();
+                        return EventResult::Redraw;
+                    }
+                    return EventResult::Handled;
+                }
+                Key::Char('y') | Key::Char('Y') => {
+                    if self.buffer.redo() {
+                        self.touch();
+                        return EventResult::Redraw;
+                    }
+                    return EventResult::Handled;
+                }
+                // Ctrl+←/→：按词移动（Shift 扩展选区）。
+                Key::Left => {
+                    if self.buffer.move_word_left(mods.shift) {
+                        self.touch_caret();
+                        return EventResult::Redraw;
+                    }
+                    return EventResult::Handled;
+                }
+                Key::Right => {
+                    if self.buffer.move_word_right(mods.shift) {
+                        self.touch_caret();
                         return EventResult::Redraw;
                     }
                     return EventResult::Handled;
@@ -775,7 +826,13 @@ impl Widget for TextArea {
                 ctx.set_pointer_capture(self.id.clone());
                 self.dragging = true;
                 let byte = self.byte_at_screen(*pos);
-                self.buffer.set_cursor(byte);
+                // 双击 → 选中整词；否则落光标。判定与 `TextInput` 同一套（时间 + 距离）。
+                if self.is_double_click(*pos) {
+                    self.buffer.select_word_at(byte);
+                } else {
+                    self.buffer.set_cursor(byte);
+                }
+                self.last_click = Some((Instant::now(), *pos));
                 self.goal_x = None;
                 EventResult::Redraw
             }

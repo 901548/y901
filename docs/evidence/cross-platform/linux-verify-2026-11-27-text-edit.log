@@ -1,0 +1,15 @@
+# Linux 验收日志（2026-11-27 第十七轮）：文本编辑（撤销/重做、按词移动、双击选词）
+# 环境：Ubuntu 22.04 (WSL2) + Xvfb；CARGO_TARGET_DIR=$HOME/y901-target
+# 命令：CARGO_FLAGS=--offline SKIP_SLOW=1 bash scripts/linux-verify.sh
+# 额外：cargo clippy -p y901-ui -p y901-widgets --all-targets -- -D warnings → EXIT 0
+
+EXIT_CHECK_X11=0
+EXIT_GOLDEN=0
+EXIT_REAL_WINDOW=0
+EXIT_CLIPPY_X11=0
+EXIT_STROKE=0
+EXIT_SGR_REVERSE=0
+EXIT_FULL_WORKSPACE=0
+LINUX VERIFY: OK
+
+LINUX VERIFY: OK (7/7 EXIT_0)

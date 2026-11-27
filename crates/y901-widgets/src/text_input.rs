@@ -107,6 +107,11 @@ pub struct TextInput {
     dragging: bool,
     caret_visible: bool,
     last_blink: Instant,
+    /// 上一次左键按下的时间与位置：用于识别**双击**（选词）。
+    ///
+    /// 为什么不用系统双击消息：三个后端（Win32/X11/Web）都得各自翻译一遍，
+    /// 而"时间 + 距离"这两个量在任何后端都拿得到，判定逻辑只写一份。
+    last_click: Option<(Instant, Pos)>,
 
     /// IME 预编辑串：画成覆盖层，不进 buffer。
     preedit: String,
@@ -153,6 +158,7 @@ impl TextInput {
             dragging: false,
             caret_visible: true,
             last_blink: Instant::now(),
+            last_click: None,
             preedit: String::new(),
             clipboard: Box::new(NullClipboard),
             version: 0,
@@ -452,6 +458,20 @@ impl TextInput {
         self.scroll_x = self.scroll_x.clamp(0.0, max_scroll);
     }
 
+    /// 这次按下是否算**双击**（与上一次按下同位置、间隔 < 400ms）。
+    ///
+    /// 位置容差 4 逻辑像素：真实双击时手会抖一两个像素，严格相等几乎永远不成立。
+    fn is_double_click(&self, pos: Pos) -> bool {
+        const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
+        const TOLERANCE: f32 = 4.0;
+        match self.last_click {
+            Some((at, prev)) if at.elapsed() < DOUBLE_CLICK => {
+                (prev.x - pos.x).abs() <= TOLERANCE && (prev.y - pos.y).abs() <= TOLERANCE
+            }
+            _ => false,
+        }
+    }
+
     /// 鼠标 X（屏幕坐标）→ 字节偏移。
     fn byte_at_screen_x(&self, x: f32) -> usize {
         let pad = self.padding_scaled(self.ui_scale);
@@ -479,6 +499,41 @@ impl TextInput {
                     if let Some(text) = self.clipboard.get() {
                         self.buffer.insert_str(&text);
                         self.touch();
+                        return EventResult::Redraw;
+                    }
+                    return EventResult::Handled;
+                }
+                // Ctrl+Z 撤销；Ctrl+Shift+Z 重做（与 Ctrl+Y 等价，两种习惯都支持）。
+                Key::Char('z') | Key::Char('Z') => {
+                    let changed = if mods.shift {
+                        self.buffer.redo()
+                    } else {
+                        self.buffer.undo()
+                    };
+                    if changed {
+                        self.touch();
+                        return EventResult::Redraw;
+                    }
+                    return EventResult::Handled;
+                }
+                Key::Char('y') | Key::Char('Y') => {
+                    if self.buffer.redo() {
+                        self.touch();
+                        return EventResult::Redraw;
+                    }
+                    return EventResult::Handled;
+                }
+                // Ctrl+←/→：按**词**移动（Shift 同时扩展选区）。
+                Key::Left => {
+                    if self.buffer.move_word_left(mods.shift) {
+                        self.caret_visible = true;
+                        return EventResult::Redraw;
+                    }
+                    return EventResult::Handled;
+                }
+                Key::Right => {
+                    if self.buffer.move_word_right(mods.shift) {
+                        self.caret_visible = true;
                         return EventResult::Redraw;
                     }
                     return EventResult::Handled;
@@ -700,7 +755,13 @@ impl Widget for TextInput {
                 self.dragging = true;
 
                 let byte = self.byte_at_screen_x(pos.x);
-                self.buffer.set_cursor(byte);
+                // 双击（同一位置附近、两次间隔在阈值内）→ 选中整词；否则落光标。
+                if self.is_double_click(*pos) {
+                    self.buffer.select_word_at(byte);
+                } else {
+                    self.buffer.set_cursor(byte);
+                }
+                self.last_click = Some((Instant::now(), *pos));
                 EventResult::Redraw
             }
 
