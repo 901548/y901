@@ -118,7 +118,10 @@ if ($Check) {
 
     # 目标数 = cargo 输出里 "test result:" 的条数（每个 test binary 一条）。
     $targets = ([regex]::Matches($defaultOut, 'test result: \w+\. \d+ passed')).Count
-    $baselineLine = (Get-Content (Join-Path $root 'docs\evidence\test-baseline.txt') | Where-Object { $_ -notmatch '^#' -and $_.Trim() -ne '' } | Select-Object -First 1)
+    # 与 gate.ps1 同一处理：**必须显式 UTF-8 读**。PS 5.1 的 `Get-Content` 按 ANSI 解码，
+    # 中文注释的"尾字节 + 换行"歧义会把末尾数字行粘进注释，于是这里解析出空串。
+    $baselineLines = [System.IO.File]::ReadAllLines((Join-Path $root 'docs\evidence\test-baseline.txt'), [System.Text.UTF8Encoding]::new($false))
+    $baselineLine = ($baselineLines | Where-Object { $_.Trim() -ne '' -and $_.Trim() -notmatch '^#' } | Select-Object -First 1)
     $baseline = [int]$baselineLine.Trim()
     if ($passed -ne $baseline) {
         Write-Host "[sync] FAIL: actual passed=$passed but baseline=$baseline (update test-baseline.txt first)"

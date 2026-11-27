@@ -2,11 +2,42 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1295` / `ignored=70` / `targets=188`；`--include-ignored` 全量 `passed=1295` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1258` / `ignored=34` / `targets=188`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-a11y.log](evidence/cross-platform/linux-verify-2026-11-27-a11y.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1297` / `ignored=71` / `targets=189`；`--include-ignored` 全量 `passed=1297` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1260` / `ignored=35` / `targets=189`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-cluster.log](evidence/cross-platform/linux-verify-2026-11-27-cluster.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-27（续三）：光标移动不再物化整份边界表（PLAN 批次 6 后半）
+
+`TextBuffer` 的 `snap` / `prev_boundary` / `next_boundary` 每次调用都先
+`cluster_boundaries()` 建一个**全文本**的 `Vec<usize>`，再二分/线性找。一次光标移动
+要调 3 次，等于每帧物化 3 份边界表。
+
+真实感的一个数字（`crates/y901-ui/tests/cluster_perf.rs`，`#[ignore]` 剖析用例）：
+**20 万字符的单行文本，1000 次右移 = 327 µs（改后）vs 41.2 s（改前），约 12.6 万倍**。
+
+改法：`snap` / `prev` / `next` 改成**按簇游走**——
+- `snap`：退到字符起始，不在簇边界就接着往回走；
+- `prev_boundary`：往回走一个字符再判边界；
+- `next_boundary`：往前一个字符一个字符判边界（簇内字符不可能是边界，所以真实步数是簇长）；
+- 判定条件与 `cluster_boundaries` **逐字对应**（`is_boundary_at`）。
+
+三者都不再分配内存；`cluster_boundaries()` 保留（公开 API，测试与外部用户仍可用）。
+
+**正确性靠对拍**：新增 `allocation_free_walk_matches_the_materialised_reference`，
+把旧实现原样抄成参照物，在 10 组文本（ASCII / 组合重音 / 天城文 / 阿拉伯文 /
+ZWJ emoji 序列 / 空格混合）× **每个字节位置**上逐一比对 snap/prev/next 三个函数。
+另加一条超长簇用例（"基字 + 500 组合记号"，验证一次跨簇而不是按字符走）。
+
+**验证**：workspace **1297 passed / 0 failed / 71 ignored / 189 目标**；像素哈希
+`0xF7455CCE7781A864` 未变（纯实现优化）；Linux Xvfb 全量见 evidence 日志。
+
+顺带修掉一个**门禁脚本自身的坑**：`gate.ps1` 与 `sync-doc-numbers.ps1` 都用
+`Get-Content` 读 `test-baseline.txt`，而 PowerShell 5.1 默认按 ANSI 解码 —— 中文注释
+遇到"尾字节 + 换行"的歧义时会把末尾的数字行**粘进上一行注释**，于是报
+"test baseline has no number"。两处都改成 `[System.IO.File]::ReadAllLines(..., UTF8)`
+（`sync-doc-numbers.ps1` 里读 `linux-numbers.txt` 早就踩过同一个坑并写下了注释）。
 
 ## 2026-11-27（续二）：无障碍动作路由 —— `NodeId` 改稳定哈希（PLAN 批次 3）
 
@@ -32,8 +63,8 @@
 AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩形 == 命中测试矩形"
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
-**验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；workspace **1295 passed / 0 failed**
-（ignored 70 / 188 目标，`--include-ignored` 1365）；Linux Xvfb **1258 passed / 34 ignored**，
+**验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；workspace **1297 passed / 0 failed**
+（ignored 71 / 189 目标，`--include-ignored` 1368）；Linux Xvfb **1260 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -407,7 +438,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1295** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1297** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -425,7 +456,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 | 6 | `.gitignore` 第 37 行是 GBK 非法 UTF-8 | 逐行解码修复为 UTF-8（唯一非法行已还原中文注释） |
 | 7 | 55 行字面 `\uXXXX` 注释 | 解码 `profile.rs` 16 / web `lib.rs` 13 / `bindings.rs` 18 / `keys.rs` 1 / 两个 `.ps1` 6 行；仅保留 STATUS 里作为**示例**的那一处 |
 | 8 | `FRAMEWORK.md` 6 处"浯层"错字 | 全部改回"浮层" |
-| 9 | ACCEPTANCE GPU harness 口径互相矛盾 | 标题改为"GPU 像素验收用例"，并写明三个口径（8 条断言 / `snapshot_harness` 10 条 `#[ignore]` / 全仓 `ignored=70`）；STATUS 的文档债标为已修 |
+| 9 | ACCEPTANCE GPU harness 口径互相矛盾 | 标题改为"GPU 像素验收用例"，并写明三个口径（8 条断言 / `snapshot_harness` 10 条 `#[ignore]` / 全仓 `ignored=71`）；STATUS 的文档债标为已修 |
 | 10 | `runtime.rs` 注释与实现脱钩（还在讲"自节流/上一帧呈现耗时"） | 改成 `last_tick` 差值口径，并写明旧 `last_frame_ms` 恒 0 的事故；`profile.rs` 注明 p50/p95 已改为**纯工作耗时**，不能与旧数字直接比 |
 
 **C 批（测试灵敏度）**
@@ -878,7 +909,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1295/0/70 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1297/0/71 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，
@@ -1037,7 +1068,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   原文称"需要真机的测试只有 `rebuild_reuploads_atlas`"，实际 GPU / D3D11 依赖的 `#[ignore]` 有 **13** 个
   （`snapshot_harness` ×10 + `soft_matches_d3d_within_antialiasing_tolerance` + `pixel_statistics_and_png_baseline` + `rebuild_reuploads_atlas`）。
   需改为 13 个，或直接指向 `ACCEPTANCE.md` 的分类表。
-- ~~**文档债：`docs/ACCEPTANCE.md` 的"7 个 GPU harness"小节与分类表不一致**~~ —— 已修（2026-11-19）：标题改为"GPU 像素验收用例"并写明三个口径（8 条断言用例 / `snapshot_harness` 10 条 `#[ignore]` / 全仓 `ignored=70`）。
+- ~~**文档债：`docs/ACCEPTANCE.md` 的"7 个 GPU harness"小节与分类表不一致**~~ —— 已修（2026-11-19）：标题改为"GPU 像素验收用例"并写明三个口径（8 条断言用例 / `snapshot_harness` 10 条 `#[ignore]` / 全仓 `ignored=71`）。
   `snapshot_harness` 现有 **10** 个 `#[ignore]`，小节只列 7 个；余下 3 个（`text_label_paints_visible_non_background_pixels`、
   `text_inside_scrollview_is_not_clipped_away`、`rebuild_of_cached_target_does_not_leave_black_areas`）是回归用例而非像素 harness。
   需先澄清"harness"定义，再决定是补进表还是把标题改成"7 个像素对拍 + 3 个回归"。

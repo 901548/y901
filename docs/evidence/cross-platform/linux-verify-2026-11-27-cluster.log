@@ -1,0 +1,16 @@
+# Linux 验收日志（2026-11-27 第十六轮）：光标移动不再物化边界表（PLAN 批次 6 后半）
+# 环境：Ubuntu 22.04 (WSL2) + Xvfb；CARGO_TARGET_DIR=$HOME/y901-target
+# 命令：CARGO_FLAGS=--offline SKIP_SLOW=1 bash scripts/linux-verify.sh
+# 本轮第一次跑抓到 Linux clippy 3 条（question_mark ×2 / chars_last_cmp ×1），修完重跑为 OK；
+# 说明 Windows 绿灯不代表 Linux clippy 过（-D warnings 口径一致，但 lint 触发面不同）。
+
+EXIT_CHECK_X11=0
+EXIT_GOLDEN=0
+EXIT_REAL_WINDOW=0
+EXIT_CLIPPY_X11=0
+EXIT_STROKE=0
+EXIT_SGR_REVERSE=0
+EXIT_FULL_WORKSPACE=0
+LINUX VERIFY: OK
+
+LINUX VERIFY: OK (7/7 EXIT_0)

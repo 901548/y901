@@ -85,8 +85,14 @@ if (-not $SkipTest) {
     if (-not (Test-Path $baselineTests)) {
         Fail "test baseline missing: $baselineTests"
     }
-    # 基线文件允许写注释（`#` 开头）：取第一个非注释、非空行作为数字
-    $baselineLine = (Get-Content $baselineTests | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } | Select-Object -First 1)
+    # 基线文件允许写注释（`#` 开头）：取第一个非注释、非空行作为数字。
+    #
+    # **必须显式按 UTF-8 读**（与 sync-doc-numbers.ps1 对 linux-numbers.txt 的处理一致）：
+    # PowerShell 5.1 的 `Get-Content` 默认按 ANSI（本机 GBK）解码，文件里的中文注释一旦
+    # 走到"尾字节 + 换行"的歧义组合，就会把**下一行粘进注释**——实测把末尾的
+    # `1295` 粘成 `…。1295` 之后被当成注释行，于是报 "test baseline has no number"。
+    $baselineLines = [System.IO.File]::ReadAllLines($baselineTests, [System.Text.UTF8Encoding]::new($false))
+    $baselineLine = ($baselineLines | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } | Select-Object -First 1)
     if (-not $baselineLine) { Fail "test baseline has no number: $baselineTests" }
     $expected = [int]$baselineLine.Trim()
     $skipLog = Join-Path ([System.IO.Path]::GetTempPath()) 'y901-test-skips.txt'

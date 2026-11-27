@@ -234,4 +234,8 @@
 #    浮层子树可达且可点 / 菜单重建后 id 稳定；y901-ui popup_hit 2 条 ——
 #    语义树浮层矩形与命中几何一致 / 浮层排在基础树之后。
 #    include_ignored 1353 → 1365。)
-1295
+# Measured at 2026-11-27 (PLAN 批次 6 后半：光标移动不再物化边界表，+2 条规则用例 +1 条剖析用例):
+#   default cargo test --workspace --no-fail-fast   passed 1297, failed 0, ignored 71 / 189 个测试目标
+#   (新增 y901-ui cluster::tests 2 条（逐字节对拍旧实现 / 超长组合簇）+ tests/cluster_perf.rs 1 条 #[ignore] 剖析；
+#    ignored 70 → 71。剖析实测：20 万字符文本上 1000 次移动 327µs，旧实现 41.2s（12.6 万倍）。
+1297

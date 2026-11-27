@@ -70,32 +70,108 @@ pub fn cluster_boundaries(text: &str) -> Vec<usize> {
     out
 }
 
+/// `i` 是否是集群边界（`i` 必须是某个字符的起始偏移，且 `0 < i < len`）。
+///
+/// 与 [`cluster_boundaries`] 的推导规则**逐字对应**：
+/// 位置 `i` 成界 ⟺ `i` 处的字符不是组合记号 ⟺ 且它前面那个字符不是 ZWJ。
+#[inline]
+fn is_boundary_at(text: &str, i: usize) -> bool {
+    debug_assert!(text.is_char_boundary(i));
+    if i == 0 || i >= text.len() {
+        return false; // 两端由调用方单独处理（0 恒为界，len 也是界）
+    }
+    let ch = text[i..].chars().next().unwrap_or('\0');
+    if is_combining_mark(ch) {
+        return false;
+    }
+    // 前一个字符：`text[..i]` 的最后一个字符。
+    !text[..i].ends_with('\u{200D}')
+}
+
+/// 从 `byte` 往回找最近的边界（含 `byte` 自己）。
+///
+/// 复杂度：O(一个簇的长度) —— 常见情况是 1 个字符（拉丁/中文/阿拉伯），
+/// 最坏是一个超长组合记号序列。**不分配内存**（旧实现每次建整个 `Vec<usize>`）。
+fn boundary_at_or_before(text: &str, byte: usize) -> usize {
+    let mut end = byte;
+    while end > 0 {
+        let Some((start, _)) = text[..end].char_indices().next_back() else {
+            return 0;
+        };
+        if start == 0 {
+            return 0; // 0 恒为界
+        }
+        if is_boundary_at(text, start) {
+            return start;
+        }
+        end = start;
+    }
+    0
+}
+
 /// 把任意字节位置**吸附到最近的集群边界**（优先向前，避免越过用户想放的位置）。
+///
+/// 不分配内存：只为"调用它的那条光标"走一个簇。
 pub fn snap(text: &str, byte: usize) -> usize {
     let byte = byte.min(text.len());
-    if byte == 0 || byte >= text.len() {
-        return byte.min(text.len());
+    if byte == 0 {
+        return 0;
     }
-    let bounds = cluster_boundaries(text);
-    // 落在边界上就原样返回；否则退到前一个边界。
-    match bounds.binary_search(&byte) {
-        Ok(_) => byte,
-        Err(idx) => bounds.get(idx.saturating_sub(1)).copied().unwrap_or(0),
+    if byte >= text.len() {
+        return text.len();
     }
+    // 落在字符中间时先退到字符起始，再看它是不是簇边界。
+    let mut at = byte;
+    while at > 0 && !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    if text.is_char_boundary(at) && (is_boundary_at(text, at) || at == 0) {
+        return at;
+    }
+    boundary_at_or_before(text, at)
 }
 
 /// 前一个集群边界（用于 ←/Backspace）。已在开头返回 `None`。
 pub fn prev_boundary(text: &str, byte: usize) -> Option<usize> {
     let byte = snap(text, byte);
-    let bounds = cluster_boundaries(text);
-    bounds.iter().rev().copied().find(|b| *b < byte)
+    if byte == 0 {
+        return None;
+    }
+    // `snap` 已经把位置对齐到边界，往回走一个字符再找边界即可。
+    let mut end = byte;
+    while end > 0 {
+        let (start, _) = text[..end].char_indices().next_back()?;
+        if start == 0 {
+            return Some(0); // 0 恒为界，且 `0 < byte`
+        }
+        if is_boundary_at(text, start) {
+            return Some(start);
+        }
+        end = start;
+    }
+    Some(0)
 }
 
 /// 后一个集群边界（用于 →/Delete）。已在末尾返回 `None`。
 pub fn next_boundary(text: &str, byte: usize) -> Option<usize> {
     let byte = snap(text, byte);
-    let bounds = cluster_boundaries(text);
-    bounds.iter().copied().find(|b| *b > byte)
+    if byte >= text.len() {
+        return None;
+    }
+    // 从 `byte` 之后逐字符前进；每个候选位置自己判断是否成界。
+    let mut it = text[byte..].char_indices();
+    // 跳过起点自身（`byte` 已经是边界）。
+    it.next();
+    for (offset, ch) in it {
+        let i = byte + offset;
+        // i == len 时 `chars().next()` 为空 → 不可能是组合记号，直接用规则判定。
+        let boundary = !is_combining_mark(ch) && !text[..i].ends_with('\u{200D}');
+        if boundary {
+            return Some(i);
+        }
+    }
+    // 走到头：`len` 本身是边界。
+    Some(text.len())
 }
 
 #[cfg(test)]
@@ -162,6 +238,96 @@ mod tests {
         );
         assert_eq!(prev_boundary(text, 0), None);
         assert_eq!(next_boundary(text, text.len()), None);
+    }
+
+    /// 旧实现（物化整个 `Vec`）的逐字副本，只用于**对拍**新实现。
+    ///
+    /// 为什么保留它：`snap` / `prev_boundary` / `next_boundary` 改成"按簇游走、不分配"
+    /// 之后，正确性不再能靠"读代码"保证 —— 需要一个独立参照物，在每个字节位置逐一对比。
+    fn reference_snap_prev_next(text: &str, byte: usize) -> (usize, Option<usize>, Option<usize>) {
+        fn bounds(text: &str) -> Vec<usize> {
+            let mut out = vec![0usize];
+            let mut prev_was_zwj = false;
+            for (i, ch) in text.char_indices() {
+                if i > 0 && !is_combining_mark(ch) && !prev_was_zwj {
+                    out.push(i);
+                }
+                prev_was_zwj = ch == '\u{200D}';
+            }
+            out.push(text.len());
+            out.dedup();
+            out
+        }
+        let byte = byte.min(text.len());
+        let b = bounds(text);
+        let snapped = if byte == 0 || byte >= text.len() {
+            byte
+        } else {
+            match b.binary_search(&byte) {
+                Ok(_) => byte,
+                Err(idx) => b.get(idx.saturating_sub(1)).copied().unwrap_or(0),
+            }
+        };
+        let prev = b.iter().rev().copied().find(|x| *x < snapped);
+        let next = b.iter().copied().find(|x| *x > snapped);
+        (snapped, prev, next)
+    }
+
+    #[test]
+    fn allocation_free_walk_matches_the_materialised_reference() {
+        // 覆盖面：ASCII（每字符一簇）、组合重音、天城文、阿拉伯文、ZWJ emoji 序列、
+        // 以及"零散空格 + 组合记号"的混合串。
+        let corpus = [
+            "",
+            "abc",
+            "ab cd",
+            "e\u{301}",
+            "e\u{301}x\u{308}",
+            "\u{915}\u{93F}\u{930}\u{94D}\u{92F}",
+            "\u{645}\u{631}\u{62D}\u{628}\u{627}",
+            "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+            "a\u{200D}b\u{200C}c",
+            "  \u{301}  ",
+        ];
+        for text in corpus {
+            for byte in 0..=text.len() {
+                let (want_snap, want_prev, want_next) = reference_snap_prev_next(text, byte);
+                assert_eq!(snap(text, byte), want_snap, "snap({text:?}, {byte})");
+                assert_eq!(
+                    prev_boundary(text, byte),
+                    want_prev,
+                    "prev_boundary({text:?}, {byte})"
+                );
+                assert_eq!(
+                    next_boundary(text, byte),
+                    want_next,
+                    "next_boundary({text:?}, {byte})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn walk_stays_correct_on_a_long_combining_run() {
+        // 一个"基字 + 500 个组合记号"的超长簇：`snap` 必须落回基字起点，
+        // `next_boundary` 必须一步跨到簇尾（不能因为簇长就退化成按字符走）。
+        let mut text = String::from("a");
+        for _ in 0..500 {
+            text.push('\u{301}');
+        }
+        text.push('b');
+        // "a" + 500 个组合记号（各 2 字节）= 1001 字节，'b' 从 1001 开始。
+        assert_eq!(snap(&text, 250), 0, "簇中间必须吸附到簇首");
+        assert_eq!(next_boundary(&text, 0), Some(1001), "下一步应一次跨到 'b'");
+        assert_eq!(prev_boundary(&text, text.len()), Some(1001));
+        let huge = "x".repeat(200_000);
+        // 长 ASCII 文本上做 1000 次移动：旧实现每次物化一个 20 万元素的 Vec
+        //（约 1.6 MB 分配 × 1000 次），新实现只走一个字符。
+        let mut pos = huge.len();
+        for _ in 0..1000 {
+            pos = prev_boundary(&huge, pos).unwrap_or(0);
+        }
+        assert_eq!(pos, huge.len() - 1000, "1000 次 ← 应正好后退 1000 个字符");
     }
 
     #[test]
