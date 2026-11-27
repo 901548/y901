@@ -28,7 +28,7 @@ const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 /// FNV-1a 的质数。
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-/// FNV-1a 流式哈希器。
+/// FNV-1a 流式哈希器（字节流路径是标准 FNV-1a；`u64` 快路见 `write_u64`）。
 ///
 /// 初值是 FNV 的 **offset basis**（不是 0）：这样 `write(b"")`、`write_u64` 的结果与
 /// 标准 FNV-1a 一致，也不会出现"累加器恰好等于 0 时被误当成未初始化"的分支 ——
@@ -59,10 +59,18 @@ impl Hasher for FnvHasher {
         self.0 = hash;
     }
 
+    /// `u64` 键的快路：**一轮混合**，不是标准 FNV-1a 的 8 轮。
+    ///
+    /// 为什么可以不一样：本模块只被 `HashMap`/`HashSet` 用，只需要"分布好"，
+    /// 不需要与标准 FNV-1a 一致（没有跨进程/跨版本的哈希值对外暴露）。
+    /// 而键本身已经是 [`crate::layout::id_key`] 用完整 FNV-1a 算过的值 ——
+    /// 再喂 8 轮只会多花 7 次乘法换不到任何分布收益。
+    ///
+    /// 先做一次 `n ^= n >> 32`：让**高位**也参与低位，避免"高位不同、低位相同"
+    /// 的键挤进同一个桶。
     fn write_u64(&mut self, n: u64) {
-        // 键已经是我们自己算过的 FNV 值，再做一次乘法把低位打散就够了；
-        // 关键是**不要**退回 std 的 SipHash 轮函数。
-        self.0 = (self.0 ^ n).wrapping_mul(FNV_PRIME);
+        let mixed = n ^ (n >> 32);
+        self.0 = (self.0 ^ mixed).wrapping_mul(FNV_PRIME);
     }
 
     fn write_usize(&mut self, n: usize) {
@@ -142,6 +150,27 @@ mod tests {
         let mut h2 = FnvHasher::default();
         h2.write_u64(123);
         assert_eq!(h1.finish(), h2.finish());
+    }
+
+    /// `write_u64` 快路必须把**高位**也混进低位。
+    ///
+    /// 回归目标：旧实现只做 `(state ^ n) * PRIME`，键的高位不参与低位，
+    /// 于是"高位不同、低位相同"的键（例如同一批 id 的哈希值只差高位）会挤进同一个小桶。
+    #[test]
+    fn u64_fast_path_mixes_high_bits_into_low_bits() {
+        use std::hash::BuildHasher;
+        let bh = FnvBuildHasher::default();
+        // 这些键的低 32 位相同、高 32 位不同：旧的单轮混合会给它们相同的低位。
+        let keys: Vec<u64> = (0..256u64).map(|i| (i << 32) | 0x1234).collect();
+        let low: std::collections::HashSet<u64> =
+            keys.iter().map(|k| bh.hash_one(k) % 1024).collect();
+        assert!(
+            low.len() > 200,
+            "只有高 32 位不同的 256 个键必须散开，实际落进 {} 个桶",
+            low.len()
+        );
+        // 确定性不变
+        assert_eq!(bh.hash_one(42u64), bh.hash_one(42u64));
     }
 
     /// **空输入必须是标准 FNV offset basis**。

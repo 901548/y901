@@ -60,6 +60,14 @@ impl Query {
                 other => return Err(format!("未知查询键 `{other}`")),
             };
             if op == "~=" {
+                // `~=` 是"字符串包含"。对布尔键（`disabled` / `exposed`）它**永远不会匹配**，
+                // 而"查不到任何东西"会被误读成"没有禁用节点"——比报错危险。
+                // 所以在这里直接拒绝，让调用方改用 `=`。
+                if matches!(key_static, "disabled" | "exposed") {
+                    return Err(format!(
+                        "键 `{key_static}` 是布尔值，不支持 `~=`（包含语义）；请用 `{key_static}=true|false`"
+                    ));
+                }
                 q.clauses.push(Clause::Contains(key_static, value));
             } else {
                 q.clauses.push(Clause::Eq(key_static, value));
@@ -180,6 +188,22 @@ mod tests {
     fn unknown_key_is_error() {
         assert!(Query::parse("nope=1").is_err());
         assert!(Query::parse("limit=abc").is_err());
+    }
+
+    #[test]
+    fn contains_on_a_boolean_key_is_rejected_instead_of_matching_nothing() {
+        // `~=` 是子串包含；对 `disabled`/`exposed` 恒不匹配。静默返回"空结果"会被
+        // 误读成"没有禁用节点"，所以必须在解析期报错。
+        let err = Query::parse("disabled~=true").expect_err("布尔键不支持 ~=");
+        assert!(err.contains("disabled"), "错误信息要点出是哪个键：{err}");
+        assert!(err.contains("true|false"), "要告诉调用方改用 `=`：{err}");
+        assert!(
+            Query::parse("exposed~=true").is_err(),
+            "exposed 同样不支持 ~="
+        );
+        // 正常路径不受影响
+        assert!(Query::parse("disabled=true").is_ok());
+        assert!(Query::parse("label~=\"Save\"").is_ok());
     }
 
     #[test]

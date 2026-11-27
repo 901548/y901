@@ -244,4 +244,10 @@
 #    词移动、标点区段、选词边界、簇安全、空文本）+ y901-widgets text_editing 10 条
 #    （Ctrl+Z/Y/Shift+Z 端到端、Ctrl+←/→ 与 Shift 扩选、双击选词、簇不拆分、
 #    TextArea 同能力）。include_ignored 1387。
-1316
+# Measured at 2026-11-27 (PLAN 批次 7：卫生 —— 真空断言 / 死数据 / 过期文档):
+#   default cargo test --workspace --no-fail-fast   passed 1322, failed 0, ignored 71 / 190 个测试目标
+#   (新增 6 条：theme 改名槽位真生效 / combo_box 高亮真被绘制 / image None 双向裁剪 2 条 /
+#    Query 布尔键 ~= 解析期报错 / fasthash u64 高位混入低位。
+#    同时**加强**了 3 条既有用例（渐变主导轴改用非正方形目标、Table PageDown 由 ">=3" 改为精确步长、
+#    ImageFit 断言面积相等）。include_ignored 1393。)
+1322

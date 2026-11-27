@@ -1220,10 +1220,25 @@ mod tests {
         press(&mut t, &mut ctx, y901_ui::Key::Home);
         assert_eq!(t.selected_index(), Some(0), "Home 选第一行");
         press(&mut t, &mut ctx, y901_ui::Key::PageDown);
+        // 旧版只断言 `>= 3`：page_rows 恰好是 3 时它永远成立，
+        // 就算 PageDown 被实现成"前进 3 行"（一页的巧合）也抓不到。
+        // 现在要求**精确等于一页的步长**，并从第 0 行出发（不是从中间）。
         assert!(
-            t.selected_index().unwrap() >= 3,
-            "PageDown 至少前进一页（page_rows={}）",
+            t.page_rows >= 2,
+            "前置：PageDown 才有意义（page_rows={}，200px 高 / 每行高度算出来至少 2 行）",
             t.page_rows
+        );
+        assert_eq!(
+            t.selected_index(),
+            Some(t.page_rows.min(99)),
+            "PageDown 必须恰好前进 page_rows 行（page_rows={}）",
+            t.page_rows
+        );
+        press(&mut t, &mut ctx, y901_ui::Key::PageUp);
+        assert_eq!(
+            t.selected_index(),
+            Some(0),
+            "PageUp 必须恰好退回一页（不是退到 -1 也不是原地不动）"
         );
     }
 

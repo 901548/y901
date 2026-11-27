@@ -82,14 +82,21 @@ impl ImageStyle {
                 (target, src)
             }
             ImageFit::None => {
-                // 原始尺寸居中；超出目标的部分由调用方裁剪
-                let dst = crate::Rect::new(
-                    target.x + (target.w - sw) * 0.5,
-                    target.y + (target.h - sh) * 0.5,
-                    sw,
-                    sh,
-                );
-                (dst, full_src)
+                // 原始尺寸居中。源图比目标大时**两边同时裁**：
+                //
+                // 只把超出部分丢给调用方裁（旧行为）会得到"目标被裁、源仍是整张"的组合，
+                // 采样时纹理会**拉伸**而不是裁切 —— 小图放进大框看不见错，大图放进小框
+                // 就会明显变形。这里把交集算出来，反推出源图对应的子矩形。
+                let dst_x = target.x + (target.w - sw) * 0.5;
+                let dst_y = target.y + (target.h - sh) * 0.5;
+                let visible = crate::Rect::new(dst_x, dst_y, sw, sh).intersect(target);
+                if visible.w <= 0.0 || visible.h <= 0.0 {
+                    return (crate::Rect::ZERO, crate::Rect::ZERO);
+                }
+                // 目标子矩形里的一像素 = 源图里的一像素（1:1），偏移量直接搬过去。
+                let src =
+                    crate::Rect::new(visible.x - dst_x, visible.y - dst_y, visible.w, visible.h);
+                (visible, src)
             }
         }
     }
@@ -153,6 +160,46 @@ mod tests {
         );
         assert!(close(dst.w, 40.0) && close(dst.h, 20.0), "原始尺寸");
         assert_eq!(src, Rect::new(0.0, 0.0, 40.0, 20.0));
+    }
+
+    /// **源图比目标大时两边同时裁**：旧实现只裁目标、源给整张 → 采样被拉伸变形。
+    #[test]
+    fn none_crops_both_sides_when_the_image_is_larger_than_the_target() {
+        // 100×100 的图放进 40×40 的框：居中后可见的是源图 (30,30)-(70,70)。
+        let (dst, src) = ImageStyle {
+            fit: ImageFit::None,
+            ..Default::default()
+        }
+        .layout(Rect::new(0.0, 0.0, 40.0, 40.0), 100, 100);
+        assert_eq!(
+            dst,
+            Rect::new(0.0, 0.0, 40.0, 40.0),
+            "目标子矩形 = 整个目标框"
+        );
+        assert_eq!(
+            src,
+            Rect::new(30.0, 30.0, 40.0, 40.0),
+            "源子矩形必须是对应的中间 40×40（1:1，不能是整张 100×100）"
+        );
+        // 关键不变量：两块面积相等 → 不会拉伸。
+        assert!(
+            close(dst.w * dst.h, src.w * src.h),
+            "目标与源必须等面积（1:1）"
+        );
+    }
+
+    /// 只在一个方向超出时，也只在那个方向裁。
+    #[test]
+    fn none_crops_only_the_overflowing_axis() {
+        // 200×20 的图放进 100×100：水平居中裁左右，垂直完整可见。
+        let (dst, src) = ImageStyle {
+            fit: ImageFit::None,
+            ..Default::default()
+        }
+        .layout(Rect::new(0.0, 0.0, 100.0, 100.0), 200, 20);
+        assert_eq!(dst, Rect::new(0.0, 40.0, 100.0, 20.0));
+        assert_eq!(src, Rect::new(50.0, 0.0, 100.0, 20.0));
+        assert!(close(dst.h, 20.0), "高度不超，不该被裁");
     }
 
     #[test]

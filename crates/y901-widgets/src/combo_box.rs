@@ -603,6 +603,81 @@ mod tests {
         assert_eq!(list.highlight, 0);
     }
 
+    /// 键盘高亮**必须真的画在屏幕上**（旧实现只改字段，屏幕上看不出 Enter 会选谁）。
+    ///
+    /// 断言用"偶数行"：斑马纹只给奇数行上底色，因此一个**偶数行**被填色只可能
+    /// 来自键盘高亮 —— 这样即使斑马纹策略改了，这条用例仍然只测高亮。
+    #[test]
+    fn keyboard_highlight_is_actually_painted_on_an_even_row() {
+        struct Rec {
+            fills: std::cell::RefCell<Vec<(Rect, y901_ui::Color)>>,
+        }
+        impl TextMetrics for Rec {
+            fn measure_text(&self, t: &str, _s: &TextStyle) -> Size {
+                Size::new(t.chars().count() as f32 * 7.0, 14.0)
+            }
+            fn line_height(&self, _s: &TextStyle) -> f32 {
+                14.0
+            }
+            fn scale(&self) -> f32 {
+                1.0
+            }
+        }
+        impl RenderCtx for Rec {
+            fn size(&self) -> Size {
+                Size::new(400.0, 400.0)
+            }
+            fn fill_rect(&mut self, r: Rect, c: y901_ui::Color) {
+                self.fills.borrow_mut().push((r, c));
+            }
+            fn stroke_rect(&mut self, _r: Rect, _c: y901_ui::Color, _w: f32) {}
+            fn draw_text(&mut self, _o: Pos, _t: &str, _s: &TextStyle) -> f32 {
+                0.0
+            }
+            fn push_clip(&mut self, _r: Rect) {}
+            fn pop_clip(&mut self) {}
+            // 圆角填充会绕开 `fill_rect`：这里退化成矩形填充，好让断言只看"哪块被上了色"。
+            fn fill_round_rect(&mut self, r: Rect, c: y901_ui::Color, _radius: f32) {
+                self.fills.borrow_mut().push((r, c));
+            }
+            fn stroke_round_rect(&mut self, _r: Rect, _c: y901_ui::Color, _w: f32, _radius: f32) {}
+        }
+
+        // 不选中任何项，让"已选中"底色不参与；从 highlight=0（偶数行）开始。
+        let mut list = popup_list(None, 4);
+        let mut arranged = EventCtx::new(None, Size::new(400.0, 400.0));
+        let _ = list.event(&mut arranged, &key(y901_ui::Key::Down)); // highlight=1（奇数行，有斑马纹）
+        let mut ctx = Rec {
+            fills: std::cell::RefCell::new(Vec::new()),
+        };
+        list.render(&mut ctx);
+        let paints = ctx.fills.borrow();
+        // 收集"被上过色的行矩形"（按 y 聚合）。
+        let filled_rows: Vec<f32> = paints
+            .iter()
+            .filter(|(r, _)| r.h > 1.0 && r.w > 1.0)
+            .map(|(r, _)| r.y)
+            .collect();
+        assert!(
+            !filled_rows.is_empty(),
+            "渲染必须至少画了列表背景与某一行的高亮"
+        );
+        let row_h = ITEM_H;
+        let highlighted_y = list.item_rect(1).y;
+        assert!(
+            filled_rows
+                .iter()
+                .any(|y| (y - highlighted_y).abs() < row_h * 0.5),
+            "键盘高亮的第 2 行（y≈{highlighted_y}）必须被涂色，实际涂色行：{filled_rows:?}"
+        );
+        // 对照：第 3 行（偶数行、未被高亮）不应被涂色 —— 斑马纹不会给它上色。
+        let even_y = list.item_rect(2).y;
+        assert!(
+            !filled_rows.iter().any(|y| (y - even_y).abs() < 1.0),
+            "未高亮的偶数行不该有底色（有的话说明断言抓错了对象）：{filled_rows:?}"
+        );
+    }
+
     #[test]
     fn enter_commits_highlighted_item_and_closes() {
         let mut list = popup_list(Some(0), 3);

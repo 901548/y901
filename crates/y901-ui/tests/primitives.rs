@@ -170,21 +170,50 @@ fn gradient_horizontal_is_exact() {
 
 #[test]
 fn gradient_diagonal_follows_dominant_axis() {
-    // dir=(0.3, 1.0) → 主导轴是 y，逐行；颜色沿 y 单调变化
-    let mut rec = Recorder::new();
-    let rect = Rect::new(0.0, 0.0, 40.0, 40.0);
-    rec.fill_gradient_rect_dir(
+    // **非正方形**的目标：正方形下"逐行"与"逐列"画出来的条数一样多，
+    // 断言再多也检验不出主导轴判断错了（旧版就是 40×40，等于什么也没验）。
+    let rect = Rect::new(0.0, 0.0, 64.0, 16.0);
+
+    // dir = (0.3, 1.0)：竖直分量占优 → 逐行（16 条），颜色沿 y 变化
+    let mut rows = Recorder::new();
+    rows.fill_gradient_rect_dir(
         rect,
         Color::rgba(1.0, 0.0, 0.0, 1.0),
         Color::rgba(0.0, 0.0, 1.0, 1.0),
         (0.3, 1.0),
     );
-    assert_eq!(rec.fills.len(), 40, "主导轴 y → 逐行");
-    let reds: Vec<f32> = rec.fills.iter().map(|(_, c)| c.r).collect();
+    assert_eq!(rows.fills.len(), 16, "主导轴 y → 每行一条（16 行）");
+    let reds: Vec<f32> = rows.fills.iter().map(|(_, c)| c.r).collect();
     for w in reds.windows(2) {
-        assert!(w[1] <= w[0] + 1e-4, "红通道必须单调递减：{reds:?}");
+        assert!(w[1] <= w[0] + 1e-4, "红通道必须沿 y 单调递减：{reds:?}");
     }
-    assert_eq!(rec.total_area(), 1600.0, "面积必须精确");
+    // 注意：梯度按"目标矩形在方向向量上的投影"归一化，(0.3, 1.0) 在 64×16 的矩形上
+    // 只覆盖 t 的一部分，所以两端不会精确等于起止色；这里断言的是**确实在渐变**
+    // （跨度够大），而不是"等于端点颜色"。
+    assert!(
+        reds[0] - reds[reds.len() - 1] > 0.2,
+        "沿 y 必须有明显渐变，实得 {reds:?}"
+    );
+    assert_eq!(rows.total_area(), 1024.0, "面积必须精确（64×16）");
+
+    // dir = (1.0, 0.3)：水平分量占优 → 逐列（64 条），颜色沿 x 变化
+    let mut cols = Recorder::new();
+    cols.fill_gradient_rect_dir(
+        rect,
+        Color::rgba(1.0, 0.0, 0.0, 1.0),
+        Color::rgba(0.0, 0.0, 1.0, 1.0),
+        (1.0, 0.3),
+    );
+    assert_eq!(cols.fills.len(), 64, "主导轴 x → 每列一条（64 列）");
+    let reds_x: Vec<f32> = cols.fills.iter().map(|(_, c)| c.r).collect();
+    for w in reds_x.windows(2) {
+        assert!(w[1] <= w[0] + 1e-4, "红通道必须沿 x 单调递减：{reds_x:?}");
+    }
+    assert!(
+        reds_x[0] - reds_x[reds_x.len() - 1] > 0.2,
+        "沿 x 必须有明显渐变，实得 {reds_x:?}"
+    );
+    assert_eq!(cols.total_area(), 1024.0, "面积必须精确（64×16）");
 }
 
 #[test]

@@ -216,13 +216,38 @@ impl Theme {
         }
     }
 
+    /// 本主题实际使用的槽位名（长度恒为 [`Theme::SLOTS`]）。
+    ///
+    /// 为什么保留这个字段：主题可以在**运行期**给槽位改名（`text` → `caption`），
+    /// 组件只认槽位名，`Role` 是业务传入的开放字符串。用 `Theme::slot_name()`
+    /// 的编译期表就永远看不到这种改名 —— 那让 `slots` 变成死数据。
+    pub fn slot_names(&self) -> &[&'static str; Theme::SLOTS] {
+        &self.slots
+    }
+
+    /// 按**本主题的**槽位名解析角色；未知角色回退到 `panel`（槽位 0）。
+    ///
+    /// 与 [`Theme::slot`] 的区别：那个用编译期常量表（可在 const 上下文用），
+    /// 这个用实例里的 `slots`（能看到运行期改名）。`style()` 走这一个。
+    pub fn slot_index(&self, role: Role) -> usize {
+        let name = role.0;
+        let mut i = 0;
+        while i < Theme::SLOTS {
+            if self.slots[i] == name {
+                return i;
+            }
+            i += 1;
+        }
+        0
+    }
+
     /// 查表。未知角色回退到 panel。
     ///
     /// `State::Selected`（持久选中）没有独立列：由该角色的 `Normal` 向 `Pressed`
     /// 混色 55% 得到——比 Normal 深、比 Pressed 浅，符合"选中"的视觉预期。
     /// 这样所有角色都自动拥有选中态，不必给 12 行主题表各加一列。
     pub fn style(&self, role: Role, state: State) -> Style {
-        let slot = Theme::slot(role);
+        let slot = self.slot_index(role);
         match state.table_index() {
             Some(index) => self.table[slot][index],
             None => {
@@ -231,6 +256,16 @@ impl Theme {
                 normal.blend_toward(pressed, 0.55)
             }
         }
+    }
+
+    /// 把某个槽位改名后，`style()` 必须按**新名字**解析角色。
+    ///
+    /// 这条用例存在的意义：`slots` 字段以前是纯死数据（`style()` 走的是编译期
+    /// 常量表），改名完全没效果，而没有任何测试能发现。
+    #[cfg(test)]
+    pub(crate) fn renamed_for_test(mut self, from: usize, to: &'static str) -> Self {
+        self.slots[from] = to;
+        self
     }
 
     /// 默认暗色主题。组件不得再硬编码颜色。
@@ -642,6 +677,29 @@ mod tests {
         let dark = Theme::DARK.style(Role::BUTTON, State::Normal);
         let light = LIGHT.style(Role::BUTTON, State::Normal);
         assert_ne!(dark.bg, light.bg, "换主题必须真的换颜色");
+    }
+
+    #[test]
+    fn renamed_slot_is_resolved_at_runtime_not_from_the_const_table() {
+        // 把 `text` 槽改名为 `caption`：`Role("caption")` 必须命中原 `text` 槽的样式，
+        // 而 `Role("text")` 必须落到 panel 回退（它已经不在槽位表里了）。
+        // 旧实现 `style()` 走编译期常量表，这条用例会失败 —— 正是它该抓的回归。
+        let themed = Theme::DARK.renamed_for_test(3, "caption");
+        let caption = themed.style(Role("caption"), State::Normal);
+        let old_text = Theme::DARK.style(Role::TEXT, State::Normal);
+        assert_eq!(caption, old_text, "改名后的槽位必须仍取到同一份样式");
+        assert_eq!(
+            themed.slot_index(Role("caption")),
+            3,
+            "slot_index 必须看实例里的 slots"
+        );
+        assert_eq!(
+            themed.slot_index(Role::TEXT),
+            0,
+            "旧名字不再命中，应回退 panel"
+        );
+        // 常量表仍是编译期契约（组件可以 const 上下文用），不受改名影响。
+        assert_eq!(Theme::slot(Role::TEXT), 3);
     }
 
     #[test]

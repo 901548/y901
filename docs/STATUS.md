@@ -2,11 +2,31 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1316` / `ignored=71` / `targets=190`；`--include-ignored` 全量 `passed=1316` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1279` / `ignored=35` / `targets=190`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-text-edit.log](evidence/cross-platform/linux-verify-2026-11-27-text-edit.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1322` / `ignored=71` / `targets=190`；`--include-ignored` 全量 `passed=1322` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1285` / `ignored=35` / `targets=190`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-hygiene.log](evidence/cross-platform/linux-verify-2026-11-27-hygiene.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-27（续五）：卫生批 —— 把"假装在测的用例"和"没人用的字段"清掉（PLAN 批次 7）
+
+这一批没有新功能，全是"看起来有、其实没有"的东西：
+
+| 位置 | 问题 | 现在 |
+|---|---|---|
+| `primitives.rs` 渐变主导轴 | 用 **40×40 正方形**，逐行与逐列条数相同，主导轴判断错了也照样绿 | 改用 64×16：竖直占优 → 16 条、水平占优 → 64 条，外加单调性/渐变跨度/精确面积 |
+| `table.rs` PageDown | 只断言 `选中 >= 3`：page_rows 恰为 3 时**恒真** | 断言**精确等于一页**，并补对称的 PageUp |
+| `combo_box.rs` 键盘高亮 | 只断言私有字段 `highlight`，画没画出来不知道 | 渲染层用例：高亮行必须真被涂色；用**偶数行**做对照（斑马纹只涂奇数行） |
+| `Theme.slots` | 字段存在但 `style()` 走编译期常量表 → **死数据** | `style()` 走实例 `slot_index()`；加"槽位改名真生效"用例 |
+| `fasthash::write_u64` | 文档说 FNV-1a，实际只有**一轮**；且高位不参与低位 | 文档如实说明"快路只需分布、不必与标准一致"；**加 `n ^ (n >> 32)`** 把高位混进低位 + 回归用例（去掉即红） |
+| `ImageFit::None` | 源图大于目标时只裁目标、源仍整张 → **采样被拉伸** | 按交集**两边同时裁**，保证面积相等 |
+| `Query` 的 `~=` | 对 `disabled`/`exposed` 恒不匹配，静默返回空结果 | 解析期报错并提示改用 `=`（"查不到"会被误读成"没有禁用节点"） |
+
+`color/geometry/command` 的"过期文档"复核后**没有**需要改的表述，因此没动 —— 记录在此，
+避免下一轮重复怀疑。
+
+**验证**：+6 条新用例、加强 3 条；workspace **1322 passed / 0 failed / 71 ignored / 190 目标**
+（`--include-ignored` 1393）；像素哈希 `0xF7455CCE7781A864` 不变；Linux Xvfb 1285 passed。
 
 ## 2026-11-27（续四）：文本编辑的产品缺口 —— 撤销/重做、按词移动、双击选词（PLAN 批次 5）
 
@@ -58,7 +78,7 @@ workspace **1316 passed / 0 failed / 71 ignored / 190 目标**（`--include-igno
 ZWJ emoji 序列 / 空格混合）× **每个字节位置**上逐一比对 snap/prev/next 三个函数。
 另加一条超长簇用例（"基字 + 500 组合记号"，验证一次跨簇而不是按字符走）。
 
-**验证**：workspace **1316 passed / 0 failed / 71 ignored / 190 目标**；像素哈希
+**验证**：workspace **1322 passed / 0 failed / 71 ignored / 190 目标**；像素哈希
 `0xF7455CCE7781A864` 未变（纯实现优化）；Linux Xvfb 全量见 evidence 日志。
 
 顺带修掉一个**门禁脚本自身的坑**：`gate.ps1` 与 `sync-doc-numbers.ps1` 都用
@@ -91,8 +111,8 @@ ZWJ emoji 序列 / 空格混合）× **每个字节位置**上逐一比对 snap/
 AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩形 == 命中测试矩形"
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
-**验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；workspace **1316 passed / 0 failed**
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1279 passed / 35 ignored**，
+**验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1285 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -466,7 +486,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1316** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1322** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
@@ -937,7 +957,7 @@ cargo test --workspace --no-fail-fast 2>&1 \
   Linux 全量 `xvfb-run cargo test --workspace --no-fail-fast`（2026-11-20 历史记录；**当前口径**见
   [linux-numbers.txt](evidence/linux-numbers.txt) 与 [linux-verify-2026-11-26-x11.log](evidence/cross-platform/linux-verify-2026-11-26-x11.log)）
   → 当时全绿（具体计数以该日志为准）。证据：[linux-full-2026-11-20.log](evidence/cross-platform/linux-full-2026-11-20.log)。
-  与 Windows 的 1316/0/71 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
+  与 Windows 的 1322/0/71 不同 —— **差异来自平台 cfg 门控与字体回退链**，不是测试丢失。
   同日复跑 `scripts/linux-verify.sh`：八步全 `EXIT_*=0`
   （证据：[linux-verify-2026-11-20.log](evidence/cross-platform/linux-verify-2026-11-20.log)）。
 - **本轮修掉一个只在 Linux 复现的真问题**：`xvfb-run` 下测试进程里**没有 `HOSTNAME` 环境变量**，
