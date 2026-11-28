@@ -1666,15 +1666,29 @@ fn _unused(_e: Edges) {}
 /// 而图片是交错的 RGBA；对交错字节做平均会**把颜色通道混在一起**。
 /// 所以这里按 4 个通道分别求平均。
 fn box_levels_rgba(base: &[u8], w: u32, h: u32, levels: usize) -> Vec<(u32, u32, Vec<u8>)> {
-    let mut out = Vec::new();
+    // **零拷贝**：每一级直接读"上一级已经存进 `out` 的那份"或原始 L0，不再克隆。
+    //
+    // 旧实现有两处多余的全量拷贝（大图约 15 MB/次）：
+    // 1. `let mut cur = base.to_vec();` —— 把整张 L0 复制一份，只为让第一轮有个 `&[u8]`；
+    // 2. `out.push((nw, nh, next.clone())); cur = next;` —— 每一级都克隆一次，
+    //    因为 `next` 既要做下一级的输入、又要交给调用方。
+    //
+    // 现在把顺序倒过来：先算出 `next`（读 `out.last()` 或 `base`），再整体 `push` 进 `out`，
+    // 下一轮直接借 `out.last()`。分配次数从 `1 + 2×levels` 降到 `levels`，
+    // 且每次分配都是**最终产物**本身，没有任何临时全量缓冲。
+    let mut out: Vec<(u32, u32, Vec<u8>)> = Vec::with_capacity(levels);
     let (mut cw, mut ch) = (w, h);
-    let mut cur = base.to_vec();
     for _ in 0..levels {
         if cw <= 1 && ch <= 1 {
             break;
         }
         let (nw, nh) = ((cw / 2).max(1), (ch / 2).max(1));
         let mut next = vec![0u8; (nw * nh * 4) as usize];
+        // 源：第一级是调用方的 L0，之后是上一级（上一轮 push 进 `out` 的那份）。
+        let src: &[u8] = match out.last() {
+            Some((_, _, v)) => v,
+            None => base,
+        };
         for y in 0..nh {
             for x in 0..nw {
                 let mut acc = [0u32; 4];
@@ -1684,9 +1698,9 @@ fn box_levels_rgba(base: &[u8], w: u32, h: u32, levels: usize) -> Vec<(u32, u32,
                         let sx = (x * 2 + dx).min(cw - 1);
                         let sy = (y * 2 + dy).min(ch - 1);
                         let si = ((sy * cw + sx) * 4) as usize;
-                        if si + 4 <= cur.len() {
+                        if si + 4 <= src.len() {
                             for c in 0..4 {
-                                acc[c] += cur[si + c] as u32;
+                                acc[c] += src[si + c] as u32;
                             }
                             n += 1;
                         }
@@ -1698,8 +1712,7 @@ fn box_levels_rgba(base: &[u8], w: u32, h: u32, levels: usize) -> Vec<(u32, u32,
                 }
             }
         }
-        out.push((nw, nh, next.clone()));
-        cur = next;
+        out.push((nw, nh, next));
         cw = nw;
         ch = nh;
     }

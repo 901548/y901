@@ -308,4 +308,10 @@
 #   (新增 y901-runtime/tests/frame_step_invariants.rs 3 条。未发现新 bug。
 #    变异验证：close_requested 不置真 → 红；去掉 drain 里的 layout_requested → runtime 用例不红
 #    （因为 frame_step 直接用 external>0 判定），但 y901-ui 的 invalidation_handle 用例覆盖了它。)
-1368
+# Measured at 2026-11-28 (TextInput 密码/占位/IME 属性测试 + box_levels_rgba 零拷贝):
+#   default cargo test --workspace --no-fail-fast   passed 1374, failed 0, ignored 71 / 207 个测试目标
+#   (新增 y901-widgets/tests/textinput_state_invariants.rs 4 条；
+#    y901-render/tests/image_mip_alloc.rs 2 条（零拷贝分配护栏 + 上传登记）。
+#    零拷贝实测：4 MiB 大图上传累计分配 3.31×L0 → 1.313×L0（理论最优 1.3125）。
+#    变异验证：掩码按字节数 / 语义不掩码 / 加回全量拷贝 → 分别红。像素哈希不变。)
+1374
