@@ -222,9 +222,29 @@ impl Widget for ScrollView {
             }
         }
 
-        // **先钳制偏移，再摆内容**：旧实现先按旧 offset 摆好子节点、之后才钳制，
-        // 内容变短的那一帧子节点会整体偏上（下一帧才纠正），看起来像"抖一下"。
+        // **先把偏移算成"本帧最终值"，再摆内容**。
+        //
+        // 旧实现分两步：先钳制 → 摆内容 → 再处理粘底。粘底那一步会**在摆完内容之后**
+        // 改 `offset`，于是同一帧里"子节点位置"和"offset()"各说各话：
+        //
+        // ```text
+        // 流式追加一行（粘底开着）：
+        //   摆内容用 offset=300 → 再把 offset 推到 360
+        //   子节点按 300 摆好 → 最后 60px 落到视口外 → 下一帧才跳上来
+        // ```
+        //
+        // 表现就是"流式输出时画面一顿一顿地跳"。这是 `arrange` 的同一类错误：
+        // 凡是会影响子节点位置的状态，都必须在 `kid.arrange(...)` **之前**定稿。
         self.offset = self.offset.clamp(0.0, self.max_offset());
+        if self.stick_to_bottom {
+            if self.stick_armed {
+                // 内容变高后跟到最底。
+                self.offset = self.max_offset();
+            } else if self.is_at_bottom() {
+                // 用户上滚过 → `stick_armed = false`；回到底部后自动重新激活。
+                self.stick_armed = true;
+            }
+        }
 
         // 内容坐标系：子节点按未滚动的绝对高度排，屏幕位置靠平移得到
         let content_rect = Rect::new(
@@ -235,15 +255,6 @@ impl Widget for ScrollView {
         );
         if let Some(kid) = self.kids.first_mut() {
             kid.arrange(content_rect, metrics, cache);
-        }
-        // 粘底：内容变高后如果仍处于激活状态，跟到最底。
-        // 用户上滚 → `stick_armed = false`；回到底部 → 自动重新激活。
-        if self.stick_to_bottom {
-            if self.stick_armed {
-                self.offset = self.max_offset();
-            } else if self.is_at_bottom() {
-                self.stick_armed = true;
-            }
         }
 
         // 同步滚动条几何

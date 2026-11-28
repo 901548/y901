@@ -2,11 +2,49 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1357` / `ignored=71` / `targets=201`；`--include-ignored` 全量 `passed=1357` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1315` / `ignored=35` / `targets=201`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-virtualization.log](evidence/cross-platform/linux-verify-2026-11-28-virtualization.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1359` / `ignored=71` / `targets=202`；`--include-ignored` 全量 `passed=1359` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1317` / `ignored=35` / `targets=202`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-scroll-stick.log](evidence/cross-platform/linux-verify-2026-11-28-scroll-stick.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-28（续四）：`ScrollView` 粘底在"摆完内容之后"改偏移 —— 流式输出会一顿一顿跳
+
+这是第 5 个真 bug，来自第三套独立实现的滚动逻辑（`scroll.rs`，与 `ListView`/`TreeView` 完全不同）。
+
+### 症状
+
+`arrange()` 的顺序是：
+
+```text
+钳制偏移 → 摆内容（kid.arrange 用 offset 算 y） → 处理粘底（把 offset 推到新底部）
+```
+
+粘底那一步**在摆完内容之后**改 `offset`，于是同一帧里"子节点位置"和 `offset()` 各说各话：
+
+```text
+流式追加一行（粘底开着）：
+  摆内容用 offset=300  →  再把 offset 推到 360
+  子节点按 300 摆好    →  最后 60px 落到视口外  →  下一帧才跳上来
+```
+
+表现就是**流式输出（日志、进度）时画面一顿一顿地跳**。这个文件自己在钳制那段注释里
+写着"旧实现先按旧 offset 摆好子节点、之后才钳制……看起来像抖一下" —— 同一个错误在
+粘底路径上又犯了一次。
+
+### 修法
+
+把粘底挪到 `kid.arrange()` **之前**，让"本帧最终 offset"在摆内容前定稿。规则可以一句话
+概括：**凡是会影响子节点位置的 `arrange` 内状态，都必须在子节点 arrange 之前算完。**
+
+### 验证
+
+- `scrollview_invariants`（2 条）：滚动容器每帧必须满足 `子节点 y == viewport.y - offset()`，
+  包含"随机变高/变矮 + 滚动 + 粘底"120 组 × 20 步；
+- 变异验证：把粘底挪回"摆完内容之后" → **两条都立即红**（`kid.y=-300` vs 期望 `-360`）。
+
+workspace **1359 passed / 0 failed / 71 ignored / 202 目标**（`--include-ignored` 1430）；
+像素哈希不变；Linux Xvfb 1317 / 35 / 202。
 
 ## 2026-11-28（续三）：虚拟滚动属性测试 —— **没有新 bug**
 
@@ -34,7 +72,7 @@
 | `TreeView::arrange` 不调 `clamp_scroll()` | **立即红**（`row0.y=-64`，正是"内容偏上"） |
 | `TreeView::visible_range` 去掉 `first.min(len)` | **不红** —— 因为 `clamp_scroll` 保证了 `first < len`，这是不可达态下的冗余保护（记录下来：它不是 bug，但也不是可测行为） |
 
-**验证**：workspace **1357 passed / 0 failed / 71 ignored / 201 目标**（`--include-ignored` 1428）；
+**验证**：当轮 workspace **1357 passed / 0 failed / 71 ignored / 201 目标**（`--include-ignored` 1428）；
 像素哈希不变；Linux Xvfb 1315 / 35 / 201。
 
 ## 2026-11-28（再续）：X11 请求编码属性测试 —— **没有新 bug**
@@ -435,7 +473,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1315 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1317 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -808,7 +846,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1357** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1359** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。

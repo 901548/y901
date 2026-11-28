@@ -290,4 +290,8 @@
 #   (新增 y901-widgets/tests/listview_invariants.rs 2 条 + treeview_invariants.rs 2 条。
 #    未发现新 bug；变异验证：row_at 丢滚动偏移 → 红；arrange 不夹滚动偏移 → 红。
 #    另记：去掉 visible_range 里 `first.min(len)` 的防御不红 —— 那是不可达态下的冗余保护。)
-1357
+# Measured at 2026-11-28 (ScrollView 粘底时序 bug：粘底在摆内容之后改 offset，画面滞后一帧):
+#   default cargo test --workspace --no-fail-fast   passed 1359, failed 0, ignored 71 / 202 个测试目标
+#   (新增 y901-widgets/tests/scrollview_invariants.rs 2 条。变异验证：把粘底挪回"摆完内容之后"
+#    → 两条都立即红。像素哈希不变。)
+1359
