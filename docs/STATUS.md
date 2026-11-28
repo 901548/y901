@@ -2,11 +2,31 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1350` / `ignored=71` / `targets=198`；`--include-ignored` 全量 `passed=1350` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1308` / `ignored=35` / `targets=198`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-zwj.log](evidence/cross-platform/linux-verify-2026-11-28-zwj.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1353` / `ignored=71` / `targets=199`；`--include-ignored` 全量 `passed=1353` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1311` / `ignored=35` / `targets=199`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-encode-props.log](evidence/cross-platform/linux-verify-2026-11-28-encode-props.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-28（再续）：X11 请求编码属性测试 —— **没有新 bug**
+
+继续把属性测试推到协议编码层。不解析协议，只检查**服务端收到包后第一件会做的事**：
+
+1. 整包 **4 字节对齐**；
+2. 头部 `length` 字段（字节 2..4，小端）必须**精确等于** `总字节 / 4`；
+3. 总长不超过单请求上限；
+4. 大 payload 必须被 `request_fits` 判为"装不下"（调用方据此分块），而不是编码出一个回绕的小长度。
+
+覆盖 11 个编码器 × 300 组随机参数，外加 `PutImage` 200 组随机尺寸（断言 `总长 == 24 + w×h×4`）。
+
+结论：**零红**。长度守卫此前已有 5 条定向用例（`length_guard_tests`），这轮把"每个编码器 +
+随机参数"都过了一遍，没发现新缺陷。
+
+一条**变异验证**确认断言有牙：把 `length_units` 改成少算 1 个单位 →
+`intern_atom` 的 `length=4 (16 字节) vs 实际 20`、`put_image` 的 `1263 vs 5056` 立刻报出来。
+
+**验证**：workspace **1353 passed / 0 failed / 71 ignored / 199 目标**（`--include-ignored` 1424）；
+像素哈希不变；Linux Xvfb 1311 / 35 / 199。
 
 ## 2026-11-28（续）：`ZWJ` 之后的制表符/空白被粘进 emoji 簇 —— 退格会连带删掉
 
@@ -41,7 +61,7 @@ UAX #29 里 `ZWJ` 只对 Extended_Pictographic 生效（GB11），而**控制符
 另新增 `bidi_invariants`（3 条）钉住双向文本：视觉顺序必须是逻辑字符位置的一个**排列**
 （不重不漏）、纯 LTR 不变、纯 RTL 整段反转、`visual_runs_of` 的区间连续覆盖且无空段。
 
-workspace **1350 passed / 0 failed / 71 ignored / 198 目标**（`--include-ignored` 1421）；
+当轮 workspace **1350 passed / 0 failed / 71 ignored / 198 目标**（`--include-ignored` 1421）；
 像素哈希不变；Linux Xvfb 1308 / 35 / 198。
 
 **记一条方法论**：跨实现比对时先确认"两者是否**应当**相同"。这次断言错了，
@@ -386,7 +406,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1308 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1311 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -759,7 +779,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1350** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1353** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
