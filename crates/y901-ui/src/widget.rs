@@ -90,6 +90,22 @@ impl Role {
     /// 滚动条。
     pub const SCROLLBAR: Role = Role("scrollbar");
 
+    // ---- 语义角色（给无障碍用；与"主题色槽"是两回事）----
+    //
+    // 为什么要分开：`Role` 原本被当成**主题色槽**用（`Theme` 只有 8 个槽位），于是
+    // 开关/滑杆/复选框只能报 `BUTTON`、告警只能报 `PANEL` —— 读屏器因此把它们**念成按钮/分组**。
+    // 正确做法是让 `role()` 报真实语义，而**主题槽位**在 `Theme::slot()` 里做别名映射
+    // （switch/slider/checkbox → button 槽，alert → panel 槽），颜色与以前完全一致。
+
+    /// 开关（读屏器念"开关"，带开/关状态）。
+    pub const SWITCH: Role = Role("switch");
+    /// 滑杆（读屏器念"滑杆" + 当前值 + 范围）。
+    pub const SLIDER: Role = Role("slider");
+    /// 复选框（读屏器念"复选框" + 勾选状态）。
+    pub const CHECKBOX: Role = Role("checkbox");
+    /// 告警（assertive 实时区域，读屏器应主动播报）。
+    pub const ALERT: Role = Role("alert");
+
     /// 角色名；语义树与主题查表都用它作为稳定标识。
     pub const fn as_str(self) -> &'static str {
         self.0

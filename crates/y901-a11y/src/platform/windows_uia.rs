@@ -108,17 +108,19 @@ impl WindowsUia {
     /// `request_initial_tree` 取走；之后的调用直接走 `update_if_active`
     /// （没有客户端连接时什么都不做，**零开销**）。
     pub fn push(&mut self, update: TreeUpdate) {
-        // 先试着走"已有客户端"的快速路径。
+        // 走"已有客户端"的快速路径。
         // `update_if_active` 要求 factory 返回一个**新的** update（FnOnce 只能消费一次），
         // 所以这里克隆一份：TreeUpdate 是纯数据，克隆成本远低于重建整棵树。
         let cloned = update.clone();
-        let had_client = self.adapter.update_if_active(move || cloned).is_some();
-        if !had_client {
-            // 还没有客户端连接：把最新树存起来供 `request_initial_tree` 用。
-            // 只保留最后一份（旧树对客户端没有价值，而且会占内存）。
-            if let Ok(mut slot) = self.tree_slot.lock() {
-                *slot = Some(update);
-            }
+        let _had_client = self.adapter.update_if_active(move || cloned).is_some();
+        // **无条件把最新树存进 slot**（`move`，不额外克隆）。
+        //
+        // 为什么不能"只在没有客户端时才存"：`request_initial_tree` 会**取走** slot 里的树，
+        // 而下一个连上来的客户端（换一个读屏器、或读屏器重启）再取时拿到的是**空**。
+        // 实测：第一次查询 UIA 拿到 21 个节点，第二次就变成 0 个 —— 用户看到的是
+        // "读屏器说这个窗口是空的"。存一份最新树同时解决了"空闲后才启动读屏器"和这个问题。
+        if let Ok(mut slot) = self.tree_slot.lock() {
+            *slot = Some(update);
         }
     }
 

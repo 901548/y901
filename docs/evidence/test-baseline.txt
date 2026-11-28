@@ -318,4 +318,9 @@
 #   default cargo test --workspace --no-fail-fast   passed 1378, failed 0, ignored 71 / 208 个测试目标
 #   (新增 y901-widgets/tests/tab_indent.rs 4 条。变异验证：Ctrl+Tab 不逃逸 → 红；
 #    制表位按字符数而非显示列 → 红。像素哈希不变。)
-1378
+# Measured at 2026-11-28 (真机 UIA 验收驱动的无障碍语义修正 + 空闲树刷新):
+#   default cargo test --workspace --no-fail-fast   passed 1384, failed 0, ignored 71 / 209 个测试目标
+#   (新增 y901-widgets/tests/a11y_semantics.rs 6 条：角色映射/名字不含 id/按钮 value 不泄漏命令/
+#    列表与告警在树里/名字与内容分离/语义角色不改配色。像素哈希不变（别名映射回原槽位）。
+#    另修 component_audit 与 password_placeholder 里编码了旧契约的 3 条断言。)
+1384

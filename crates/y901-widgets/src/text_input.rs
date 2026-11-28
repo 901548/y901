@@ -70,6 +70,11 @@ struct GlyphX {
 /// 单行文本输入框：光标、选区、滚动、剪贴板、IME。
 pub struct TextInput {
     id: String,
+    /// **无障碍名称**（读屏器念的名字；空 = 未提供）。
+    ///
+    /// 与 `value` 分开：`value` 是**内容**（"可编辑文本"），名字是"这个框是干什么的"（"备注"）。
+    /// 旧实现没有名字时拿内容顶替，读屏器只会念内容，用户不知道输入框的用途。
+    a11y_label: String,
     /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。
     key: u64,
     buffer: TextBuffer,
@@ -137,6 +142,7 @@ impl TextInput {
         let key = y901_ui::layout::id_key(&id);
         Self {
             id,
+            a11y_label: String::new(),
             key,
             buffer: TextBuffer::new(),
             style: TextStyle::fg(Color::WHITE).with_bg(Color::rgba(0.10, 0.11, 0.14, 1.0)),
@@ -166,6 +172,14 @@ impl TextInput {
             password: false,
             placeholder: None,
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字）。
+    ///
+    /// 见 `Switch::label` 的说明：没有名字时**不再拿内容顶替** —— 内容属于 `value`。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.a11y_label = text.into();
+        self
     }
 
     /// 密码模式（构建器）：渲染与 `semantics()` 全部打码，`text()` 仍返回原文。
@@ -1042,21 +1056,18 @@ impl Widget for TextInput {
         } else {
             self.buffer.text().to_string()
         };
-        let label = if self.password {
+        // **名字与内容分开**：
+        // - 名字（`label`，读屏器念"这个框是干什么的"）来自 `.label(..)`；
+        // - 内容（`value`，念"里面是什么"）来自缓冲区。
+        //
+        // 旧实现把**内容当名字**（空时退化成 "TextInput"），于是读屏器只会念
+        // "可编辑文本"，用户不知道这个输入框的用途；而密码模式下名字恒为 "password"。
+        // 现在没显式给名字就**不编名字**（`password_placeholder.rs` 也要求占位提示
+        // 不得进语义），由使用方补 `.label(..)`。
+        let label = if self.password && self.a11y_label.is_empty() {
             "password".to_string()
         } else {
-            self.buffer.text().to_string()
-        };
-        // **空输入框要有名字**：之前 label 直接取缓冲区文本，
-        // 空的时候就是空串，外部工具无法按名辨认。用 placeholder 兜底，
-        // 再没有就叫 "TextInput"。
-        // **不能用 placeholder 兜底**：`password_placeholder.rs` 明确要求占位提示
-        // 不得进入语义 label（否则敏感应用的提示会被外部工具读走）。
-        // 这里只在**完全空**时给一个中性名字。
-        let label = if label.is_empty() {
-            "TextInput".to_string()
-        } else {
-            label
+            self.a11y_label.clone()
         };
         let sem = Semantics::default()
             .exposed(true)

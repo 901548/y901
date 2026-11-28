@@ -1,0 +1,58 @@
+# Windows UIA 无障碍树取证（2026-11-28）：`a11y_demo` 的真实 UIA 元素
+#
+# 工具：PowerShell + UIAutomationClient（与「讲述人」消费的是同一套 API）。
+# 为什么用它代替"人耳听讲述人"：读屏器读的就是这棵树 —— 名字、角色、值、状态、
+# LiveSetting 全在这里；能程序化核对的部分不该靠人。**没有**覆盖的只有"语音引擎
+# 怎么念这些字符串"（那是读屏器一侧的事）。
+#
+# 复现：cargo build -p y901-shell --features a11y --example a11y_demo
+#       target\debug\examples\a11y_demo.exe  然后跑 target\uia-dump4.ps1 <hwnd>
+
+WINDOW name=[Y901 无障碍验收] type=Group
+DESCENDANTS=21
+------
+  1. Text         name=[Y901 无障碍验收]
+  2. Text         name=[本页用于读屏器手工验收；每个控件都有明确标签与状态。]
+  3. Text         name=[按钮]
+  4. Button       name=[保存（Ctrl+S）] invoke
+  5. Text         name=[复选框]
+  6. CheckBox     name=[启用同步] value=[false] toggle=Off
+  7. Text         name=[开关]
+  8. Button       name=[启用同步] value=[on] toggle=On
+  9. Text         name=[滑杆]
+ 10. Slider       name=[音量] value=[0.50] value=0.5 min=0 max=1
+ 11. Text         name=[数值输入]
+ 12. Edit         name=[重试次数] value=[42] value=42 min=0 max=100
+ 13. Text         name=[文本框]
+ 14. Edit         name=[备注] value=[可编辑文本]
+ 15. Text         name=[列表]
+ 16. List         name=[list(3)]
+ 17. Text         name=[列表项 1]
+ 18. Text         name=[列表项 2]
+ 19. Text         name=[列表项 3]
+ 20. Text         name=[这是一个告警] invoke
+ 21. Text         name=[尚未保存]
+------
+END tries=1
+
+
+# ---- 与 docs/A11Y_ACCEPTANCE.md 的逐项对照 ----
+# 1  标题           Text  name=[Y901 无障碍验收]                        PASS
+# 2  保存按钮       Button name=[保存（Ctrl+S）] invoke                    PASS（value 不再泄漏命令名）
+# 3  复选框         CheckBox name=[启用同步] toggle=Off                   PASS（角色由 Button 修正为 CheckBox）
+# 4  开关           Button name=[启用同步] toggle=On                      PASS（UIA 没有 switch 类型，Button+Toggle 是 Windows 惯例）
+# 5  滑杆           Slider name=[音量] value=0.50 min=0 max=1             PASS（角色由 Button 修正为 Slider，范围可读）
+# 6  数值输入       Edit name=[重试次数] value=42 min=0 max=100           PASS（名字与值分离）
+# 7  文本框         Edit name=[备注] value=[可编辑文本]                    PASS（名字与内容分离）
+# 8  列表           List name=[list(3)] + 列表项 1/2/3                    PASS（此前整棵列表不在树里）
+# 9  告警           Text name=[这是一个告警]                              PASS（标题即名字；见下方说明）
+# 10 状态行         Text name=[尚未保存]                                  PASS
+# 18 无"未命名按钮"  ——                                                      PASS（未出现空名字控件）
+# 19 念出内部 id    ——                                                      PASS（"switch switch-ctl" 等已消除）
+
+# 说明（诚实边界）：
+# - 「讲述人真的念对了吗」需要真人；本文件证明的是**它要念的内容**是对的。
+# - 告警在 UIA 里呈现为 Text 元素（accesskit 的 Role::Alert 没有独立的 UIA 控件类型），
+#   assertive 依赖 LiveSetting 属性；本轮 dump 未取到该属性（可能由 adapter 在事件里推送），
+#   因此"主动播报"仍需人工确认。
+

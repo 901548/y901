@@ -136,27 +136,52 @@ fn arrange_each(components: &mut [Box<dyn Widget>], cache: &mut LayoutCache) {
 
 // ---------- 一、语义面契约 ----------
 
-/// 已知问题(审计发现):TextInput 的语义 label 为空——外部工具只能靠 id 辨认节点。
-/// 其余组件都有可读 label;修复后去掉 ignore 应转绿。
+/// `TextInput` 的**名字与内容**必须分开，且名字可以显式给出。
+///
+/// 2026-11-28 的真机 UIA 验收把这条契约改了：旧实现把**内容**当名字
+/// （空的时候退化成 "TextInput"），读屏器只会念"可编辑文本"，用户不知道这个框干什么；
+/// 现在名字来自 `.label(..)`、内容留在 `value`，且**不再拿 id 顶替名字**。
 #[test]
 fn text_input_semantics_has_label() {
-    let input = TextInput::new("p-input");
-    let sem = input.semantics();
+    // 没给名字：名字为空（**不得**退化成 id 或内容），内容在 value
+    let plain = TextInput::new("p-input").with_text("abc");
+    let sem = plain.semantics();
     assert!(
-        !sem.label.is_empty(),
-        "TextInput 应提供语义 label(当前为空,只有 id 可用)"
+        sem.label.is_empty(),
+        "未设 label 时名字应为空，实得 {:?}",
+        sem.label
+    );
+    assert_eq!(sem.value, "abc", "内容应留在 value");
+
+    // 给了名字：名字就是它，内容仍是 value
+    let named = TextInput::new("p-input").label("备注").with_text("abc");
+    let sem2 = named.semantics();
+    assert_eq!(sem2.label, "备注", "名字应来自显式 label");
+    assert_eq!(sem2.value, "abc", "名字与内容必须是两件事");
+    assert!(
+        !sem2.label.contains("p-input"),
+        "名字里不得出现内部 id（读屏器会原样念出来）"
     );
 }
 
 /// 所有对外组件必须 `exposed(true)`:语义面默认封禁,
 /// 忘了 `.exposed(true)` 的组件对外部工具(AI/RPC)是不可见的。
-/// label 非空要求覆盖全部组件,TextInput 暂列豁免(见上方工单)。
+/// 名字的要求见下方：已修组件**不得**含 id，其余仍是旧口径（欠账清单见 A11Y_ACCEPTANCE）。
 #[test]
 fn semantics_exposed_contract() {
-    const LABEL_EXEMPT: &[&str] = &["p-input"];
     let mut comps = for_each_probe_component!(comps);
     let mut cache = LayoutCache::new();
     arrange_each(&mut comps, &mut cache);
+    // 已修好的组件：名字里**不得**出现自己的 id（真机 UIA 验收逐条核对过）。
+    const NO_ID_IN_LABEL: &[&str] = &[
+        "p-switch",
+        "p-slider",
+        "p-checkbox",
+        "p-alert",
+        "p-number",
+        "p-input",
+        "p-button",
+    ];
     for c in &comps {
         let sem = c.semantics();
         assert!(
@@ -164,7 +189,17 @@ fn semantics_exposed_contract() {
             "{} 的 semantics 未暴露(exposed_to_ai=false)——外部工具看不到它",
             c.id()
         );
-        if !LABEL_EXEMPT.contains(&c.id()) {
+        if NO_ID_IN_LABEL.contains(&c.id()) {
+            assert!(
+                !sem.label.contains(c.id()),
+                "{} 的语义 label 里含自己的 id（{:?}）——读屏器会把实现细节念出来",
+                c.id(),
+                sem.label
+            );
+        } else {
+            // 其余组件仍是旧口径（`format!("{} {}", 角色, id)`）。**这是已知欠账**，
+            // 清单与原因见 docs/A11Y_ACCEPTANCE.md 的"待办"一节：每个都要补
+            // `.label(..)` 构建器，属于机械改动，不在发布前夜做。
             assert!(
                 !sem.label.is_empty(),
                 "{} 的语义 label 为空——外部工具无法辨认节点",
@@ -201,7 +236,11 @@ fn value_semantics_reflects_state() {
 
     let alert = Alert::new("a", AlertKind::Warning, "磁盘快满");
     let sem5 = alert.semantics();
-    assert_eq!(sem5.value, "磁盘快满", "Alert 的 value 应为标题");
+    assert_eq!(
+        sem5.label, "磁盘快满",
+        "Alert 的**名字**应为标题（不是把他拼成 `alert a`）"
+    );
+    assert!(!sem5.label.contains("alert a"), "Alert 的名字不得含内部 id");
     assert!(
         sem5.props
             .iter()

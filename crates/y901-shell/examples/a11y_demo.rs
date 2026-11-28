@@ -139,13 +139,13 @@ fn build() -> UiTree {
         .push(Box::new(field(
             "switch",
             "开关",
-            Box::new(Switch::new("switch-ctl", true)),
+            Box::new(Switch::new("switch-ctl", true).label("启用同步")),
             fg,
         )))
         .push(Box::new(field(
             "slider",
             "滑杆",
-            Box::new(Slider::new("slider-ctl", 0.5)),
+            Box::new(Slider::new("slider-ctl", 0.5).label("音量")),
             fg,
         )))
         .push(Box::new(field(
@@ -153,6 +153,7 @@ fn build() -> UiTree {
             "数值输入",
             Box::new(
                 NumberInput::new("number-ctl", 42.0)
+                    .label("重试次数")
                     .range(0.0, 100.0)
                     .step(1.0)
                     .flex_item(FlexItem::height(32.0)),
@@ -164,6 +165,7 @@ fn build() -> UiTree {
             "文本框",
             Box::new(
                 TextInput::new("text-ctl")
+                    .label("备注")
                     .with_text("可编辑文本")
                     .flex_item(FlexItem::height(32.0)),
             ),

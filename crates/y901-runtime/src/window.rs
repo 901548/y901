@@ -97,6 +97,17 @@ pub trait WindowBackend {
     /// `after_frame` 可以改 `tree`，`after_present` 不会改——它只读取已提交的结果。
     fn after_present(&mut self, _tree: &mut UiTree, _host: &mut dyn crate::Host) {}
 
+    /// **空闲时也刷一次无障碍树**（默认空实现）。
+    ///
+    /// 为什么必须有：无障碍树是"推"给 UIA/AT-SPI 的，而我们的推送跟在**渲染**后面 ——
+    /// 应用空闲不重绘时就不推送。于是**读屏器在应用空闲之后才启动时，会读到一棵空树**
+    /// （实测：启动 `a11y_demo`，等它静下来，再查询 UIA，`DESCENDANTS=0`；
+    /// 动一下窗口强制重绘，树立刻回来）。用户看到的现象是"读屏器说这个窗口什么都没有"。
+    ///
+    /// `run_loop` 在空闲帧里按固定间隔调用它（见 `A11Y_REFRESH`），后端实现只需
+    /// "把当前树再推一次；没有客户端连接时这次推送是零开销"。
+    fn refresh_a11y(&mut self, _tree: &mut UiTree) {}
+
     /// 本后端的分阶段统计**种类**；`None` = 该后端未接入统计（默认）。
     ///
     /// 为什么需要它：`render_stats::RenderStats` 构造时必须知道后端种类，

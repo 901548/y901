@@ -1,4 +1,4 @@
-﻿//! Switch：44x24 的开关，用于设置面板。
+//! Switch：44x24 的开关，用于设置面板。
 //!
 //! 视觉：圆角轨道 + 圆形滑块。未选中 = panel Hovered 轨道、滑块靠左；
 //! 选中 = accent 轨道（`BUTTON Pressed` 底）、滑块靠右。
@@ -25,6 +25,8 @@ const SLIDE_MS: u64 = 120;
 pub struct Switch {
     id: String,
     checked: bool,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（不再拿 id 顶替）。
+    label: String,
     /// 状态变化时发出的命令（args = bool）。见 crate::command_with_args。
     command: Option<y901_ui::Command>,
     /// 本次过渡的起始值（0.0 = 左，1.0 = 右）。
@@ -39,6 +41,7 @@ impl Switch {
         Self {
             id: id.into(),
             checked,
+            label: String::new(),
             command: None,
             anim_from: 0.0,
             rect: Rect::ZERO,
@@ -51,6 +54,16 @@ impl Switch {
     /// 与 `Button` 一致：组件只表达意图，不持有应用逻辑。
     pub fn command(mut self, cmd: y901_ui::Command) -> Self {
         self.command = Some(cmd);
+        self
+    }
+
+    /// 无障碍名称（读屏器念的名字）。
+    ///
+    /// 为什么必须显式给：`role()` 是"开关"，但开关本身没有文字 —— 没有名字时
+    /// 读屏器只会念"开关，开"，用户不知道这个开关是干什么的。旧实现拿内部 id 拼名字
+    /// （`switch switch-ctl`），那等于把实现细节念给用户听。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
         self
     }
 
@@ -87,9 +100,9 @@ impl Widget for Switch {
     }
 
     fn role(&self) -> Role {
-        // 没有 `Role::CHECKBOX` 常量（Theme 只定义了 8 个槽位），
-        // 用 BUTTON 槽位取色，语义上通过 `prop("checked")` 表达。
-        Role::BUTTON
+        // **语义角色**（读屏器念"开关"）。配色仍走 button 槽 ——
+        // 由 `Theme::slot()` 的别名负责，见那里的说明。
+        Role::SWITCH
     }
 
     fn focusable(&self) -> bool {
@@ -223,7 +236,9 @@ impl Widget for Switch {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("switch {}", self.id))
+            // **不再把内部 id 拼进名字**：`switch switch-ctl` 会被读屏器原样念出来，
+            // 属于"念实现细节"。没设 label 时不编名字，由使用方补 `.label(..)`。
+            .label(self.label.clone())
             .value(if self.checked { "on" } else { "off" })
             .prop("checked", self.checked.to_string())
             .checked(self.checked)

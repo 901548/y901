@@ -29,6 +29,8 @@ use y901_ui::{
 /// 数值输入框。
 pub struct NumberInput {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（不再拿 id 顶替）。
+    label: String,
     key: u64,
     /// 已提交值。
     value: f64,
@@ -62,6 +64,7 @@ impl NumberInput {
         // 传下去（`clamp` 只比大小，不做有限性检查），最后是界面显示 `NaN`。
         let value = if value.is_finite() { value } else { 0.0 };
         Self {
+            label: String::new(),
             id,
             key,
             value,
@@ -77,6 +80,12 @@ impl NumberInput {
             item: FlexItem::default(),
             scale: 1.0,
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字）。见 `Switch::label` 的说明。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
     }
 
     /// 步进值（`↑`/`↓` 每次加减这么多；`Shift` 时 ×10）。
@@ -435,7 +444,8 @@ impl Widget for NumberInput {
     fn semantics(&self) -> Semantics {
         let mut s = Semantics::default()
             .exposed(!self.disabled)
-            .label(format!("number input {}", self.id))
+            // 不再把内部 id 拼进名字（见 `Switch::label` 的说明）。
+            .label(self.label.clone())
             .value(self.display_text())
             .action_spec("set_value", InputKind::Number)
             .action_spec("step", InputKind::Number)

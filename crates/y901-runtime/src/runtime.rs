@@ -252,6 +252,13 @@ pub fn frame_step_with_stats<W: WindowBackend>(
 /// 跑事件循环直到窗口要求退出。
 ///
 /// 返回 `Ok(())` 表示正常退出（用户关闭窗口）；`Err` 表示后端报错。
+/// 空闲时无障碍树的刷新间隔。
+///
+/// 500ms 是"读屏器启动后不会明显等待"与"不做无用功"之间的折中：没有客户端连接时
+/// 这次推送是空操作，有连接时最多滞后半秒。
+const A11Y_REFRESH: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// 跑事件循环直到窗口要求退出（见下面的文档）。
 pub fn run_loop<W: WindowBackend>(
     window: &mut W,
     tree: &mut UiTree,
@@ -290,6 +297,8 @@ pub fn run_loop<W: WindowBackend>(
     let mut last_tick = Instant::now();
     // 最近一次发出 `UiEvent::Tick` 的时间（供 Tick 节拍）。
     let mut last_tick_at = Instant::now();
+    // 无障碍树的空闲刷新节拍：应用不重绘时也要让"后来才启动的读屏器"拿到树。
+    let mut last_a11y_refresh = Instant::now();
 
     loop {
         let loop_start = Instant::now();
@@ -344,6 +353,15 @@ pub fn run_loop<W: WindowBackend>(
             return Ok(());
         }
         last_tick = tick_now;
+        // 空闲帧：按 `A11Y_REFRESH` 间隔把无障碍树再推一次。
+        //
+        // 只在"本帧没画东西"时做：有渲染的帧本来就推送过了（`after_frame` 里）。
+        // 代价：没有读屏器连接时 `update_if_active` 是空操作；有连接时是一次快照推送，
+        // 每 500ms 一次，对 UI 线程可忽略。
+        if !presented && last_a11y_refresh.elapsed() >= A11Y_REFRESH {
+            last_a11y_refresh = Instant::now();
+            window.refresh_a11y(tree);
+        }
         if !first_frame_done {
             first_frame_done = true;
             eprintln!(

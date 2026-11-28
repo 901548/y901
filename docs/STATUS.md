@@ -2,11 +2,63 @@
 
 - **状态（2026-11-28）**: workspace 版本 `0.5.0`（**已准备好、尚未发布**）。上一版 `0.4.0` 已发布（12 个 crate 均未 yank，tag `v0.4.0` 已推送）。0.5.0 是**破坏性变更**：`y901-backend-web::Present` 增加私有字段 `collector`（`constructible_struct_adds_private_field`），按 0.x 约定升 minor。变更与发布步骤见 [RELEASE_NOTES_v0.5.0.md](RELEASE_NOTES_v0.5.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（v0.5.0 的 tag 在正式发布时打）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.4.0`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1378` / `ignored=71` / `targets=208`；`--include-ignored` 全量 `passed=1378` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1336` / `ignored=35` / `targets=208`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-tab-indent.log](evidence/cross-platform/linux-verify-2026-11-28-tab-indent.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1384` / `ignored=71` / `targets=209`；`--include-ignored` 全量 `passed=1384` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1342` / `ignored=35` / `targets=209`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-a11y-semantics.log](evidence/cross-platform/linux-verify-2026-11-28-a11y-semantics.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-28（续十）：真机读屏器验收 —— 用 UIA 树代替"人耳听"，抓到 6 个无障碍缺陷
+
+验收清单（`A11Y_ACCEPTANCE.md`）一直标着"需要真人 + 讲述人"。本轮换了个做法：
+**读屏器读的就是 UIA 树**，而 UIA 是可以用 `UIAutomationClient` 程序化读取的 ——
+于是"它要念什么"不必靠人耳，人可以只负责最后一步"语音引擎念得对不对"。
+
+启动 `a11y_demo`，把窗口真实的 UIA 元素全量 dump 出来（证据：
+[`a11y-uia-windows-2026-11-28.log`](evidence/cross-platform/a11y-uia-windows-2026-11-28.log)），
+对照清单发现 **6 个真缺陷**，全部是用户会直接听到的：
+
+| # | 现象（读屏器会念成） | 根因 |
+|---|---|---|
+| 1 | 复选框/滑杆念成"按钮"，告警念成"分组" | 组件把**主题色槽**（只有 8 个）当成语义角色报出去 |
+| 2 | `switch switch-ctl` / `slider slider-ctl` / `alert alert` | `semantics().label` 里拼了内部 id |
+| 3 | 按钮被念成"保存（Ctrl+S），a11y.save" | 命令名被塞进 `value` |
+| 4 | **整个列表、告警不在树里** | `VerticalList` 没调 `.exposed(true)`（默认封禁） |
+| 5 | 文本框只有内容没有名字 | 名字与内容混用同一字段 |
+| 6 | 窗口名字为空 | 根节点没有名字（读屏器只会念"分组"） |
+
+还有第 7 个更隐蔽的：**应用空闲后连上来的读屏器读到空树**。
+`push()` 只在"没有客户端"时才缓存树，而 `request_initial_tree` 会把它**取走** ——
+第二个客户端（读屏器重启、换一个读屏器）拿到的是空。实测：第一次查询 21 个节点，
+第二次 0 个。修法两条并用：`push()` **无条件保留最新树** + `run_loop` 在空闲帧
+每 500ms 调一次 `refresh_a11y`（trait 新钩子，默认空实现）。
+
+### 语义角色与主题色槽分离
+
+`Role` 同时承担"读屏器念什么"和"取哪个颜色槽"两件事，是这批 bug 的总根源。
+现在 `role()` 报真实语义（`switch`/`slider`/`checkbox`/`alert`），
+由 `Theme::slot()` 做**别名映射**回原槽位（前三个 → button，alert → panel）——
+**配色一个像素都不变**（像素哈希 `0xF7455CCE7781A864` 不变，有测试钉住）。
+
+### 验证
+
+- 修改后重新 dump：窗口有名字、CheckBox/Slider 角色正确、列表 + 3 个项在树里、
+  名字是人话、连续 3 次新进程查询都能拿到 21 个节点；
+- 新增 `a11y_semantics`（6 条）：角色映射、名字不含 id、按钮 value 不泄漏命令、
+  列表与项在树里、名字与内容分离、语义角色不改配色；
+- 三条旧测试（`component_audit` ×2、`password_placeholder` ×1）编码的是**旧契约**，
+  按新契约更新（"label 非空" → "label 不得含 id"；"名字==内容" → "名字与内容分离"）。
+
+workspace **1384 passed / 0 failed / 71 ignored / 209 目标**（`--include-ignored` 1455）；
+像素哈希不变；Linux Xvfb 1342 / 35 / 209。
+
+### 仍未做（诚实边界）
+
+- **讲述人实际播报**：本文件证明"它要念的内容"正确，不证明"语音引擎念对了"。
+- **告警的 assertive 主动播报**：dump 未取到 `LiveSetting` 属性，仍需人工确认。
+- **14 个组件仍把 id 拼进 label**（badge/combobox/context_menu/empty_state/error_state/
+  image/menu_bar/popover/progress/radio/skeleton/spinner/tree_view）：每个都要补
+  `.label(..)` 构建器，属机械改动，已记在 `A11Y_ACCEPTANCE.md` 的欠账清单里。
 
 ## 2026-11-28（续九）：`TextArea` 的 Tab 缩进 —— 以及框架必须先给一条"键盘出路"
 
@@ -44,7 +96,7 @@ PLAN 批次 5 的最后一项。当初挂起的理由写的是"要先定 Tab 属
 | 框架去掉 `!modifiers.ctrl` 判断 | **立即红**（`Ctrl+Tab` 被缩进吃掉 → 键盘陷阱） |
 | 制表位按字符数而非显示列 | **立即红**（`中` 后补 4 个空格，应为 2 个） |
 
-workspace **1378 passed / 0 failed / 71 ignored / 208 目标**（`--include-ignored` 1449）；
+**验证**：当轮 workspace **1378 passed / 0 failed / 71 ignored / 208 目标**（`--include-ignored` 1449）；
 像素哈希不变；Linux Xvfb 1336 / 35 / 208。
 
 ## 2026-11-28（续八）：两件事 —— ①文本输入多状态属性测试 ②`box_levels_rgba` 零拷贝
@@ -653,7 +705,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1336 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1342 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -1026,7 +1078,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1378** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1384** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。

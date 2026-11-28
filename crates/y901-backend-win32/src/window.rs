@@ -918,6 +918,9 @@ pub struct Window {
     /// "这个 id 现在还在不在树里"，查不到就说明动作指向已删除的节点。
     #[cfg(feature = "a11y")]
     a11y_node_ids: y901_a11y::platform::NodeIdMap,
+    /// 窗口标题：作为无障碍树**根节点**的名字（读屏器进入应用时先念它）。
+    #[cfg(feature = "a11y")]
+    a11y_window_name: String,
 }
 
 impl Window {
@@ -1179,6 +1182,8 @@ impl Window {
                 a11y,
                 #[cfg(feature = "a11y")]
                 a11y_node_ids: y901_a11y::platform::NodeIdMap::default(),
+                #[cfg(feature = "a11y")]
+                a11y_window_name: options.title.clone(),
             };
             // 此时窗口已以普通样式存在，`set_fullscreen` 能保存到真实原状态。
             if fullscreen {
@@ -2379,6 +2384,16 @@ impl y901_runtime::window::WindowBackend for Window {
     ///
     /// `had_dirty` 在调用**之前**取一次，仅用于回答“本帧动了没有”；
     /// 它不参与决策（决策仍在 `render_inner` 里）。
+    /// 空闲时也把无障碍树推一次（见 trait 里 `refresh_a11y` 的说明）。
+    fn refresh_a11y(&mut self, tree: &mut UiTree) {
+        #[cfg(feature = "a11y")]
+        if self.a11y.is_some() {
+            self.pump_a11y(tree);
+        }
+        #[cfg(not(feature = "a11y"))]
+        let _ = tree;
+    }
+
     fn render(&mut self, tree: &mut UiTree) -> Result<RenderOutcome, String> {
         // **测试开关**：强制 render 失败，用于验证 `Window::Drop` 的**异常路径兜底**。
         //
@@ -2513,7 +2528,19 @@ impl Window {
         let Some(bridge) = self.a11y.as_mut() else {
             return;
         };
-        let (update, node_ids) = y901_a11y::to_tree_update_with_map(tree.snapshot());
+        let (mut update, node_ids) = y901_a11y::to_tree_update_with_map(tree.snapshot());
+        // **根节点（窗口）也要有名字**：读屏器进入应用时先念它，空名字只会念"分组"。
+        // 名字来源就是窗口标题 —— 每个窗口都有，且正是用户看到的标题栏文字。
+        if let Some(root) = update
+            .nodes
+            .iter_mut()
+            .find(|(id, _)| Some(*id) == update.tree.as_ref().map(|t| t.root))
+            .map(|(_, n)| n)
+        {
+            if root.label().is_none() {
+                root.set_label(self.a11y_window_name.clone());
+            }
+        }
         bridge.push(update);
         // 记住本帧映射：动作可能下一帧才到，但那时树已经变了，
         // 用**最近一次推送**的映射才是"用户看到的那棵树"。

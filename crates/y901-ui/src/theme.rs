@@ -189,9 +189,29 @@ impl Theme {
     }
 
     /// 把任意角色映射到槽位；未知角色落到 "panel"。
+    ///
+    /// # 语义角色 → 视觉槽位的别名
+    ///
+    /// `Role` 承担两个职责：**无障碍语义**（读屏器念什么）与**主题色槽**（用什么颜色）。
+    /// 主题只有 8 个槽位，而语义角色远多于 8 个 —— 于是开关/滑杆/复选框过去只能报
+    /// `BUTTON`，告警只能报 `PANEL`，读屏器因此把它们念成"按钮/分组"。
+    ///
+    /// 现在 `role()` 报真实语义，颜色靠这里**别名映射**回原有槽位，画面上一个像素都不变：
+    ///
+    /// | 语义角色 | 视觉槽位 |
+    /// |---|---|
+    /// | `switch` / `slider` / `checkbox` | `button` |
+    /// | `alert` | `panel` |
     pub const fn slot(role: Role) -> usize {
-        // Role 是开放字符串，只能线性比对（6 次 str 比较，可忽略）
         let name = role.0;
+        // 语义别名先查（"读屏器念对"与"配色不变"两件事都要成立）。
+        if str_eq(name, "switch") || str_eq(name, "slider") || str_eq(name, "checkbox") {
+            return 1; // button 槽
+        }
+        if str_eq(name, "alert") {
+            return 0; // panel 槽
+        }
+        // Role 是开放字符串，只能线性比对（8 次 str 比较，可忽略）
         let mut i = 0;
         while i < Theme::SLOTS {
             if str_eq(name, Theme::slot_name(i)) {
@@ -231,6 +251,13 @@ impl Theme {
     /// 这个用实例里的 `slots`（能看到运行期改名）。`style()` 走这一个。
     pub fn slot_index(&self, role: Role) -> usize {
         let name = role.0;
+        // 与 `Theme::slot` 的语义别名保持一致（否则"编译期查表"与"运行期查表"会分叉）。
+        if name == "switch" || name == "slider" || name == "checkbox" {
+            return 1;
+        }
+        if name == "alert" {
+            return 0;
+        }
         let mut i = 0;
         while i < Theme::SLOTS {
             if self.slots[i] == name {

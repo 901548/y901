@@ -1626,6 +1626,7 @@ version = "0.5.0"
 dependencies = [
  "png",
  "web-time",
+ "y901-a11y",
  "y901-core",
  "y901-render",
  "y901-ui",

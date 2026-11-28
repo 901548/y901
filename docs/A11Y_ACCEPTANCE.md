@@ -1,3 +1,40 @@
+# Y901 无障碍验收清单
+
+> **2026-11-28 更新：清单里"机器可核对"的部分已用 UIAutomationClient 自动跑过一遍。**
+> 读屏器读的就是 UIA 树，所以"它要念什么"不必靠人耳 —— 取证见
+> [`evidence/cross-platform/a11y-uia-windows-2026-11-28.log`](evidence/cross-platform/a11y-uia-windows-2026-11-28.log)。
+> 那次运行抓到 **6 个真缺陷**（角色报成按钮/分组、名字里念出内部 id、按钮 value 泄漏命令名、
+> 列表与告警不在树里、输入框只有内容没名字、窗口无名字），以及第 7 个"空闲后读屏器读到空树"
+> —— 全部已修，见 [STATUS.md](STATUS.md)「续十」。
+>
+> **仍然需要真人**的只剩两件：
+> 1. 讲述人/NVDA 的**实际播报**（语音引擎念得对不对、重音与停顿是否合理）；
+> 2. 告警的 **assertive 主动播报**（dump 取不到 `LiveSetting`）。
+>
+> ## 机器验收结果（2026-11-28，`a11y_demo`）
+>
+> | 项 | 期望 | 实测 | 结论 |
+> |---|---|---|---|
+> | 窗口 | 名称 = 标题 | `name=[Y901 无障碍验收]` | PASS |
+> | 标题 | 文本 | `Text name=[Y901 无障碍验收]` | PASS |
+> | 按钮 | Button + 名称 | `Button name=[保存（Ctrl+S）] invoke` | PASS |
+> | 复选框 | CheckBox + 勾选态 | `CheckBox name=[启用同步] toggle=Off` | PASS |
+> | 开关 | Toggle + 开/关 | `Button name=[启用同步] toggle=On`（UIA 无 switch 类型，这是 Windows 惯例） | PASS |
+> | 滑杆 | Slider + 值 + 范围 | `Slider name=[音量] value=0.50 min=0 max=1` | PASS |
+> | 数值输入 | Edit + 名字 + 值 + 范围 | `Edit name=[重试次数] value=42 min=0 max=100` | PASS |
+> | 文本框 | Edit + 名字 + 内容 | `Edit name=[备注] value=[可编辑文本]` | PASS |
+> | 列表 | List + 项数 + 逐项 | `List name=[list(3)]` + 列表项 1/2/3 | PASS |
+> | 告警 | 名字 = 标题 | `Text name=[这是一个告警]` | PASS（assertive 待人工） |
+> | 状态行 | 文本 | `Text name=[尚未保存]` | PASS |
+> | 无未命名控件 | — | 21 个元素全部有名字 | PASS |
+> | 不念内部 id | — | `switch switch-ctl` 这类已消除 | PASS |
+>
+> ## 欠账（未修，已记档）
+>
+> 以下 14 个组件仍用 `format!("{} {}", 角色, id)` 当名字，读屏器会把 id 念出来。
+> 每个都要补一个 `.label(..)` 构建器（机械改动）：
+> `badge`、`combo_box`、`context_menu`、`empty_state`、`error_state`、`image`、
+> `menu_bar`、`popover`、`progress`、`radio`、`skeleton`、`spinner`、`tree_view`。
 # 无障碍手工验收清单（10 分钟）
 
 > 目的：验证 **读屏器真的能读到并操作** Y901 的界面。

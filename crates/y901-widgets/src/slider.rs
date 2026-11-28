@@ -61,6 +61,8 @@ fn hit_r(scale: f32) -> f32 {
 
 /// 水平滑块。
 pub struct Slider {
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称。
+    label: String,
     id: String,
     value: f32,
     on_change: Option<Box<dyn Fn(f32)>>,
@@ -73,6 +75,7 @@ impl Slider {
     /// 创建滑块。`value` 会被 clamp 到 `0..=1`。
     pub fn new(id: impl Into<String>, value: f32) -> Self {
         Self {
+            label: String::new(),
             id: id.into(),
             // clamp 对 NaN 返回 NaN（IEEE 语义），必须先排查非法值
             value: sane(value),
@@ -81,6 +84,12 @@ impl Slider {
             focused: false,
             dragging: false,
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字）。见 `Switch::label` 的说明。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
     }
 
     /// 值变化回调。
@@ -161,7 +170,8 @@ impl Widget for Slider {
     }
 
     fn role(&self) -> Role {
-        Role::BUTTON
+        // **语义角色**：读屏器念"滑杆" + 当前值 + 范围。配色仍走 button 槽（见 `Theme::slot`）。
+        Role::SLIDER
     }
 
     fn focusable(&self) -> bool {
@@ -293,7 +303,8 @@ impl Widget for Slider {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("slider {}", self.id))
+            // 不再把内部 id 拼进名字（见 `Switch::label` 的说明）。
+            .label(self.label.clone())
             .value(format!("{:.2}", self.value))
             .action("set")
             .prop("value", format!("{:.2}", self.value))

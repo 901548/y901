@@ -190,6 +190,10 @@ impl Widget for VerticalList {
 
     fn semantics(&self) -> Semantics {
         Semantics::default()
+            // **必须显式暴露**：`Semantics::default()` 是 `exposed_to_ai: false`，
+            // 于是整棵列表（连同它的项）此前**完全进不了无障碍树** ——
+            // 读屏器看不到列表、也念不出项数。
+            .exposed(true)
             .label(format!("list({})", self.children.len()))
             .prop("count", self.children.len().to_string())
     }

@@ -177,7 +177,11 @@ fn non_password_semantics_unchanged() {
     let mut ti = TextInput::new("plain");
     ti.set_text("hello");
     let sem = ti.semantics();
-    assert_eq!(sem.label, "hello");
+    // **名字与内容分离**（2026-11-28 真机 UIA 验收后的契约）：
+    // 没有显式 `.label(..)` 时名字为空、不做伪装；内容始终在 `value`。
+    // 旧行为是把内容当名字（`label == "hello"`），读屏器因此只知道"里面是什么"，
+    // 不知道"这个框是干什么的"——两个字段混在一起还会让 `value` 变成冗余播报。
+    assert_eq!(sem.label, "");
     assert_eq!(sem.value, "hello");
     assert_eq!(
         sem.state.get("text").and_then(|v| v.as_str()),

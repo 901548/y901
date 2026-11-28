@@ -281,7 +281,10 @@ impl Widget for Button {
         Semantics::default()
             .exposed(true)
             .label(self.label.clone())
-            .value(self.command.clone())
+            // **不要把命令名放进 `value`**：UIA 的 Value 是被读屏器念出来的内容，
+            // 放进去就成了"保存（Ctrl+S），a11y.save"——把实现细节念给用户听。
+            // 外部工具要走命令名请读 `prop("command")`。
+            .prop("command", self.command.clone())
             .action("click")
             // disabled 是**顶层语义字段**，不进 state：
             // 两处重复会让外部工具困惑"哪个是真的"，也会让哈希范围含糊。

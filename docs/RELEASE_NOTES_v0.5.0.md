@@ -50,8 +50,27 @@ crates/y901-backend-web/src/present.rs
 - **无障碍**：`NodeId` 改为 `NodeInfo.id` 的稳定哈希，屏读器缓存与焦点记忆跨帧有效；
   浮层（菜单/下拉）现在也在语义树里，且矩形与命中测试一致。
 
-## 性能
+## 无障碍（真机 UIA 验收驱动）
 
+用 `UIAutomationClient` 读出 `a11y_demo` 的真实 UIA 树（读屏器读的就是这棵树），
+发现并修复 6 个**用户会直接听到**的缺陷：
+
+- 复选框/滑杆被念成"按钮"、告警被念成"分组" —— 组件把**主题色槽**当语义角色报出去。
+  现在报真实语义角色，配色由 `Theme::slot()` 别名映射回原槽位，**像素零变化**。
+- 名字里念出内部 id（`switch switch-ctl`）—— 改为显式 `.label(..)`，不再拿 id 顶替。
+- 按钮的"值"是命令名（`a11y.save`）—— 命令改放 `props["command"]`。
+- **整个列表与告警不在无障碍树里**（`VerticalList` 默认未暴露）。
+- 输入框只有内容、没有名字 —— 名字与内容分离。
+- 窗口本身没有名字 —— 根节点用窗口标题。
+
+以及第 7 个更隐蔽的：**应用空闲之后才启动的读屏器会读到空树**
+（树被上一个客户端取走且不再推送）。修法：`push()` 无条件保留最新树 +
+`run_loop` 空闲时每 500ms 刷新一次（新增 `WindowBackend::refresh_a11y` 钩子）。
+
+已知欠账：14 个组件仍把 id 拼进 label（见 [`A11Y_ACCEPTANCE.md`](A11Y_ACCEPTANCE.md)）；
+讲述人的**实际播报**与告警的 assertive 播报仍需人工确认。
+
+## 性能
 | 项目 | 改前 | 改后 |
 |---|---|---|
 | 光标移动（20 万字符，1000 次右移） | 41.2 s | **327 µs** |
@@ -74,8 +93,13 @@ crates/y901-backend-web/src/present.rs
 
 - **设备丢失恢复路径没有自动化覆盖**：触发它需要拔显卡/驱动更新。第 7 条靠"WARP 上恰好能稳定
   复现"定位，结论已写成结构守卫，但"真实 GPU 上设备真的丢了会怎样"仍是人工范围。
-- **屏幕阅读器实际播报**：自动化只证明"语义树里有正确的东西"，念得对不对要真人
-  （[`A11Y_ACCEPTANCE.md`](A11Y_ACCEPTANCE.md) 10 分钟清单，本轮新增 17b"删中间一行再点删除"）。
+- **屏幕阅读器实际播报**：2026-11-28 已用 `UIAutomationClient` 把 `a11y_demo` 的真实 UIA 树
+  逐项核对过（发现并修掉 7 个缺陷，见上）。但"读屏器把这串字念得对不对、重音停顿是否合理"
+  仍要真人；告警的 assertive 主动播报也是（dump 取不到 `LiveSetting`）。
+  清单见 [`A11Y_ACCEPTANCE.md`](A11Y_ACCEPTANCE.md)。
+- **14 个组件的名字仍含内部 id**（badge/combobox/context_menu/empty_state/error_state/image/
+  menu_bar/popover/progress/radio/skeleton/spinner/tree_view）：要各自补 `.label(..)`，
+  属机械改动，已记在 `A11Y_ACCEPTANCE.md` 的欠账清单。
 - **IME 候选窗**：只验到表单参数正确，真实输入法把候选框画在光标旁仍需人工看。
 - **`box_levels_rgba` 的像素等价性**：零拷贝后累计分配降到理论最优、像素哈希不变，
   但没有逐字节对拍旧实现的读回路径（`box_levels_rgba` 是私有的，没有公开读回接口）。
