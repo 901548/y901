@@ -2,11 +2,54 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1359` / `ignored=71` / `targets=202`；`--include-ignored` 全量 `passed=1359` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1317` / `ignored=35` / `targets=202`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-scroll-stick.log](evidence/cross-platform/linux-verify-2026-11-28-scroll-stick.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1361` / `ignored=71` / `targets=203`；`--include-ignored` 全量 `passed=1361` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1319` / `ignored=35` / `targets=203`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-table-columns.log](evidence/cross-platform/linux-verify-2026-11-28-table-columns.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-28（续五）：`Table` 定宽列超宽时，"按比例压缩"被跳过 —— 列画到可视区外
+
+第 6 个真 bug，出在 `Table::column_layout()`。
+
+### 症状
+
+列布局算完后有一段"超宽按比例压缩"，判据写的是 `flex_total_w > 0.0`：
+
+```rust
+let flex_total_w = if flex_weight > 0.0 { rest } else { 0.0 };   // rest = 分给 flex 列的剩余空间
+if total > avail && total > 0.0 && flex_total_w > 0.0 { ...压缩... }
+```
+
+但 `rest = (avail - fixed - percent_total).max(0.0)` —— **定宽列本身就超宽时 `rest` 恰好是 0**，
+于是 `flex_total_w == 0`，压缩被跳过：
+
+```text
+列：Px(7) Flex Flex Flex Px(119)，表格宽 93
+fixed = 126 → rest = 0 → flex 列宽 0、flex_total_w = 0 → 不压缩 → 总宽 126 > 93
+```
+
+后果：最后一列画在行区域之外（被裁掉、看不见），而 `column_layout()` 同时供**命中测试**用 →
+表头点击会指向那块看不见的区域。这正是这段代码注释里说要修的那一类问题
+（"第二列被裁、表头命中还会指向被裁的区域"）—— 判据选错了代理变量，同一个 bug 又回来了。
+
+### 修法
+
+判据改成 **`flex_weight > 0.0`**（"存在 flex 列"这个真正的事实），而不是"分给 flex 的空间 > 0"。
+同例：`fixed=126`、`flex_weight=3` → 按 `93/126` 压缩 → 总宽正好 93。
+顺带删掉已无人使用的 `flex_total_w`。
+
+### 验证
+
+`table_invariants`（2 条）：随机列组成（定宽/flex 混合）× 200 组，
+断言列首尾相接不重叠、除"显式定宽本身超宽"外总宽不超出行区域；外加随机 `set_rows`/`sort`/
+`select` 下"选中下标永远合法"。
+
+变异验证：判据改回 `flex_total_w > 0.0` → **立即红**
+（`[case30] 列总宽 126 超过表格宽 93（fixed_sum=126 has_flex=true）`）。
+
+workspace **1361 passed / 0 failed / 71 ignored / 203 目标**（`--include-ignored` 1432）；
+像素哈希不变；Linux Xvfb 1319 / 35 / 203。
 
 ## 2026-11-28（续四）：`ScrollView` 粘底在"摆完内容之后"改偏移 —— 流式输出会一顿一顿跳
 
@@ -43,7 +86,7 @@
   包含"随机变高/变矮 + 滚动 + 粘底"120 组 × 20 步；
 - 变异验证：把粘底挪回"摆完内容之后" → **两条都立即红**（`kid.y=-300` vs 期望 `-360`）。
 
-workspace **1359 passed / 0 failed / 71 ignored / 202 目标**（`--include-ignored` 1430）；
+**验证**：当轮 workspace **1359 passed / 0 failed / 71 ignored / 202 目标**（`--include-ignored` 1430）；
 像素哈希不变；Linux Xvfb 1317 / 35 / 202。
 
 ## 2026-11-28（续三）：虚拟滚动属性测试 —— **没有新 bug**
@@ -473,7 +516,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1317 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1319 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -846,7 +889,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1359** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1361** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。

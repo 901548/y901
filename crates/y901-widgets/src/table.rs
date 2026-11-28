@@ -355,7 +355,7 @@ impl Table {
         // 现在的规则：share 先按权重分；只有当**所有 flex 列都分不到 80** 时才用
         // "每列 80 但整体按比例压缩"，保证 Σflex ≤ rest。
         let min_per_flex = FLEX_MIN_W.min(rest / (flex_weight.max(1.0)).max(1.0));
-        let flex_total_w = if flex_weight > 0.0 { rest } else { 0.0 };
+
         let mut out = Vec::with_capacity(n);
         let mut x = self.inner.x;
         for c in &self.columns {
@@ -374,9 +374,20 @@ impl Table {
             out.push((x, w));
             x += w;
         }
-        // 超宽时按比例压缩（保证最后不超出行区域；`Percent` 列也可能超）
+        // 超宽时按比例压缩（保证最后不超出行区域；`Percent` 列也可能超）。
+        //
+        // **判据必须是"存在 flex 列"（`flex_weight > 0.0`），不能是 `flex_total_w > 0.0`**：
+        // `flex_total_w` 等于 `rest`（分给 flex 列的剩余空间），而定宽列**本身就超宽**时
+        // `rest` 恰好是 0 —— 于是压缩被跳过、总宽超出可用宽度：
+        //
+        // ```text
+        // 列：Px(7) Flex Flex Flex Px(119)，表格宽 93
+        // 旧：fixed=126 → rest=0 → flex 列宽 0、flex_total_w=0 → 不压缩 → 总宽 126 > 93
+        //     最后一列画在行区域之外（被裁掉），表头命中还会指向这块看不见的区域
+        // 新：flex_weight=3 > 0 → 按 93/126 压缩 → 总宽 = 93
+        // ```
         let total: f32 = out.iter().map(|(_, w)| *w).sum();
-        if total > avail && total > 0.0 && flex_total_w > 0.0 {
+        if total > avail && total > 0.0 && flex_weight > 0.0 {
             let k = avail / total;
             for (_, w) in out.iter_mut() {
                 *w *= k;

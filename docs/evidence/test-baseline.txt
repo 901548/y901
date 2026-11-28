@@ -294,4 +294,8 @@
 #   default cargo test --workspace --no-fail-fast   passed 1359, failed 0, ignored 71 / 202 个测试目标
 #   (新增 y901-widgets/tests/scrollview_invariants.rs 2 条。变异验证：把粘底挪回"摆完内容之后"
 #    → 两条都立即红。像素哈希不变。)
-1359
+# Measured at 2026-11-28 (Table 列宽压缩判据 bug：定宽列超宽时压缩被跳过，列超出可视区):
+#   default cargo test --workspace --no-fail-fast   passed 1361, failed 0, ignored 71 / 203 个测试目标
+#   (新增 y901-widgets/tests/table_invariants.rs 2 条（列布局不越界 + 选中始终合法）。
+#    变异验证：判据改回 flex_total_w → 立即红（Px(7)+3×Flex+Px(119) 在 93px 表里总宽 126）。)
+1361
