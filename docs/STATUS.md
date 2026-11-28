@@ -2,11 +2,43 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1365` / `ignored=71` / `targets=204`；`--include-ignored` 全量 `passed=1365` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1323` / `ignored=35` / `targets=204`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-selection-paste.log](evidence/cross-platform/linux-verify-2026-11-28-selection-paste.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1368` / `ignored=71` / `targets=205`；`--include-ignored` 全量 `passed=1368` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1326` / `ignored=35` / `targets=205`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-frame-step.log](evidence/cross-platform/linux-verify-2026-11-28-frame-step.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-28（续七）：`frame_step` 状态机属性测试 —— **没有新 bug**
+
+最后一层：事件循环。`FrameStats` 的四个布尔量（`had_work` / `need_layout` / `presented` /
+`close_requested`）各自驱动不同行为，**组合错了分别是"关不掉窗口"、"空闲烧 CPU"、
+"后台数据不刷新"**——单看每一行代码都对，只有组合起来才错。
+
+随机混 6 种 `RawEvent`（关窗 / 改尺寸 / 鼠标移动 / 按下 / 字符 / 光标形状）× 200 组 × 15 帧，
+每帧检查四条不变量：
+
+1. `close_requested` **恰好**由 `Close` 事件触发（多一个 → 莫名退出；少一个 → 关不掉）；
+2. 有 `Resize` 就必须 `need_layout` 且真的调了 `relayout`；
+3. `presented` 为真 ⇒ 后端确实渲染过；
+4. 空闲帧（无事件、无脏区、无请求）不得上屏。
+
+另加两条定向回归：**外部标脏同帧重排 + 上屏**（审计 #7 的运行时侧）、**空闲帧一次都不画**。
+
+结论：**零红**。
+
+变异验证有一个**有价值的部分命中**：
+
+| 变异 | 结果 |
+|---|---|
+| `close_requested` 永远不置真 | **立即红**（`close_requested 与事件不符`） |
+| 去掉 `drain_external_invalidations` 里的 `layout_requested = true` | **runtime 用例不红** —— 因为 `frame_step` 自己用 `external > 0` 判定要不要重排；但 **`y901-ui` 的 `single_node_invalidation_requests_a_relayout` 立刻红** |
+
+第二行是这轮最值得记的一条：**同一处状态被两个消费方用不同方式使用** ——
+`frame_step` 走返回值，直接调 `UiTree` 的宿主走 `take_layout_request()`。
+覆盖点在后者，不在前者。变异存活不等于没测到，得先去别处确认；确认后才知道这层是安全的。
+
+**验证**：workspace **1368 passed / 0 failed / 71 ignored / 205 目标**（`--include-ignored` 1439）；
+像素哈希不变；Linux Xvfb 1326 / 35 / 205。
 
 ## 2026-11-28（续六）：选区抽取 / 剪贴板清洗属性测试 —— **没有新 bug**
 
@@ -33,7 +65,7 @@
 | `text()` 不再跳过 `WideTail` | **2 条立即红**（宽字符被重复输出 → 往返丢数据） |
 | `sanitize()` 放行 `< 0x20` 控制符 | **立即红**（`残留控制字符 '\u{8}'`，输出里带着能改行的 BS） |
 
-**验证**：workspace **1365 passed / 0 failed / 71 ignored / 204 目标**（`--include-ignored` 1436）；
+**验证**：当轮 workspace **1365 passed / 0 failed / 71 ignored / 204 目标**（`--include-ignored` 1436）；
 像素哈希不变；Linux Xvfb 1323 / 35 / 204。
 
 ## 2026-11-28（续五）：`Table` 定宽列超宽时，"按比例压缩"被跳过 —— 列画到可视区外
@@ -544,7 +576,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1323 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1326 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -917,7 +949,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1365** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1368** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
