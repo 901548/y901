@@ -277,4 +277,8 @@
 #   default cargo test --workspace --no-fail-fast   passed 1345, failed 0, ignored 71 / 197 个测试目标
 #   (新增 y901-ui/tests/layout_invariants.rs 3 条。未发现新 bug —— 布局层本来就有一批针对性用例，
 #    本轮补充的是"随机化"覆盖。变异验证：让 leftover 不减 gaps → flex 均分用例立即红。)
-1345
+# Measured at 2026-11-28 (ZWJ 簇规则修正：ZWJ + 控制/空白必须断开；+ Bidi 属性测试):
+#   default cargo test --workspace --no-fail-fast   passed 1350, failed 0, ignored 71 / 198 个测试目标
+#   (新增 y901-ui cluster 具名回归 2 条（ZWJ+制表符/换行/空格 断开；emoji ZWJ 序列仍同簇）
+#    + y901-render/tests/bidi_invariants.rs 3 条。变异验证：joins_after_zwj 改回恒真 → 立即红。)
+1350

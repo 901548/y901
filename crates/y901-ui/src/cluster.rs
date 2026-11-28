@@ -46,11 +46,23 @@ pub fn is_combining_mark(ch: char) -> bool {
         || ch == '\u{200C}' // ZWNJ
 }
 
+/// ZWJ 之后的字符是否**仍然属于同一个簇**（emoji/连字序列）。
+///
+/// 为什么不一律"ZWJ 后都同簇"（旧实现）：`\u{200D}` 后面跟制表符、换行、空格时，
+/// 那不是 emoji 连接序列 —— 一律同簇会让 **Backspace 一次删掉"👨‍" + 制表符**，
+/// 也会让 ←/→ 跨过空白落到意外的位置。UAX #29 里 ZWJ 只对 Extended_Pictographic
+/// 生效（GB11），控制/空白永远成界（GB4/GB5）。
+///
+/// 这里用"非控制、非空白、非 ASCII"作近似：emoji 与 CJK 全在 U+1F000 以上或全角区，
+/// 拉丁字母/标点则应当断开。判错的代价只是"簇切得细一点"，不会丢字符。
+fn joins_after_zwj(ch: char) -> bool {
+    !ch.is_control() && !ch.is_whitespace() && !ch.is_ascii()
+}
 /// 集群边界（升序，含 `0` 与文本长度）。
 ///
 /// 规则（**按字素簇而不是按单词**）：
-/// - **每个字符都成界**，除非它是组合记号 / ZWJ / ZWNJ，或它的前一个字符是 ZWJ
-///   （emoji 的连接序列）；
+/// - **每个字符都成界**，除非它是组合记号 / ZWJ / ZWNJ，或它前一个是 ZWJ **且**
+///   它本身不是控制/空白/ASCII（真正的 emoji 连接序列）；`ZWJ + 制表符` 不是一簇；
 /// - 于是阿拉伯语是"每个字母一簇"（Backspace 删一个字母，符合编辑器惯例），
 ///   而 `कि`、`e◌́` 这类"基础字符 + 附加符号"是一簇（不会删掉半个音节）。
 ///
@@ -60,8 +72,11 @@ pub fn cluster_boundaries(text: &str) -> Vec<usize> {
     let mut out = vec![0usize];
     let mut prev_was_zwj = false;
     for (i, ch) in text.char_indices() {
-        if i > 0 && !is_combining_mark(ch) && !prev_was_zwj {
-            out.push(i);
+        if i > 0 {
+            let joins = is_combining_mark(ch) || (prev_was_zwj && joins_after_zwj(ch));
+            if !joins {
+                out.push(i);
+            }
         }
         prev_was_zwj = ch == '\u{200D}';
     }
@@ -84,8 +99,11 @@ fn is_boundary_at(text: &str, i: usize) -> bool {
     if is_combining_mark(ch) {
         return false;
     }
-    // 前一个字符：`text[..i]` 的最后一个字符。
-    !text[..i].ends_with('\u{200D}')
+    // ZWJ 之后只有"非控制/空白/ASCII"才继续同簇（见 `joins_after_zwj`）。
+    if text[..i].ends_with('\u{200D}') {
+        return !joins_after_zwj(ch);
+    }
+    true
 }
 
 /// 从 `byte` 往回找最近的边界（含 `byte` 自己）。
@@ -165,8 +183,9 @@ pub fn next_boundary(text: &str, byte: usize) -> Option<usize> {
     for (offset, ch) in it {
         let i = byte + offset;
         // i == len 时 `chars().next()` 为空 → 不可能是组合记号，直接用规则判定。
-        let boundary = !is_combining_mark(ch) && !text[..i].ends_with('\u{200D}');
-        if boundary {
+        let _ = ch;
+        // 统一走 `is_boundary_at`：规则只写一处，两条实现路径（走簇 / 物化表）不会分叉。
+        if is_boundary_at(text, i) {
             return Some(i);
         }
     }
@@ -249,8 +268,12 @@ mod tests {
             let mut out = vec![0usize];
             let mut prev_was_zwj = false;
             for (i, ch) in text.char_indices() {
-                if i > 0 && !is_combining_mark(ch) && !prev_was_zwj {
-                    out.push(i);
+                if i > 0 {
+                    // 与 `cluster_boundaries` **同一规则**（含 `joins_after_zwj` 的细化）。
+                    let joins = is_combining_mark(ch) || (prev_was_zwj && joins_after_zwj(ch));
+                    if !joins {
+                        out.push(i);
+                    }
                 }
                 prev_was_zwj = ch == '\u{200D}';
             }
@@ -328,6 +351,46 @@ mod tests {
             pos = prev_boundary(&huge, pos).unwrap_or(0);
         }
         assert_eq!(pos, huge.len() - 1000, "1000 次 ← 应正好后退 1000 个字符");
+    }
+
+    /// **`ZWJ` 之后跟控制符/空白时必须断开**（UAX #29 的 GB4/GB5/GB11）。
+    ///
+    /// 旧实现一律"前一个是 ZWJ ⇒ 同簇"，于是 `👨‍\t`（emoji + ZWJ + 制表符）被当成
+    /// 一个簇：Backspace 一次会**连制表符一起删掉**，←/→ 也会跨过空白。
+    #[test]
+    fn zwj_does_not_glue_control_or_space_into_the_same_cluster() {
+        // ZWJ + 制表符：制表符必须自己成界（可以单独删）
+        let text = "\u{1F468}\u{200D}\t";
+        let b = cluster_boundaries(text);
+        assert!(
+            b.contains(&(text.len() - 1)),
+            "制表符之前必须成界（否则它和前一个 emoji 粘成一簇）：{b:?}"
+        );
+        // 于是从末尾退格一次只删掉制表符
+        assert_eq!(
+            prev_boundary(text, text.len()),
+            Some(text.len() - 1),
+            "Backspace 只能删掉制表符，不能连 emoji 一起删"
+        );
+
+        // ZWJ + 换行、ZWJ + 空格同理
+        for tail in ["\n", " "] {
+            let t = format!("\u{1F468}\u{200D}{tail}");
+            let b = cluster_boundaries(&t);
+            assert!(
+                b.contains(&(t.len() - tail.len())),
+                "ZWJ 后的 {tail:?} 必须成界：{b:?}"
+            );
+        }
+    }
+
+    /// 真正的 emoji 连接序列仍然是一簇（`👨‍👩` 不能被劈开）。
+    #[test]
+    fn emoji_zwj_sequence_stays_one_cluster() {
+        let text = "\u{1F468}\u{200D}\u{1F469}";
+        let b = cluster_boundaries(text);
+        assert_eq!(b, vec![0, text.len()], "emoji ZWJ 序列必须是一簇：{b:?}");
+        assert_eq!(prev_boundary(text, text.len()), Some(0));
     }
 
     #[test]

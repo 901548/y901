@@ -2,11 +2,50 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1345` / `ignored=71` / `targets=197`；`--include-ignored` 全量 `passed=1345` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1303` / `ignored=35` / `targets=197`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-layout-props.log](evidence/cross-platform/linux-verify-2026-11-28-layout-props.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1350` / `ignored=71` / `targets=198`；`--include-ignored` 全量 `passed=1350` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1308` / `ignored=35` / `targets=198`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-zwj.log](evidence/cross-platform/linux-verify-2026-11-28-zwj.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-28（续）：`ZWJ` 之后的制表符/空白被粘进 emoji 簇 —— 退格会连带删掉
+
+这条是**跨实现比对**发现的：`y901-render` 和 `y901-ui` 各有一套"集群边界"实现，
+我本来想断言两者相等，结果发现它们**按设计就不同**（一个服务 shaping 分段、一个服务
+光标/删除粒度）—— 但那轮比对顺手暴露了 UI 侧一个真问题。
+
+### 症状
+
+`y901-ui::cluster` 的规则是"每个字符成界，除非它是组合记号，**或前一个是 `ZWJ`**"。
+"前一个是 ZWJ" 被无条件应用，于是 **`ZWJ` 后跟任何字符都粘在一起**：
+
+```text
+👨 + ZWJ + TAB     → 被当成一个簇
+Backspace 一次     → 连制表符一起删掉
+←/→                → 跨过制表符/换行
+```
+
+UAX #29 里 `ZWJ` 只对 Extended_Pictographic 生效（GB11），而**控制符与空白永远成界**
+（GB4/GB5）。所以 `👨‍\t` 必须是两簇：emoji 一簇（含 ZWJ）、制表符一簇。
+
+### 修法
+
+新增 `joins_after_zwj(ch)`：只有"非控制、非空白、非 ASCII"的字符才在 ZWJ 后继续同簇
+（emoji 与 CJK 都在这个范围内；拉丁字母/标点应当断开）。`cluster_boundaries`、
+`is_boundary_at`、`next_boundary` 三条路径全部走同一个判定 ——
+顺带把 `next_boundary` 里那份**手抄的旧规则**换成调用 `is_boundary_at`，
+消除"同一规则写两遍"的分叉源（这正是本轮 bug 的温床）。
+
+**验证**：新增 2 条具名回归（`ZWJ + 制表符/换行/空格` 必须断开；`👨‍👩` 仍是一簇）。
+变异验证：把 `joins_after_zwj` 改回恒 `true` → 用例立即红。
+另新增 `bidi_invariants`（3 条）钉住双向文本：视觉顺序必须是逻辑字符位置的一个**排列**
+（不重不漏）、纯 LTR 不变、纯 RTL 整段反转、`visual_runs_of` 的区间连续覆盖且无空段。
+
+workspace **1350 passed / 0 failed / 71 ignored / 198 目标**（`--include-ignored` 1421）；
+像素哈希不变；Linux Xvfb 1308 / 35 / 198。
+
+**记一条方法论**：跨实现比对时先确认"两者是否**应当**相同"。这次断言错了，
+但错误断言把注意力引到了真 bug 上 —— 前提写错不白费，只要愿意读失败原因。
 
 ## 2026-11-28：属性测试扫到 Flex 布局层 —— **没有新 bug**（这本身就是结论）
 
@@ -30,7 +69,7 @@
 所以断言改成分两种情形（放得下 → 必须在框内；放不下 → 只要求不重叠且起点正确）。
 把"设计意图"误判成 bug 是属性测试最常见的假阳性来源，这条记在这里免得下次重复。
 
-**验证**：workspace **1345 passed / 0 failed / 71 ignored / 197 目标**（`--include-ignored` 1416）；
+**验证**：当轮 workspace **1345 passed / 0 failed / 71 ignored / 197 目标**（`--include-ignored` 1416）；
 像素哈希不变；Linux Xvfb 1303 / 35 / 197。变异验证：让 `leftover` 不减 `gaps`
 （即 gap 不参与可用宽度计算）→ flex 均分用例**立即红**，说明这三条断言是真有牙的。
 
@@ -347,7 +386,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1303 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1308 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -720,7 +759,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1345** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1350** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。
