@@ -1,15 +1,15 @@
 # Y901 框架验收凭证
 
-本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1135 passed / 0 failed / 63 ignored**；包含 ignored 的完整运行 **1198 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-27 无障碍动作路由（NodeId 稳定哈希）后复测为 **1311 passed / 0 failed / 35 ignored / 199 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
+本验收矩阵汇总的是带日期的运行记录，不表示每次提交均重新执行。Windows 数字口径最近更新于 2026-11-22：默认测试 **1135 passed / 0 failed / 63 ignored**；包含 ignored 的完整运行 **1198 passed / 0 failed**。唯一计数数据源为 [numbers.txt](evidence/numbers.txt)，baseline 见 [test-baseline.txt](evidence/test-baseline.txt)。Linux 数字在 2026-11-27 无障碍动作路由（NodeId 稳定哈希）后复测为 **1315 passed / 0 failed / 35 ignored / 201 targets**，证据见下方新日志及 [linux-numbers.txt](evidence/linux-numbers.txt)。
 
 ## 结果
 
 | 口径 | 数量 |
 |---|---|
-| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1353 passed / 0 failed / 71 ignored** |
-| `cargo test --workspace --offline -- --include-ignored` | **1424 passed / 0 failed** |
+| `cargo test --workspace --offline`（默认，跳过 `#[ignore]`） | **1357 passed / 0 failed / 71 ignored** |
+| `cargo test --workspace --offline -- --include-ignored` | **1428 passed / 0 failed** |
 
-`include_ignored=1424`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
+`include_ignored=1428`（唯一来源 `docs/evidence/numbers.txt`；该数来自实际 `--include-ignored` 运行，而非默认通过数与 ignored 数相加的推算）。
 
 `#[ignore]` 用例的构成见下表（总数以 `docs/evidence/numbers.txt` 为准）。
 
@@ -57,8 +57,8 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| 默认测试 | **1353 passed / 0 failed / 71 ignored**（199 个测试目标） |
-| `--include-ignored` | **1424 passed / 0 failed** |
+| 默认测试 | **1357 passed / 0 failed / 71 ignored**（201 个测试目标） |
+| `--include-ignored` | **1428 passed / 0 failed** |
 | clippy / fmt / `missing_docs` | 0 warning / clean / 0 |
 | 像素哈希 | `0xF7455CCE7781A864` / 400×220 |
 | `cargo audit` | 0 漏洞 |
@@ -67,7 +67,7 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 
 | 检查 | 结果 |
 |---|---|
-| Linux 默认测试（`xvfb-run cargo test --workspace`） | **1311 passed / 0 failed / 35 ignored**（199 个测试目标） |
+| Linux 默认测试（`xvfb-run cargo test --workspace`） | **1315 passed / 0 failed / 35 ignored**（201 个测试目标） |
 | Linux x11 `check --all-targets` | exit 0 |
 | Linux x11 `golden` | 36 passed / 0 failed |
 | Linux `xvfb-run real_window` | 17 passed / 0 failed / 2 ignored |
@@ -78,7 +78,7 @@ Windows 门禁与 Linux 验收是**两套独立证据**：`gate.ps1` 只跑在 W
 > （18 条 TextArea 用例 + 1 条 doctest），因此 Linux 计数从 1035 变为 1054。
 > 更早的首次 1031（Web ARIA 接线前）见 git 历史与本文件旧版本。
 
-Linux 本轮证据：[`linux-verify-2026-11-28-encode-props.log`](evidence/cross-platform/linux-verify-2026-11-28-encode-props.log)，上一轮 [`linux-verify-2026-11-28-zwj.log`](evidence/cross-platform/linux-verify-2026-11-28-zwj.log)，上一轮 [`linux-verify-2026-11-28-layout-props.log`](evidence/cross-platform/linux-verify-2026-11-28-layout-props.log)，上一轮 [`linux-verify-2026-11-27-dirty-bounds.log`](evidence/cross-platform/linux-verify-2026-11-27-dirty-bounds.log)，上一轮 [`linux-verify-2026-11-27-core-props.log`](evidence/cross-platform/linux-verify-2026-11-27-core-props.log)，上一轮 [`linux-verify-2026-11-27-win32-close.log`](evidence/cross-platform/linux-verify-2026-11-27-win32-close.log)，上一轮 [`linux-verify-2026-11-27-invalidation.log`](evidence/cross-platform/linux-verify-2026-11-27-invalidation.log)，上一轮 [`linux-verify-2026-11-27-hygiene.log`](evidence/cross-platform/linux-verify-2026-11-27-hygiene.log)，上一轮 [`linux-verify-2026-11-27-text-edit.log`](evidence/cross-platform/linux-verify-2026-11-27-text-edit.log)，上一轮 [`linux-verify-2026-11-27-cluster.log`](evidence/cross-platform/linux-verify-2026-11-27-cluster.log)，上一轮 [`linux-verify-2026-11-27-a11y.log`](evidence/cross-platform/linux-verify-2026-11-27-a11y.log)，上一轮 [`linux-verify-2026-11-27-lf.log`](evidence/cross-platform/linux-verify-2026-11-27-lf.log)。上一轮 [`linux-verify-2026-11-27-collector.log`](evidence/cross-platform/linux-verify-2026-11-27-collector.log)。上一轮 [`linux-verify-2026-11-27-ci-fix.log`](evidence/cross-platform/linux-verify-2026-11-27-ci-fix.log)。上一轮 [`linux-verify-2026-11-27-atlas-overflow.log`](evidence/cross-platform/linux-verify-2026-11-27-atlas-overflow.log)。上一轮 [`linux-verify-2026-11-26-popup-hit.log`](evidence/cross-platform/linux-verify-2026-11-26-popup-hit.log)。上一轮 [`linux-verify-2026-11-26-instance-capacity.log`](evidence/cross-platform/linux-verify-2026-11-26-instance-capacity.log)。上一轮 [`linux-verify-2026-11-26-soft-stats.log`](evidence/cross-platform/linux-verify-2026-11-26-soft-stats.log)（RenderStats A6：Win32 `--force-soft` 软路径埋点；Linux 侧用于确认无回归）。
+Linux 本轮证据：[`linux-verify-2026-11-28-virtualization.log`](evidence/cross-platform/linux-verify-2026-11-28-virtualization.log)，上一轮 [`linux-verify-2026-11-28-encode-props.log`](evidence/cross-platform/linux-verify-2026-11-28-encode-props.log)，上一轮 [`linux-verify-2026-11-28-zwj.log`](evidence/cross-platform/linux-verify-2026-11-28-zwj.log)，上一轮 [`linux-verify-2026-11-28-layout-props.log`](evidence/cross-platform/linux-verify-2026-11-28-layout-props.log)，上一轮 [`linux-verify-2026-11-27-dirty-bounds.log`](evidence/cross-platform/linux-verify-2026-11-27-dirty-bounds.log)，上一轮 [`linux-verify-2026-11-27-core-props.log`](evidence/cross-platform/linux-verify-2026-11-27-core-props.log)，上一轮 [`linux-verify-2026-11-27-win32-close.log`](evidence/cross-platform/linux-verify-2026-11-27-win32-close.log)，上一轮 [`linux-verify-2026-11-27-invalidation.log`](evidence/cross-platform/linux-verify-2026-11-27-invalidation.log)，上一轮 [`linux-verify-2026-11-27-hygiene.log`](evidence/cross-platform/linux-verify-2026-11-27-hygiene.log)，上一轮 [`linux-verify-2026-11-27-text-edit.log`](evidence/cross-platform/linux-verify-2026-11-27-text-edit.log)，上一轮 [`linux-verify-2026-11-27-cluster.log`](evidence/cross-platform/linux-verify-2026-11-27-cluster.log)，上一轮 [`linux-verify-2026-11-27-a11y.log`](evidence/cross-platform/linux-verify-2026-11-27-a11y.log)，上一轮 [`linux-verify-2026-11-27-lf.log`](evidence/cross-platform/linux-verify-2026-11-27-lf.log)。上一轮 [`linux-verify-2026-11-27-collector.log`](evidence/cross-platform/linux-verify-2026-11-27-collector.log)。上一轮 [`linux-verify-2026-11-27-ci-fix.log`](evidence/cross-platform/linux-verify-2026-11-27-ci-fix.log)。上一轮 [`linux-verify-2026-11-27-atlas-overflow.log`](evidence/cross-platform/linux-verify-2026-11-27-atlas-overflow.log)。上一轮 [`linux-verify-2026-11-26-popup-hit.log`](evidence/cross-platform/linux-verify-2026-11-26-popup-hit.log)。上一轮 [`linux-verify-2026-11-26-instance-capacity.log`](evidence/cross-platform/linux-verify-2026-11-26-instance-capacity.log)。上一轮 [`linux-verify-2026-11-26-soft-stats.log`](evidence/cross-platform/linux-verify-2026-11-26-soft-stats.log)（RenderStats A6：Win32 `--force-soft` 软路径埋点；Linux 侧用于确认无回归）。
 同日的更早记录（按时间倒序，均在同目录）：`linux-verify-2026-11-26-web-stats.log`（A5 Web）、`linux-verify-2026-11-26-x11-stats.log`（A4 X11）、`linux-verify-2026-11-26-x11-encode.log`（X11 编码器长度）、`linux-verify-2026-11-26-atlas.log`（图集帧边界）、`linux-verify-2026-11-26-x11-deadline.log`（读取层 deadline）、`linux-verify-2026-11-26-x11-read.log`（半包重组 / `bytes_after`）、`linux-verify-2026-11-26-x11.log`（resize）、`linux-verify-2026-11-23.log`、`linux-verify-2026-11-22-s6.log`、`linux-verify-2026-11-22.log`。
 命令：`CARGO_FLAGS=--offline bash scripts/linux-verify.sh`（Ubuntu 22.04 / WSL2 + Xvfb）。
 2026-11-20 的历史记录保留为 [`linux-full-2026-11-20.log`](evidence/cross-platform/linux-full-2026-11-20.log)、
