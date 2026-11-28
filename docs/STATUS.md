@@ -2,11 +2,37 @@
 
 - **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
 - **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1342` / `ignored=71` / `targets=196`；`--include-ignored` 全量 `passed=1342` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-27 复测 `passed=1300` / `ignored=35` / `targets=196`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-27-dirty-bounds.log](evidence/cross-platform/linux-verify-2026-11-27-dirty-bounds.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1345` / `ignored=71` / `targets=197`；`--include-ignored` 全量 `passed=1345` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1303` / `ignored=35` / `targets=197`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-layout-props.log](evidence/cross-platform/linux-verify-2026-11-28-layout-props.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-28：属性测试扫到 Flex 布局层 —— **没有新 bug**（这本身就是结论）
+
+同一套"随机化 + 不变量"继续往布局层推：随机容器宽高、padding、gap、子项数量与 flex 权重，
+钉三条不变量：
+
+1. **兄弟不重叠**（沿主轴比较矩形区间，200 组）；
+2. **flex 均分**：所有子项宽度 + 全部 gap 必须等于内容宽度（误差 < 0.5px，200 组）；
+3. **放得下时不越界、放不下时允许溢出但不得重叠**，且首个子项永远从内容区左上角开始。
+
+结论：**一条都没红**。布局层前几轮已经有过针对性用例（min/max 的 DPI 解析、
+百分比跨阶段一致、`Stack` 无界、`Table` 列宽压缩等），随机化只是补覆盖，没发现新缺陷。
+
+一条**测试自己的坑**值得记：最初把"子项必须留在父内容区内"写成无条件断言，结果随机用例
+在两处失败 —— 查下去都不是 bug：
+
+- `Flex::wrap(false)`（默认）**允许溢出**，这正是 `layout.rs` 里
+  `default_no_wrap_still_overflows` 钉住的既定语义；
+- `min_width` 之和超过可用宽度时，**守住 min 就必然溢出**，溢出才是对的。
+
+所以断言改成分两种情形（放得下 → 必须在框内；放不下 → 只要求不重叠且起点正确）。
+把"设计意图"误判成 bug 是属性测试最常见的假阳性来源，这条记在这里免得下次重复。
+
+**验证**：workspace **1345 passed / 0 failed / 71 ignored / 197 目标**（`--include-ignored` 1416）；
+像素哈希不变；Linux Xvfb 1303 / 35 / 197。变异验证：让 `leftover` 不减 `gaps`
+（即 gap 不参与可用宽度计算）→ flex 均分用例**立即红**，说明这三条断言是真有牙的。
 
 ## 2026-11-27（续十一）：属性测试继续推进 —— `DirtyRegion::bounds` 的 f32 舍入
 
@@ -41,8 +67,8 @@ x0 = 54.8, x1 = 424.72  →  w = 369.91998  →  x0 + w = 424.71997  <  424.72
 那不是 bug，是断言选错了对象。改成**按像素中心**采样（后端转 scissor 时是 `ceil` 向外取整，
 "最后一个像素覆盖没覆盖"才是真语义），随机红消失。
 
-**验证**：workspace **1342 passed / 0 failed / 71 ignored / 196 目标**（`--include-ignored` 1413）；
-像素哈希不变；Linux Xvfb 1300 / 35 / 196。变异验证：去掉 ULP 外扩 → 属性测试与具名回归**都立即红**。
+**验证**：当轮 workspace **1342 passed / 0 failed / 71 ignored / 196 目标**（`--include-ignored` 1413）；
+像素哈希不变；当轮 Linux Xvfb 1300 / 35 / 196。变异验证：去掉 ULP 外扩 → 属性测试与具名回归**都立即红**。
 
 ## 2026-11-27（续十）：用属性测试扫出 `y901-core` 两个真 bug
 
@@ -321,7 +347,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1300 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1303 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -694,7 +720,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1342** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1345** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。

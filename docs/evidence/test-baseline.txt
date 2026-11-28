@@ -273,4 +273,8 @@
 #   (新增 y901-ui/tests/dirty_region_invariants.rs 1 条属性测试 + tree.rs 内 dirty_bounds_tests 1 条具名回归；
 #    y901-render/tests/atlas_packing_invariants.rs 2 条（随机 200 张图集 × 80 次分配不重叠/不越界）。
 #    bounds 修复做了变异验证（去掉 ULP 外扩 → 立即红）。像素哈希不变。)
-1342
+# Measured at 2026-11-28 (Flex 布局属性测试：兄弟不重叠 / flex 均分 / 放得下不越界):
+#   default cargo test --workspace --no-fail-fast   passed 1345, failed 0, ignored 71 / 197 个测试目标
+#   (新增 y901-ui/tests/layout_invariants.rs 3 条。未发现新 bug —— 布局层本来就有一批针对性用例，
+#    本轮补充的是"随机化"覆盖。变异验证：让 leftover 不减 gaps → flex 均分用例立即红。)
+1345
