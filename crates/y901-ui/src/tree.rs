@@ -3177,6 +3177,9 @@ impl UiTree {
                     .children()
                     .iter()
                     .map(|c| walk(c.as_ref(), focus))
+                    // **虚拟化行/项**（表格行、树项…）不是真实 widget，但必须进无障碍树：
+                    // 否则读屏器进表格念不到任何单元格。它们只在这里出现，不进 `snapshot_json`。
+                    .chain(node.a11y_virtual_children())
                     .collect(),
             }
         }

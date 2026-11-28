@@ -211,6 +211,14 @@ impl Theme {
         if str_eq(name, "alert") {
             return 0; // panel 槽
         }
+        if str_eq(name, "table")
+            || str_eq(name, "tree")
+            || str_eq(name, "tree_item")
+            || str_eq(name, "row")
+            || str_eq(name, "cell")
+        {
+            return 4; // list 槽（表格/树一直用这个槽取色）
+        }
         // Role 是开放字符串，只能线性比对（8 次 str 比较，可忽略）
         let mut i = 0;
         while i < Theme::SLOTS {
@@ -257,6 +265,14 @@ impl Theme {
         }
         if name == "alert" {
             return 0;
+        }
+        if name == "table"
+            || name == "tree"
+            || name == "tree_item"
+            || name == "row"
+            || name == "cell"
+        {
+            return 4; // list 槽
         }
         let mut i = 0;
         while i < Theme::SLOTS {

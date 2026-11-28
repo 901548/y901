@@ -635,7 +635,8 @@ impl Widget for Table {
     }
 
     fn role(&self) -> Role {
-        Role::LIST
+        // **语义角色**：读屏器按"表格"播报（配色仍走 list 槽，见 `Theme::slot`）。
+        Role::TABLE
     }
 
     fn measure(
@@ -846,6 +847,57 @@ impl Widget for Table {
             }
             _ => EventResult::Ignored,
         }
+    }
+
+    /// 表格的**可见行 + 单元格**进无障碍树（虚拟化行不是真实 widget）。
+    ///
+    /// 只导出**当前可见**的行（与 `visible_range()` 同源）：10 万行全导出会把
+    /// 每次 a11y 推送变成 O(总行数)，而读屏器此刻能触及的也只是可见的那几十行。
+    fn a11y_virtual_children(&self) -> Vec<y901_ui::NodeInfo> {
+        use y901_ui::{Role, Semantics};
+        if self.columns.is_empty() || self.rows.is_empty() || self.inner.h <= 0.0 {
+            return Vec::new();
+        }
+        let cols = self.column_layout();
+        let mut out = Vec::new();
+        for display in self.visible_range() {
+            let Some(&data) = self.order.get(display) else {
+                continue;
+            };
+            let Some(row) = self.rows.get(data) else {
+                continue;
+            };
+            let rrect = self.display_row_rect(display);
+            let mut cells = Vec::with_capacity(cols.len());
+            for (ci, (cx, cw)) in cols.iter().enumerate() {
+                let text = row.get(ci).cloned().unwrap_or_default();
+                cells.push(y901_ui::NodeInfo {
+                    id: format!("{}#r{}c{}", self.id, display, ci),
+                    role: Role::CELL,
+                    rect: y901_ui::Rect::new(*cx, rrect.y, *cw, rrect.h),
+                    focused: false,
+                    semantics: Semantics::default().exposed(true).label(text),
+                    children: Vec::new(),
+                });
+            }
+            let selected = self.selected == Some(data);
+            let mut sem = Semantics::default()
+                .exposed(true)
+                .prop("index", data.to_string())
+                .prop("row", display.to_string());
+            if selected {
+                sem = sem.state("selected", data as u32);
+            }
+            out.push(y901_ui::NodeInfo {
+                id: format!("{}#r{}", self.id, display),
+                role: Role::ROW,
+                rect: rrect,
+                focused: false,
+                semantics: sem,
+                children: cells,
+            });
+        }
+        out
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {

@@ -2,11 +2,67 @@
 
 - **状态（2026-11-28）**: workspace 版本 `0.5.0`（**已发布**）。12 个 crate 全部上传到 crates.io 且未 yank，tag `v0.5.0` 已推送，下游从 registry 拉包编译通过。上一版 `0.4.0` 已发布（12 个 crate 均未 yank，tag `v0.4.0` 已推送）。0.5.0 是**破坏性变更**：`y901-backend-web::Present` 增加私有字段 `collector`（`constructible_struct_adds_private_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.5.0.md](RELEASE_NOTES_v0.5.0.md)。
 - **tags**: v0.1.0 ~ **v0.5.0**（0.5.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.4.0`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1386` / `ignored=71` / `targets=209`；`--include-ignored` 全量 `passed=1386` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1344` / `ignored=35` / `targets=209`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-live-regions.log](evidence/cross-platform/linux-verify-2026-11-28-live-regions.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1389` / `ignored=71` / `targets=209`；`--include-ignored` 全量 `passed=1389` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1347` / `ignored=35` / `targets=209`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-table-tree-a11y.log](evidence/cross-platform/linux-verify-2026-11-28-table-tree-a11y.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-28（续十二）：表格行/单元格与树项进无障碍树 —— 读屏器终于能读表格
+
+`Table` 在无障碍树里**一直只有一个容器节点**。原因不是忘了标注，而是结构性的：
+虚拟化表格只渲染可见的几十行，那些行**不是真实 widget**（没有 `Box<dyn Widget>`），
+所以它们天然不在 `children()` 里 —— 读屏器用户进入表格后念不到任何单元格，
+键盘也走不进去。表格恰恰是数据类界面最需要被读屏器访问的控件。
+
+### 做法：给 `Widget` 加"虚拟子节点"钩子
+
+```rust
+fn a11y_virtual_children(&self) -> Vec<NodeInfo> { Vec::new() }   // 默认空
+```
+
+`UiTree::snapshot()` 在真实子节点后追加它们（`chain`），于是它们只进**无障碍树**，
+不进 RPC 的 `get_tree`（后者按真实 widget 遍历，合成 id 不存在于注入/命中体系）。
+
+两条硬约束写进钩子的文档：
+
+1. 只导出**当前可见**行/项（与 `visible_range()` 同源）—— 10 万行全导出会把每次
+   a11y 推送变成 O(总行数)，而读屏器此刻能触及的也只是那几十行；
+2. 矩形必须是**布局后的真实矩形**，否则外部工具点不中。
+
+`Table` 导出 `Row` → `Cell`（单元格文字就是内容）；`TreeView` 导出 `TreeItem`，
+带 `level` 与 `expanded`。
+
+### 顺带修角色
+
+`Table`/`TreeView` 的 `role()` 之前报 `LIST`（主题色槽），读屏器念"列表"。
+现在报 `table` / `tree`，配色由 `Theme::slot` 别名回 list 槽 —— **像素哈希不变**。
+
+### 真机 UIA 复验
+
+```text
+20. Text    name=[表格]
+21. Table   name=[告警统计]
+22. DataItem name=[]
+23. DataItem name=[警告]        ← 单元格文字读得出来了
+24. DataItem name=[2]
+...
+28. Text    name=[树]
+29. Tree    name=[设置]
+30. TreeItem name=[配置]        ← 树项 + 层级
+31. TreeItem name=[网络]
+32. TreeItem name=[存储]
+```
+
+（完整日志 [`a11y-uia-windows-2026-11-28-table-tree.log`](evidence/cross-platform/a11y-uia-windows-2026-11-28-table-tree.log)）
+
+### 验证
+
+新增 `a11y_semantics` 3 条：表格 3 行 ×2 列导出 3 个 Row / 6 个 Cell 且矩形落在表格内；
+1000 行大表在 120px 视口里**只导出可见的十来行**；树的 4 个可见项带 level/expanded。
+变异验证：Table 不导出虚拟行 → 2 条红；Table 角色退回 `LIST` → 红。
+
+workspace **1389 passed / 0 failed / 71 ignored / 209 目标**；像素哈希不变；Linux Xvfb 1347 / 35 / 209。
 
 ## 2026-11-28（续十一）：无障碍清欠账（13 个组件）+ 把验收做成一条命令
 
@@ -51,7 +107,7 @@ powershell -NoProfile -File scripts/dump-a11y-uia.ps1 -OutFile docs/evidence/...
   `accesskit_windows` 发 `UIA_LiveRegionChanged` 要求 `name().is_some() && live() != Off`，
   两者缺一，告警就退化成一段普通文字。变异验证：告警改 `live=Off` → 红；告警名字留空 → 红。
 
-workspace **1386 passed / 0 failed / 71 ignored / 209 目标**；像素哈希不变。
+workspace **1389 passed / 0 failed / 71 ignored / 209 目标**；像素哈希不变。
 
 ## 2026-11-28（续十）：真机读屏器验收 —— 用 UIA 树代替"人耳听"，抓到 6 个无障碍缺陷
 
@@ -94,7 +150,7 @@ workspace **1386 passed / 0 failed / 71 ignored / 209 目标**；像素哈希不
 - 三条旧测试（`component_audit` ×2、`password_placeholder` ×1）编码的是**旧契约**，
   按新契约更新（"label 非空" → "label 不得含 id"；"名字==内容" → "名字与内容分离"）。
 
-workspace **1386 passed / 0 failed / 71 ignored / 209 目标**（`--include-ignored` 1457）；
+workspace **1389 passed / 0 failed / 71 ignored / 209 目标**（`--include-ignored` 1460）；
 像素哈希不变；Linux Xvfb 1342 / 35 / 209。
 
 ### 仍未做（诚实边界）
@@ -750,7 +806,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1344 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1347 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -1123,7 +1179,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1386** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1389** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。

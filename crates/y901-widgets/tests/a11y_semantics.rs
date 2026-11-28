@@ -368,3 +368,149 @@ fn live_regions_carry_both_a_name_and_a_live_setting() {
         .expect("进度节点");
     assert_eq!(progress.live(), Some(Live::Polite), "进度应是 polite");
 }
+/// **表格的可见行与单元格必须进无障碍树**（虚拟化行不是真实 widget）。
+///
+/// 这是本轮补的最大的可及性缺口：`Table` 以前在无障碍树里只有"一个叫表格的节点"，
+/// 读屏器用户进去后**念不到任何单元格**，也走不进去 —— 而表格恰恰是数据类界面
+/// 最需要被读屏器访问的控件。
+#[test]
+fn table_rows_and_cells_reach_the_accessibility_tree() {
+    use y901_widgets::{SortOrder, Table, TableColumn};
+
+    // 固定列宽，方便断言单元格矩形
+
+    let mut table = Table::new("tb")
+        .column(TableColumn::fixed("名称", 100.0))
+        .column(TableColumn::fixed("数量", 80.0));
+    for i in 0..3 {
+        table = table.row(vec![format!("行{i}"), format!("{i}")]);
+    }
+    let _ = table.sort_by(1, SortOrder::Ascending);
+
+    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(table))));
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+    let table_rect = tree.find("tb").expect("表格节点").rect();
+    let (update, _map) = to_tree_update_with_map(tree.snapshot());
+
+    // 容器本身必须报"表格"（此前报 List —— 读屏器念"列表"，用户不知道有行/列）
+    assert!(
+        update
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == y901_a11y::accesskit::Role::Table),
+        "表格容器必须映射成 AccessKit Table"
+    );
+    let roles: Vec<_> = update.nodes.iter().map(|(_, n)| n.role()).collect();
+    let rows = roles
+        .iter()
+        .filter(|r| **r == y901_a11y::accesskit::Role::Row)
+        .count();
+    let cells = roles
+        .iter()
+        .filter(|r| **r == y901_a11y::accesskit::Role::Cell)
+        .count();
+    assert_eq!(rows, 3, "三行数据应导出三个 Row 节点");
+    assert_eq!(cells, 6, "3 行 × 2 列应导出六个 Cell 节点");
+
+    // 单元格文字必须是真实内容，且矩形落在表格内
+    let labels: Vec<String> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == y901_a11y::accesskit::Role::Cell)
+        .filter_map(|(_, n)| n.label().map(|s| s.to_string()))
+        .collect();
+    assert!(
+        labels.contains(&"行0".to_string()),
+        "单元格文字实得 {labels:?}"
+    );
+    assert!(
+        labels.contains(&"2".to_string()),
+        "单元格文字实得 {labels:?}"
+    );
+
+    let (tx0, ty0) = (table_rect.x as f64, table_rect.y as f64);
+    let (tx1, ty1) = (table_rect.right() as f64, table_rect.bottom() as f64);
+    for (_, n) in update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == y901_a11y::accesskit::Role::Cell)
+    {
+        let b = n.bounds().expect("单元格要有矩形");
+        assert!(
+            b.x0 >= tx0 - 0.5 && b.x1 <= tx1 + 0.5 && b.y0 >= ty0 - 0.5 && b.y1 <= ty1 + 0.5,
+            "单元格矩形超出表格：{b:?} 表格={table_rect:?}"
+        );
+    }
+}
+
+/// **虚拟化不能把整表都导出**：1000 行、视口只装得下几行时，导出量应与可见行同阶。
+#[test]
+fn table_does_not_export_every_row_of_a_huge_dataset() {
+    use y901_widgets::{Table, TableColumn};
+    let mut table = Table::new("big").column(TableColumn::fixed("c", 100.0));
+    for i in 0..1000 {
+        table = table.row(vec![format!("{i}")]);
+    }
+    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(table))));
+    tree.layout(Size::new(300.0, 120.0), &Mono);
+    let (update, _map) = to_tree_update_with_map(tree.snapshot());
+    let rows = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == y901_a11y::accesskit::Role::Row)
+        .count();
+    assert!(
+        rows > 0 && rows <= 12,
+        "视口只能装几行，却导出了 {rows} 个 Row（应只导出可见范围）"
+    );
+}
+
+/// **树的可见项必须进无障碍树**，且带层级与展开状态。
+#[test]
+fn tree_view_items_reach_the_accessibility_tree_with_levels() {
+    use y901_widgets::{TreeItem, TreeView};
+    let roots = vec![
+        TreeItem::branch(
+            "src",
+            vec![TreeItem::leaf("main.rs"), TreeItem::leaf("lib.rs")],
+        ),
+        TreeItem::leaf("README"),
+    ];
+    // `branch()` 默认展开 —— 不要再 toggle（toggle 会把它折起来，可见项只剩 2 个）
+    let mut tree_view = TreeView::new("tv", roots);
+    tree_view.rebuild();
+    let mut tree = UiTree::new(Box::new(Flex::column("root").push(Box::new(tree_view))));
+    tree.layout(Size::new(300.0, 240.0), &Mono);
+    let (update, _map) = to_tree_update_with_map(tree.snapshot());
+
+    assert!(
+        update
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == y901_a11y::accesskit::Role::Tree),
+        "树视图容器必须映射成 AccessKit Tree（此前报 List）"
+    );
+    let items: Vec<_> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == y901_a11y::accesskit::Role::TreeItem)
+        .map(|(_, n)| n)
+        .collect();
+    assert_eq!(
+        items.len(),
+        4,
+        "展开后应有 4 个可见项（src + 2 子项 + README）"
+    );
+    let labels: Vec<String> = items
+        .iter()
+        .filter_map(|n| n.label().map(|s| s.to_string()))
+        .collect();
+    assert!(labels.contains(&"main.rs".to_string()), "实得 {labels:?}");
+    assert!(labels.contains(&"README".to_string()), "实得 {labels:?}");
+    // 展开状态与层级都要能读出来
+    let src = items
+        .iter()
+        .find(|n| n.label() == Some("src"))
+        .expect("src 节点");
+    assert_eq!(src.is_expanded(), Some(true), "src 应报告已展开");
+}

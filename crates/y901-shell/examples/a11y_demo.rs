@@ -32,8 +32,8 @@ use y901_runtime::{Host, Options};
 use y901_shell::create_runtime;
 use y901_ui::{Align, Command, Edges, Flex, FlexItem, Json, Role, State, Theme, UiTree};
 use y901_widgets::{
-    Alert, AlertKind, Button, Checkbox, NumberInput, Slider, Switch, TextInput, TextLabel,
-    VerticalList,
+    Alert, AlertKind, Button, Checkbox, NumberInput, Slider, Switch, Table, TableColumn, TextInput,
+    TextLabel, TreeItem, TreeView, VerticalList,
 };
 
 /// 演示用的 Host：只处理"保存"按钮，把次数写回状态行。
@@ -177,6 +177,40 @@ fn build() -> UiTree {
             "list",
             "列表",
             Box::new(list.flex_item(FlexItem::height(96.0))),
+            fg,
+        )))
+        .push(Box::new(field(
+            "table",
+            "表格",
+            Box::new(
+                Table::new("a11y-table")
+                    .label("告警统计")
+                    .column(TableColumn::fixed("级别", 90.0))
+                    .column(TableColumn::flex("数量"))
+                    .row(vec!["警告".into(), "2".into()])
+                    .row(vec!["错误".into(), "1".into()])
+                    .row(vec!["提示".into(), "5".into()])
+                    .flex_item(FlexItem::height(96.0)),
+            ),
+            fg,
+        )))
+        .push(Box::new(field(
+            "tree",
+            "树",
+            Box::new(
+                TreeView::new(
+                    "a11y-tree",
+                    vec![
+                        TreeItem::branch(
+                            "配置",
+                            vec![TreeItem::leaf("网络"), TreeItem::leaf("存储")],
+                        ),
+                        TreeItem::leaf("关于"),
+                    ],
+                )
+                .label("设置")
+                .flex_item(FlexItem::height(96.0)),
+            ),
             fg,
         )))
         .push(Box::new(

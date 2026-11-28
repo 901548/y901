@@ -333,4 +333,8 @@
 #   (新增 a11y_semantics 第 8 条：live region 必须有名字且 live != Off —— 这是
 #    accesskit_windows 发 UIA_LiveRegionChanged 的两个前提。变异验证：告警改 live=Off → 红；
 #    告警名字留空 → 红。像素哈希不变。)
-1386
+# Measured at 2026-11-28 (表格行/单元格与树项进无障碍树；Table/TreeView 角色修正):
+#   default cargo test --workspace --no-fail-fast   passed 1389, failed 0, ignored 71 / 209 个测试目标
+#   (新增 a11y_semantics 3 条：表格行/单元格进树 + 大表只导出可见行 + 树项带层级/展开。
+#    变异验证：Table 不导出虚拟行 → 2 条红；Table 角色退回 LIST → 红。像素哈希不变。)
+1389

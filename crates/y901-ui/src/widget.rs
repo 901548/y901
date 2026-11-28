@@ -105,6 +105,16 @@ impl Role {
     pub const CHECKBOX: Role = Role("checkbox");
     /// 告警（assertive 实时区域，读屏器应主动播报）。
     pub const ALERT: Role = Role("alert");
+    /// 表格/列表的一行（虚拟化行由容器合成，不是真实 widget）。
+    pub const ROW: Role = Role("row");
+    /// 表格的一个单元格。
+    pub const CELL: Role = Role("cell");
+    /// 树的一个节点项。
+    pub const TREE_ITEM: Role = Role("tree_item");
+    /// 表格（读屏器按"表格"播报，可进入其行/单元格）。
+    pub const TABLE: Role = Role("table");
+    /// 树视图（读屏器按"树"播报，可展开/折叠）。
+    pub const TREE: Role = Role("tree");
 
     /// 角色名；语义树与主题查表都用它作为稳定标识。
     pub const fn as_str(self) -> &'static str {
@@ -1603,6 +1613,23 @@ pub trait Widget {
     /// 注意：只有**当前焦点**组件会被询问，非焦点组件的返回值无意义。
     fn wants_tab(&self) -> bool {
         false
+    }
+
+    /// **虚拟子节点**（默认空）：虚拟化容器合成的行/项。
+    ///
+    /// 为什么需要这个钩子：表格、树视图、虚拟列表**只渲染可见的几十行**，
+    /// 那些行不是真实 widget（没有 `Box<dyn Widget>`），于是它们天然不在
+    /// `children()` 里 —— 无障碍树里也就没有它们。读屏器用户进入表格后
+    /// **念不到任何单元格**，键盘也走不进去。这是真实可及性缺陷，不是细节。
+    ///
+    /// 约定：
+    /// - 返回的节点必须**已经布局好矩形**（与绘制/命中一致），并把 `exposed(true)` 打开；
+    /// - 只返回**当前可见**的行/项（与 `visible_range` 同源），不要整表展开 ——
+    ///   10 万行全导出会把每次推送变成 O(n)；
+    /// - 这些节点只进**无障碍树**（`snapshot()`），不进 RPC 的 `get_tree`
+    ///   （后者按真实 widget 遍历，合成节点的 id 不存在于注入/命中体系）。
+    fn a11y_virtual_children(&self) -> Vec<crate::tree::NodeInfo> {
+        Vec::new()
     }
 
     /// 布局缓存键（可选）。返回 `Some` 时框架直接用它，避免对 `id()` 做字符串哈希。

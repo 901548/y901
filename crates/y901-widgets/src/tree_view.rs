@@ -291,7 +291,8 @@ impl Widget for TreeView {
     }
 
     fn role(&self) -> Role {
-        Role::LIST
+        // **语义角色**：读屏器按"树"播报（配色仍走 list 槽，见 `Theme::slot`）。
+        Role::TREE
     }
 
     fn focusable(&self) -> bool {
@@ -433,6 +434,48 @@ impl Widget for TreeView {
             }
             _ => EventResult::Ignored,
         }
+    }
+
+    /// 树的**可见项**进无障碍树（扁平化后的行不是真实 widget）。
+    ///
+    /// 每项带 `level` 与 `expanded`，读屏器才知道层级与可展开性；
+    /// 只导出可见范围，理由同表格。
+    fn a11y_virtual_children(&self) -> Vec<y901_ui::NodeInfo> {
+        use y901_ui::{Role, Semantics};
+        if self.visible.is_empty() || self.row_h <= 0.0 {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for i in self.visible_range() {
+            let Some((path, depth)) = self.visible.get(i) else {
+                continue;
+            };
+            let Some(item) = self.item_at(path) else {
+                continue;
+            };
+            let Some(r) = self.row_rect(i) else {
+                continue;
+            };
+            let mut sem = Semantics::default()
+                .exposed(true)
+                .label(item.label.clone())
+                .prop("level", depth.to_string());
+            if !item.children.is_empty() {
+                sem = sem.prop("expandable", "true").expanded(item.expanded);
+            }
+            if self.selected.as_deref() == Some(path.as_slice()) {
+                sem = sem.state("selected", true);
+            }
+            out.push(y901_ui::NodeInfo {
+                id: format!("{}#i{}", self.id, i),
+                role: Role::TREE_ITEM,
+                rect: r,
+                focused: false,
+                semantics: sem,
+                children: Vec::new(),
+            });
+        }
+        out
     }
 
     fn render(&mut self, ctx: &mut dyn RenderCtx) {

@@ -1,0 +1,57 @@
+# Windows UIA 无障碍树取证（2026-11-28 第三轮：表格行/单元格与树项进无障碍树）
+#
+# 本轮修的两件事：
+# 1. 表格/树以前在无障碍树里只有"一个容器节点"——虚拟化行不是真实 widget，
+#    天然不在 children() 里，于是读屏器进去念不到任何单元格。新增
+#    `Widget::a11y_virtual_children()` 钩子，Table/TreeView 只导出**可见**行/项。
+# 2. Table/TreeView 的角色此前报 List（主题色槽），读屏器念"列表"。
+#    现在报 table/tree，配色由 Theme::slot 别名回 list 槽，像素不变。
+#
+# 结论（见下）：Table name=[告警统计] 下出现 DataItem 行与单元格文字；
+# Tree name=[设置] 下出现 TreeItem [配置]/[网络]/[存储]。
+#
+# 复现：powershell -NoProfile -File scripts/dump-a11y-uia.ps1
+
+# Windows UIA 无障碍树取证（scripts/dump-a11y-uia.ps1）
+# 工具：PowerShell + UIAutomationClient（与讲述人消费同一套 API）
+# 时间：2026-11-28 23:43:50
+
+WINDOW name=[Y901 无障碍验收] type=Group
+DESCENDANTS=34
+------
+  1. Text         name=[Y901 无障碍验收]
+  2. Text         name=[本页用于读屏器手工验收；每个控件都有明确标签与状态。]
+  3. Text         name=[按钮]
+  4. Button       name=[保存（Ctrl+S）] invoke
+  5. Text         name=[复选框]
+  6. CheckBox     name=[启用同步] value=[false] toggle=Off
+  7. Text         name=[开关]
+  8. Button       name=[启用同步] value=[on] toggle=On
+  9. Text         name=[滑杆]
+ 10. Slider       name=[音量] value=[0.50] value=0.5 min=0 max=1
+ 11. Text         name=[数值输入]
+ 12. Edit         name=[重试次数] value=[42] value=42 min=0 max=100
+ 13. Text         name=[文本框]
+ 14. Edit         name=[备注] value=[可编辑文本]
+ 15. Text         name=[列表]
+ 16. List         name=[待办事项]
+ 17. Text         name=[列表项 1]
+ 18. Text         name=[列表项 2]
+ 19. Text         name=[列表项 3]
+ 20. Text         name=[表格]
+ 21. Table        name=[告警统计] invoke
+ 22. DataItem     name=[]
+ 23. DataItem     name=[警告]
+ 24. DataItem     name=[2]
+ 25. DataItem     name=[]
+ 26. DataItem     name=[错误]
+ 27. DataItem     name=[1]
+ 28. Text         name=[树]
+ 29. Tree         name=[设置]
+ 30. TreeItem     name=[配置]
+ 31. TreeItem     name=[网络]
+ 32. TreeItem     name=[存储]
+ 33. Text         name=[这是一个告警] invoke
+ 34. Text         name=[尚未保存]
+------
+END tries=1
