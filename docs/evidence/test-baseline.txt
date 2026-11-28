@@ -328,4 +328,9 @@
 #   (新增 a11y_semantics 第 7 条：13 个组件"显式命名生效 + 未命名不含 id"。
 #    真机 UIA 复验 21 个元素无 id：docs/evidence/cross-platform/a11y-uia-windows-2026-11-28-labels.log。
 #    像素哈希不变。)
-1385
+# Measured at 2026-11-28 (实时区域：告警/错误态/进度的 live 标记与名字成对出现):
+#   default cargo test --workspace --no-fail-fast   passed 1386, failed 0, ignored 71 / 209 个测试目标
+#   (新增 a11y_semantics 第 8 条：live region 必须有名字且 live != Off —— 这是
+#    accesskit_windows 发 UIA_LiveRegionChanged 的两个前提。变异验证：告警改 live=Off → 红；
+#    告警名字留空 → 红。像素哈希不变。)
+1386

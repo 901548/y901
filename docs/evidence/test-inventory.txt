@@ -2,7 +2,7 @@
 # format: <binary> <count> <sha256 of sorted test names>
 # Regenerate: pwsh -File scripts/check-test-inventory.ps1 -Update
 
-a11y_semantics 7 6bd5b6e9ada423be1891f07ef0d4b26bfaceefcbb366ea3a322bcf54c4287d59
+a11y_semantics 8 fefed129709f6f4a7a981c27ffcfcfb63b7f43da3f65995ae71e924a07a44019
 animation_tick 3 f9a65d622b9153f5218c12057d9b5c1cc28a4817ed68af15cec3b8459106ca98
 animation_tree 5 c24a03b2b2391cbca7b977453d7d116cba4c294d542988f49df221d6ea678817
 atlas_packing_invariants 2 465d6a962c7c6bc9b642c8940dce9b9bc191c0b6931f44e8c3b76a574d1087bc

@@ -7,9 +7,15 @@
 > 列表与告警不在树里、输入框只有内容没名字、窗口无名字），以及第 7 个"空闲后读屏器读到空树"
 > —— 全部已修，见 [STATUS.md](STATUS.md)「续十」。
 >
-> **仍然需要真人**的只剩两件：
-> 1. 讲述人/NVDA 的**实际播报**（语音引擎念得对不对、重音与停顿是否合理）；
-> 2. 告警的 **assertive 主动播报**（dump 取不到 `LiveSetting`）。
+> **仍然需要真人**的只剩一件：讲述人/NVDA 的**实际播报**
+> （语音引擎念得对不对、重音与停顿是否合理）。
+>
+> 告警的 **assertive 主动播报**已经能在代码层钉住了：`accesskit_windows` 发
+> `UIA_LiveRegionChanged` 的条件是 `name().is_some() && live() != Live::Off`，
+> 现在有测试同时断言"名字非空 + live=Assertive"（`a11y_semantics`
+> 的 `live_regions_carry_both_a_name_and_a_live_setting`）。
+> （`.NET` 的 `AutomationElement.LiveSettingProperty` 在当前版本是 null，
+> 所以这条没能从 UIA 侧读到 —— 记录在此，不要以为 dump 里没有就是没实现。）
 >
 > ## 怎么复跑机器验收（一条命令）
 >

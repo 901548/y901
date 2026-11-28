@@ -313,3 +313,58 @@ fn every_widget_accepts_an_explicit_label_and_defaults_to_empty() {
         named.len()
     );
 }
+/// **实时区域必须带名字 + live 标记** —— 这两条**同时**成立，`accesskit_windows` 才会
+/// 发 `UIA_LiveRegionChanged`（见 accesskit_windows `adapter.rs`：
+/// `if wrapper.name().is_some() && node.live() != Live::Off`）。
+///
+/// 为什么值得单独钉住：告警的价值就在"主动打断"；名字为空或 live 丢了，
+/// 它就退化成一段普通文字 —— 用户永远不会被告知。
+#[test]
+fn live_regions_carry_both_a_name_and_a_live_setting() {
+    use y901_a11y::accesskit::Live;
+    use y901_widgets::{AlertKind, ErrorState, ProgressBar};
+
+    let mut tree = UiTree::new(Box::new(
+        Flex::column("root")
+            .push(Box::new(Alert::new("a1", AlertKind::Error, "磁盘快满")))
+            .push(Box::new(ErrorState::new("e1", "加载失败")))
+            .push(Box::new(ProgressBar::new("p1", 0.4).label("上传进度"))),
+    ));
+    tree.layout(Size::new(400.0, 300.0), &Mono);
+    let (update, _map) = to_tree_update_with_map(tree.snapshot());
+
+    let live_nodes: Vec<_> = update
+        .nodes
+        .iter()
+        .map(|(_, n)| n)
+        .filter(|n| n.live() != Some(Live::Off) && n.live().is_some())
+        .collect();
+    assert!(
+        live_nodes.len() >= 3,
+        "告警/错误态/进度条都应是 live region，实得 {}",
+        live_nodes.len()
+    );
+    for n in live_nodes {
+        assert!(
+            n.label().is_some_and(|l| !l.is_empty()),
+            "live region 必须有名字，否则 UIA 不会发 LiveRegionChanged（节点 {:?}）",
+            n.role()
+        );
+    }
+
+    // 告警与错误态是断言式（打断），进度是礼貌式（排队）
+    let alert = update
+        .nodes
+        .iter()
+        .map(|(_, n)| n)
+        .find(|n| n.label() == Some("磁盘快满"))
+        .expect("告警节点");
+    assert_eq!(alert.live(), Some(Live::Assertive), "告警必须是 assertive");
+    let progress = update
+        .nodes
+        .iter()
+        .map(|(_, n)| n)
+        .find(|n| n.label() == Some("上传进度"))
+        .expect("进度节点");
+    assert_eq!(progress.live(), Some(Live::Polite), "进度应是 polite");
+}
