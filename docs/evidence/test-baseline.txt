@@ -298,4 +298,9 @@
 #   default cargo test --workspace --no-fail-fast   passed 1361, failed 0, ignored 71 / 203 个测试目标
 #   (新增 y901-widgets/tests/table_invariants.rs 2 条（列布局不越界 + 选中始终合法）。
 #    变异验证：判据改回 flex_total_w → 立即红（Px(7)+3×Flex+Px(119) 在 93px 表里总宽 126）。)
-1361
+# Measured at 2026-11-28 (选区抽取 / 剪贴板清洗属性测试):
+#   default cargo test --workspace --no-fail-fast   passed 1365, failed 0, ignored 71 / 204 个测试目标
+#   (新增 y901-extras/tests/selection_paste_invariants.rs 4 条：text() 与 contains() 逐格一致 /
+#    复制粘贴往返无损 / sanitize 不留控制字符 / sanitize 幂等。未发现新 bug；
+#    变异验证：text() 不跳过 WideTail → 2 条红；sanitize 放行控制符 → 立即红。)
+1365

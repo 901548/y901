@@ -1,0 +1,14 @@
+# Linux 验收日志（2026-11-28 第七轮）：选区抽取 / 剪贴板清洗属性测试（未发现新 bug）
+# 环境：Ubuntu 22.04 (WSL2) + Xvfb；CARGO_TARGET_DIR=$HOME/y901-target
+# 命令：CARGO_FLAGS=--offline SKIP_SLOW=1 bash scripts/linux-verify.sh
+
+EXIT_CHECK_X11=0
+EXIT_GOLDEN=0
+EXIT_REAL_WINDOW=0
+EXIT_CLIPPY_X11=0
+EXIT_STROKE=0
+EXIT_SGR_REVERSE=0
+EXIT_FULL_WORKSPACE=0
+LINUX VERIFY: OK
+
+LINUX VERIFY: OK (7/7 EXIT_0)
