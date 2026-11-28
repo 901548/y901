@@ -2709,18 +2709,23 @@ impl UiTree {
         }
 
         // Tab / Shift+Tab：**焦点组件声明要自己处理时放行**，否则走焦点遍历。
-        // 终端用它做 shell 补全；单行输入框不声明（Tab 仍切焦点）。
+        // 终端用它做 shell 补全；`TextArea` 在显式开启 `tab_indents(true)` 时用它做缩进。
+        //
+        // **`Ctrl+Tab` 永远走焦点遍历**（不看 `wants_tab`）：这是"组件吃掉了 Tab"时
+        // 唯一的键盘出路。没有这条，开了缩进的编辑器会变成**键盘陷阱** ——
+        // 键盘用户进了文本框就再也出不来（只能点鼠标），那是无障碍缺陷。
         if let UiEvent::Key {
             key: crate::event::Key::Tab,
             modifiers,
         } = event
         {
-            let wants = self
-                .focus
-                .as_deref()
-                .and_then(|id| self.find(id))
-                .map(|n| n.wants_tab())
-                .unwrap_or(false);
+            let wants = !modifiers.ctrl
+                && self
+                    .focus
+                    .as_deref()
+                    .and_then(|id| self.find(id))
+                    .map(|n| n.wants_tab())
+                    .unwrap_or(false);
             if !wants {
                 let delta = if modifiers.shift { -1 } else { 1 };
                 let moved = self.focus_next(delta);

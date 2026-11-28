@@ -314,4 +314,8 @@
 #    y901-render/tests/image_mip_alloc.rs 2 条（零拷贝分配护栏 + 上传登记）。
 #    零拷贝实测：4 MiB 大图上传累计分配 3.31×L0 → 1.313×L0（理论最优 1.3125）。
 #    变异验证：掩码按字节数 / 语义不掩码 / 加回全量拷贝 → 分别红。像素哈希不变。)
-1374
+# Measured at 2026-11-28 (PLAN 批次 5 最后一项：TextArea Tab 缩进 + 框架 Ctrl+Tab 逃生口):
+#   default cargo test --workspace --no-fail-fast   passed 1378, failed 0, ignored 71 / 208 个测试目标
+#   (新增 y901-widgets/tests/tab_indent.rs 4 条。变异验证：Ctrl+Tab 不逃逸 → 红；
+#    制表位按字符数而非显示列 → 红。像素哈希不变。)
+1378

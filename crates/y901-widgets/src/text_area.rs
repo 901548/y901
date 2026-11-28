@@ -104,6 +104,16 @@ pub struct TextArea {
     needs_relayout: bool,
     /// 上次 `render` 用到的可视宽度（宽度变化也要重排）。
     inner_w_last: f32,
+    /// **Tab 是否用于缩进**（默认 `false`：Tab 归框架做焦点遍历）。
+    ///
+    /// 见 [`TextArea::tab_indents`]：这是**显式选择**，不是默认行为 ——
+    /// 组件吃掉 Tab 之后键盘用户需要 `Ctrl+Tab` 才能离开，属于"要自己负责"的能力。
+    tab_indents: bool,
+    /// 制表位宽度（逻辑像素对应的**空格数**）。
+    ///
+    /// 为什么插空格而不是插 `\t`：`TextBuffer` 的宽度是逐字符量的，
+    /// `\t` 没有"跨到下一个制表位"的概念 —— 插进去会画出错误的对齐。
+    tab_width: usize,
 }
 
 impl TextArea {
@@ -143,7 +153,93 @@ impl TextArea {
             rows: DEFAULT_ROWS,
             needs_relayout: true,
             inner_w_last: 0.0,
+            tab_indents: false,
+            tab_width: 4,
         }
+    }
+
+    /// **让 Tab 在本控件内插入缩进**（而不是切换焦点）。
+    ///
+    /// 默认关闭：`Tab` 由框架做焦点遍历，这是键盘用户在大面积界面里移动的主要手段。
+    /// 开启后 `Tab` 插入 `width` 个空格（对齐到**下一个制表位**），`Shift+Tab` 反缩进
+    /// （删掉光标前最多 `width` 个空格）。
+    ///
+    /// # 键盘陷阱与出路
+    ///
+    /// 组件吃掉 Tab 之后，键盘用户必须有离开的方式 —— 框架保证
+    /// **`Ctrl+Tab` 永远走焦点遍历**（不询问 `wants_tab()`），这是本能力的前提条件。
+    /// 开启前请确认你的用户知道这一点（或者同时在界面上提供别的离开方式）。
+    ///
+    /// # 为什么插空格而不是 `\t`
+    ///
+    /// `TextBuffer` 的宽度是**逐字符**量的（`char_width`），`\t` 没有"跨到下一个制表位"
+    /// 的语义，插进去会得到错误的水平对齐。插空格则天然正确，且复制到编辑器里行为一致。
+    pub fn tab_indents(mut self, on: bool) -> Self {
+        self.tab_indents = on;
+        self
+    }
+
+    /// 设置制表位宽度（空格数，`0` 视为 `1`）。默认 4。
+    pub fn tab_width(mut self, width: usize) -> Self {
+        self.tab_width = width.max(1);
+        self
+    }
+
+    /// 光标所在的**显示列**（按当前行、逐字符计宽；宽字算 2、零宽记号算 0）。
+    ///
+    /// 计宽规则**与排版同源**（都用 [`Self::char_w`]）：否则中文/组合记号文本上的
+    /// 制表位会和画面对不上，缩进越按越歪。
+    fn caret_column(&self) -> usize {
+        let cursor = self.buffer.cursor();
+        let start = self.buffer.line_start(cursor);
+        let mut cols = 0usize;
+        for ch in self.buffer.text()[start..cursor].chars() {
+            if is_zero_width_mark(ch) {
+                continue;
+            }
+            cols += if (ch as u32) >= 0x2E80 { 2 } else { 1 };
+        }
+        cols
+    }
+
+    /// `Tab`：插到下一个制表位（不足一个制表位也补齐）。
+    fn indent(&mut self) -> bool {
+        let col = self.caret_column();
+        let n = self.tab_width - (col % self.tab_width);
+        if self.buffer.has_selection() {
+            self.buffer.delete_selection();
+        }
+        self.buffer.insert_str(&" ".repeat(n));
+        self.touch();
+        true
+    }
+
+    /// `Shift+Tab`：删掉光标前最多一个制表位的空格（只吃空格，不吃别的字符）。
+    fn outdent(&mut self) -> bool {
+        let cursor = self.buffer.cursor();
+        if cursor == 0 || self.buffer.has_selection() {
+            return false;
+        }
+        let start = self.buffer.line_start(cursor);
+        let text = self.buffer.text();
+        let mut remove = 0usize;
+        let mut idx = cursor;
+        while idx > start && remove < self.tab_width {
+            let (i, ch) = text[..idx].char_indices().next_back().unwrap();
+            if ch != ' ' {
+                break;
+            }
+            idx = i;
+            remove += 1;
+        }
+        if remove == 0 {
+            return false;
+        }
+        for _ in 0..remove {
+            self.buffer.backspace();
+        }
+        self.touch();
+        true
     }
 
     /// 设置初始文本，光标落在末尾。
@@ -516,6 +612,21 @@ impl TextArea {
     // ---------- 键盘 ----------
 
     fn handle_key(&mut self, key: Key, mods: Modifiers) -> EventResult {
+        // **Tab 缩进**（仅 `tab_indents(true)` 时走到这里：框架会先问 `wants_tab()`，
+        // 未开启时 Tab 早在 `UiTree::dispatch` 里被焦点遍历消费掉了）。
+        // `Ctrl+Tab` 永远不会到这里 —— 框架把它固定为"切焦点"的逃生口。
+        if key == Key::Tab && self.tab_indents && !mods.ctrl {
+            let changed = if mods.shift {
+                self.outdent()
+            } else {
+                self.indent()
+            };
+            return if changed {
+                EventResult::Redraw
+            } else {
+                EventResult::Handled
+            };
+        }
         // Ctrl 组合优先（与 TextInput 同序：先组合键，再普通键）
         if mods.ctrl {
             match key {
@@ -688,6 +799,14 @@ impl TextArea {
 }
 
 impl Widget for TextArea {
+    /// 只在**显式开启** `tab_indents(true)` 时接管 Tab。
+    ///
+    /// **必须是 trait 方法**：写成 `impl TextArea` 里的同名方法只会形成一个"固有方法"，
+    /// 框架通过 `&dyn Widget` 调的是 trait 的默认实现（`false`）—— 缩进看起来"完全没生效"，
+    /// 而且编译器只会警告"方法从未被使用"。这个坑本轮踩过一次，记在这里。
+    fn wants_tab(&self) -> bool {
+        self.tab_indents
+    }
     fn id(&self) -> &str {
         &self.id
     }
