@@ -145,8 +145,25 @@ if ($null -ne $published) {
     Record 'crates.io 上是否已有该版本' 'SKIP' '查不到（无网络或被限流）'
 }
 
-Record '真机读屏器验收（讲述人 / Orca / NVDA）' 'BLOCKED' '无障碍桥已能推树，但没有真人验证过读屏效果'
-# Linux 验收：Windows 跑不了，但可以查**证据文件是否新鲜**（7 天内 = 可接受）。
+# 无障碍验收：拆成"机器能验的"与"只能人做的"两半。
+#
+# 读屏器读的就是 UIA/AT-SPI 树，那棵树可以用 UIAutomationClient（或 AT-SPI 客户端）
+# 程序化读出来 —— 所以"它要念什么"不必靠人耳。2026-11-28 就是这么做的一遍，
+# 抓到 7 个真实缺陷（见 STATUS「续十」）。取证文件存在且新鲜 = 机器半过了。
+$a11yLogs = @(Get-ChildItem (Join-Path $root 'docs\evidence\cross-platform') -Filter 'a11y-*.log' -File -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending)
+if ($a11yLogs.Count -gt 0) {
+    $a11yNewest = $a11yLogs[0]
+    $a11yAge = ((Get-Date) - $a11yNewest.LastWriteTime).TotalDays
+    if ($a11yAge -le 30) {
+        Record '无障碍树取证（机器，UIA/AT-SPI）' 'PASS' ("{0}（{1:N1} 天前）：语义树逐项核对过" -f $a11yNewest.Name, $a11yAge)
+    } else {
+        Record '无障碍树取证（机器，UIA/AT-SPI）' 'BLOCKED' ("最新证据是 {0}（{1:N1} 天前）：改动过语义面就应重新取证" -f $a11yNewest.Name, $a11yAge)
+    }
+} else {
+    Record '无障碍树取证（机器，UIA/AT-SPI）' 'BLOCKED' '没有 a11y-*.log 取证：按 A11Y_ACCEPTANCE.md 跑一遍 UIA 树 dump'
+}
+Record '讲述人/NVDA 实际播报（人工）' 'BLOCKED' '机器只能证明"要念的内容"正确；语音引擎念得对不对要真人听'# Linux 验收：Windows 跑不了，但可以查**证据文件是否新鲜**（7 天内 = 可接受）。
 $linuxLogs = @(Get-ChildItem (Join-Path $root 'docs\evidence\cross-platform') -Filter '*.log' -File -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending)
 if ($linuxLogs.Count -gt 0) {
