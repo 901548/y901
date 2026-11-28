@@ -1,4 +1,4 @@
-﻿//! ErrorState：`EmptyState` 的错误版（红色图标 + 红色标题 + 重试按钮）。
+//! ErrorState：`EmptyState` 的错误版（红色图标 + 红色标题 + 重试按钮）。
 //!
 //! 为什么和 EmptyState 分开而不是加一个 `kind` 参数：
 //! 两者的**语义**不同（"没有数据" vs "出错了，可以重试"），颜色规则也不同
@@ -189,8 +189,8 @@ impl Widget for ErrorState {
     fn semantics(&self) -> Semantics {
         let mut s = Semantics::default()
             .exposed(true)
-            .label(format!("error {}", self.id))
-            .value(self.title.clone())
+            // 标题人话就是名字（不再拼 id）。
+            .label(self.title.clone())
             .prop("kind", "error")
             // 错误提示属于"打断式"播报。
             .live(y901_ui::LiveRegion::Assertive)

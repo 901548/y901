@@ -195,3 +195,121 @@ fn semantic_roles_keep_the_theme_colours() {
         "`alert` 语义角色必须仍取 panel 槽的颜色"
     );
 }
+/// **每个组件都能被显式命名**（`.label(..)` 生效），且**默认不编名字**。
+///
+/// 这是 2026-11-28 无障碍清欠账的验收：13 个组件原本把内部 id 拼进名字
+/// （`badge my-badge`、`tree my-tree` …），读屏器会念出来。
+/// 现在统一成"有 label 用 label，没有就留空"。
+#[test]
+fn every_widget_accepts_an_explicit_label_and_defaults_to_empty() {
+    use y901_ui::layout::LayoutCache;
+    use y901_ui::Rect;
+    use y901_widgets::{
+        Badge, ComboBox, ContextMenu, EmptyState, ErrorState, Image, MenuBar, Popover, ProgressBar,
+        RadioGroup, Skeleton, Spinner, Table, TreeView, VerticalList,
+    };
+
+    let mut cache = LayoutCache::new();
+    let mut arrange = |w: &mut dyn y901_ui::Widget| {
+        w.arrange(Rect::new(0.0, 0.0, 300.0, 200.0), &Mono, &mut cache);
+    };
+
+    // (未命名的控件, 命名后的控件, 期望名字)
+    let mut named: Vec<(String, String)> = Vec::new();
+    macro_rules! probe {
+        ($plain:expr, $named:expr, $want:expr) => {{
+            let mut a = $plain;
+            let mut b = $named;
+            arrange(&mut a);
+            arrange(&mut b);
+            let plain_id = y901_ui::Widget::id(&a).to_string();
+            let sem = y901_ui::Widget::semantics(&a);
+            assert!(
+                !sem.label.contains(&plain_id),
+                "{} 未命名时的 label 不得含 id：{:?}",
+                plain_id,
+                sem.label
+            );
+            let sem2 = y901_ui::Widget::semantics(&b);
+            assert_eq!(sem2.label, $want, "{} 的显式名字应生效", plain_id);
+            named.push((plain_id, sem2.label));
+        }};
+    }
+
+    probe!(
+        Badge::new("b", "新"),
+        Badge::new("b", "新"),
+        "新" // 徽标：文字就是名字
+    );
+    probe!(
+        ComboBox::new("cb", vec!["甲", "乙"]),
+        ComboBox::new("cb", vec!["甲", "乙"]).label("城市"),
+        "城市"
+    );
+    probe!(
+        ContextMenu::new("cm", vec!["复制".into()]),
+        ContextMenu::new("cm", vec!["复制".into()]).label("右键菜单"),
+        "右键菜单"
+    );
+    probe!(
+        EmptyState::new("es", "没有数据"),
+        EmptyState::new("es", "没有数据"),
+        "没有数据" // 标题就是名字
+    );
+    probe!(
+        ErrorState::new("ers", "加载失败"),
+        ErrorState::new("ers", "加载失败"),
+        "加载失败"
+    );
+    probe!(
+        Image::from_rgba("img", 2, 2, &[0u8; 16]),
+        Image::from_rgba("img", 2, 2, &[0u8; 16]).label("公司标志"),
+        "公司标志"
+    );
+    probe!(
+        MenuBar::new("mb"),
+        MenuBar::new("mb").label("主菜单"),
+        "主菜单"
+    );
+    probe!(
+        ProgressBar::new("pb", 0.5),
+        ProgressBar::new("pb", 0.5).label("上传进度"),
+        "上传进度"
+    );
+    probe!(
+        RadioGroup::new("rg", vec!["小".into(), "大".into()], None),
+        RadioGroup::new("rg", vec!["小".into(), "大".into()], None).label("字号"),
+        "字号"
+    );
+    probe!(
+        Spinner::new("sp"),
+        Spinner::new("sp").label("加载中"),
+        "加载中"
+    );
+    probe!(Table::new("tb"), Table::new("tb").label("订单"), "订单");
+    probe!(
+        TreeView::new("tv", vec![]),
+        TreeView::new("tv", vec![]).label("文件树"),
+        "文件树"
+    );
+    probe!(
+        VerticalList::new("vl"),
+        VerticalList::new("vl").label("待办"),
+        "待办"
+    );
+    // 骨架屏是装饰：命名了也不该念（这里只要求不念 id）
+    let mut sk = Skeleton::new("sk");
+    arrange(&mut sk);
+    assert!(!y901_ui::Widget::semantics(&sk).label.contains("sk"));
+    // 骨架屏与浮层锚点**刻意不提供** `.label()`：它们是纯装饰/定位件，
+    // 给它们名字只会让读屏器念一堆没有信息的节点。
+    let _ = Popover::new("po", Rect::ZERO, || {
+        Box::new(TextLabel::new("po-child", "x"))
+    });
+
+    assert!(
+        named.len() >= 13,
+        "至少要覆盖 13 个组件，实得 {}",
+        named.len()
+    );
+}

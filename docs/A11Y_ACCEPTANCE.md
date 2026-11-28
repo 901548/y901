@@ -11,6 +11,16 @@
 > 1. 讲述人/NVDA 的**实际播报**（语音引擎念得对不对、重音与停顿是否合理）；
 > 2. 告警的 **assertive 主动播报**（dump 取不到 `LiveSetting`）。
 >
+> ## 怎么复跑机器验收（一条命令）
+>
+> ```powershell
+> powershell -NoProfile -File scripts/dump-a11y-uia.ps1 -OutFile docs/evidence/cross-platform/a11y-uia-<日期>.log
+> ```
+>
+> 它会**带 `a11y feature` 重建示例**、启动、dump 整棵 UIA 树、关窗、写日志。
+> 为什么要重建：`a11y_demo.exe` 与所有 `--all-targets` 构建共用，
+> 一次不带 feature 的 `cargo test/clippy` 就会把它覆盖成"没有无障碍桥"的版本
+> （现象：窗口能开，但 UIA 里 `DESCENDANTS=0`）——本轮踩过这个坑。
 > ## 机器验收结果（2026-11-28，`a11y_demo`）
 >
 > | 项 | 期望 | 实测 | 结论 |
@@ -29,12 +39,17 @@
 > | 无未命名控件 | — | 21 个元素全部有名字 | PASS |
 > | 不念内部 id | — | `switch switch-ctl` 这类已消除 | PASS |
 >
-> ## 欠账（未修，已记档）
+> ## 欠账（2026-11-28 已清）
 >
-> 以下 14 个组件仍用 `format!("{} {}", 角色, id)` 当名字，读屏器会把 id 念出来。
-> 每个都要补一个 `.label(..)` 构建器（机械改动）：
-> `badge`、`combo_box`、`context_menu`、`empty_state`、`error_state`、`image`、
-> `menu_bar`、`popover`、`progress`、`radio`、`skeleton`、`spinner`、`tree_view`。
+> 上一版记的 13 个组件（`badge`/`combo_box`/`context_menu`/`empty_state`/`error_state`/
+> `image`/`menu_bar`/`popover`/`progress`/`radio`/`skeleton`/`spinner`/`tree_view`）
+> 加上 `table`/`list_view`/`list`/`combobox list`，**全部**改成了
+> "有 `.label(..)` 用 label、没有就留空" —— 没有任何组件的名字里再出现内部 id。
+> 复验日志：[`a11y-uia-windows-2026-11-28-labels.log`](evidence/cross-platform/a11y-uia-windows-2026-11-28-labels.log)
+> （21 个 UIA 元素，无一含 id）。
+>
+> 约定：装饰性组件（`Skeleton`、`Popover` 锚点）**刻意不提供** `.label()` ——
+> 给它们名字只会让读屏器念一堆没有信息的节点。
 # 无障碍手工验收清单（10 分钟）
 
 > 目的：验证 **读屏器真的能读到并操作** Y901 的界面。

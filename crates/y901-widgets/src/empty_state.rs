@@ -190,8 +190,8 @@ impl Widget for EmptyState {
     fn semantics(&self) -> Semantics {
         let mut s = Semantics::default()
             .exposed(true)
-            .label(format!("empty {}", self.id))
-            .value(self.title.clone())
+            // 标题人话就是名字（不再拼 id）。
+            .label(self.title.clone())
             .action("action");
         if let Some(d) = self.description.as_ref() {
             s = s.prop("description", d.clone());

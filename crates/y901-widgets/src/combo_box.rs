@@ -29,6 +29,8 @@ const LIST_MIN_W: f32 = 180.0;
 /// 下拉选择。
 pub struct ComboBox {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（**不再拿 id 顶替**）。
+    label: String,
     items: Vec<String>,
     selected: Option<usize>,
     /// 选中项变化时发出的命令（args = {"index": i}）。
@@ -50,6 +52,7 @@ impl ComboBox {
     pub fn new(id: impl Into<String>, items: Vec<impl Into<String>>) -> Self {
         Self {
             id: id.into(),
+            label: String::new(),
             items: items.into_iter().map(Into::into).collect(),
             selected: None,
             command: None,
@@ -60,6 +63,16 @@ impl ComboBox {
             style: None,
             scale: 1.0,
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 为什么不给默认值：语义里曾经写 `format!("… {}", self.id)`，于是读屏器把
+    /// **内部 id** 念给用户听（真机 UIA 验收抓到的缺陷之一）。组件编不出人话，
+    /// 就该留空让使用方补 —— 空名字比"念实现细节"好。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
     }
 
     /// 预选中项。
@@ -313,7 +326,7 @@ impl Widget for ComboBox {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("combobox {}", self.id))
+            .label(self.label.clone())
             .value(self.display_text().to_string())
             .prop("items", self.items.len().to_string())
             .action("select")
@@ -464,7 +477,7 @@ impl Widget for ComboList {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("combobox list {}", self.id))
+            .label(String::new())
             .prop("items", self.items.len().to_string())
     }
 }

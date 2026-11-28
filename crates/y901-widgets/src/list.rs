@@ -21,6 +21,8 @@ fn scaled(edges: Edges, scale: f32) -> Edges {
 /// 垂直列表容器：等宽、依次排列、支持 gap 与 padding。
 pub struct VerticalList {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（**不再拿 id 顶替**）。
+    label: String,
     children: Vec<Box<dyn Widget>>,
     /// Padding base values in DIP, unless `fixed_padding` is set.
     padding: Edges,
@@ -40,6 +42,7 @@ impl VerticalList {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
+            label: String::new(),
             children: Vec::new(),
             padding: Edges::ZERO,
             fixed_padding: None,
@@ -48,6 +51,14 @@ impl VerticalList {
             item: FlexItem::default(),
             rect: Rect::ZERO,
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 语义里曾经把内部 id（和行数）拼进名字，读屏器会把这些实现细节念出来。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
     }
 
     /// 设置内边距（DIP，随 DPI 缩放；子节点整体内缩）。
@@ -194,7 +205,8 @@ impl Widget for VerticalList {
             // 于是整棵列表（连同它的项）此前**完全进不了无障碍树** ——
             // 读屏器看不到列表、也念不出项数。
             .exposed(true)
-            .label(format!("list({})", self.children.len()))
+            // 名字里不念 id/数量；数量留在 prop("count")。
+            .label(self.label.clone())
             .prop("count", self.children.len().to_string())
     }
 }

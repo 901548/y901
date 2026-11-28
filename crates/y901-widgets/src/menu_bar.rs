@@ -55,6 +55,8 @@ const TITLE_PAD: f32 = 12.0;
 /// 水平菜单栏。
 pub struct MenuBar {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（**不再拿 id 顶替**）。
+    label: String,
     entries: Vec<MenuEntry>,
     rect: Rect,
     item: FlexItem,
@@ -72,6 +74,7 @@ impl MenuBar {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
+            label: String::new(),
             entries: Vec::new(),
             rect: Rect::ZERO,
             item: FlexItem::default(),
@@ -80,6 +83,16 @@ impl MenuBar {
             opened: None,
             scale: 1.0,
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 为什么不给默认值：语义里曾经写 `format!("… {}", self.id)`，于是读屏器把
+    /// **内部 id** 念给用户听（真机 UIA 验收抓到的缺陷之一）。组件编不出人话，
+    /// 就该留空让使用方补 —— 空名字比"念实现细节"好。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
     }
 
     /// 追加一个菜单。
@@ -338,7 +351,7 @@ impl Widget for MenuBar {
     fn semantics(&self) -> Semantics {
         let mut s = Semantics::default()
             .exposed(true)
-            .label(format!("menu bar {}", self.id))
+            .label(self.label.clone())
             .prop("menus", self.entries.len().to_string())
             .state("active", self.active.map(|i| i as u32).unwrap_or(u32::MAX));
         for (i, e) in self.entries.iter().enumerate() {

@@ -94,7 +94,9 @@ fn build() -> UiTree {
     let fg = theme.style(Role::TEXT, State::Normal).fg;
 
     // 演示列表：用 VerticalList 承载若干"行"，让读屏器能念出列表与项数。
-    let mut list = VerticalList::new("a11y-list").flex_item(FlexItem::height(96.0));
+    let mut list = VerticalList::new("a11y-list")
+        .label("待办事项")
+        .flex_item(FlexItem::height(96.0));
     for i in 1..=3 {
         list = list.push(Box::new(
             TextLabel::new(format!("item-{i}"), format!("列表项 {i}")).color(fg),

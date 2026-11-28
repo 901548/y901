@@ -28,6 +28,8 @@ fn is_supported_size(w: u32, h: u32) -> bool {
 /// 图片控件。
 pub struct Image {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（**不再拿 id 顶替**）。
+    label: String,
     /// 位图宽度
     width: u32,
     /// 位图高度
@@ -72,6 +74,7 @@ impl Image {
         data.resize(need, 0);
         Self {
             id: id.into(),
+            label: String::new(),
             width: w,
             height: h,
             rgba: data,
@@ -81,6 +84,16 @@ impl Image {
             rect: Rect::ZERO,
             item: y901_ui::FlexItem::default(),
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 为什么不给默认值：语义里曾经写 `format!("… {}", self.id)`，于是读屏器把
+    /// **内部 id** 念给用户听（真机 UIA 验收抓到的缺陷之一）。组件编不出人话，
+    /// 就该留空让使用方补 —— 空名字比"念实现细节"好。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
     }
 
     /// 从**已有纹理**创建（图标复用）。
@@ -96,6 +109,7 @@ impl Image {
     ) -> Self {
         Self {
             id: id.into(),
+            label: String::new(),
             width: width.max(1),
             height: height.max(1),
             // 不需要自己的位图；纹理已存在
@@ -140,6 +154,7 @@ impl Image {
     fn empty(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
+            label: String::new(),
             width: 1,
             height: 1,
             rgba: vec![0, 0, 0, 0],
@@ -303,7 +318,7 @@ impl Widget for Image {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("image {}", self.id))
+            .label(self.label.clone())
             .prop("width", self.width.to_string())
             .prop("height", self.height.to_string())
             .prop("fit", format!("{:?}", self.style.fit))

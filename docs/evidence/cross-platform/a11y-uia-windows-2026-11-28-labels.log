@@ -1,0 +1,30 @@
+# Windows UIA 无障碍树取证（scripts/dump-a11y-uia.ps1）
+# 工具：PowerShell + UIAutomationClient（与讲述人消费同一套 API）
+# 时间：2026-11-28 22:17:58
+
+WINDOW name=[Y901 无障碍验收] type=Group
+DESCENDANTS=21
+------
+  1. Text         name=[Y901 无障碍验收]
+  2. Text         name=[本页用于读屏器手工验收；每个控件都有明确标签与状态。]
+  3. Text         name=[按钮]
+  4. Button       name=[保存（Ctrl+S）] invoke
+  5. Text         name=[复选框]
+  6. CheckBox     name=[启用同步] value=[false] toggle=Off
+  7. Text         name=[开关]
+  8. Button       name=[启用同步] value=[on] toggle=On
+  9. Text         name=[滑杆]
+ 10. Slider       name=[音量] value=[0.50] value=0.5 min=0 max=1
+ 11. Text         name=[数值输入]
+ 12. Edit         name=[重试次数] value=[42] value=42 min=0 max=100
+ 13. Text         name=[文本框]
+ 14. Edit         name=[备注] value=[可编辑文本]
+ 15. Text         name=[列表]
+ 16. List         name=[待办事项]
+ 17. Text         name=[列表项 1]
+ 18. Text         name=[列表项 2]
+ 19. Text         name=[列表项 3]
+ 20. Text         name=[这是一个告警] invoke
+ 21. Text         name=[尚未保存]
+------
+END tries=1

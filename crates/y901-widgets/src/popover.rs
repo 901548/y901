@@ -128,7 +128,9 @@ impl Widget for Popover {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("popover anchor {}", self.id))
+            // 锚点本身没有语义内容：**不编名字**，也不念 id。
+            // 需要给浮层起名请用使用的子组件（菜单/对话框）自己的语义。
+            .label(String::new())
     }
 }
 

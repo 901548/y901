@@ -65,6 +65,8 @@ impl TreeItem {
 /// 层级列表控件。
 pub struct TreeView {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（**不再拿 id 顶替**）。
+    label: String,
     roots: Vec<TreeItem>,
     /// 选中路径
     selected: Option<Vec<usize>>,
@@ -89,10 +91,20 @@ impl TreeView {
         self.item = item;
         self
     }
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 语义里曾经写 `format!("tree {}", self.id)`，读屏器会把内部 id 念出来。
+    /// 语义里曾经写 `format!("tree {}", self.id)`，读屏器会把内部 id 念出来。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
+    }
+
     /// 创建树视图。
     pub fn new(id: impl Into<String>, roots: Vec<TreeItem>) -> Self {
         let mut t = Self {
             id: id.into(),
+            label: String::new(),
             roots,
             selected: None,
             scroll_offset: 0.0,
@@ -494,7 +506,7 @@ impl Widget for TreeView {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("tree {}", self.id))
+            .label(self.label.clone())
             .value(
                 self.selected
                     .as_ref()

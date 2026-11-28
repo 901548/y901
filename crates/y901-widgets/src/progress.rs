@@ -1,4 +1,4 @@
-﻿//! ProgressBar：只读进度条。
+//! ProgressBar：只读进度条。
 //!
 //! 视觉：轨道（背景色，圆角 4px，高 8px）+ 进度条（主题色，宽度 = value × 轨道宽度）。
 //! 无交互。`value` 越界时 **clamp** 到 `0..=1`，不 panic、不外溢。
@@ -16,6 +16,8 @@ const RADIUS: f32 = 4.0;
 /// 只读进度条。
 pub struct ProgressBar {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（**不再拿 id 顶替**）。
+    label: String,
     /// 进度（0..=1，越界自动 clamp）
     value: f32,
     /// 是否在轨道中间显示百分比文字
@@ -30,11 +32,22 @@ impl ProgressBar {
     pub fn new(id: impl Into<String>, value: f32) -> Self {
         Self {
             id: id.into(),
+            label: String::new(),
             value: value.clamp(0.0, 1.0),
             show_text: false,
             rect: Rect::ZERO,
             item: y901_ui::FlexItem::default(),
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 为什么不给默认值：语义里曾经写 `format!("… {}", self.id)`，于是读屏器把
+    /// **内部 id** 念给用户听（真机 UIA 验收抓到的缺陷之一）。组件编不出人话，
+    /// 就该留空让使用方补 —— 空名字比"念实现细节"好。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
     }
 
     /// 设置在 Flex 中的尺寸约束（链式）。
@@ -141,7 +154,7 @@ impl Widget for ProgressBar {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("progress {}", self.id))
+            .label(self.label.clone())
             .value(format!("{:.2}", self.value))
             .prop("value", format!("{:.2}", self.value))
             // 进度是后台信息：空闲时播报即可。

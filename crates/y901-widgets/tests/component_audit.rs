@@ -173,15 +173,6 @@ fn semantics_exposed_contract() {
     let mut cache = LayoutCache::new();
     arrange_each(&mut comps, &mut cache);
     // 已修好的组件：名字里**不得**出现自己的 id（真机 UIA 验收逐条核对过）。
-    const NO_ID_IN_LABEL: &[&str] = &[
-        "p-switch",
-        "p-slider",
-        "p-checkbox",
-        "p-alert",
-        "p-number",
-        "p-input",
-        "p-button",
-    ];
     for c in &comps {
         let sem = c.semantics();
         assert!(
@@ -189,23 +180,15 @@ fn semantics_exposed_contract() {
             "{} 的 semantics 未暴露(exposed_to_ai=false)——外部工具看不到它",
             c.id()
         );
-        if NO_ID_IN_LABEL.contains(&c.id()) {
-            assert!(
-                !sem.label.contains(c.id()),
-                "{} 的语义 label 里含自己的 id（{:?}）——读屏器会把实现细节念出来",
-                c.id(),
-                sem.label
-            );
-        } else {
-            // 其余组件仍是旧口径（`format!("{} {}", 角色, id)`）。**这是已知欠账**，
-            // 清单与原因见 docs/A11Y_ACCEPTANCE.md 的"待办"一节：每个都要补
-            // `.label(..)` 构建器，属于机械改动，不在发布前夜做。
-            assert!(
-                !sem.label.is_empty(),
-                "{} 的语义 label 为空——外部工具无法辨认节点",
-                c.id()
-            );
-        }
+        // **名字里不得出现自己的 id**（`format!("{} {}", 角色, id)` 那套已全部拆掉）：
+        // 读屏器会把 id 原样念给用户听，那是实现细节。空名字是允许的 ——
+        // 组件编不出人话，就该让使用方 `.label(..)` 补。
+        assert!(
+            !sem.label.contains(c.id()),
+            "{} 的语义 label 里含自己的 id（{:?}）——读屏器会把实现细节念出来",
+            c.id(),
+            sem.label
+        );
     }
 }
 

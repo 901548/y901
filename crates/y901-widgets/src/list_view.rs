@@ -29,6 +29,8 @@ const BAR_WIDTH: f32 = 6.0;
 /// 虚拟化列表（数据由回调提供）。
 pub struct ListView {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称。
+    label: String,
     /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。
     key: u64,
     row_height: f32,
@@ -56,6 +58,14 @@ pub struct ListView {
 }
 
 impl ListView {
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 语义里曾经把内部 id（和行数）拼进名字，读屏器会把实现细节念出来。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
+    }
+
     /// 新建空列表。
     ///
     /// 输入：`id`（树内唯一；滚动条 id 为 `{id}.bar`）、`row_height`（像素，最小 1）。
@@ -65,6 +75,7 @@ impl ListView {
         let key = y901_ui::layout::id_key(&id);
         Self {
             bar: Scrollbar::new(format!("{id}.bar"), id.clone()),
+            label: String::new(),
             id,
             key,
             row_height: row_height.max(1.0),
@@ -557,7 +568,8 @@ impl Widget for ListView {
         let visible = self.visible_range();
         Semantics::default()
             .exposed(true)
-            .label(format!("list({} rows)", self.len))
+            // 名字里不念行数（读屏器改成播报"列表，N 项"由 state 里的 rows 驱动）。
+            .label(self.label.clone())
             .action_spec("scroll_to_ratio", InputKind::Number)
             .state("rows", self.len as u32)
             .state("offset", self.offset)

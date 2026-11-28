@@ -20,6 +20,8 @@ const DEFAULT_SIZE: f32 = 24.0;
 /// 旋转指示器。
 pub struct Spinner {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（**不再拿 id 顶替**）。
+    label: String,
     size: f32,
     /// 当前高亮的点下标（每 Tick +1）。
     phase: usize,
@@ -34,12 +36,23 @@ impl Spinner {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
+            label: String::new(),
             size: DEFAULT_SIZE,
             phase: 0,
             rect: Rect::ZERO,
             item: FlexItem::default(),
             size_scaled: 0.0,
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 为什么不给默认值：语义里曾经写 `format!("… {}", self.id)`，于是读屏器把
+    /// **内部 id** 念给用户听（真机 UIA 验收抓到的缺陷之一）。组件编不出人话，
+    /// 就该留空让使用方补 —— 空名字比"念实现细节"好。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
     }
 
     /// 设置直径（逻辑像素）。
@@ -147,7 +160,7 @@ impl Widget for Spinner {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("spinner {}", self.id))
+            .label(self.label.clone())
             .prop("busy", "true")
     }
 }

@@ -217,8 +217,8 @@ impl Widget for Badge {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("badge {}", self.id))
-            .value(self.text.clone())
+            // 徽标的文字**就是它的名字**（不再拼 id、也不再重复塞进 value）。
+            .label(self.text.clone())
             .prop("kind", self.kind.as_str())
     }
 }

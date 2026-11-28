@@ -249,7 +249,8 @@ impl Widget for Skeleton {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("loading placeholder {}", self.id))
+            // 骨架屏是**装饰**：读屏器不该念它，也不念 id。
+            .label(String::new())
             .prop("shapes", self.shapes.len().to_string())
     }
 }

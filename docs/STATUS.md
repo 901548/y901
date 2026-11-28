@@ -2,11 +2,53 @@
 
 - **状态（2026-11-28）**: workspace 版本 `0.5.0`（**已发布**）。12 个 crate 全部上传到 crates.io 且未 yank，tag `v0.5.0` 已推送，下游从 registry 拉包编译通过。上一版 `0.4.0` 已发布（12 个 crate 均未 yank，tag `v0.4.0` 已推送）。0.5.0 是**破坏性变更**：`y901-backend-web::Present` 增加私有字段 `collector`（`constructible_struct_adds_private_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.5.0.md](RELEASE_NOTES_v0.5.0.md)。
 - **tags**: v0.1.0 ~ **v0.5.0**（0.5.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.4.0`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
-- **测试记录**: Windows 2026-11-26 复测 `passed=1384` / `ignored=71` / `targets=209`；`--include-ignored` 全量 `passed=1384` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1342` / `ignored=35` / `targets=209`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-a11y-semantics.log](evidence/cross-platform/linux-verify-2026-11-28-a11y-semantics.log)）。均为有日期的平台证据，非每次提交即时运行。
+- **测试记录**: Windows 2026-11-26 复测 `passed=1385` / `ignored=71` / `targets=209`；`--include-ignored` 全量 `passed=1385` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1343` / `ignored=35` / `targets=209`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-a11y-labels.log](evidence/cross-platform/linux-verify-2026-11-28-a11y-labels.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）
 - **哈希基线**: `docs/evidence/hash-baseline.txt` = `0xF7455CCE7781A864` / `400x220`
 - **SAFETY 覆盖：**96 个调用点 / 96 覆盖 / 0 缺口**（v0.1.14 起）；历史：v0.1.13 前 **96 / 93 / 3**
+
+## 2026-11-28（续十一）：无障碍清欠账（13 个组件）+ 把验收做成一条命令
+
+上一轮修完 7 个缺陷后留下一张欠账清单：13 个组件仍把内部 id 拼进名字
+（`badge my-badge`、`tree my-tree`…）。这轮清完，并顺手把"机器验收"固化成一个脚本。
+
+### 清欠账
+
+统一规则：**有 `.label(..)` 用 label，没有就留空**（空名字比"念实现细节"好）。
+对有天然人话的组件直接用现成文本：
+
+| 组件 | 名字来源 |
+|---|---|
+| `Badge` | 文字本身就是名字 |
+| `EmptyState` / `ErrorState` | 标题 |
+| `Alert` | 标题（上一轮已改） |
+| `ComboBox` / `ContextMenu` / `MenuBar` / `ProgressBar` / `RadioGroup` / `Spinner` / `Table` / `TreeView` / `VerticalList` / `ListView` / `Image` | 新增 `.label(..)` 构建器，默认空 |
+| `Skeleton` / `Popover` 锚点 | **刻意不提供** `.label()` —— 纯装饰/定位件，给名字只会念噪音 |
+
+顺带把 `Table`/`ListView`/`VerticalList` 名字里的**行数**也去掉了
+（`list(3 rows)` → 空）：数量属于 `state`/`prop`，读屏器读列表的子项数就够了。
+
+### 把验收做成一条命令
+
+新增 `scripts/dump-a11y-uia.ps1` + `scripts/uia-tree-dump.ps1`：
+
+```powershell
+powershell -NoProfile -File scripts/dump-a11y-uia.ps1 -OutFile docs/evidence/... .log
+```
+
+踩到并记下的坑：`a11y_demo.exe` 与所有 `--all-targets` 构建**共用产物**，
+跑一次不带 `--features a11y` 的 `cargo test/clippy` 就把它覆盖成"没有桥"的版本 ——
+现象是窗口能开但 `DESCENDANTS=0`，很容易误判成"无障碍坏了"。脚本因此每次都带 feature 重建。
+
+### 验证
+
+- 真机 UIA 复验：**21 个元素，无一含内部 id**；`List name=[待办事项]`
+  （日志 [`a11y-uia-windows-2026-11-28-labels.log`](evidence/cross-platform/a11y-uia-windows-2026-11-28-labels.log)）；
+- 新增 `a11y_semantics` 第 7 条：13 个组件"显式名字生效 + 未命名时不含 id"；
+- `component_audit` 的契约从"label 非空"改成**全局**"label 不得含 id"（不再有白名单）。
+
+workspace **1385 passed / 0 failed / 71 ignored / 209 目标**；像素哈希不变。
 
 ## 2026-11-28（续十）：真机读屏器验收 —— 用 UIA 树代替"人耳听"，抓到 6 个无障碍缺陷
 
@@ -49,7 +91,7 @@
 - 三条旧测试（`component_audit` ×2、`password_placeholder` ×1）编码的是**旧契约**，
   按新契约更新（"label 非空" → "label 不得含 id"；"名字==内容" → "名字与内容分离"）。
 
-workspace **1384 passed / 0 failed / 71 ignored / 209 目标**（`--include-ignored` 1455）；
+workspace **1385 passed / 0 failed / 71 ignored / 209 目标**（`--include-ignored` 1456）；
 像素哈希不变；Linux Xvfb 1342 / 35 / 209。
 
 ### 仍未做（诚实边界）
@@ -705,7 +747,7 @@ AccessKit 的 `bounds` 就来自这个 `rect` —— 现在钉住"语义树矩�
 （锚点贴视口右下角，强制 `place_popup` 翻转）与"浮层排在基础树之后"。
 
 **验证**：`y901-a11y` +10 条、`y901-ui/popup_hit` +2 条；当轮 workspace **1297 passed / 0 failed**（此后批次 6/5/7 依次增至 1322）
-（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1342 passed / 35 ignored**，
+（ignored 71 / 190 目标，`--include-ignored` 1387）；Linux Xvfb **1343 passed / 35 ignored**，
 且 `y901-backend-x11 --features a11y`（AT-SPI/D-Bus）可编。
 **变异验证**：把 `IdAllocator::allocate` 退回遍历序号 → 4 条新用例立即红，还原后 43 条全绿
 （文件 SHA256 比对确认字节一致）。
@@ -1078,7 +1120,7 @@ debug 下 `debug_assert!(request_fits(..))`，release 下 `try_into().unwrap_or(
 
 - **现象**：`(基线\s*)(\d{1,4})` 把 `基线 0xF7455...` 的 `0` 换成 `**N**`
   （→ `**N**xF7455...`）；`(?=默认)` 规则把 `win32 默认族` 的 `32` 换成 <!-- counts-exempt -->
-  `win***1384** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
+  `win***1385** 默认族`。两处都是**脚本制造的脏数据**，而 `-Check` 当时完全看不见。 <!-- counts-exempt -->
 - **修法**：两条规则都要求数字是**独立 token**（`(?<![\w.])…(?![\w.])`），
   基线规则额外**整体跳过 `0x…`**；`-Check` 增加"反自伤"规则
   （`**N**xF…` / `字母**N**` 直接判 stale）；自动改写也遵守同一套 token 边界。

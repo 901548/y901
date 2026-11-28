@@ -112,6 +112,8 @@ const BAR_W: f32 = 6.0;
 /// 多列数据表格。
 pub struct Table {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称。
+    label: String,
     /// 预算好的 FNV-1a key（避免每次布局重算字符串哈希）。
     key: u64,
     columns: Vec<TableColumn>,
@@ -158,11 +160,20 @@ pub struct Table {
 }
 
 impl Table {
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 语义里曾经把内部 id（和行数）拼进名字，读屏器会把实现细节念出来。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
+    }
+
     /// 创建空表。
     pub fn new(id: impl Into<String>) -> Self {
         let id = id.into();
         let key = y901_ui::layout::id_key(&id);
         Self {
+            label: String::new(),
             id,
             key,
             columns: Vec::new(),
@@ -934,7 +945,9 @@ impl Widget for Table {
     fn semantics(&self) -> Semantics {
         let mut s = Semantics::default()
             .exposed(true)
-            .label(format!("table {} ({} rows)", self.id, self.rows.len()))
+            // 名字里不念 id（真机 UIA 验收的缺陷之一）；行数留在 `state`/`prop` 里。
+            .label(self.label.clone())
+            .prop("rows", self.rows.len().to_string())
             .prop("rows", self.rows.len().to_string())
             .prop("columns", self.columns.len().to_string())
             .action_spec("select_row", InputKind::Number)

@@ -323,4 +323,9 @@
 #   (新增 y901-widgets/tests/a11y_semantics.rs 6 条：角色映射/名字不含 id/按钮 value 不泄漏命令/
 #    列表与告警在树里/名字与内容分离/语义角色不改配色。像素哈希不变（别名映射回原槽位）。
 #    另修 component_audit 与 password_placeholder 里编码了旧契约的 3 条断言。)
-1384
+# Measured at 2026-11-28 (无障碍清欠账：13 个组件的名字不再含内部 id):
+#   default cargo test --workspace --no-fail-fast   passed 1385, failed 0, ignored 71 / 209 个测试目标
+#   (新增 a11y_semantics 第 7 条：13 个组件"显式命名生效 + 未命名不含 id"。
+#    真机 UIA 复验 21 个元素无 id：docs/evidence/cross-platform/a11y-uia-windows-2026-11-28-labels.log。
+#    像素哈希不变。)
+1385

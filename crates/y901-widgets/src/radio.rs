@@ -35,6 +35,8 @@ const ROW_GAP: f32 = 4.0;
 /// 单选组。
 pub struct RadioGroup {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（**不再拿 id 顶替**）。
+    label: String,
     options: Vec<String>,
     selected: Option<usize>,
     on_change: Option<Box<dyn Fn(usize)>>,
@@ -48,12 +50,23 @@ impl RadioGroup {
         let selected = selected.filter(|&i| i < options.len());
         Self {
             id: id.into(),
+            label: String::new(),
             options,
             selected,
             on_change: None,
             rect: Rect::ZERO,
             focused: false,
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 为什么不给默认值：语义里曾经写 `format!("… {}", self.id)`，于是读屏器把
+    /// **内部 id** 念给用户听（真机 UIA 验收抓到的缺陷之一）。组件编不出人话，
+    /// 就该留空让使用方补 —— 空名字比"念实现细节"好。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
     }
 
     /// 设置选中变化的回调。
@@ -244,7 +257,7 @@ impl Widget for RadioGroup {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("radio {}", self.id))
+            .label(self.label.clone())
             .value(self.selected.map(|i| i.to_string()).unwrap_or_default())
             .action("select")
             .prop("count", self.options.len().to_string())

@@ -17,6 +17,8 @@ use y901_ui::{
 /// 右键菜单宿主。
 pub struct ContextMenu {
     id: String,
+    /// 无障碍名称（读屏器念它）。空 = 不提供名称（**不再拿 id 顶替**）。
+    label: String,
     items: Vec<String>,
     /// 选中回调（索引、标题）
     on_select: Option<SelectCallback>,
@@ -29,10 +31,21 @@ impl ContextMenu {
     pub fn new(id: impl Into<String>, items: Vec<String>) -> Self {
         Self {
             id: id.into(),
+            label: String::new(),
             items,
             on_select: None,
             rect: Rect::ZERO,
         }
+    }
+
+    /// 无障碍名称（读屏器念的名字；空 = 不提供）。
+    ///
+    /// 为什么不给默认值：语义里曾经写 `format!("… {}", self.id)`，于是读屏器把
+    /// **内部 id** 念给用户听（真机 UIA 验收抓到的缺陷之一）。组件编不出人话，
+    /// 就该留空让使用方补 —— 空名字比"念实现细节"好。
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = text.into();
+        self
     }
 
     /// 选中回调。
@@ -120,7 +133,7 @@ impl Widget for ContextMenu {
     fn semantics(&self) -> Semantics {
         Semantics::default()
             .exposed(true)
-            .label(format!("context menu {}", self.id))
+            .label(self.label.clone())
             .prop("items", self.items.len().to_string())
     }
 }
