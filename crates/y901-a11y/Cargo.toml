@@ -13,7 +13,7 @@ categories = ["gui", "accessibility"]
 # 纯 Rust：`accesskit` 只定义跨平台的无障碍树与动作，不含任何 C 绑定；
 # 具体平台适配（UIA / AT-SPI / DOM）由各后端按需依赖 `accesskit_windows` 等。
 [dependencies]
-y901-ui = { path = "../y901-ui", version = "0.4.0" }
+y901-ui = { path = "../y901-ui", version = "0.5.0" }
 accesskit = "0.25"
 
 # 平台适配器：**都是纯 Rust**（accesskit_windows 只依赖 windows/windows-core 绑定，

@@ -9,7 +9,7 @@ Rust 跨平台 GUI 框架，自带 Win32/D3D11、X11 与 Web（wasm）后端。�
 
 ```toml
 [dependencies]
-y901 = "0.4.0"
+y901 = "0.5.0"
 ```
 
 `y901` 是**单一入口**，内部把下面 10 个子 crate 全部 re-export 好：
@@ -146,7 +146,7 @@ powershell -File scripts/gate.ps1          # 完整门禁（发布前必跑）
 - [docs/QUICKSTART.md](docs/QUICKSTART.md)：5 分钟上手（英文）
 - [docs/PLATFORMS.md](docs/PLATFORMS.md)：平台分层与出范围声明（英文）
 - [docs/ROADMAP.md](docs/ROADMAP.md)：复杂文本/无障碍/API/组件的整改路线图
-- [docs/RELEASE_NOTES_v0.4.0.md](docs/RELEASE_NOTES_v0.4.0.md)：0.4.0 发布说明（已发布）
+- [docs/RELEASE_NOTES_v0.5.0.md](docs/RELEASE_NOTES_v0.5.0.md)：0.5.0 发布说明（已准备好，待发布）
 - [docs/RELEASE_NOTES_v0.3.0.md](docs/RELEASE_NOTES_v0.3.0.md)：0.3.0 发布说明（已发布）
 - [docs/MIGRATION_0.3.md](docs/MIGRATION_0.3.md)：0.2.x → 0.3.0 迁移说明
 - [docs/CRATES_IO.md](docs/CRATES_IO.md)：发布流程与踩过的坑

@@ -9,7 +9,7 @@ A pure-Rust cross-platform GUI framework with its own Win32/D3D11, X11 and Web (
 backends. Text uses a **monospace cell model** (`0.5em × 1em`), which makes it a good fit
 for terminal-style desktop tools, log viewers and file managers.
 
-> [中文说明](README.zh-CN.md) · [Roadmap](docs/ROADMAP.md) · [Platform support](docs/PLATFORMS.md) · [v0.4.0 notes (in development)](docs/RELEASE_NOTES_v0.4.0.md) · [v0.3.0 (released)](docs/RELEASE_NOTES_v0.3.0.md)
+> [中文说明](README.zh-CN.md) · [Roadmap](docs/ROADMAP.md) · [Platform support](docs/PLATFORMS.md) · [v0.5.0 notes (ready)](docs/RELEASE_NOTES_v0.5.0.md) · [v0.4.0 (released)](docs/RELEASE_NOTES_v0.4.0.md)
 
 ## Status
 
@@ -22,7 +22,7 @@ supported on a best-effort basis (Tier 2). The browser backend is a **demo/reach
 
 ```toml
 [dependencies]
-y901 = "0.4.0"
+y901 = "0.5.0"
 ```
 
 `y901` is the **single entry point**: it re-exports the ten `y901-*` implementation crates.

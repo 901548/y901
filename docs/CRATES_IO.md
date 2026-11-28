@@ -158,6 +158,7 @@ foreach ($c in $order) {
 
 | 版本 | 日期 | 结果 | 证据 |
 |---|---|---|---|
+| `0.5.0` | （待发布） | 已准备好：版本已升、发布说明已写、门禁与就绪检查全绿；缺 crates.io 凭据与真机读屏器验收 | `check-release-readiness.ps1` 自动项全 PASS（tag 在发布时打） |
 | `0.4.0` | 2026-11-23 | 12 个 crate 全部上传，均未 yank，tag `v0.4.0` 已推送 | `crates.io/api/v1/crates/<name>` 返回 `0.4.0`；`scripts/check-consumer.ps1 -Version 0.4.0` 通过（下游从 registry 拉包编译成功） |
 | `0.3.0` | 2026-11-20 | 12 个 crate 上传 | 同上一版流程 |
 

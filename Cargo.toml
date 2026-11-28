@@ -17,7 +17,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 # 给 crates.io / docs.rs 与下游一个明确的 MSRV（scripts/gate.ps1 第 1 步就卡这个值）。
 rust-version = "1.92"

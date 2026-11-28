@@ -1,7 +1,7 @@
 # 项目状态
 
-- **状态（2026-11-23）**: workspace 版本 `0.4.0`（**已发布**）。12 个 crate 均已上传 crates.io 且未 yank，tag `v0.4.0` 已推送；上一版是 `0.3.0`，0.4.0 起因于发布后两个带 `!` 的提交与一处真实破坏性变更（`WasmState` 增 `pub` 字段，`constructible_struct_adds_field`），按 0.x 约定升 minor。变更见 [RELEASE_NOTES_v0.4.0.md](RELEASE_NOTES_v0.4.0.md)。
-- **tags**: v0.1.0 ~ **v0.4.0**（0.4.0 已发布到 crates.io）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.2.5`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
+- **状态（2026-11-28）**: workspace 版本 `0.5.0`（**已准备好、尚未发布**）。上一版 `0.4.0` 已发布（12 个 crate 均未 yank，tag `v0.4.0` 已推送）。0.5.0 是**破坏性变更**：`y901-backend-web::Present` 增加私有字段 `collector`（`constructible_struct_adds_private_field`），按 0.x 约定升 minor。变更与发布步骤见 [RELEASE_NOTES_v0.5.0.md](RELEASE_NOTES_v0.5.0.md)。
+- **tags**: v0.1.0 ~ **v0.4.0**（v0.5.0 的 tag 在正式发布时打）；历史版本说明见 `RELEASE_NOTES_v0.2.1.md` ~ `v0.4.0`；**crates.io 发布手册见 [docs/CRATES_IO.md](CRATES_IO.md)**。
 - **测试记录**: Windows 2026-11-26 复测 `passed=1378` / `ignored=71` / `targets=208`；`--include-ignored` 全量 `passed=1378` / `failed=0`（含 GPU 用例，本机 150% DPI）（[numbers.txt](evidence/numbers.txt)）。Linux 2026-11-28 复测 `passed=1336` / `ignored=35` / `targets=208`（[linux-numbers.txt](evidence/linux-numbers.txt)，日志 [linux-verify-2026-11-28-tab-indent.log](evidence/cross-platform/linux-verify-2026-11-28-tab-indent.log)）。均为有日期的平台证据，非每次提交即时运行。
 - **门禁**: `scripts/gate.ps1`（MSRV / **fmt** / 测试计数 / **test-inventory** / clippy / 像素哈希 / missing_docs / **doc 数字** / audit）；CI 另有 Linux Xvfb、打包校验与 `cargo deny check`（`deny.toml`）
 - **clippy**: 0 警告（JSON 口径，先查退出码）

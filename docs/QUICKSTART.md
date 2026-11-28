@@ -26,7 +26,7 @@ Add the single entry crate:
 ```toml
 # Cargo.toml
 [dependencies]
-y901 = "0.4.0"
+y901 = "0.5.0"
 ```
 
 > Working inside this repository instead? Use a path dependency:
